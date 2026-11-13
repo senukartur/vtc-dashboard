@@ -133,6 +133,7 @@ export const qualificationStates = mysqlTable(
     userId: idColumn("user_id").notNull(),
     game: game("game").notNull(),
     assignmentId: idColumn("assignment_id"),
+    eligibleSince: utcColumn("eligible_since"),
     version: int("version", { unsigned: true }).notNull(),
   },
   (t) => [

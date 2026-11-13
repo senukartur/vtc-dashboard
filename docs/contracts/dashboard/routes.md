@@ -179,3 +179,23 @@ The operations below are staged in OpenAPI. Existing methods with new `x-stage-2
 | `GET /api/v1/events/{eventId}/media` | `listEventMedia` | `company.read` | VTC-127 |
 | `GET /api/v1/events/{eventId}/media/{mediaId}/content?size=thumb\|full` | `getEventMediaContent` | `company.read`, draft restricted to managers | VTC-127 |
 | `GET /api/v1/public/events/{eventId}/cover` | `getPublicEventCover` | `public`, ready cover of a public published event | VTC-127 |
+
+## Stage 3 dashboard (VTC-139 Step 1)
+
+OpenAPI stages the following operations and shared-path extensions. A shared path selects the Stage 3 projection with `view=stage3` when its feature lane activates it. [Staged contract semantics](README.md#stage-3-foundation-vtc-139-step-1).
+
+| Method and route | Operation ID | Capability | Feature owner |
+| --- | --- | --- | --- |
+| `GET /api/v1/trips/review-summary` | `getTripReviewSummary` | `trips.review` | VTC-133 |
+| `GET /api/v1/trips?scope=review&view=stage3` | `listTrips` | `trips.review` | VTC-133 |
+| `GET /api/v1/trips/{tripId}/review?view=stage3` | `getTripReview` | `trips.review` | VTC-133 |
+| `POST /api/v1/trips/{tripId}/decisions?view=stage3` | `decideTrip` | `trips.review` | VTC-133 |
+| `GET /api/v1/reconciliation-candidates?view=stage3` | `listReconciliationCandidates` | `trips.review` | VTC-133 |
+| `POST /api/v1/reconciliation-candidates/{candidateId}/dismissals` | `dismissReconciliationCandidate` | `trips.review` | VTC-133 |
+| `POST /api/v1/reconciliation-candidates/{candidateId}/dismissal-reversals` | `undoReconciliationCandidateDismissal` | `trips.review` | VTC-133 |
+| `GET /api/v1/admin/promotion-candidates?game=ets2&status=eligible` | `listPromotionCandidates` | `qualifications.manage` | VTC-134 |
+| `GET /api/v1/admin/promotion-history` | `listPromotionHistory` | `qualifications.manage` | VTC-134 |
+| `GET /api/v1/admin/members/{memberId}/qualification-action-history?view=stage3` | `listQualificationActionHistory` | `qualifications.manage` | VTC-134 |
+| `GET /api/v1/admin/qualification-members?view=stage3` | `listQualificationMembers` | `qualifications.manage` | VTC-134 |
+| `GET /api/v1/me/workspace-summary?view=stage3` | `getMyWorkspaceSummary` | `company.read` with source-specific capabilities | VTC-134 |
+| `GET /api/v1/admin/audit?view=stage3` | `listAudit` | `members.manage` | VTC-135 |

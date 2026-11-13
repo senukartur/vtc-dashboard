@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 103 tables including the ledger and 29 migrations.
+// Fresh full-schema preparation now covers 105 tables including the ledger and 30 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -105,6 +105,7 @@ export async function reset(connection: Connection) {
     "reconciliation_commands",
     "reconciliation_history",
     "reconciliations",
+    "reconciliation_candidate_dismissals",
     "reconciliation_candidates",
     "reconciliation_rules",
     "manual_blob_generations",
@@ -153,6 +154,7 @@ export async function reset(connection: Connection) {
     "source_payloads",
     "source_messages",
     "source_trips",
+    "trip_review_reasons",
     "trips",
     "external_truckers_cache",
     "external_steam_changes",
@@ -277,7 +279,8 @@ async function publishedPrefixFolder(
     | 25
     | 26
     | 27
-    | 28,
+    | 28
+    | 29,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -329,6 +332,8 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_QUALIFICATION_RULE_EDITING_PREFIX_REQUIRED");
   if (count === 26 && entries[25]?.tag !== "0025_fixed_wolverine")
     throw new Error("PUBLISHED_MANUAL_DRAFT_DISCARD_PREFIX_REQUIRED");
+  if (count === 29 && entries[28]?.tag !== "0028_faulty_caretaker")
+    throw new Error("PUBLISHED_STAGE_3_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -456,4 +461,8 @@ export async function simpleCatalogsPriorFolder(): Promise<string> {
 
 export async function eventStage2PriorFolder(): Promise<string> {
   return publishedPrefixFolder(28);
+}
+
+export async function stage3PriorFolder(): Promise<string> {
+  return publishedPrefixFolder(29);
 }

@@ -207,3 +207,131 @@ test("over-limit acceptance input, decision marker, review details and queue fil
     default: "desc",
   });
 });
+
+test("Stage 3 direct acceptance may omit its reason, while return and proposal decisions require text", () => {
+  const stage = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/TripStage3DecisionInput" });
+  const legacy = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/DecisionInput" });
+  const accept = {
+    decision: "accept",
+    reviewedRevisionId: newId(),
+    factRevisionId: newId(),
+    proposalId: null,
+  };
+  expect(stage(accept)).toBe(true);
+  expect(legacy(accept)).toBe(false);
+  for (const reason of ["", " \t\n"]) expect(stage({ ...accept, reason })).toBe(true);
+  expect(stage({ ...accept, confirmOverLimits: true })).toBe(true);
+  expect(stage({ ...accept, reason: null })).toBe(false);
+  expect(stage({ ...accept, privateMetadata: true })).toBe(false);
+
+  const returned = { ...accept, decision: "reject" };
+  const proposal = { ...accept, proposalId: newId() };
+  for (const input of [returned, proposal, { ...proposal, decision: "reject" }]) {
+    expect(stage(input)).toBe(false);
+    expect(stage({ ...input, reason: "   " })).toBe(false);
+    expect(stage({ ...input, reason: "Fictional review comment" })).toBe(true);
+    expect(stage({ ...input, reason: "Fictional review comment", confirmOverLimits: true })).toBe(
+      false,
+    );
+  }
+});
+
+test("Stage 3 review compares independently present manual and telemetry sources", async () => {
+  const { readFileSync } = await import("node:fs");
+  const examples = JSON.parse(
+    readFileSync(new URL("../../docs/contracts/dashboard/examples.json", import.meta.url), "utf8"),
+  );
+  const review = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/TripStage3ReviewEnvelope" });
+  for (const kind of ["manual", "telemetry", "mixed"]) {
+    const response = examples.cases.find(
+      (c: { id: string }) => c.id === `getTripReview:stage-3-${kind}`,
+    ).response;
+    const { sources } = response.data;
+    expect(Boolean(sources.manual)).toBe(kind !== "telemetry");
+    expect(Boolean(sources.telemetry)).toBe(kind !== "manual");
+    expect(review(response)).toBe(true);
+    expect(
+      review({ ...response, data: { ...response.data, sources: { ...sources, rawPayload: {} } } }),
+    ).toBe(false);
+    if (sources.telemetry) {
+      const { normalizedFacts, facts } = sources.telemetry;
+      expect(normalizedFacts.provider).toBe("ets2telemetry");
+      expect(normalizedFacts.plannedDistanceM).toBeNull();
+      expect(facts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "actual_distance",
+            evidenceRecordId: normalizedFacts.sourceRecordId,
+          }),
+        ]),
+      );
+      const {
+        acceptance,
+        effectiveFacts,
+        evaluation,
+        factRevisionId,
+        qualificationCheck,
+        summary,
+      } = response.data;
+      expect(evaluation.factRevisionId).toBe(factRevisionId);
+      expect(effectiveFacts.factRevisionId).toBe(factRevisionId);
+      expect(qualificationCheck.reasonCode).toBe("qualification_history_unknown");
+      if (kind === "mixed") {
+        expect(effectiveFacts.provider).toBe("manual");
+        expect(evaluation.attributionBasis).toBe("manual_confirmation");
+        expect(evaluation.reportingAt).toBe(evaluation.attributionAt);
+        expect(acceptance).toEqual({
+          mode: "unavailable",
+          blockedReasonCodes: ["cargo_unknown", "qualification_history_unknown"],
+        });
+        expect(normalizedFacts.factRevisionId).not.toBe(
+          response.data.effectiveFacts.factRevisionId,
+        );
+        expect(normalizedFacts.actualDistanceM).not.toBe(
+          sources.manual.manualRevision.fields.actualDistanceM,
+        );
+        expect(normalizedFacts.destination.entityId).not.toBe(
+          sources.manual.manualRevision.fields.destination.entityId,
+        );
+        expect(normalizedFacts.cargoDamagePercent).toBe(0);
+      } else {
+        expect(normalizedFacts.cargoDamagePercent).toBeNull();
+        expect(evaluation.factRevisionId).toBe(normalizedFacts.factRevisionId);
+        expect(evaluation.attributionAt).toBe(normalizedFacts.actualStartAt);
+        expect(evaluation.reportingAt).toBe(normalizedFacts.actualCompletedAt);
+        expect(evaluation.reportingAt).toBe(summary.reportingAt);
+        expect(acceptance).toEqual({
+          mode: "unavailable",
+          blockedReasonCodes: ["qualification_history_unknown"],
+        });
+      }
+      const normalized = validate.compile({
+        $ref: "urn:vtc:browser:v1#/$defs/TripStage3TelemetryNormalizedFacts",
+      });
+      for (const patch of [
+        { provider: "manual" },
+        { sourceRecordId: "raw-provider-id" },
+        { origin: { ...normalizedFacts.origin, rawPayload: {} } },
+        { cargoDamagePercent: -1 },
+        { cargoDamagePercent: 101 },
+        { cargoDamagePercent: "10" },
+        { originCompanyId: newId() },
+        { rawPayload: {} },
+      ])
+        expect(normalized({ ...normalizedFacts, ...patch })).toBe(false);
+      const checkSource = validate.compile({
+        $ref: "urn:vtc:browser:v1#/$defs/TripStage3TelemetryReview",
+      });
+      expect(checkSource({ facts })).toBe(false);
+      expect(
+        review({
+          ...response,
+          data: {
+            ...response.data,
+            sources: { ...sources, telemetry: { ...sources.telemetry, rawPayload: {} } },
+          },
+        }),
+      ).toBe(false);
+    }
+  }
+});

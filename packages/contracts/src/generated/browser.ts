@@ -828,6 +828,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/promotion-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List company promotion candidates
+         * @description Return active members in the selected game with current assignments and authoritative accepted trip totals for those assignments. Eligibility follows the same rule, current/next levels and totals as confirmation. Historical eligibility onset can be unknown; ineligible rows have eligibleSince null. Order by eligibleSince descending with null last, then member ID ascending. Filter before total and paging. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.
+         */
+        get: operations["listPromotionCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/promotion-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List company qualification actions
+         * @description Read company-wide promotions and assignments newest first by the recorded promotion confirmation or assignment effective time, then action ID and kind. Include each promotion once with its linked proof and include ordinary assignments independently. Expose the recorded actor and domain reason where available, without inferring an assignment recording time. Filter by game and member before the total and cursor. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.
+         */
+        get: operations["listPromotionHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/qualification-levels/{levelId}": {
         parameters: {
             query?: never;
@@ -2343,6 +2383,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reconciliation-candidates/{candidateId}/dismissal-reversals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo the current reconciliation candidate dismissal
+         * @description Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections. Before the first dismissal the implicit version is 1. The first stored dismissal returns version 2 and undo advances it. An identical retry rechecks current authority and returns the stored result and its ETag even after dismissal state changes. Reusing the key with a different fingerprint returns 409 IDEMPOTENCY_CONFLICT.
+         */
+        post: operations["undoReconciliationCandidateDismissal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reconciliation-candidates/{candidateId}/dismissals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss the current reconciliation candidate snapshot
+         * @description Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections. Before the first dismissal the implicit version is 1. The first stored dismissal returns version 2 and undo advances it. An identical retry rechecks current authority and returns the stored result and its ETag even after dismissal state changes. Reusing the key with a different fingerprint returns 409 IDEMPOTENCY_CONFLICT.
+         */
+        post: operations["dismissReconciliationCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reconciliations": {
         parameters: {
             query?: never;
@@ -2692,6 +2772,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/trips/review-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the waiting review and duplicate totals
+         * @description Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Count waiting held canonical roots and actionable duplicate candidates in the selected game, or in both games when omitted. Oldest fields are null when no waiting trip matches; age is elapsed whole seconds at computedAt.
+         */
+        get: operations["getTripReviewSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2850,6 +2950,350 @@ export interface components {
             occurredAt: string;
             /** Format: uuid */
             subjectId: string;
+        };
+        AuditStage3ApplicationEntry: {
+            /** @enum {string} */
+            action: "application.submitted" | "application.reviewed";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3ApplicationSnapshot"] | null;
+                before: components["schemas"]["AuditStage3ApplicationSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3ApplicationSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "application";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3ApplicationSnapshot: {
+            /** @enum {string} */
+            status: "submitted" | "approved" | "rejected";
+        };
+        AuditStage3AssignmentEntry: {
+            /** @enum {string} */
+            action: "qualification.assigned" | "qualification.promoted";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3AssignmentSnapshot"] | null;
+                before: components["schemas"]["AuditStage3AssignmentSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3AssignmentSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "qualification";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3AssignmentSnapshot: {
+            assignmentId: components["schemas"]["Id"];
+            game: components["schemas"]["Game"];
+            levelId: components["schemas"]["Id"];
+        };
+        AuditStage3CompanySettingsEntry: {
+            /** @enum {string} */
+            action: "configuration.changed";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3CompanySettingsSnapshot"] | null;
+                before: components["schemas"]["AuditStage3CompanySettingsSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3CompanySettingsSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "company";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3CompanySettingsSnapshot: {
+            reportingTimezone: string | null;
+        };
+        AuditStage3DuplicateEntry: {
+            /** @enum {string} */
+            action: "duplicate.dismissed" | "duplicate.dismissal_undone";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3DuplicateSnapshot"] | null;
+                before: components["schemas"]["AuditStage3DuplicateSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3DuplicateSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "duplicate_candidate";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3DuplicateSnapshot: {
+            dismissed: boolean;
+            version: number;
+        };
+        AuditStage3Entry: components["schemas"]["AuditStage3LegacyEntry"] | components["schemas"]["AuditStage3CompanySettingsEntry"] | components["schemas"]["AuditStage3RolesEntry"] | components["schemas"]["AuditStage3MembershipEntry"] | components["schemas"]["AuditStage3LeadershipEntry"] | components["schemas"]["AuditStage3ApplicationEntry"] | components["schemas"]["AuditStage3InvitationEntry"] | components["schemas"]["AuditStage3TripDecisionEntry"] | components["schemas"]["AuditStage3ReconciliationEntry"] | components["schemas"]["AuditStage3DuplicateEntry"] | components["schemas"]["AuditStage3AssignmentEntry"] | components["schemas"]["AuditStage3LevelEntry"] | components["schemas"]["AuditStage3RulesEntry"];
+        AuditStage3InvitationEntry: {
+            /** @enum {string} */
+            action: "invitation.reissued" | "invitation.copied" | "invitation.redeemed";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3InvitationSnapshot"] | null;
+                before: components["schemas"]["AuditStage3InvitationSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3InvitationSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "invitation";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3InvitationSnapshot: {
+            /** @enum {string} */
+            state: "active" | "used" | "revoked";
+        };
+        AuditStage3LeadershipEntry: {
+            /** @enum {string} */
+            action: "leadership.transferred";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3LeadershipSnapshot"] | null;
+                before: components["schemas"]["AuditStage3LeadershipSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3LeadershipSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "user";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3LeadershipSnapshot: {
+            director: boolean;
+        };
+        AuditStage3LegacyEntry: {
+            action: string;
+            actorId: string | null;
+            actorNickname: string | null;
+            details: null;
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            objectType: components["schemas"]["AuditStage3ObjectType"];
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3LevelEntry: {
+            /** @enum {string} */
+            action: "qualification.level_changed";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3LevelSnapshot"] | null;
+                before: components["schemas"]["AuditStage3LevelSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3LevelSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "qualification_level";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3LevelSnapshot: {
+            active: boolean;
+            game: components["schemas"]["Game"];
+            levelId: components["schemas"]["Id"];
+            position: number;
+            version: number;
+        };
+        AuditStage3List: {
+            items: components["schemas"]["AuditStage3Entry"][];
+            nextCursor: string | null;
+            total?: number;
+        };
+        AuditStage3ListEnvelope: {
+            data: components["schemas"]["AuditStage3List"];
+            meta: components["schemas"]["Meta"];
+        };
+        AuditStage3MembershipEntry: {
+            /** @enum {string} */
+            action: "membership.changed";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3MembershipSnapshot"] | null;
+                before: components["schemas"]["AuditStage3MembershipSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3MembershipSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "user";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3MembershipSnapshot: {
+            role: ("trainee" | "driver") | null;
+            /** @enum {string} */
+            status: "active" | "inactive";
+        };
+        /** @enum {string} */
+        AuditStage3ObjectType: "company" | "user" | "trip" | "catalog" | "application" | "invitation" | "qualification" | "event" | "duplicate_candidate" | "qualification_level" | "qualification_rule_version";
+        AuditStage3ReconciliationEntry: {
+            /** @enum {string} */
+            action: "trip.reconciled";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3ReconciliationSnapshot"] | null;
+                before: components["schemas"]["AuditStage3ReconciliationSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3ReconciliationSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "trip";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3ReconciliationSnapshot: {
+            reconciliationId: components["schemas"]["Id"];
+            /** @enum {string} */
+            state: "applied" | "reversed";
+        };
+        AuditStage3RolesEntry: {
+            /** @enum {string} */
+            action: "roles.changed";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3RolesSnapshot"] | null;
+                before: components["schemas"]["AuditStage3RolesSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3RolesSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "user";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3RolesSnapshot: {
+            roles: ("trainee" | "driver" | "dispatcher" | "deputy_director")[];
+        };
+        AuditStage3RulesEntry: {
+            /** @enum {string} */
+            action: "qualification.rules_published";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3RulesSnapshot"] | null;
+                before: components["schemas"]["AuditStage3RulesSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3RulesSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "qualification_rule_version";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3RulesSnapshot: {
+            game: components["schemas"]["Game"];
+            levelId: components["schemas"]["Id"];
+            ruleVersionId: components["schemas"]["Id"];
+            version: number;
+        };
+        AuditStage3TripDecisionEntry: {
+            /** @enum {string} */
+            action: "report.reviewed" | "report.accepted_over_limits";
+            actorId: string | null;
+            actorNickname: string | null;
+            details: {
+                after: components["schemas"]["AuditStage3TripDecisionSnapshot"] | null;
+                before: components["schemas"]["AuditStage3TripDecisionSnapshot"];
+            } | {
+                after: components["schemas"]["AuditStage3TripDecisionSnapshot"];
+                before: null;
+            };
+            /** Format: uuid */
+            id: string;
+            objectName: string | null;
+            /** @constant */
+            objectType: "trip";
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            subjectId: string;
+        };
+        AuditStage3TripDecisionSnapshot: {
+            acceptedOverLimits: boolean;
+            /** @enum {string} */
+            decision: "unassessed" | "pending_review" | "accepted" | "rejected";
         };
         CatalogCargoInput: {
             adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
@@ -4906,6 +5350,115 @@ export interface components {
             requiredTrips: number | null;
             rules: components["schemas"]["Rule"][];
         };
+        QualificationStage3ActionHistory: {
+            actor: components["schemas"]["QualificationActionActor"] | null;
+            /** Format: date-time */
+            assignedAt: string;
+            assignmentReason: string | null;
+            endedAt: string | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            levelId: string;
+            /** Format: uuid */
+            periodId: string;
+            promotion: {
+                actor: components["schemas"]["QualificationActionActor"] | null;
+                confirmedAt: components["schemas"]["Timestamp"];
+                id: components["schemas"]["Id"];
+                reason: string | null;
+            } | null;
+            /** @enum {string} */
+            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion";
+        };
+        QualificationStage3ActionHistoryList: {
+            items: components["schemas"]["QualificationStage3ActionHistory"][];
+            nextCursor: string | null;
+        };
+        QualificationStage3ActionHistoryListEnvelope: {
+            data: components["schemas"]["QualificationStage3ActionHistoryList"];
+            meta: components["schemas"]["Meta"];
+        };
+        QualificationStage3AssignmentHistory: {
+            actor: components["schemas"]["QualificationActionActor"] | null;
+            assignedAt: components["schemas"]["Timestamp"];
+            assignmentId: components["schemas"]["Id"];
+            endedAt: components["schemas"]["Timestamp"] | null;
+            game: components["schemas"]["Game"];
+            id: components["schemas"]["Id"];
+            /** @constant */
+            kind: "assignment";
+            level: components["schemas"]["QualificationStage3LevelSummary"];
+            member: components["schemas"]["MemberSummary"];
+            /** @enum {string} */
+            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction";
+            reason: string | null;
+        };
+        QualificationStage3CompanyAction: components["schemas"]["QualificationStage3PromotionHistory"] | components["schemas"]["QualificationStage3AssignmentHistory"];
+        QualificationStage3LevelSummary: {
+            id: components["schemas"]["Id"];
+            name: string;
+        };
+        QualificationStage3MemberSearchList: {
+            items: components["schemas"]["MemberSummary"][];
+            nextCursor: string | null;
+        };
+        QualificationStage3MemberSearchListEnvelope: {
+            data: components["schemas"]["QualificationStage3MemberSearchList"];
+            meta: components["schemas"]["Meta"];
+        };
+        QualificationStage3PromotionCandidate: {
+            acceptedTrips: number;
+            actualDistanceM: string;
+            assignmentId: components["schemas"]["Id"];
+            currentLevel: components["schemas"]["QualificationStage3LevelSummary"];
+            eligible: boolean;
+            eligibleSince: components["schemas"]["Timestamp"] | null;
+            game: components["schemas"]["Game"];
+            member: components["schemas"]["MemberSummary"];
+            nextLevel: components["schemas"]["QualificationStage3LevelSummary"] | null;
+            requiredDistanceM: string | null;
+            requiredTrips: number | null;
+            version: number;
+        };
+        QualificationStage3PromotionCandidateList: {
+            items: components["schemas"]["QualificationStage3PromotionCandidate"][];
+            nextCursor: string | null;
+            total: number;
+        };
+        QualificationStage3PromotionCandidateListEnvelope: {
+            data: components["schemas"]["QualificationStage3PromotionCandidateList"];
+            meta: components["schemas"]["Meta"];
+        };
+        QualificationStage3PromotionHistory: {
+            acceptedTrips: number;
+            actor: components["schemas"]["QualificationActionActor"] | null;
+            actualDistanceM: string;
+            confirmedAt: components["schemas"]["Timestamp"];
+            game: components["schemas"]["Game"];
+            id: components["schemas"]["Id"];
+            /** @constant */
+            kind: "promotion";
+            member: components["schemas"]["MemberSummary"];
+            reason: string | null;
+            requiredDistanceM: string | null;
+            requiredTrips: number | null;
+            sourceAssignmentId: components["schemas"]["Id"];
+            sourceLevel: components["schemas"]["QualificationStage3LevelSummary"];
+            targetAssignmentId: components["schemas"]["Id"];
+            targetLevel: components["schemas"]["QualificationStage3LevelSummary"];
+        };
+        QualificationStage3PromotionHistoryList: {
+            items: components["schemas"]["QualificationStage3CompanyAction"][];
+            nextCursor: string | null;
+            total: number;
+        };
+        QualificationStage3PromotionHistoryListEnvelope: {
+            data: components["schemas"]["QualificationStage3PromotionHistoryList"];
+            meta: components["schemas"]["Meta"];
+        };
         ReadAllInput: {
             throughCursor: string;
         };
@@ -5215,6 +5768,235 @@ export interface components {
             /** Format: date-time */
             submittedAt: string;
         };
+        TripStage3AcceptInput: {
+            confirmOverLimits?: boolean;
+            /** @constant */
+            decision: "accept";
+            /** Format: uuid */
+            factRevisionId: string;
+            proposalId: null;
+            /** @description Omitted or whitespace-only means no staff reason. */
+            reason?: string;
+            /** Format: uuid */
+            reviewedRevisionId: string;
+        };
+        TripStage3DecisionInput: components["schemas"]["TripStage3AcceptInput"] | components["schemas"]["TripStage3ReturnInput"] | components["schemas"]["TripStage3ProposalDecisionInput"];
+        TripStage3Duplicate: {
+            createdAt: components["schemas"]["Timestamp"];
+            dismissed: boolean;
+            game: components["schemas"]["Game"];
+            id: components["schemas"]["Id"];
+            primaryTrip: components["schemas"]["TripStage3DuplicateTrip"];
+            reasonCodes: components["schemas"]["TripStage3ReviewReasonCode"][];
+            secondaryTrip: components["schemas"]["TripStage3DuplicateTrip"];
+            version: number;
+        };
+        TripStage3DuplicateDismissal: {
+            candidateId: components["schemas"]["Id"];
+            dismissed: boolean;
+            dismissedAt: components["schemas"]["Timestamp"];
+            undoneAt: components["schemas"]["Timestamp"] | null;
+            version: number;
+        };
+        TripStage3DuplicateDismissalEnvelope: {
+            data: components["schemas"]["TripStage3DuplicateDismissal"];
+            meta: components["schemas"]["Meta"];
+        };
+        TripStage3DuplicateDismissInput: {
+            reason: string;
+        };
+        TripStage3DuplicateList: {
+            items: components["schemas"]["TripStage3Duplicate"][];
+            nextCursor: string | null;
+            total: number;
+        };
+        TripStage3DuplicateListEnvelope: {
+            data: components["schemas"]["TripStage3DuplicateList"];
+            meta: components["schemas"]["Meta"];
+        };
+        TripStage3DuplicateTrip: {
+            actualDistanceM: string | null;
+            cargo: components["schemas"]["CatalogLabel"] | null;
+            /** @enum {string} */
+            decision: "unassessed" | "pending_review" | "accepted" | "rejected";
+            destination: components["schemas"]["CatalogLabel"] | null;
+            game: components["schemas"]["Game"];
+            id: components["schemas"]["Id"];
+            number: number;
+            origin: components["schemas"]["CatalogLabel"] | null;
+            /** @enum {string} */
+            outcome: "open" | "delivered" | "cancelled" | "none";
+            owner: components["schemas"]["MemberSummary"];
+            reportingAt: components["schemas"]["Timestamp"] | null;
+            sourceKinds: ("ets2telemetry" | "manual")[];
+            version: number;
+        };
+        TripStage3DuplicateUndoInput: Record<string, never>;
+        TripStage3ManualReview: {
+            evidence: components["schemas"]["Evidence"][];
+            manualRevision: components["schemas"]["ManualRevisionRead"];
+        };
+        TripStage3ProposalDecisionInput: {
+            /** @enum {string} */
+            decision: "accept" | "reject";
+            /** Format: uuid */
+            factRevisionId: string;
+            proposalId: components["schemas"]["Id"];
+            reason: string;
+            /** Format: uuid */
+            reviewedRevisionId: string;
+        };
+        TripStage3ResolvedReviewItem: {
+            decidedAt: components["schemas"]["Timestamp"];
+            /** @enum {string} */
+            outcome: "accepted" | "rejected";
+            reasonCodes: components["schemas"]["TripStage3ReviewReasonCode"][];
+            /** @constant */
+            state: "resolved";
+            trip: components["schemas"]["TripStage3ReviewQueueTrip"];
+        };
+        TripStage3ReturnInput: {
+            /** @constant */
+            decision: "reject";
+            /** Format: uuid */
+            factRevisionId: string;
+            proposalId: null;
+            reason: string;
+            /** Format: uuid */
+            reviewedRevisionId: string;
+        };
+        TripStage3Review: {
+            acceptance: components["schemas"]["ReviewAcceptance"];
+            blockedReasonCodes: string[];
+            canDecide: boolean;
+            decisions: components["schemas"]["Decision"][];
+            effectiveFacts: components["schemas"]["EffectiveTripFacts"] | null;
+            evaluation: components["schemas"]["EvaluationSnapshot"];
+            /** Format: uuid */
+            factRevisionId: string;
+            pendingProposalId: string | null;
+            qualificationCheck: components["schemas"]["QualificationCheck"];
+            reviewReasonCodes: string[];
+            sources: {
+                manual: components["schemas"]["TripStage3ManualReview"] | null;
+                telemetry: components["schemas"]["TripStage3TelemetryReview"] | null;
+            };
+            summary: components["schemas"]["TripStage3ReviewQueueTrip"];
+        };
+        TripStage3ReviewEnvelope: {
+            data: components["schemas"]["TripStage3Review"];
+            meta: components["schemas"]["Meta"];
+        };
+        TripStage3ReviewItem: components["schemas"]["TripStage3WaitingReviewItem"] | components["schemas"]["TripStage3ResolvedReviewItem"];
+        TripStage3ReviewList: {
+            items: components["schemas"]["TripStage3ReviewItem"][];
+            nextCursor: string | null;
+            total: number;
+        };
+        TripStage3ReviewListEnvelope: {
+            data: components["schemas"]["TripStage3ReviewList"];
+            meta: components["schemas"]["Meta"];
+        };
+        TripStage3ReviewQueueTrip: {
+            actualDistanceM: string | null;
+            cargo: components["schemas"]["CatalogLabel"] | null;
+            /** @description UTC canonical trip creation instant. */
+            createdAt: components["schemas"]["Timestamp"];
+            /** @enum {string} */
+            decision: "unassessed" | "pending_review" | "accepted" | "rejected";
+            destination: components["schemas"]["CatalogLabel"] | null;
+            /** @description Associated visible event, or null if none is visible. Only in authorized author/reviewer projections. Omit entirely in company scope. */
+            event?: {
+                id: components["schemas"]["Id"];
+                title: string;
+            } | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            /**
+             * @description Only in authorized author/reviewer projections. Omit entirely in company scope.
+             * @enum {string}
+             */
+            gameMode?: "single-player" | "truckersmp" | "haulmp" | "unknown";
+            /** Format: uuid */
+            id: string;
+            /** @description Stable canonical trip number when assigned. */
+            number: number;
+            origin: components["schemas"]["CatalogLabel"] | null;
+            /** @enum {string} */
+            outcome: "open" | "delivered" | "cancelled" | "none";
+            owner: components["schemas"]["MemberSummary"];
+            /** @enum {string} */
+            recording?: "complete" | "partial" | "unknown";
+            reportingAt: string | null;
+            /**
+             * @description Derived by the server from the persisted effective fact and reporting timestamp, never the collection of source kinds.
+             * @enum {string}
+             */
+            reportingBasis?: "actual_completion" | "manual_confirmation" | "unknown";
+            sourceKinds: ("ets2telemetry" | "manual")[];
+            /** @description UTC submission instant of the current manual revision, or null when there is no current manual revision. */
+            submittedAt?: components["schemas"]["Timestamp"] | null;
+            version: number;
+            /** @constant */
+            view: "summary";
+        };
+        TripStage3ReviewReasonCode: string;
+        TripStage3ReviewSummary: {
+            computedAt: components["schemas"]["Timestamp"];
+            duplicateCount: number;
+            oldestAgeSeconds: number | null;
+            oldestQueuedAt: components["schemas"]["Timestamp"] | null;
+            waitingCount: number;
+        };
+        TripStage3ReviewSummaryEnvelope: {
+            data: components["schemas"]["TripStage3ReviewSummary"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** @description Comparable normalized fields from the selected telemetry source fact revision. Null denotes an unavailable value. This source provides no normalized depots or companies. */
+        TripStage3TelemetryNormalizedFacts: {
+            actualCompletedAt: string | null;
+            actualDistanceM: components["schemas"]["Decimal"] | null;
+            actualStartAt: string | null;
+            cargo: components["schemas"]["EffectiveCatalogPin"] | null;
+            /** @description Percentage from normalized telemetry damage fraction. Null when the value is unavailable or invalid. */
+            cargoDamagePercent: number | null;
+            cargoMassKg: components["schemas"]["Decimal"] | null;
+            destination: components["schemas"]["EffectiveCatalogPin"] | null;
+            /** Format: uuid */
+            factRevisionId: string;
+            origin: components["schemas"]["EffectiveCatalogPin"] | null;
+            plannedDistanceM: components["schemas"]["Decimal"] | null;
+            /** @constant */
+            provider: "ets2telemetry";
+            /** @description Recorded classifications for this telemetry source fact. */
+            recordedTelemetry?: {
+                /** @enum {string} */
+                gameMode: "single-player" | "truckersmp" | "haulmp" | "unknown";
+                /** @enum {string} */
+                hardModeResult: "qualified" | "not-qualified" | "unknown";
+                /** @enum {string} */
+                jobType: "quick-job" | "freight-market" | "cargo-market" | "world-of-trucks" | "unknown";
+            };
+            ruleContextComplete: boolean;
+            /** @description Internal source evidence record ID for this normalized fact revision. */
+            sourceRecordId: components["schemas"]["Id"];
+            trailers: (components["schemas"]["EffectiveCatalogPin"] | null)[];
+            trailersComplete: boolean;
+            wholeTripDistanceSupported: boolean;
+        };
+        TripStage3TelemetryReview: {
+            /** @description Safe per-field provenance for the selected telemetry source fact revision. */
+            facts: components["schemas"]["SafeSourceFact"][];
+            normalizedFacts: components["schemas"]["TripStage3TelemetryNormalizedFacts"];
+        };
+        TripStage3WaitingReviewItem: {
+            manualRevision: components["schemas"]["TripReviewRevision"] | null;
+            queuedAt: components["schemas"]["Timestamp"];
+            reasonCodes: components["schemas"]["TripStage3ReviewReasonCode"][];
+            /** @constant */
+            state: "waiting";
+            trip: components["schemas"]["TripStage3ReviewQueueTrip"];
+        };
         TripSummary: {
             actualDistanceM: string | null;
             cargo: components["schemas"]["CatalogLabel"] | null;
@@ -5271,6 +6053,47 @@ export interface components {
             maxFileBytes: number | null;
             maxFilesPerReport: number | null;
             policyRevision: number;
+        };
+        WorkspaceStage3Summary: {
+            computedAt: components["schemas"]["Timestamp"];
+            /** @description Requires applications.manage and enabled Admissions reads. Count submitted applications. */
+            newApplicationsCount?: number;
+            /** @description Requires qualifications.manage and enabled qualification progress reads. Use the authorized per-game promotion-candidate population. */
+            promotionsReady?: {
+                ats: number;
+                ets2: number;
+            };
+            /** @description Requires trips.review and enabled review sources. Exclude the viewer's own trips. */
+            reviewQueue?: components["schemas"]["TripStage3ReviewSummary"];
+            /** @description Requires trips.read_own_private and enabled Trips and Manual Reports reads, including effective rejection data. Include each owned canonical trip once when effectively rejected with an author-resubmittable current manual revision owned by the viewer. Use the latest applicable authoritative staff rejection of that revision in its canonical group. Exclude aliases as rows and ignore historical alias decisions without current effect, telemetry-only and proposal-only rejections, and pending or accepted revisions. A resubmitted pending revision leaves the list until rejected. Sort by applicable decidedAt DESC, then canonical trip ID DESC. Return the author-visible reason or null when no displayable text is available. */
+            tripsNeedingFixes?: {
+                count: number;
+                items: {
+                    latestReturnReason: string | null;
+                    tripId: components["schemas"]["Id"];
+                }[];
+            };
+            /** @description Requires events.respond and enabled Events reads. Include scheduled events the caller can see and respond to with startsAt strictly after computedAt and either no RSVP or a current unanswered RSVP. Sort by startsAt ASC, then event ID ASC. */
+            unansweredUpcomingEvents?: {
+                count: number;
+                items: {
+                    eventId: components["schemas"]["Id"];
+                    startsAt: components["schemas"]["Timestamp"];
+                    title: string;
+                }[];
+            };
+            /** @description Requires trips.submit_own and enabled Manual Reports reads. Include the caller's editing drafts, ordered by createdAt DESC, then draft ID DESC. */
+            unfinishedManualDrafts?: {
+                count: number;
+                items: {
+                    draftId: components["schemas"]["Id"];
+                    updatedAt: components["schemas"]["Timestamp"];
+                }[];
+            };
+        };
+        WorkspaceStage3SummaryEnvelope: {
+            data: components["schemas"]["WorkspaceStage3Summary"];
+            meta: components["schemas"]["Meta"];
         };
         /** @description Current permission-filtered workspace snapshot. Omit each section independently if its source is configured off or current authority is missing. An available empty section has count zero and an empty preview where applicable. Transient read failures follow the standard error policy. */
         WorkspaceSummary: {
@@ -6973,6 +7796,63 @@ export interface operations {
                 };
             };
             default: components["responses"]["Error"];
+        };
+    };
+    listPromotionCandidates: {
+        parameters: {
+            query: {
+                cursor?: components["parameters"]["Cursor"];
+                game: components["schemas"]["Game"];
+                limit?: components["parameters"]["Limit"];
+                /** @description Defaults to eligible. */
+                status?: "eligible" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List company promotion candidates */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualificationStage3PromotionCandidateListEnvelope"];
+                };
+            };
+            default: components["responses"]["PrivateNoStoreError"];
+        };
+    };
+    listPromotionHistory: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                game?: components["schemas"]["Game"];
+                limit?: components["parameters"]["Limit"];
+                memberId?: components["schemas"]["Id"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List company qualification actions */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualificationStage3PromotionHistoryListEnvelope"];
+                };
+            };
+            default: components["responses"]["PrivateNoStoreError"];
         };
     };
     renameQualificationLevel: {
@@ -9558,6 +10438,74 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    undoReconciliationCandidateDismissal: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                candidateId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TripStage3DuplicateUndoInput"];
+            };
+        };
+        responses: {
+            /** @description Undo the current reconciliation candidate dismissal */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong authoritative version, for the next command. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripStage3DuplicateDismissalEnvelope"];
+                };
+            };
+            default: components["responses"]["PrivateNoStoreError"];
+        };
+    };
+    dismissReconciliationCandidate: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                candidateId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TripStage3DuplicateDismissInput"];
+            };
+        };
+        responses: {
+            /** @description Dismiss the current reconciliation candidate snapshot */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong authoritative version, for the next command. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripStage3DuplicateDismissalEnvelope"];
+                };
+            };
+            default: components["responses"]["PrivateNoStoreError"];
+        };
+    };
     reconcileTrips: {
         parameters: {
             query?: never;
@@ -10214,6 +11162,31 @@ export interface operations {
                 };
             };
             default: components["responses"]["Error"];
+        };
+    };
+    getTripReviewSummary: {
+        parameters: {
+            query?: {
+                game?: components["schemas"]["Game"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read the waiting review and duplicate totals */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripStage3ReviewSummaryEnvelope"];
+                };
+            };
+            default: components["responses"]["PrivateNoStoreError"];
         };
     };
 }

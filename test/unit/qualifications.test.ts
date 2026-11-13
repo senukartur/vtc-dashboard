@@ -2,7 +2,10 @@ import { randomBytes } from "node:crypto";
 import { newId } from "@vtc/db";
 import { expect, test } from "vitest";
 import { pagination } from "../../apps/api/src/modules/qualifications/pagination.ts";
-import { validateQualificationsConfig } from "../../apps/api/src/modules/qualifications/service.ts";
+import {
+  nextLevel,
+  validateQualificationsConfig,
+} from "../../apps/api/src/modules/qualifications/service.ts";
 import { qualificationEvent } from "../../apps/api/src/platform/outbox/events.ts";
 
 const actor = {
@@ -68,4 +71,12 @@ test("qualification activation has no fallback cursor key or numeric policy defa
   expect(() =>
     validateQualificationsConfig({ cursorKey: randomBytes(32).toString("hex") }),
   ).not.toThrow();
+});
+
+test("the qualifications facade follows the fixed level order within the caller's selected game", () => {
+  expect(nextLevel("trainee")).toBe("driver_iii");
+  expect(nextLevel("driver_iii")).toBe("driver_ii");
+  expect(nextLevel("driver_ii")).toBe("driver_i");
+  expect(nextLevel("driver_i")).toBeNull();
+  expect(nextLevel("unknown" as Parameters<typeof nextLevel>[0])).toBeNull();
 });

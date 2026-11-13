@@ -28,6 +28,7 @@ import {
   reviewQueuePriorFolder,
   SCHEMA_SETUP_TIMEOUT_MS,
   simpleCatalogsPriorFolder,
+  stage3PriorFolder,
   testConnection,
   tripNumberPriorFolder,
 } from "./support.ts";
@@ -129,7 +130,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 29);
+      assert.equal(await runMigrations(settings), 30);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -186,7 +187,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 29);
+      assert.equal(await runMigrations(settings), 30);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -369,7 +370,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 29);
+      assert.equal(await runMigrations(guardedSettings()), 30);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_adr_requires_cargo','trip_trailer_shape')",
@@ -464,7 +465,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 29);
+        assert.equal(await runMigrations(settings), 30);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -522,7 +523,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 29);
+      assert.equal(await runMigrations(guardedSettings()), 30);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -577,7 +578,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 29);
+      assert.equal(await runMigrations(guardedSettings()), 30);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -631,7 +632,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 29);
+      assert.equal(await runMigrations(guardedSettings()), 30);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -714,7 +715,7 @@ await recoveryTest(
       // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
       // This is not a live backup/restore procedure and never stamps or replays the partial schema.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 29);
+      assert.equal(await runMigrations(settings), 30);
       assert.equal(await runMigrations(settings), 0);
       const [columns] = await connection.query<RowDataPacket[]>(
         "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
@@ -1158,7 +1159,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 19);
       await seedCatalogUpgradeRows(connection);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_facts"), 1);
-      assert.equal(await runMigrations(settings), 10);
+      assert.equal(await runMigrations(settings), 11);
       assert.equal(await runMigrations(settings), 0);
 
       for (const table of [
@@ -1241,7 +1242,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 29);
+      assert.equal(history.length, 30);
       assert.ok(history.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -2045,6 +2046,7 @@ await recoveryTest(
   async () => {
     const connection = await testConnection();
     let folder: string | undefined;
+    let stage3Prefix: string | undefined;
     const id = (n: number) => `e1320000-0000-4000-8000-${String(n).padStart(12, "0")}`;
     const [actor, legacy, draft, otherEvent, atsDlc, etsDlc] = [
       id(1),
@@ -2111,6 +2113,7 @@ await recoveryTest(
       const settings = guardedSettings();
       await reset(connection);
       folder = await eventStage2PriorFolder();
+      stage3Prefix = await stage3PriorFolder();
       assert.equal(await runMigrations(settings, { folder }), 28);
       await connection.execute(
         "INSERT INTO identity_users (id,name,email,created_at,updated_at) VALUES (?,'Fictional organizer','event-stage-2@example.invalid',?,?)",
@@ -2131,8 +2134,8 @@ await recoveryTest(
       const before = await definitions();
       const history = await ledger();
 
-      assert.equal(await runMigrations(settings), 1);
-      assert.equal(await runMigrations(settings), 0);
+      assert.equal(await runMigrations(settings, { folder: stage3Prefix }), 1);
+      assert.equal(await runMigrations(settings, { folder: stage3Prefix }), 0);
       const upgraded = await ledger();
       assert.equal(upgraded.length, 29);
       assert.deepEqual(upgraded.slice(0, -1), history);
@@ -2236,6 +2239,332 @@ await recoveryTest(
     } finally {
       await connection.end();
       if (folder) await rm(folder, { recursive: true });
+      if (stage3Prefix) await rm(stage3Prefix, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "Stage 3 upgrades the populated 0028 prefix, backfills held roots and constrains dismissal snapshots",
+  async () => {
+    const connection = await testConnection();
+    const settings = guardedSettings();
+    let folder: string | undefined;
+    const id = (n: number) => `e1390000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    const owner = id(1),
+      root = id(2),
+      alias = id(3),
+      free = id(4),
+      empty = id(5),
+      actor = id(6),
+      candidate = id(7);
+    const createdAt = "2026-01-02 00:00:00.123",
+      later = "2026-01-03 00:00:00.456";
+    const read = (sql: string) => connection.query<RowDataPacket[]>(sql).then(([rows]) => rows);
+    const history = () =>
+      read("SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version");
+    const receiptKey = id(9);
+    const fingerprint = Buffer.alloc(32, 0xab);
+    const writeReceipt = (operation: string, result: object) =>
+      connection.execute(
+        "INSERT INTO reconciliation_commands (actor_id,operation,`key`,fingerprint,result,created_at) VALUES (?,?,?,?,?,?)",
+        [actor, operation, receiptKey, fingerprint, JSON.stringify(result), createdAt],
+      );
+    const receipts = async () => {
+      const rows = await read(
+        "SELECT operation,operation+0 ordinal,CAST(`key` AS CHAR) receiptKey,HEX(fingerprint) fingerprint,result FROM reconciliation_commands ORDER BY ordinal",
+      );
+      return rows.map((row) => ({ ...row, ordinal: Number(row.ordinal) }));
+    };
+    const legacyReceipts = [
+      { operation: "merge", result: { data: { id: root }, version: 4 } },
+      { operation: "reverse", result: { data: { id: root }, version: 5 } },
+    ];
+    async function seedPrefix() {
+      for (const [userId, email] of [
+        [owner, "owner@example.invalid"],
+        [actor, "reviewer@example.invalid"],
+      ] as const) {
+        await connection.execute(
+          "INSERT INTO identity_users (id,name,email,created_at,updated_at) VALUES (?,'Fictional member',?,?,?)",
+          [userId, email, createdAt, createdAt],
+        );
+        await connection.execute(
+          "INSERT INTO identity_memberships (user_id,status) VALUES (?,'active')",
+          [userId],
+        );
+      }
+      for (const [tripId, aliasOf, held, reasons] of [
+        [
+          root,
+          null,
+          true,
+          [
+            "manual_review_required",
+            "manual_review_required",
+            "Manual_review_required",
+            "unknown_actual_start",
+          ],
+        ],
+        [alias, root, true, ["alias_reason"]],
+        [free, null, false, ["obsolete_reason"]],
+        [empty, null, true, []],
+      ] as const) {
+        await connection.execute(
+          "INSERT INTO trips (id,owner_id,game,alias_of,version,outcome,recording,decision,reporting_at,review_hold,review_reasons,created_at) VALUES (?,?,'ets2',?,1,'delivered','complete','pending_review',?,?,?,?)",
+          [tripId, owner, aliasOf, later, held, JSON.stringify(reasons), createdAt],
+        );
+      }
+      await connection.execute(
+        "INSERT INTO qualification_states (user_id,game,assignment_id,version) VALUES (?,'ets2',NULL,1)",
+        [owner],
+      );
+      await connection.execute(
+        "INSERT INTO audit_entries (id,actor_kind,actor_id,operation,subject_kind,subject_id,occurred_at,reason) VALUES (?,'user',?,'report.reviewed','trip',?,?,'staff_review')",
+        [id(8), actor, root, createdAt],
+      );
+      for (const { operation, result } of legacyReceipts) await writeReceipt(operation, result);
+    }
+    async function backfilled() {
+      const queue = await read(
+        "SELECT CAST(id AS CHAR) id,CAST(queued_at AS CHAR) queuedAt FROM trips ORDER BY id",
+      );
+      assert.deepEqual(queue, [
+        { id: root, queuedAt: createdAt },
+        { id: alias, queuedAt: null },
+        { id: free, queuedAt: null },
+        { id: empty, queuedAt: createdAt },
+      ]);
+      const reasons = await read(
+        "SELECT CAST(trip_id AS CHAR) id,code FROM trip_review_reasons ORDER BY trip_id,code",
+      );
+      assert.deepEqual(reasons, [
+        { id: root, code: "Manual_review_required" },
+        { id: root, code: "manual_review_required" },
+        { id: root, code: "unknown_actual_start" },
+      ]);
+    }
+    try {
+      await reset(connection);
+      folder = await stage3PriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 29);
+      await seedPrefix();
+      const prefix = await history();
+      const legacy = await receipts();
+      assert.deepEqual(
+        legacy,
+        legacyReceipts.map((receipt, index) => ({
+          ...receipt,
+          ordinal: index + 1,
+          receiptKey,
+          fingerprint: fingerprint.toString("hex").toUpperCase(),
+        })),
+      );
+
+      assert.equal(await runMigrations(settings), 1);
+      assert.equal(await runMigrations(settings), 0);
+      const applied = await history();
+      assert.equal(applied.length, 30);
+      assert.deepEqual(applied.slice(0, -1), prefix);
+      assert.equal(applied.at(-1)?.state, "applied");
+      await backfilled();
+      assert.deepEqual(await read("SELECT eligible_since FROM qualification_states"), [
+        { eligible_since: null },
+      ]);
+      const audit = await read("SELECT subject_kind+0 ordinal, details FROM audit_entries");
+      assert.equal(audit.length, 1);
+      assert.equal(Number(audit[0]?.ordinal), 3);
+      assert.equal(audit[0]?.details, null);
+      for (const [table, index, columns] of [
+        ["trips", "trip_review_queue", ["review_hold", "alias_of", "created_at", "id"]],
+        ["trips", "trip_review_queued_at", ["review_hold", "alias_of", "queued_at", "id"]],
+        ["trip_review_reasons", "trip_review_reason_filter", ["code", "trip_id"]],
+      ] as const) {
+        const [fields] = await connection.execute<RowDataPacket[]>(
+          "SELECT COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND INDEX_NAME=? ORDER BY SEQ_IN_INDEX",
+          [table, index],
+        );
+        assert.deepEqual(
+          fields.map((row) => row.COLUMN_NAME),
+          columns,
+        );
+      }
+      await assert.rejects(
+        connection.execute(
+          "INSERT INTO trip_review_reasons (trip_id,code) VALUES (?,'manual_review_required')",
+          [root],
+        ),
+        hasCode("ER_DUP_ENTRY"),
+      );
+      const hash = Buffer.alloc(32, 1);
+      await connection.execute(
+        "INSERT INTO reconciliation_rules (hash,config,created_at) VALUES (?,JSON_OBJECT(),?)",
+        [hash, createdAt],
+      );
+      await connection.execute(
+        "INSERT INTO reconciliation_candidates (id,owner_id,game,search_hash,primary_trip_id,secondary_trip_id,primary_version,secondary_version,rule_hash,evidence,reasons,active,created_at) VALUES (?,?,'ets2',?,?,?,1,1,?,JSON_OBJECT(),JSON_ARRAY(),TRUE,?)",
+        [candidate, owner, hash, root, free, hash, createdAt],
+      );
+      const dismiss = (
+        candidateId: string,
+        reason: string,
+        version: number,
+        undoneBy: string | null = null,
+        undoneAt: string | null = null,
+      ) =>
+        connection.execute(
+          "INSERT INTO reconciliation_candidate_dismissals (candidate_id,dismissed_by,dismissed_at,reason,version,undone_by,undone_at) VALUES (?,?,?,?,?,?,?)",
+          [candidateId, actor, createdAt, reason, version, undoneBy, undoneAt],
+        );
+      for (const result of [
+        () => dismiss(candidate, "  \t", 2),
+        () => dismiss(candidate, "Fictional reason", 0),
+        () => dismiss(candidate, "Fictional reason", 1),
+        () => dismiss(candidate, "Fictional reason", 2, actor),
+        () => dismiss(candidate, "Fictional reason", 2, null, later),
+        () => dismiss(candidate, "Fictional reason", 2, actor, "2026-01-01 00:00:00.000"),
+      ])
+        await assert.rejects(result(), hasCode("ER_CHECK_CONSTRAINT_VIOLATED"));
+      await assert.rejects(
+        dismiss(id(99), "Fictional reason", 2),
+        hasCode("ER_NO_REFERENCED_ROW_2"),
+      );
+      await dismiss(candidate, "Fictional reason", 2);
+      const dismissal = {
+        data: {
+          candidateId: candidate,
+          version: 2,
+          dismissed: true,
+          dismissedAt: "2026-01-02T00:00:00.123Z",
+          undoneAt: null,
+        },
+        version: 2,
+      };
+      await writeReceipt("dismiss", dismissal);
+      await assert.rejects(writeReceipt("dismiss", dismissal), hasCode("ER_DUP_ENTRY"));
+      await assert.rejects(dismiss(candidate, "Fictional reason", 2), hasCode("ER_DUP_ENTRY"));
+      await assert.rejects(
+        connection.execute("DELETE FROM reconciliation_candidates WHERE id=?", [candidate]),
+        hasCode("ER_ROW_IS_REFERENCED_2"),
+      );
+      await connection.execute(
+        "UPDATE reconciliation_candidate_dismissals SET undone_by=?,undone_at=?,version=3 WHERE candidate_id=?",
+        [owner, later, candidate],
+      );
+      const undo = {
+        data: {
+          ...dismissal.data,
+          version: 3,
+          dismissed: false,
+          undoneAt: "2026-01-03T00:00:00.456Z",
+        },
+        version: 3,
+      };
+      await writeReceipt("undo_dismissal", undo);
+      assert.deepEqual(await receipts(), [
+        ...legacy,
+        {
+          operation: "dismiss",
+          ordinal: 3,
+          receiptKey,
+          fingerprint: fingerprint.toString("hex").toUpperCase(),
+          result: dismissal,
+        },
+        {
+          operation: "undo_dismissal",
+          ordinal: 4,
+          receiptKey,
+          fingerprint: fingerprint.toString("hex").toUpperCase(),
+          result: undo,
+        },
+      ]);
+      await assert.rejects(
+        connection.execute(
+          "UPDATE reconciliation_candidate_dismissals SET undone_by=? WHERE candidate_id=?",
+          [id(99), candidate],
+        ),
+        hasCode("ER_NO_REFERENCED_ROW_2"),
+      );
+      await reset(connection);
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "Stage 3 partial DDL preserves the 0028 prefix and refuses automatic replay",
+  async () => {
+    const connection = await testConnection();
+    const settings = guardedSettings();
+    let folder: string | undefined;
+    try {
+      await reset(connection);
+      folder = await stage3PriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 29);
+      const journal = JSON.parse(
+        await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+      );
+      const entry = journal.entries.at(-1);
+      assert.equal(entry.idx, 29);
+      const filename = `${entry.tag}.sql`;
+      const sql = await readFile(join(migrationFolder, filename), "utf8");
+      const boundary = sql.indexOf("-- Backfill the published queue clock");
+      assert.ok(boundary > 0);
+      await writeFile(
+        join(folder, filename),
+        `${sql.slice(0, boundary)}ALTER TABLE synthetic_stage_three_missing ADD COLUMN fault INT;\n`,
+      );
+      await writeFile(join(folder, "meta/_journal.json"), JSON.stringify(journal));
+      const readHistory = () =>
+        connection
+          .query<RowDataPacket[]>(
+            "SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version",
+          )
+          .then(([rows]) => rows);
+      const prefix = await readHistory();
+      await assert.rejects(runMigrations(settings, { folder }), hasCode("ER_NO_SUCH_TABLE"));
+      const dirty = await readHistory();
+      assert.deepEqual(dirty.slice(0, -1), prefix);
+      assert.equal(dirty.length, 30);
+      assert.equal(dirty.at(-1)?.state, "applying");
+      assert.equal(dirty.at(-1)?.applied_at, null);
+      const [columns] = await connection.query<RowDataPacket[]>(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='trips' AND COLUMN_NAME='queued_at'",
+      );
+      assert.equal(columns.length, 1);
+      await assert.rejects(
+        runMigrations(settings, { folder, lockTimeoutSeconds: 0 }),
+        /MIGRATION_RECOVERY_REQUIRED/,
+      );
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "Stage 3 recovery reapplies from its known consistent disposable baseline",
+  async () => {
+    const connection = await testConnection();
+    const settings = guardedSettings();
+    try {
+      // Reconstruct the known empty synthetic baseline used by the sticky-failure case.
+      await reset(connection);
+      assert.equal(await runMigrations(settings), 30);
+      assert.equal(await runMigrations(settings), 0);
+      const [recovered] = await connection.query<RowDataPacket[]>(
+        "SELECT state FROM _vtc_migrations ORDER BY version",
+      );
+      assert.equal(recovered.length, 30);
+      assert.ok(recovered.every((row) => row.state === "applied"));
+    } finally {
+      await connection.end();
     }
   },
   SCHEMA_SETUP_TIMEOUT_MS,

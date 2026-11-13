@@ -4206,7 +4206,144 @@
           }
         ],
         "x-contract-stage": "VTC-123 Step 1",
-        "description": "Apply authorized visibility and all supplied filters before counting or paging. When filtering for another owner, return only accepted trips within the caller's authorized scope. After VTC-115 activation, every successful mine or company page includes total for the authorized filtered set before cursor and limit, including with ownerId. The default scope is company. An empty filtered set has total 0. Review pages may omit total. Signed cursors bind the normalized filters, effective locale and order; a mismatch returns 409 VERSION_CONFLICT."
+        "description": "Apply authorized visibility and all supplied filters before counting or paging. When filtering for another owner, return only accepted trips within the caller's authorized scope. After VTC-115 activation, every successful mine or company page includes total for the authorized filtered set before cursor and limit, including with ownerId. The default scope is company. An empty filtered set has total 0. Review pages may omit total. Signed cursors bind the normalized filters, effective locale and order; a mismatch returns 409 VERSION_CONFLICT.",
+        "x-stage-3-operation": {
+          "x-owner-card": "VTC-133",
+          "x-capability": "trips.review",
+          "x-guards": [
+            "current_authority",
+            "exclude_own_trips",
+            "effective_decision_only"
+          ],
+          "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Waiting lists held canonical trips oldest first by queuedAt then ID by default. Resolved combines accepted and returned using the latest effective decision ordered by decidedAt descending then canonical ID descending. The reasonCode filter applies to the selected view's review or effective decision reasons. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+          "parameters": [
+            {
+              "name": "view",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "const": "stage3"
+              },
+              "description": "Explicit Stage 3 wire selection when activated."
+            },
+            {
+              "$ref": "#/components/parameters/Limit"
+            },
+            {
+              "$ref": "#/components/parameters/Cursor"
+            },
+            {
+              "name": "scope",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "const": "review"
+              }
+            },
+            {
+              "name": "status",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "waiting",
+                  "resolved"
+                ]
+              },
+              "description": "Defaults to waiting."
+            },
+            {
+              "name": "game",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "$ref": "#/components/schemas/Game"
+              }
+            },
+            {
+              "name": "ownerId",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "$ref": "#/components/schemas/Id"
+              },
+              "description": "Exact canonical owner ID among the authorized review population. Bind it into the signed cursor."
+            },
+            {
+              "name": "reasonCode",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "$ref": "#/components/schemas/TripStage3ReviewReasonCode"
+              }
+            },
+            {
+              "name": "source",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "ets2telemetry",
+                  "manual"
+                ]
+              },
+              "description": "Optional source-kind filter for every scope, using the TripSummary.sourceKinds vocabulary: a trip matches when its canonical group has a source of that kind (a trip with telemetry and a manual report matches both; a trip without sources matches neither). Applied server-side with the scope's visibility rules before keyset paging and bound into the signed cursor. Omitted: no source filter."
+            },
+            {
+              "name": "locale",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              },
+              "description": "Optional override of the authenticated viewer's saved locale. Use the effective locale for city and cargo search and returned labels, with English fallback for each missing translation. Bind the effective locale into the cursor."
+            },
+            {
+              "name": "order",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "asc",
+                  "desc"
+                ]
+              },
+              "description": "Optional waiting order by queuedAt and ID; resolved requires descending order."
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Waiting lists held canonical trips oldest first by queuedAt then ID by default. Resolved combines accepted and returned using the latest effective decision ordered by decidedAt descending then canonical ID descending. The reasonCode filter applies to the selected view's review or effective decision reasons. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Private response; never cache."
+                }
+              },
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TripStage3ReviewListEnvelope"
+                  }
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/PrivateNoStoreError"
+            }
+          }
+        }
       }
     },
     "/api/v1/trips/{tripId}": {
@@ -4653,7 +4790,68 @@
             }
           }
         ],
-        "x-contract-stage": "VTC-123 Step 1"
+        "x-contract-stage": "VTC-123 Step 1",
+        "x-stage-3-operation": {
+          "x-owner-card": "VTC-133",
+          "x-capability": "trips.review",
+          "x-guards": [
+            "current_authority",
+            "exclude_own_trips",
+            "safe_evidence_only"
+          ],
+          "description": "Require current trips.review and exclude the reviewer's own trips. Return independently available manual and telemetry snapshots for the canonical group. Each exposes only authorized evidence and normalized facts with provenance. Telemetry governs qualification validation whenever present, so over-limit acceptance is then unavailable.",
+          "parameters": [
+            {
+              "name": "tripId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              }
+            },
+            {
+              "name": "view",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "const": "stage3"
+              },
+              "description": "Explicit Stage 3 wire selection when activated."
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Require current trips.review and exclude the reviewer's own trips. Return independently available manual and telemetry snapshots for the canonical group. Each exposes only authorized evidence and normalized facts with provenance. Telemetry governs qualification validation whenever present, so over-limit acceptance is then unavailable.",
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Private response; never cache."
+                },
+                "ETag": {
+                  "schema": {
+                    "type": "string"
+                  },
+                  "description": "Strong authoritative version, for the next command."
+                }
+              },
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TripStage3ReviewEnvelope"
+                  }
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/PrivateNoStoreError"
+            }
+          }
+        }
       }
     },
     "/api/v1/trips/{tripId}/manual-revisions/{revisionId}": {
@@ -4929,6 +5127,85 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/DecisionInput"
+              }
+            }
+          }
+        },
+        "x-stage-3-operation": {
+          "x-owner-card": "VTC-133",
+          "x-capability": "trips.review",
+          "x-guards": [
+            "current_authority",
+            "exclude_own_trips",
+            "exact_reviewed_revisions",
+            "historical_attribution",
+            "missing_facts_require_resolution"
+          ],
+          "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. A direct acceptance can omit a reason or supply whitespace; persist no reason in both cases. Direct reject is displayed as Return and requires a nonblank reason. A decision on a proposal still requires a reason. The existing over-limit and support-snapshot controls apply.",
+          "parameters": [
+            {
+              "name": "tripId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              }
+            },
+            {
+              "$ref": "#/components/parameters/IfMatch"
+            },
+            {
+              "$ref": "#/components/parameters/IdempotencyKey"
+            },
+            {
+              "name": "view",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "const": "stage3"
+              },
+              "description": "Explicit Stage 3 wire selection when activated."
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. A direct acceptance can omit a reason or supply whitespace; persist no reason in both cases. Direct reject is displayed as Return and requires a nonblank reason. A decision on a proposal still requires a reason. The existing over-limit and support-snapshot controls apply.",
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Private response; never cache."
+                },
+                "ETag": {
+                  "schema": {
+                    "type": "string"
+                  },
+                  "description": "Strong authoritative version, for the next command."
+                }
+              },
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EnvelopeDecision"
+                  }
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/PrivateNoStoreError"
+            }
+          },
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripStage3DecisionInput"
+                }
               }
             }
           }
@@ -5396,7 +5673,78 @@
           {
             "$ref": "#/components/parameters/Cursor"
           }
-        ]
+        ],
+        "x-stage-3-operation": {
+          "x-owner-card": "VTC-133",
+          "x-capability": "trips.review",
+          "x-guards": [
+            "current_authority",
+            "exclude_own_trips",
+            "snapshot_visibility"
+          ],
+          "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Return both safe trip summaries for a current immutable candidate snapshot. Default status is waiting; dismissed lists current snapshots with a live dismissal. Order by candidate creation time and ID descending. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+          "parameters": [
+            {
+              "name": "view",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "const": "stage3"
+              },
+              "description": "Explicit Stage 3 wire selection when activated."
+            },
+            {
+              "$ref": "#/components/parameters/Limit"
+            },
+            {
+              "$ref": "#/components/parameters/Cursor"
+            },
+            {
+              "name": "game",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "$ref": "#/components/schemas/Game"
+              }
+            },
+            {
+              "name": "status",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "waiting",
+                  "dismissed"
+                ]
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Return both safe trip summaries for a current immutable candidate snapshot. Default status is waiting; dismissed lists current snapshots with a live dismissal. Order by candidate creation time and ID descending. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Private response; never cache."
+                }
+              },
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TripStage3DuplicateListEnvelope"
+                  }
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/PrivateNoStoreError"
+            }
+          }
+        }
       }
     },
     "/api/v1/reconciliations": {
@@ -8680,7 +9028,69 @@
           {
             "$ref": "#/components/parameters/Cursor"
           }
-        ]
+        ],
+        "x-stage-3-operation": {
+          "x-owner-card": "VTC-135",
+          "x-capability": "members.manage",
+          "x-guards": [
+            "current_authority",
+            "legacy_fallback",
+            "registered_details_only",
+            "no_secret_values_or_private_bodies"
+          ],
+          "description": "Director and Deputy only. Resolve current safe actor nickname and object name when available. Keep legacy action and subject ID even when current display data or details are unavailable. Match the optional exact action before counting and paging; total is optional. Order by occurrence time and ID descending. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+          "parameters": [
+            {
+              "name": "view",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "const": "stage3"
+              },
+              "description": "Explicit Stage 3 wire selection when activated."
+            },
+            {
+              "$ref": "#/components/parameters/Limit"
+            },
+            {
+              "$ref": "#/components/parameters/Cursor"
+            },
+            {
+              "name": "action",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Director and Deputy only. Resolve current safe actor nickname and object name when available. Keep legacy action and subject ID even when current display data or details are unavailable. Match the optional exact action before counting and paging; total is optional. Order by occurrence time and ID descending. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Private response; never cache."
+                }
+              },
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AuditStage3ListEnvelope"
+                  }
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/PrivateNoStoreError"
+            }
+          }
+        }
       }
     },
     "/api/v1/me/email-change-confirmations": {
@@ -10353,7 +10763,81 @@
           "current_authority",
           "session_bound_cursor",
           "no_private_identity_fields"
-        ]
+        ],
+        "x-stage-3-operation": {
+          "x-owner-card": "VTC-134",
+          "x-capability": "qualifications.manage",
+          "x-guards": [
+            "current_authority",
+            "no_private_identity_fields"
+          ],
+          "description": "Trim the optional search term and match a case-insensitive nickname substring inside the authorized qualification target population. Include eligible former members as in the current lookup. Keep exact ascending ID order. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+          "parameters": [
+            {
+              "name": "limit",
+              "in": "query",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 25
+              }
+            },
+            {
+              "name": "cursor",
+              "in": "query",
+              "schema": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              }
+            },
+            {
+              "name": "view",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "const": "stage3"
+              },
+              "description": "Explicit Stage 3 wire selection when activated."
+            },
+            {
+              "name": "search",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "\\S"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Trim the optional search term and match a case-insensitive nickname substring inside the authorized qualification target population. Include eligible former members as in the current lookup. Keep exact ascending ID order. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Private response; never cache."
+                }
+              },
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/QualificationStage3MemberSearchListEnvelope"
+                  }
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/PrivateNoStoreError"
+            }
+          }
+        }
       }
     },
     "/api/v1/admin/qualification-rule-previews": {
@@ -10470,7 +10954,80 @@
               ]
             }
           }
-        ]
+        ],
+        "x-stage-3-operation": {
+          "x-owner-card": "VTC-134",
+          "x-capability": "qualifications.manage",
+          "x-guards": [
+            "current_authority",
+            "private_domain_reasons",
+            "exact_promotion_proof_relation"
+          ],
+          "description": "Read authorized assignment history, with its recorded actor and reason, and the recorded actor and reason of the exact linked promotion proof. Preserve historical nulls and effective interval boundaries. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+          "parameters": [
+            {
+              "name": "memberId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              }
+            },
+            {
+              "$ref": "#/components/parameters/Limit"
+            },
+            {
+              "$ref": "#/components/parameters/Cursor"
+            },
+            {
+              "name": "game",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "ets2",
+                  "ats"
+                ]
+              }
+            },
+            {
+              "name": "view",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "const": "stage3"
+              },
+              "description": "Explicit Stage 3 wire selection when activated."
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Read authorized assignment history, with its recorded actor and reason, and the recorded actor and reason of the exact linked promotion proof. Preserve historical nulls and effective interval boundaries. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Private response; never cache."
+                }
+              },
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/QualificationStage3ActionHistoryListEnvelope"
+                  }
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/PrivateNoStoreError"
+            }
+          }
+        }
       }
     },
     "/api/v1/admin/source-capabilities": {
@@ -10736,7 +11293,52 @@
             "$ref": "#/components/responses/PrivateNoStoreError"
           }
         },
-        "description": "Apply source availability and current capabilities, visibility and ownership at computedAt. Count eligible rows before limiting each deterministically sorted preview to five items. All responses use Cache-Control: no-store."
+        "description": "Apply source availability and current capabilities, visibility and ownership at computedAt. Count eligible rows before limiting each deterministically sorted preview to five items. All responses use Cache-Control: no-store.",
+        "x-stage-3-operation": {
+          "x-owner-card": "VTC-134",
+          "x-capability": "company.read",
+          "x-guards": [
+            "current_active_membership",
+            "source_capabilities_and_visibility",
+            "exclude_own_trips_from_review_queue"
+          ],
+          "description": "Private workspace summary. Omit each section independently when source reads or authority are unavailable. Return zero counts for available empty data. Promotion counts are per game; review counts follow the staged review summary.",
+          "parameters": [
+            {
+              "name": "view",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "const": "stage3"
+              },
+              "description": "Explicit Stage 3 wire selection when activated."
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Private workspace summary. Omit each section independently when source reads or authority are unavailable. Return zero counts for available empty data. Promotion counts are per game; review counts follow the staged review summary.",
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Private response; never cache."
+                }
+              },
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/WorkspaceStage3SummaryEnvelope"
+                  }
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/PrivateNoStoreError"
+            }
+          }
+        }
       }
     },
     "/api/v1/admin/events/drafts/{eventId}": {
@@ -11817,6 +12419,370 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/api/v1/trips/review-summary": {
+      "get": {
+        "operationId": "getTripReviewSummary",
+        "tags": [
+          "trips"
+        ],
+        "summary": "Read the waiting review and duplicate totals",
+        "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Count waiting held canonical roots and actionable duplicate candidates in the selected game, or in both games when omitted. Oldest fields are null when no waiting trip matches; age is elapsed whole seconds at computedAt.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "trips",
+        "x-owner-card": "VTC-133",
+        "x-capability": "trips.review",
+        "x-guards": [
+          "current_authority",
+          "exclude_own_trips"
+        ],
+        "x-contract-stage": "VTC-139 Step 1",
+        "responses": {
+          "200": {
+            "description": "Read the waiting review and duplicate totals",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripStage3ReviewSummaryEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          }
+        },
+        "parameters": [
+          {
+            "name": "game",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Game"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/reconciliation-candidates/{candidateId}/dismissals": {
+      "post": {
+        "operationId": "dismissReconciliationCandidate",
+        "tags": [
+          "trips"
+        ],
+        "summary": "Dismiss the current reconciliation candidate snapshot",
+        "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections. Before the first dismissal the implicit version is 1. The first stored dismissal returns version 2 and undo advances it. An identical retry rechecks current authority and returns the stored result and its ETag even after dismissal state changes. Reusing the key with a different fingerprint returns 409 IDEMPOTENCY_CONFLICT.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "trips",
+        "x-owner-card": "VTC-133",
+        "x-capability": "trips.review",
+        "x-guards": [
+          "current_authority",
+          "exclude_own_trips",
+          "current_snapshot",
+          "idempotency_recheck"
+        ],
+        "x-contract-stage": "VTC-139 Step 1",
+        "responses": {
+          "200": {
+            "description": "Dismiss the current reconciliation candidate snapshot",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong authoritative version, for the next command."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripStage3DuplicateDismissalEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          }
+        },
+        "parameters": [
+          {
+            "name": "candidateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TripStage3DuplicateDismissInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reconciliation-candidates/{candidateId}/dismissal-reversals": {
+      "post": {
+        "operationId": "undoReconciliationCandidateDismissal",
+        "tags": [
+          "trips"
+        ],
+        "summary": "Undo the current reconciliation candidate dismissal",
+        "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections. Before the first dismissal the implicit version is 1. The first stored dismissal returns version 2 and undo advances it. An identical retry rechecks current authority and returns the stored result and its ETag even after dismissal state changes. Reusing the key with a different fingerprint returns 409 IDEMPOTENCY_CONFLICT.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "trips",
+        "x-owner-card": "VTC-133",
+        "x-capability": "trips.review",
+        "x-guards": [
+          "current_authority",
+          "exclude_own_trips",
+          "current_snapshot",
+          "idempotency_recheck"
+        ],
+        "x-contract-stage": "VTC-139 Step 1",
+        "responses": {
+          "200": {
+            "description": "Undo the current reconciliation candidate dismissal",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong authoritative version, for the next command."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripStage3DuplicateDismissalEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          }
+        },
+        "parameters": [
+          {
+            "name": "candidateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TripStage3DuplicateUndoInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/promotion-candidates": {
+      "get": {
+        "operationId": "listPromotionCandidates",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "List company promotion candidates",
+        "description": "Return active members in the selected game with current assignments and authoritative accepted trip totals for those assignments. Eligibility follows the same rule, current/next levels and totals as confirmation. Historical eligibility onset can be unknown; ineligible rows have eligibleSince null. Order by eligibleSince descending with null last, then member ID ascending. Filter before total and paging. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-134",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "current_authority",
+          "active_members_only",
+          "game_scoped_qualification_state"
+        ],
+        "x-contract-stage": "VTC-139 Step 1",
+        "responses": {
+          "200": {
+            "description": "List company promotion candidates",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualificationStage3PromotionCandidateListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "game",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Game"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "eligible",
+                "all"
+              ]
+            },
+            "description": "Defaults to eligible."
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/promotion-history": {
+      "get": {
+        "operationId": "listPromotionHistory",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "List company qualification actions",
+        "description": "Read company-wide promotions and assignments newest first by the recorded promotion confirmation or assignment effective time, then action ID and kind. Include each promotion once with its linked proof and include ordinary assignments independently. Expose the recorded actor and domain reason where available, without inferring an assignment recording time. Filter by game and member before the total and cursor. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-134",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "current_authority",
+          "private_domain_reasons"
+        ],
+        "x-contract-stage": "VTC-139 Step 1",
+        "responses": {
+          "200": {
+            "description": "List company qualification actions",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualificationStage3PromotionHistoryListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "game",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Game"
+            }
+          },
+          {
+            "name": "memberId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ]
       }
     }
   },
@@ -25220,6 +26186,3926 @@
           "meta"
         ],
         "additionalProperties": false
+      },
+      "TripStage3ReviewReasonCode": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "TripStage3ReviewSummary": {
+        "type": "object",
+        "properties": {
+          "computedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "waitingCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "oldestQueuedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "oldestAgeSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duplicateCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "computedAt",
+          "waitingCount",
+          "oldestQueuedAt",
+          "oldestAgeSeconds",
+          "duplicateCount"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3ReviewSummaryEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TripStage3ReviewSummary"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3ReviewQueueTrip": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "const": "summary"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "owner": {
+            "$ref": "#/components/schemas/MemberSummary"
+          },
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "open",
+              "delivered",
+              "cancelled",
+              "none"
+            ]
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "unassessed",
+              "pending_review",
+              "accepted",
+              "rejected"
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cargo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actualDistanceM": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reportingAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sourceKinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "ets2telemetry",
+                "manual"
+              ]
+            }
+          },
+          "recording": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ]
+          },
+          "reportingBasis": {
+            "type": "string",
+            "enum": [
+              "actual_completion",
+              "manual_confirmation",
+              "unknown"
+            ],
+            "description": "Derived by the server from the persisted effective fact and reporting timestamp, never the collection of source kinds."
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Stable canonical trip number when assigned."
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "UTC canonical trip creation instant."
+          },
+          "submittedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UTC submission instant of the current manual revision, or null when there is no current manual revision."
+          },
+          "event": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/Id"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "id",
+                  "title"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Associated visible event, or null if none is visible. Only in authorized author/reviewer projections. Omit entirely in company scope."
+          },
+          "gameMode": {
+            "type": "string",
+            "enum": [
+              "single-player",
+              "truckersmp",
+              "haulmp",
+              "unknown"
+            ],
+            "description": "Only in authorized author/reviewer projections. Omit entirely in company scope."
+          }
+        },
+        "required": [
+          "view",
+          "id",
+          "version",
+          "owner",
+          "game",
+          "outcome",
+          "decision",
+          "origin",
+          "destination",
+          "cargo",
+          "actualDistanceM",
+          "reportingAt",
+          "sourceKinds",
+          "number",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3WaitingReviewItem": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "const": "waiting"
+          },
+          "trip": {
+            "$ref": "#/components/schemas/TripStage3ReviewQueueTrip"
+          },
+          "queuedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TripStage3ReviewReasonCode"
+            },
+            "uniqueItems": true
+          },
+          "manualRevision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TripReviewRevision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "trip",
+          "queuedAt",
+          "reasonCodes",
+          "manualRevision"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3ResolvedReviewItem": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "const": "resolved"
+          },
+          "trip": {
+            "$ref": "#/components/schemas/TripStage3ReviewQueueTrip"
+          },
+          "decidedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "rejected"
+            ]
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TripStage3ReviewReasonCode"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "state",
+          "trip",
+          "decidedAt",
+          "outcome",
+          "reasonCodes"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3ReviewItem": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TripStage3WaitingReviewItem"
+          },
+          {
+            "$ref": "#/components/schemas/TripStage3ResolvedReviewItem"
+          }
+        ]
+      },
+      "TripStage3ReviewList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TripStage3ReviewItem"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3ReviewListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TripStage3ReviewList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3ManualReview": {
+        "type": "object",
+        "properties": {
+          "manualRevision": {
+            "$ref": "#/components/schemas/ManualRevisionRead"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            }
+          }
+        },
+        "required": [
+          "manualRevision",
+          "evidence"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3TelemetryNormalizedFacts": {
+        "type": "object",
+        "properties": {
+          "factRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "provider": {
+            "type": "string",
+            "const": "ets2telemetry"
+          },
+          "actualStartAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actualCompletedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actualDistanceM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plannedDistanceM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cargoMassKg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveCatalogPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveCatalogPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cargo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveCatalogPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trailers": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/EffectiveCatalogPin"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 10
+          },
+          "trailersComplete": {
+            "type": "boolean"
+          },
+          "wholeTripDistanceSupported": {
+            "type": "boolean"
+          },
+          "ruleContextComplete": {
+            "type": "boolean"
+          },
+          "recordedTelemetry": {
+            "description": "Recorded classifications for this telemetry source fact.",
+            "type": "object",
+            "properties": {
+              "jobType": {
+                "type": "string",
+                "enum": [
+                  "quick-job",
+                  "freight-market",
+                  "cargo-market",
+                  "world-of-trucks",
+                  "unknown"
+                ]
+              },
+              "gameMode": {
+                "type": "string",
+                "enum": [
+                  "single-player",
+                  "truckersmp",
+                  "haulmp",
+                  "unknown"
+                ]
+              },
+              "hardModeResult": {
+                "type": "string",
+                "enum": [
+                  "qualified",
+                  "not-qualified",
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "jobType",
+              "gameMode",
+              "hardModeResult"
+            ],
+            "additionalProperties": false
+          },
+          "sourceRecordId": {
+            "$ref": "#/components/schemas/Id",
+            "description": "Internal source evidence record ID for this normalized fact revision."
+          },
+          "cargoDamagePercent": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Percentage from normalized telemetry damage fraction. Null when the value is unavailable or invalid."
+          }
+        },
+        "required": [
+          "factRevisionId",
+          "provider",
+          "actualStartAt",
+          "actualCompletedAt",
+          "actualDistanceM",
+          "plannedDistanceM",
+          "cargoMassKg",
+          "origin",
+          "destination",
+          "cargo",
+          "trailers",
+          "trailersComplete",
+          "wholeTripDistanceSupported",
+          "ruleContextComplete",
+          "sourceRecordId",
+          "cargoDamagePercent"
+        ],
+        "additionalProperties": false,
+        "description": "Comparable normalized fields from the selected telemetry source fact revision. Null denotes an unavailable value. This source provides no normalized depots or companies."
+      },
+      "TripStage3TelemetryReview": {
+        "type": "object",
+        "properties": {
+          "normalizedFacts": {
+            "$ref": "#/components/schemas/TripStage3TelemetryNormalizedFacts"
+          },
+          "facts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SafeSourceFact"
+            },
+            "description": "Safe per-field provenance for the selected telemetry source fact revision."
+          }
+        },
+        "required": [
+          "normalizedFacts",
+          "facts"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3Review": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/TripStage3ReviewQueueTrip"
+          },
+          "factRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "evaluation": {
+            "$ref": "#/components/schemas/EvaluationSnapshot"
+          },
+          "qualificationCheck": {
+            "$ref": "#/components/schemas/QualificationCheck"
+          },
+          "acceptance": {
+            "$ref": "#/components/schemas/ReviewAcceptance"
+          },
+          "canDecide": {
+            "type": "boolean"
+          },
+          "blockedReasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Decision"
+            }
+          },
+          "pendingProposalId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewReasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "effectiveFacts": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveTripFacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sources": {
+            "type": "object",
+            "properties": {
+              "manual": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TripStage3ManualReview"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "telemetry": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TripStage3TelemetryReview"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "manual",
+              "telemetry"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "summary",
+          "factRevisionId",
+          "evaluation",
+          "qualificationCheck",
+          "acceptance",
+          "canDecide",
+          "blockedReasonCodes",
+          "decisions",
+          "pendingProposalId",
+          "reviewReasonCodes",
+          "effectiveFacts",
+          "sources"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3ReviewEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TripStage3Review"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3AcceptInput": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "const": "accept"
+          },
+          "reviewedRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "factRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "proposalId": {
+            "type": "null"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Omitted or whitespace-only means no staff reason."
+          },
+          "confirmOverLimits": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "decision",
+          "reviewedRevisionId",
+          "factRevisionId",
+          "proposalId"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3ReturnInput": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "const": "reject"
+          },
+          "reviewedRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "factRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "proposalId": {
+            "type": "null"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "decision",
+          "reviewedRevisionId",
+          "factRevisionId",
+          "proposalId",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3ProposalDecisionInput": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "reject"
+            ]
+          },
+          "reviewedRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "factRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "proposalId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "decision",
+          "reviewedRevisionId",
+          "factRevisionId",
+          "proposalId",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3DecisionInput": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TripStage3AcceptInput"
+          },
+          {
+            "$ref": "#/components/schemas/TripStage3ReturnInput"
+          },
+          {
+            "$ref": "#/components/schemas/TripStage3ProposalDecisionInput"
+          }
+        ]
+      },
+      "TripStage3DuplicateTrip": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "owner": {
+            "$ref": "#/components/schemas/MemberSummary"
+          },
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "open",
+              "delivered",
+              "cancelled",
+              "none"
+            ]
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "unassessed",
+              "pending_review",
+              "accepted",
+              "rejected"
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cargo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actualDistanceM": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reportingAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sourceKinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "ets2telemetry",
+                "manual"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "version",
+          "owner",
+          "game",
+          "outcome",
+          "decision",
+          "origin",
+          "destination",
+          "cargo",
+          "actualDistanceM",
+          "reportingAt",
+          "sourceKinds"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3Duplicate": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "primaryTrip": {
+            "$ref": "#/components/schemas/TripStage3DuplicateTrip"
+          },
+          "secondaryTrip": {
+            "$ref": "#/components/schemas/TripStage3DuplicateTrip"
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TripStage3ReviewReasonCode"
+            },
+            "uniqueItems": true
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "dismissed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "game",
+          "primaryTrip",
+          "secondaryTrip",
+          "reasonCodes",
+          "createdAt",
+          "version",
+          "dismissed"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3DuplicateList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TripStage3Duplicate"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3DuplicateListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TripStage3DuplicateList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3DuplicateDismissInput": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3DuplicateUndoInput": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "TripStage3DuplicateDismissal": {
+        "type": "object",
+        "properties": {
+          "candidateId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 4294967295
+          },
+          "dismissed": {
+            "type": "boolean"
+          },
+          "dismissedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "undoneAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "candidateId",
+          "version",
+          "dismissed",
+          "dismissedAt",
+          "undoneAt"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage3DuplicateDismissalEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TripStage3DuplicateDismissal"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3LevelSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3PromotionCandidate": {
+        "type": "object",
+        "properties": {
+          "member": {
+            "$ref": "#/components/schemas/MemberSummary"
+          },
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "assignmentId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "currentLevel": {
+            "$ref": "#/components/schemas/QualificationStage3LevelSummary"
+          },
+          "nextLevel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationStage3LevelSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "acceptedTrips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualDistanceM": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+            "maxLength": 64
+          },
+          "requiredTrips": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredDistanceM": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "eligibleSince": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "member",
+          "game",
+          "assignmentId",
+          "version",
+          "currentLevel",
+          "nextLevel",
+          "acceptedTrips",
+          "actualDistanceM",
+          "requiredTrips",
+          "requiredDistanceM",
+          "eligible",
+          "eligibleSince"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3PromotionCandidateList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QualificationStage3PromotionCandidate"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3PromotionCandidateListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualificationStage3PromotionCandidateList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3ActionHistory": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "levelId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "assignedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "periodId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "endedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "initial",
+              "reinstatement",
+              "historical_resolution",
+              "administrative_correction",
+              "promotion"
+            ]
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationActionActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "assignmentReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "promotion": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/Id"
+                  },
+                  "confirmedAt": {
+                    "$ref": "#/components/schemas/Timestamp"
+                  },
+                  "actor": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/QualificationActionActor"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048,
+                        "pattern": "\\S"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "confirmedAt",
+                  "actor",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "levelId",
+          "game",
+          "assignedAt",
+          "periodId",
+          "endedAt",
+          "purpose",
+          "actor",
+          "assignmentReason",
+          "promotion"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3ActionHistoryList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QualificationStage3ActionHistory"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3ActionHistoryListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualificationStage3ActionHistoryList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3PromotionHistory": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "promotion"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "member": {
+            "$ref": "#/components/schemas/MemberSummary"
+          },
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "sourceAssignmentId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "targetAssignmentId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "sourceLevel": {
+            "$ref": "#/components/schemas/QualificationStage3LevelSummary"
+          },
+          "targetLevel": {
+            "$ref": "#/components/schemas/QualificationStage3LevelSummary"
+          },
+          "confirmedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationActionActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "acceptedTrips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualDistanceM": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+            "maxLength": 64
+          },
+          "requiredTrips": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredDistanceM": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "member",
+          "game",
+          "sourceAssignmentId",
+          "targetAssignmentId",
+          "sourceLevel",
+          "targetLevel",
+          "confirmedAt",
+          "actor",
+          "reason",
+          "acceptedTrips",
+          "actualDistanceM",
+          "requiredTrips",
+          "requiredDistanceM"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3PromotionHistoryList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QualificationStage3CompanyAction"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3PromotionHistoryListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualificationStage3PromotionHistoryList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3MemberSearchList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberSummary"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3MemberSearchListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualificationStage3MemberSearchList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceStage3Summary": {
+        "type": "object",
+        "properties": {
+          "computedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "tripsNeedingFixes": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "tripId": {
+                      "$ref": "#/components/schemas/Id"
+                    },
+                    "latestReturnReason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tripId",
+                    "latestReturnReason"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 5
+              }
+            },
+            "required": [
+              "count",
+              "items"
+            ],
+            "additionalProperties": false,
+            "description": "Requires trips.read_own_private and enabled Trips and Manual Reports reads, including effective rejection data. Include each owned canonical trip once when effectively rejected with an author-resubmittable current manual revision owned by the viewer. Use the latest applicable authoritative staff rejection of that revision in its canonical group. Exclude aliases as rows and ignore historical alias decisions without current effect, telemetry-only and proposal-only rejections, and pending or accepted revisions. A resubmitted pending revision leaves the list until rejected. Sort by applicable decidedAt DESC, then canonical trip ID DESC. Return the author-visible reason or null when no displayable text is available."
+          },
+          "unfinishedManualDrafts": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "draftId": {
+                      "$ref": "#/components/schemas/Id"
+                    },
+                    "updatedAt": {
+                      "$ref": "#/components/schemas/Timestamp"
+                    }
+                  },
+                  "required": [
+                    "draftId",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 5
+              }
+            },
+            "required": [
+              "count",
+              "items"
+            ],
+            "additionalProperties": false,
+            "description": "Requires trips.submit_own and enabled Manual Reports reads. Include the caller's editing drafts, ordered by createdAt DESC, then draft ID DESC."
+          },
+          "unansweredUpcomingEvents": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "eventId": {
+                      "$ref": "#/components/schemas/Id"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "startsAt": {
+                      "$ref": "#/components/schemas/Timestamp"
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "title",
+                    "startsAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 5
+              }
+            },
+            "required": [
+              "count",
+              "items"
+            ],
+            "additionalProperties": false,
+            "description": "Requires events.respond and enabled Events reads. Include scheduled events the caller can see and respond to with startsAt strictly after computedAt and either no RSVP or a current unanswered RSVP. Sort by startsAt ASC, then event ID ASC."
+          },
+          "reviewQueue": {
+            "$ref": "#/components/schemas/TripStage3ReviewSummary",
+            "description": "Requires trips.review and enabled review sources. Exclude the viewer's own trips."
+          },
+          "newApplicationsCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Requires applications.manage and enabled Admissions reads. Count submitted applications."
+          },
+          "promotionsReady": {
+            "type": "object",
+            "properties": {
+              "ets2": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "ats": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "ets2",
+              "ats"
+            ],
+            "additionalProperties": false,
+            "description": "Requires qualifications.manage and enabled qualification progress reads. Use the authorized per-game promotion-candidate population."
+          }
+        },
+        "required": [
+          "computedAt"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceStage3SummaryEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WorkspaceStage3Summary"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3ObjectType": {
+        "type": "string",
+        "enum": [
+          "company",
+          "user",
+          "trip",
+          "catalog",
+          "application",
+          "invitation",
+          "qualification",
+          "event",
+          "duplicate_candidate",
+          "qualification_level",
+          "qualification_rule_version"
+        ]
+      },
+      "AuditStage3LegacyEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "$ref": "#/components/schemas/AuditStage3ObjectType"
+          },
+          "details": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3CompanySettingsSnapshot": {
+        "type": "object",
+        "properties": {
+          "reportingTimezone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z][A-Za-z0-9_+/-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "reportingTimezone"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3CompanySettingsEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "configuration.changed"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "company"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3CompanySettingsSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3CompanySettingsSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3CompanySettingsSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3RolesSnapshot": {
+        "type": "object",
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "trainee",
+                "driver",
+                "dispatcher",
+                "deputy_director"
+              ]
+            },
+            "maxItems": 4,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "roles"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3RolesEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "roles.changed"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "user"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3RolesSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3RolesSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3RolesSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3MembershipSnapshot": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive"
+            ]
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "trainee",
+                  "driver"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "role"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3MembershipEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "membership.changed"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "user"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3MembershipSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3MembershipSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3MembershipSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3LeadershipSnapshot": {
+        "type": "object",
+        "properties": {
+          "director": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "director"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3LeadershipEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "leadership.transferred"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "user"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3LeadershipSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3LeadershipSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3LeadershipSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3ApplicationSnapshot": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitted",
+              "approved",
+              "rejected"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3ApplicationEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "application.submitted",
+              "application.reviewed"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "application"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3ApplicationSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3ApplicationSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3ApplicationSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3InvitationSnapshot": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "used",
+              "revoked"
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3InvitationEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "invitation.reissued",
+              "invitation.copied",
+              "invitation.redeemed"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "invitation"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3InvitationSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3InvitationSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3InvitationSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3TripDecisionSnapshot": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "unassessed",
+              "pending_review",
+              "accepted",
+              "rejected"
+            ]
+          },
+          "acceptedOverLimits": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "decision",
+          "acceptedOverLimits"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3TripDecisionEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "report.reviewed",
+              "report.accepted_over_limits"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "trip"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3TripDecisionSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3TripDecisionSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3TripDecisionSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3ReconciliationSnapshot": {
+        "type": "object",
+        "properties": {
+          "reconciliationId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "reversed"
+            ]
+          }
+        },
+        "required": [
+          "reconciliationId",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3ReconciliationEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "trip.reconciled"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "trip"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3ReconciliationSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3ReconciliationSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3ReconciliationSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3DuplicateSnapshot": {
+        "type": "object",
+        "properties": {
+          "dismissed": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          }
+        },
+        "required": [
+          "dismissed",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3DuplicateEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "duplicate.dismissed",
+              "duplicate.dismissal_undone"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "duplicate_candidate"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3DuplicateSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3DuplicateSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3DuplicateSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3AssignmentSnapshot": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "assignmentId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "levelId": {
+            "$ref": "#/components/schemas/Id"
+          }
+        },
+        "required": [
+          "game",
+          "assignmentId",
+          "levelId"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3AssignmentEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "qualification.assigned",
+              "qualification.promoted"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "qualification"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3AssignmentSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3AssignmentSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3AssignmentSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3LevelSnapshot": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "levelId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          }
+        },
+        "required": [
+          "game",
+          "levelId",
+          "position",
+          "active",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3LevelEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "qualification.level_changed"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "qualification_level"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3LevelSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3LevelSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3LevelSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3RulesSnapshot": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "levelId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "ruleVersionId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          }
+        },
+        "required": [
+          "game",
+          "levelId",
+          "ruleVersionId",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3RulesEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "qualification.rules_published"
+            ]
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "actorNickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objectType": {
+            "type": "string",
+            "const": "qualification_rule_version"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "$ref": "#/components/schemas/AuditStage3RulesSnapshot"
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AuditStage3RulesSnapshot"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "null"
+                  },
+                  "after": {
+                    "$ref": "#/components/schemas/AuditStage3RulesSnapshot"
+                  }
+                },
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "action",
+          "subjectId",
+          "occurredAt",
+          "actorNickname",
+          "objectName",
+          "objectType",
+          "details"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3Entry": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AuditStage3LegacyEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3CompanySettingsEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3RolesEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3MembershipEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3LeadershipEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3ApplicationEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3InvitationEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3TripDecisionEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3ReconciliationEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3DuplicateEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3AssignmentEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3LevelEntry"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStage3RulesEntry"
+          }
+        ]
+      },
+      "AuditStage3List": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditStage3Entry"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStage3ListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AuditStage3List"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3AssignmentHistory": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "assignment"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "member": {
+            "$ref": "#/components/schemas/MemberSummary"
+          },
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "assignmentId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "level": {
+            "$ref": "#/components/schemas/QualificationStage3LevelSummary"
+          },
+          "assignedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "endedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "initial",
+              "reinstatement",
+              "historical_resolution",
+              "administrative_correction"
+            ]
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationActionActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "member",
+          "game",
+          "assignmentId",
+          "level",
+          "assignedAt",
+          "endedAt",
+          "purpose",
+          "actor",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationStage3CompanyAction": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/QualificationStage3PromotionHistory"
+          },
+          {
+            "$ref": "#/components/schemas/QualificationStage3AssignmentHistory"
+          }
+        ]
       }
     },
     "parameters": {

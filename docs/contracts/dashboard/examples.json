@@ -9403,6 +9403,1327 @@
           "requestId": "synthetic-event-stage-2"
         }
       }
+    },
+    {
+      "id": "getTripReviewSummary:stage-3-waiting",
+      "operationId": "getTripReviewSummary",
+      "status": 200,
+      "response": {
+        "data": {
+          "computedAt": "2026-01-05T12:00:00.125Z",
+          "waitingCount": 1,
+          "oldestQueuedAt": "2026-01-04T12:00:00.125Z",
+          "oldestAgeSeconds": 86400,
+          "duplicateCount": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "getTripReviewSummary:stage-3-empty",
+      "operationId": "getTripReviewSummary",
+      "status": 200,
+      "response": {
+        "data": {
+          "computedAt": "2026-01-05T12:00:00.125Z",
+          "waitingCount": 0,
+          "oldestQueuedAt": null,
+          "oldestAgeSeconds": null,
+          "duplicateCount": 0
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "listTrips:stage-3-waiting",
+      "operationId": "listTrips",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3",
+        "scope": "review",
+        "status": "waiting",
+        "reasonCode": "missing_actual_start",
+        "ownerId": "41000000-0000-4000-8000-000000000001"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "state": "waiting",
+              "trip": {
+                "view": "summary",
+                "id": "41000000-0000-4000-8000-000000000001",
+                "version": 1,
+                "owner": {
+                  "id": "41000000-0000-4000-8000-000000000001",
+                  "nickname": "Fixture Driver",
+                  "formerMember": false,
+                  "roles": []
+                },
+                "game": "ets2",
+                "outcome": "delivered",
+                "decision": "pending_review",
+                "origin": null,
+                "destination": null,
+                "cargo": null,
+                "actualDistanceM": "123400",
+                "reportingAt": null,
+                "sourceKinds": [
+                  "manual"
+                ],
+                "recording": "unknown",
+                "reportingBasis": "unknown",
+                "number": 34,
+                "createdAt": "2026-01-04T12:00:00.125Z"
+              },
+              "queuedAt": "2026-01-04T12:00:00.125Z",
+              "reasonCodes": [
+                "missing_actual_start"
+              ],
+              "manualRevision": {
+                "number": 2,
+                "submittedAt": "2026-10-17T12:00:00.000Z"
+              }
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "listTrips:stage-3-resolved",
+      "operationId": "listTrips",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3",
+        "scope": "review",
+        "status": "resolved"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "state": "resolved",
+              "trip": {
+                "view": "summary",
+                "id": "41000000-0000-4000-8000-000000000001",
+                "version": 1,
+                "owner": {
+                  "id": "41000000-0000-4000-8000-000000000001",
+                  "nickname": "Fixture Driver",
+                  "formerMember": false,
+                  "roles": []
+                },
+                "game": "ets2",
+                "outcome": "delivered",
+                "decision": "accepted",
+                "origin": null,
+                "destination": null,
+                "cargo": null,
+                "actualDistanceM": "123400",
+                "reportingAt": null,
+                "sourceKinds": [
+                  "manual"
+                ],
+                "recording": "unknown",
+                "reportingBasis": "unknown",
+                "number": 34,
+                "createdAt": "2026-01-04T12:00:00.125Z"
+              },
+              "decidedAt": "2026-01-05T12:00:00.125Z",
+              "outcome": "accepted",
+              "reasonCodes": []
+            },
+            {
+              "state": "resolved",
+              "trip": {
+                "view": "summary",
+                "id": "e1390000-0000-4000-8000-000000000020",
+                "version": 1,
+                "owner": {
+                  "id": "41000000-0000-4000-8000-000000000001",
+                  "nickname": "Fixture Driver",
+                  "formerMember": false,
+                  "roles": []
+                },
+                "game": "ets2",
+                "outcome": "delivered",
+                "decision": "rejected",
+                "origin": null,
+                "destination": null,
+                "cargo": null,
+                "actualDistanceM": "123400",
+                "reportingAt": null,
+                "sourceKinds": [
+                  "manual"
+                ],
+                "recording": "unknown",
+                "reportingBasis": "unknown",
+                "number": 35,
+                "createdAt": "2026-01-04T12:00:00.125Z"
+              },
+              "decidedAt": "2026-01-04T12:00:00.125Z",
+              "outcome": "rejected",
+              "reasonCodes": [
+                "manual_review_required"
+              ]
+            }
+          ],
+          "nextCursor": null,
+          "total": 2
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "getTripReview:stage-3-manual",
+      "operationId": "getTripReview",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "response": {
+        "data": {
+          "summary": {
+            "view": "summary",
+            "id": "51000000-0000-4000-8000-000000000007",
+            "version": 3,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "delivered",
+            "decision": "pending_review",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": "12500.5",
+            "reportingAt": null,
+            "sourceKinds": [
+              "manual"
+            ],
+            "reportingBasis": "unknown",
+            "number": 36,
+            "createdAt": "2026-01-04T12:00:00.125Z"
+          },
+          "factRevisionId": "41000000-0000-4000-8000-000000000001",
+          "evaluation": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          },
+          "qualificationCheck": {
+            "status": "unresolved",
+            "reasonCode": "qualification_history_unknown",
+            "rules": []
+          },
+          "acceptance": {
+            "mode": "unavailable",
+            "blockedReasonCodes": [
+              "qualification_history_unknown"
+            ]
+          },
+          "canDecide": false,
+          "blockedReasonCodes": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": [],
+          "sources": {
+            "manual": {
+              "manualRevision": {
+                "representation": "extended",
+                "id": "51000000-0000-4000-8000-000000000008",
+                "reportId": "51000000-0000-4000-8000-000000000009",
+                "number": 1,
+                "submittedAt": "2026-10-20T12:00:00.000Z",
+                "fields": {
+                  "game": "ets2",
+                  "origin": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000001"
+                  },
+                  "destination": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000002"
+                  },
+                  "cargo": {
+                    "status": "unresolved",
+                    "label": "Fictional cargo",
+                    "reasonCode": "not_listed",
+                    "locale": "en",
+                    "context": null
+                  },
+                  "cargoMassKg": "0",
+                  "trailerType": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000004"
+                  },
+                  "actualDistanceM": "12500.5",
+                  "evidenceIds": [
+                    "51000000-0000-4000-8000-000000000006"
+                  ],
+                  "eventId": null,
+                  "comment": null,
+                  "startedAt": "2026-10-20T09:00:00.000Z",
+                  "completedAt": "2026-10-20T10:00:00.000Z",
+                  "cargoDamagePercent": 12.5,
+                  "originCompanyId": "54000000-0000-4000-8000-000000000005",
+                  "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+                }
+              },
+              "evidence": []
+            },
+            "telemetry": null
+          },
+          "effectiveFacts": null
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "getTripReview:stage-3-telemetry",
+      "operationId": "getTripReview",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "response": {
+        "data": {
+          "summary": {
+            "view": "summary",
+            "id": "51000000-0000-4000-8000-000000000007",
+            "version": 3,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "delivered",
+            "decision": "pending_review",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": "12900.75",
+            "reportingAt": "2026-10-20T10:05:00.000Z",
+            "sourceKinds": [
+              "ets2telemetry"
+            ],
+            "reportingBasis": "actual_completion",
+            "number": 36,
+            "createdAt": "2026-01-04T12:00:00.125Z",
+            "recording": "complete"
+          },
+          "factRevisionId": "e1390000-0000-4000-8000-000000000041",
+          "evaluation": {
+            "factRevisionId": "e1390000-0000-4000-8000-000000000041",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": "2026-10-20T09:07:00.000Z",
+            "attributionBasis": "actual_start",
+            "reportingAt": "2026-10-20T10:05:00.000Z"
+          },
+          "qualificationCheck": {
+            "status": "unresolved",
+            "reasonCode": "qualification_history_unknown",
+            "rules": []
+          },
+          "acceptance": {
+            "mode": "unavailable",
+            "blockedReasonCodes": [
+              "qualification_history_unknown"
+            ]
+          },
+          "canDecide": false,
+          "blockedReasonCodes": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": [],
+          "sources": {
+            "manual": null,
+            "telemetry": {
+              "normalizedFacts": {
+                "factRevisionId": "e1390000-0000-4000-8000-000000000041",
+                "provider": "ets2telemetry",
+                "sourceRecordId": "e1390000-0000-4000-8000-000000000042",
+                "actualStartAt": "2026-10-20T09:07:00.000Z",
+                "actualCompletedAt": "2026-10-20T10:05:00.000Z",
+                "actualDistanceM": "12900.75",
+                "plannedDistanceM": null,
+                "cargoMassKg": "7250.5",
+                "origin": {
+                  "entityId": "51000000-0000-4000-8000-000000000001"
+                },
+                "destination": {
+                  "entityId": "51000000-0000-4000-8000-000000000003"
+                },
+                "cargo": {
+                  "entityId": "e1390000-0000-4000-8000-000000000044"
+                },
+                "trailers": [
+                  {
+                    "entityId": "51000000-0000-4000-8000-000000000004"
+                  }
+                ],
+                "trailersComplete": true,
+                "wholeTripDistanceSupported": true,
+                "ruleContextComplete": true,
+                "cargoDamagePercent": null
+              },
+              "facts": [
+                {
+                  "field": "actual_start",
+                  "sourceValue": "2026-10-20T09:07:00.000Z",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "actual_completion",
+                  "sourceValue": "2026-10-20T10:05:00.000Z",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "actual_distance",
+                  "sourceValue": "12900.75",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "cargo_mass",
+                  "sourceValue": "7250.5",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                }
+              ]
+            }
+          },
+          "effectiveFacts": {
+            "factRevisionId": "e1390000-0000-4000-8000-000000000041",
+            "provider": "ets2telemetry",
+            "actualStartAt": "2026-10-20T09:07:00.000Z",
+            "actualCompletedAt": "2026-10-20T10:05:00.000Z",
+            "actualDistanceM": "12900.75",
+            "plannedDistanceM": null,
+            "cargoMassKg": "7250.5",
+            "origin": {
+              "entityId": "51000000-0000-4000-8000-000000000001"
+            },
+            "destination": {
+              "entityId": "51000000-0000-4000-8000-000000000003"
+            },
+            "cargo": {
+              "entityId": "e1390000-0000-4000-8000-000000000044"
+            },
+            "trailers": [
+              {
+                "entityId": "51000000-0000-4000-8000-000000000004"
+              }
+            ],
+            "trailersComplete": true,
+            "wholeTripDistanceSupported": true,
+            "ruleContextComplete": true
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "getTripReview:stage-3-mixed",
+      "operationId": "getTripReview",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "response": {
+        "data": {
+          "summary": {
+            "view": "summary",
+            "id": "51000000-0000-4000-8000-000000000007",
+            "version": 3,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "delivered",
+            "decision": "pending_review",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": "12500.5",
+            "reportingAt": null,
+            "sourceKinds": [
+              "ets2telemetry",
+              "manual"
+            ],
+            "reportingBasis": "unknown",
+            "number": 36,
+            "createdAt": "2026-01-04T12:00:00.125Z"
+          },
+          "factRevisionId": "41000000-0000-4000-8000-000000000001",
+          "evaluation": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": "2026-10-20T12:05:00.000Z",
+            "attributionBasis": "manual_confirmation",
+            "reportingAt": "2026-10-20T12:05:00.000Z"
+          },
+          "qualificationCheck": {
+            "status": "unresolved",
+            "reasonCode": "qualification_history_unknown",
+            "rules": []
+          },
+          "acceptance": {
+            "mode": "unavailable",
+            "blockedReasonCodes": [
+              "cargo_unknown",
+              "qualification_history_unknown"
+            ]
+          },
+          "canDecide": false,
+          "blockedReasonCodes": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": [],
+          "sources": {
+            "manual": {
+              "manualRevision": {
+                "representation": "extended",
+                "id": "51000000-0000-4000-8000-000000000008",
+                "reportId": "51000000-0000-4000-8000-000000000009",
+                "number": 1,
+                "submittedAt": "2026-10-20T12:00:00.000Z",
+                "fields": {
+                  "game": "ets2",
+                  "origin": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000001"
+                  },
+                  "destination": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000002"
+                  },
+                  "cargo": {
+                    "status": "unresolved",
+                    "label": "Fictional cargo",
+                    "reasonCode": "not_listed",
+                    "locale": "en",
+                    "context": null
+                  },
+                  "cargoMassKg": "0",
+                  "trailerType": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000004"
+                  },
+                  "actualDistanceM": "12500.5",
+                  "evidenceIds": [
+                    "51000000-0000-4000-8000-000000000006"
+                  ],
+                  "eventId": null,
+                  "comment": null,
+                  "startedAt": "2026-10-20T09:00:00.000Z",
+                  "completedAt": "2026-10-20T10:00:00.000Z",
+                  "cargoDamagePercent": 12.5,
+                  "originCompanyId": "54000000-0000-4000-8000-000000000005",
+                  "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+                }
+              },
+              "evidence": []
+            },
+            "telemetry": {
+              "normalizedFacts": {
+                "factRevisionId": "e1390000-0000-4000-8000-000000000041",
+                "provider": "ets2telemetry",
+                "sourceRecordId": "e1390000-0000-4000-8000-000000000042",
+                "actualStartAt": "2026-10-20T09:07:00.000Z",
+                "actualCompletedAt": "2026-10-20T10:05:00.000Z",
+                "actualDistanceM": "12900.75",
+                "plannedDistanceM": null,
+                "cargoMassKg": "7250.5",
+                "origin": {
+                  "entityId": "51000000-0000-4000-8000-000000000001"
+                },
+                "destination": {
+                  "entityId": "51000000-0000-4000-8000-000000000003"
+                },
+                "cargo": {
+                  "entityId": "e1390000-0000-4000-8000-000000000044"
+                },
+                "trailers": [
+                  {
+                    "entityId": "51000000-0000-4000-8000-000000000004"
+                  }
+                ],
+                "trailersComplete": true,
+                "wholeTripDistanceSupported": true,
+                "ruleContextComplete": true,
+                "cargoDamagePercent": 0
+              },
+              "facts": [
+                {
+                  "field": "actual_start",
+                  "sourceValue": "2026-10-20T09:07:00.000Z",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "actual_completion",
+                  "sourceValue": "2026-10-20T10:05:00.000Z",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "actual_distance",
+                  "sourceValue": "12900.75",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "cargo_mass",
+                  "sourceValue": "7250.5",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                }
+              ]
+            }
+          },
+          "effectiveFacts": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "provider": "manual",
+            "actualStartAt": null,
+            "actualCompletedAt": null,
+            "actualDistanceM": "12500.5",
+            "plannedDistanceM": null,
+            "cargoMassKg": "0",
+            "origin": {
+              "entityId": "51000000-0000-4000-8000-000000000001"
+            },
+            "destination": {
+              "entityId": "51000000-0000-4000-8000-000000000002"
+            },
+            "cargo": null,
+            "trailers": [
+              {
+                "entityId": "51000000-0000-4000-8000-000000000004"
+              }
+            ],
+            "trailersComplete": true,
+            "wholeTripDistanceSupported": true,
+            "ruleContextComplete": false
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "decideTrip:stage-3-accept",
+      "operationId": "decideTrip",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "request": {
+        "decision": "accept",
+        "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+        "factRevisionId": "41000000-0000-4000-8000-000000000001",
+        "proposalId": null
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "outcome": "accepted",
+          "reasonCodes": [],
+          "reason": null,
+          "decidedAt": "2026-10-17T12:00:00.000Z",
+          "reviewerId": null,
+          "reviewer": null,
+          "acceptedOverLimits": false,
+          "reviewedRevisionId": null,
+          "basis": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "decideTrip:stage-3-accept-blank",
+      "operationId": "decideTrip",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "request": {
+        "decision": "accept",
+        "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+        "factRevisionId": "41000000-0000-4000-8000-000000000001",
+        "proposalId": null,
+        "reason": "  "
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "outcome": "accepted",
+          "reasonCodes": [],
+          "reason": null,
+          "decidedAt": "2026-10-17T12:00:00.000Z",
+          "reviewerId": null,
+          "reviewer": null,
+          "acceptedOverLimits": false,
+          "reviewedRevisionId": null,
+          "basis": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "decideTrip:stage-3-return",
+      "operationId": "decideTrip",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "request": {
+        "decision": "reject",
+        "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+        "factRevisionId": "41000000-0000-4000-8000-000000000001",
+        "proposalId": null,
+        "reason": "Fictional route needs correction."
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "outcome": "rejected",
+          "reasonCodes": [],
+          "reason": "Fictional route needs correction.",
+          "decidedAt": "2026-10-17T12:00:00.000Z",
+          "reviewerId": null,
+          "reviewer": null,
+          "acceptedOverLimits": false,
+          "reviewedRevisionId": null,
+          "basis": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "listReconciliationCandidates:stage-3-waiting",
+      "operationId": "listReconciliationCandidates",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3",
+        "game": "ets2"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "e1390000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "primaryTrip": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "number": 34,
+                "version": 1,
+                "owner": {
+                  "id": "41000000-0000-4000-8000-000000000001",
+                  "nickname": "Fixture Driver",
+                  "formerMember": false,
+                  "roles": []
+                },
+                "game": "ets2",
+                "outcome": "delivered",
+                "decision": "pending_review",
+                "origin": null,
+                "destination": null,
+                "cargo": null,
+                "actualDistanceM": "123400",
+                "reportingAt": null,
+                "sourceKinds": [
+                  "manual"
+                ]
+              },
+              "secondaryTrip": {
+                "id": "e1390000-0000-4000-8000-000000000002",
+                "number": 37,
+                "version": 1,
+                "owner": {
+                  "id": "41000000-0000-4000-8000-000000000001",
+                  "nickname": "Fixture Driver",
+                  "formerMember": false,
+                  "roles": []
+                },
+                "game": "ets2",
+                "outcome": "delivered",
+                "decision": "pending_review",
+                "origin": null,
+                "destination": null,
+                "cargo": null,
+                "actualDistanceM": "123400",
+                "reportingAt": null,
+                "sourceKinds": [
+                  "ets2telemetry"
+                ]
+              },
+              "reasonCodes": [
+                "candidate_search_overflow"
+              ],
+              "createdAt": "2026-01-04T12:00:00.125Z",
+              "version": 1,
+              "dismissed": false
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "dismissReconciliationCandidate:stage-3-success",
+      "operationId": "dismissReconciliationCandidate",
+      "status": 200,
+      "request": {
+        "reason": "Fictional trips are distinct."
+      },
+      "response": {
+        "data": {
+          "candidateId": "e1390000-0000-4000-8000-000000000001",
+          "version": 2,
+          "dismissed": true,
+          "dismissedAt": "2026-01-04T12:00:00.125Z",
+          "undoneAt": null
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "undoReconciliationCandidateDismissal:stage-3-success",
+      "operationId": "undoReconciliationCandidateDismissal",
+      "status": 200,
+      "request": {},
+      "response": {
+        "data": {
+          "candidateId": "e1390000-0000-4000-8000-000000000001",
+          "version": 3,
+          "dismissed": false,
+          "dismissedAt": "2026-01-04T12:00:00.125Z",
+          "undoneAt": "2026-01-05T12:00:00.125Z"
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "listPromotionCandidates:stage-3-eligible",
+      "operationId": "listPromotionCandidates",
+      "status": 200,
+      "query": {
+        "game": "ets2",
+        "status": "eligible"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "member": {
+                "id": "d3100000-0000-4000-8000-000000000001",
+                "nickname": "Fictional Qualification Member",
+                "formerMember": false,
+                "roles": [
+                  "driver",
+                  "dispatcher"
+                ]
+              },
+              "game": "ets2",
+              "assignmentId": "e1390000-0000-4000-8000-000000000005",
+              "version": 3,
+              "currentLevel": {
+                "id": "e1390000-0000-4000-8000-000000000003",
+                "name": "Trainee"
+              },
+              "nextLevel": {
+                "id": "e1390000-0000-4000-8000-000000000004",
+                "name": "Driver III"
+              },
+              "acceptedTrips": 10,
+              "actualDistanceM": "3000000.25",
+              "requiredTrips": 10,
+              "requiredDistanceM": null,
+              "eligible": true,
+              "eligibleSince": "2026-01-04T12:00:00.125Z"
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "listPromotionCandidates:stage-3-all",
+      "operationId": "listPromotionCandidates",
+      "status": 200,
+      "query": {
+        "game": "ats",
+        "status": "all"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "member": {
+                "id": "d3100000-0000-4000-8000-000000000001",
+                "nickname": "Fictional Qualification Member",
+                "formerMember": false,
+                "roles": [
+                  "driver",
+                  "dispatcher"
+                ]
+              },
+              "game": "ats",
+              "assignmentId": "e1390000-0000-4000-8000-000000000007",
+              "version": 1,
+              "currentLevel": {
+                "id": "e1390000-0000-4000-8000-000000000004",
+                "name": "Driver III"
+              },
+              "nextLevel": null,
+              "acceptedTrips": 0,
+              "actualDistanceM": "0",
+              "requiredTrips": null,
+              "requiredDistanceM": null,
+              "eligible": false,
+              "eligibleSince": null
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "listQualificationMembers:stage-3-search",
+      "operationId": "listQualificationMembers",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3",
+        "search": "Fictional Qualification Member"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "d3100000-0000-4000-8000-000000000001",
+              "nickname": "Fictional Qualification Member",
+              "formerMember": false,
+              "roles": [
+                "driver",
+                "dispatcher"
+              ]
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "listQualificationActionHistory:stage-3-history",
+      "operationId": "listQualificationActionHistory",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3",
+        "game": "ets2"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "periodId": "00000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "levelId": "00000000-0000-4000-8000-000000000001",
+              "assignedAt": "2026-10-20T12:00:00.000Z",
+              "endedAt": null,
+              "purpose": "promotion",
+              "actor": {
+                "id": "00000000-0000-4000-8000-000000000001",
+                "nickname": "Fictional current operator"
+              },
+              "promotion": {
+                "id": "e1390000-0000-4000-8000-000000000008",
+                "confirmedAt": "2026-01-05T12:00:00.125Z",
+                "actor": {
+                  "id": "e1390000-0000-4000-8000-000000000006",
+                  "nickname": "Fictional reviewer"
+                },
+                "reason": "Fictional promotion confirmed."
+              },
+              "assignmentReason": "Fictional adjustment."
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "listPromotionHistory:stage-3-history",
+      "operationId": "listPromotionHistory",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "kind": "promotion",
+              "id": "e1390000-0000-4000-8000-000000000008",
+              "member": {
+                "id": "d3100000-0000-4000-8000-000000000001",
+                "nickname": "Fictional Qualification Member",
+                "formerMember": false,
+                "roles": [
+                  "driver",
+                  "dispatcher"
+                ]
+              },
+              "game": "ets2",
+              "sourceAssignmentId": "e1390000-0000-4000-8000-000000000005",
+              "targetAssignmentId": "e1390000-0000-4000-8000-000000000007",
+              "sourceLevel": {
+                "id": "e1390000-0000-4000-8000-000000000003",
+                "name": "Trainee"
+              },
+              "targetLevel": {
+                "id": "e1390000-0000-4000-8000-000000000004",
+                "name": "Driver III"
+              },
+              "confirmedAt": "2026-01-05T12:00:00.125Z",
+              "actor": {
+                "id": "e1390000-0000-4000-8000-000000000006",
+                "nickname": "Fictional reviewer"
+              },
+              "reason": "Fictional promotion confirmed.",
+              "acceptedTrips": 10,
+              "actualDistanceM": "3000000.25",
+              "requiredTrips": 10,
+              "requiredDistanceM": null
+            },
+            {
+              "kind": "assignment",
+              "id": "e1390000-0000-4000-8000-000000000005",
+              "member": {
+                "id": "d3100000-0000-4000-8000-000000000001",
+                "nickname": "Fictional Qualification Member",
+                "formerMember": false,
+                "roles": [
+                  "driver",
+                  "dispatcher"
+                ]
+              },
+              "game": "ets2",
+              "assignmentId": "e1390000-0000-4000-8000-000000000005",
+              "level": {
+                "id": "e1390000-0000-4000-8000-000000000003",
+                "name": "Trainee"
+              },
+              "assignedAt": "2026-01-04T12:00:00.125Z",
+              "endedAt": "2026-01-05T12:00:00.125Z",
+              "purpose": "initial",
+              "actor": null,
+              "reason": null
+            }
+          ],
+          "nextCursor": null,
+          "total": 2
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "getMyWorkspaceSummary:stage-3-promotions",
+      "operationId": "getMyWorkspaceSummary",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "response": {
+        "data": {
+          "computedAt": "2026-10-21T12:00:00.000Z",
+          "tripsNeedingFixes": {
+            "count": 2,
+            "items": [
+              {
+                "tripId": "54000000-0000-4000-8000-000000000101",
+                "latestReturnReason": "Please attach a clear delivery screenshot."
+              },
+              {
+                "tripId": "54000000-0000-4000-8000-000000000102",
+                "latestReturnReason": null
+              }
+            ]
+          },
+          "unfinishedManualDrafts": {
+            "count": 1,
+            "items": [
+              {
+                "draftId": "51000000-0000-4000-8000-000000000010",
+                "updatedAt": "2026-10-20T12:00:00.000Z"
+              }
+            ]
+          },
+          "unansweredUpcomingEvents": {
+            "count": 1,
+            "items": [
+              {
+                "eventId": "54000000-0000-4000-8000-000000000003",
+                "title": "Fictional evening convoy",
+                "startsAt": "2026-10-22T18:00:00.000Z"
+              }
+            ]
+          },
+          "reviewQueue": {
+            "computedAt": "2026-01-05T12:00:00.125Z",
+            "waitingCount": 1,
+            "oldestQueuedAt": "2026-01-04T12:00:00.125Z",
+            "oldestAgeSeconds": 86400,
+            "duplicateCount": 1
+          },
+          "newApplicationsCount": 2,
+          "promotionsReady": {
+            "ets2": 1,
+            "ats": 0
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "getMyWorkspaceSummary:stage-3-limited",
+      "operationId": "getMyWorkspaceSummary",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "response": {
+        "data": {
+          "computedAt": "2026-01-05T12:00:00.125Z"
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "listAudit:stage-3-legacy",
+      "operationId": "listAudit",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "actorId": null,
+              "action": "synthetic-example",
+              "subjectId": "41000000-0000-4000-8000-000000000001",
+              "occurredAt": "2026-10-17T12:00:00.000Z",
+              "actorNickname": null,
+              "objectType": "company",
+              "objectName": null,
+              "details": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "listAudit:stage-3-details",
+      "operationId": "listAudit",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3",
+        "action": "duplicate.dismissed"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "actorId": null,
+              "action": "duplicate.dismissed",
+              "subjectId": "41000000-0000-4000-8000-000000000001",
+              "occurredAt": "2026-10-17T12:00:00.000Z",
+              "actorNickname": "Fictional reviewer",
+              "objectType": "duplicate_candidate",
+              "objectName": null,
+              "details": {
+                "before": {
+                  "dismissed": false,
+                  "version": 1
+                },
+                "after": {
+                  "dismissed": true,
+                  "version": 2
+                }
+              }
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
     }
   ]
 }
