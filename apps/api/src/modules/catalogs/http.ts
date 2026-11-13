@@ -372,7 +372,11 @@ export async function registerCatalogRoutes(
 
   // Depots: a company that operates in a city.
   app.get<{
-    Querystring: Omit<ListQuery, "untranslated"> & { companyId?: string; cityId?: string };
+    Querystring: Omit<ListQuery, "untranslated"> & {
+      companyId?: string;
+      cityId?: string;
+      depotId?: string;
+    };
   }>(
     "/api/v1/catalogs/depots",
     {
@@ -383,6 +387,7 @@ export async function registerCatalogRoutes(
             game,
             companyId: uuid,
             cityId: uuid,
+            depotId: uuid,
             search: { type: "string", minLength: 1, maxLength: 128 },
             ...listFilters,
             locale,
