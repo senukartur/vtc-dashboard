@@ -27,7 +27,7 @@ ALTER TABLE `reconciliation_commands` MODIFY COLUMN `operation` enum('merge','re
 ALTER TABLE `trip_review_reasons` ADD CONSTRAINT `trip_review_reasons_trip_id_trips_id_fk` FOREIGN KEY (`trip_id`) REFERENCES `trips`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `reconciliation_candidate_dismissals` ADD CONSTRAINT `recon_dismissal_candidate_fk` FOREIGN KEY (`candidate_id`) REFERENCES `reconciliation_candidates`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `reconciliation_candidate_dismissals` ADD CONSTRAINT `recon_dismissal_actor_fk` FOREIGN KEY (`dismissed_by`) REFERENCES `identity_memberships`(`user_id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `reconciliation_candidate_dismissals` ADD CONSTRAINT `recon_dismissal_undo_actor_fk` FOREIGN KEY (`undone_by`) REFERENCES `identity_memberships`(`user_id`);--> statement-breakpoint
+ALTER TABLE `reconciliation_candidate_dismissals` ADD CONSTRAINT `recon_dismissal_undo_actor_fk` FOREIGN KEY (`undone_by`) REFERENCES `identity_memberships`(`user_id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX `trip_review_reason_filter` ON `trip_review_reasons` (`code`,`trip_id`);--> statement-breakpoint
 CREATE INDEX `trip_review_queued_at` ON `trips` (`review_hold`,`alias_of`,`queued_at`,`id`);
 --> statement-breakpoint

@@ -8954,7 +8954,7 @@
           "tableTo": "identity_memberships",
           "columnsFrom": ["undone_by"],
           "columnsTo": ["user_id"],
-          "onDelete": "no action",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },

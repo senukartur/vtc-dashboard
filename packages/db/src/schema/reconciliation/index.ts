@@ -95,7 +95,7 @@ export const reconciliationCandidateDismissals = mysqlTable(
       name: "recon_dismissal_undo_actor_fk",
       columns: [t.undoneBy],
       foreignColumns: [membership.userId],
-    }),
+    }).onDelete("restrict"),
     check("recon_dismissal_persisted_version", sql`${t.version} > 1`),
     check("recon_dismissal_reason_present", sql`REGEXP_LIKE(${t.reason}, '[^[:space:]]')`),
     check("recon_dismissal_undo_pair", sql`(${t.undoneBy} IS NULL) = (${t.undoneAt} IS NULL)`),
