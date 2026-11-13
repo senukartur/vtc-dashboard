@@ -53,7 +53,9 @@ export function EditorPreview({
   ]
     .filter(Boolean)
     .join(", ");
-  const meta = [timing, platform, form.server.trim()].filter(Boolean).join(" · ");
+  const meta = [timing && `${timing} (${timezone})`, platform, form.server.trim()]
+    .filter(Boolean)
+    .join(" · ");
   const route = cityNames
     .map((name, index) =>
       [

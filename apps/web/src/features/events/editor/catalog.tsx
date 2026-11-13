@@ -326,24 +326,35 @@ export function DlcField({
     open && !!game && settled,
   );
   const manualIds = entries.filter(({ sources }) => sources.includes("manual")).map(({ id }) => id);
+  const searchText = term.toLowerCase();
   const choices = new Map(
     entries.map((entry) => [
       entry.id,
       {
         label: entry.label ?? text.retainedCatalog,
-        locked: entry.sources.includes("from_city"),
+        code: entry.code,
+        derived: entry.sources.includes("from_city"),
+        matchesSearch:
+          [entry.label, entry.code].some((value) => value?.toLowerCase().includes(searchText)) ||
+          !term,
       },
     ]),
   );
   if (settled) {
     for (const page of pages.data?.pages ?? []) {
       for (const item of page.data.data.items) {
-        if (item.game === game && !item.hidden && !choices.has(item.id)) {
-          choices.set(item.id, { label: item.nameEn, locked: false });
+        if (item.game === game && !item.hidden) {
+          choices.set(item.id, {
+            label: item.nameEn,
+            code: item.code,
+            derived: choices.get(item.id)?.derived ?? false,
+            matchesSearch: true,
+          });
         }
       }
     }
   }
+  const visibleChoices = Array.from(choices).filter(([, choice]) => choice.matchesSearch);
 
   function close() {
     setOpen(false);
@@ -419,27 +430,40 @@ export function DlcField({
             onChange={(event) => setSearch(event.target.value)}
           />
           <div className="event-editor-dlc-list">
-            {Array.from(choices, ([id, choice]) => {
-              if (!choice.label.toLowerCase().includes(term.toLowerCase())) return null;
-              return (
-                <label key={id} className="event-editor-dlc-option">
-                  <input
-                    type="checkbox"
-                    disabled={choice.locked}
-                    checked={choice.locked || manualIds.includes(id)}
-                    onChange={(event) =>
-                      onChange(
-                        event.target.checked
-                          ? [...manualIds, id]
-                          : manualIds.filter((value) => value !== id),
-                      )
-                    }
-                  />
-                  <span>{choice.label}</span>
-                  {choice.locked && <small className="muted">{text.lockedDlc}</small>}
-                </label>
-              );
-            })}
+            {visibleChoices.map(([id, choice]) => (
+              <label key={id} className="event-editor-dlc-option">
+                <input
+                  type="checkbox"
+                  aria-label={
+                    choice.derived
+                      ? [choice.label, choice.code, text.manual].filter(Boolean).join(" · ")
+                      : undefined
+                  }
+                  checked={manualIds.includes(id)}
+                  onChange={(event) =>
+                    onChange(
+                      event.target.checked
+                        ? [...manualIds, id]
+                        : manualIds.filter((value) => value !== id),
+                    )
+                  }
+                />
+                <span>
+                  {choice.label}
+                  {choice.code && (
+                    <>
+                      {" "}
+                      · <code>{choice.code}</code>
+                    </>
+                  )}
+                </span>
+                {choice.derived && (
+                  <small className="muted">
+                    {text.manual} · {text.lockedDlc}
+                  </small>
+                )}
+              </label>
+            ))}
           </div>
           {(!settled || pages.isPending) && <p role="status">{text.loading}</p>}
           {settled && pages.isError && (
@@ -452,7 +476,7 @@ export function DlcField({
               </Button>
             </div>
           )}
-          {settled && pages.isSuccess && !choices.size && (
+          {settled && pages.isSuccess && visibleChoices.length === 0 && (
             <p className="muted">{text.noCatalogOptions}</p>
           )}
           <div className="event-editor-inline">

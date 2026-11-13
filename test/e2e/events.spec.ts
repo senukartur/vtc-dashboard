@@ -1287,18 +1287,22 @@ test.describe("Stage 2 draft entry", () => {
       .response as components["schemas"]["EventStage2EnvelopeDraft"];
 
   test(
-    "the new event form saves Moscow wall times and tonnes as UTC and kilograms",
+    "the new event form saves an overnight Moscow schedule in UTC and tonnes in kilograms",
     browserCase(["@functional"]),
     async ({ page }) => {
       await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
       await page.goto("/account/events/new");
       const schedule = page.getByRole("group", { name: "When", exact: true });
-      await schedule.locator('input[type="date"]').fill("2099-10-25");
-      await schedule.locator('input[type="time"]').nth(0).fill("00:30");
-      await schedule.locator('input[type="time"]').nth(1).fill("01:00");
+      await schedule.getByRole("textbox", { name: "Date", exact: true }).fill("2099-10-25");
+      await schedule.getByRole("button", { name: "Set a separate meeting date" }).click();
+      await schedule.getByRole("textbox", { name: "Meeting date", exact: true }).fill("2099-10-24");
+      await schedule.getByRole("textbox", { name: "Meeting time", exact: true }).fill("23:30");
+      await schedule.getByRole("textbox", { name: "Start time", exact: true }).fill("01:00");
       await page.getByRole("button", { name: "+ Set end time", exact: true }).click();
-      await schedule.locator('input[type="date"]').nth(1).fill("2099-10-26");
-      await schedule.locator('input[type="time"]').nth(2).fill("00:15");
+      const end = schedule.getByRole("group", { name: "End time", exact: true });
+      await end.getByRole("textbox", { name: "Date", exact: true }).fill("2099-10-26");
+      await end.getByRole("textbox", { name: "End time", exact: true }).fill("00:15");
+      await expect(page.locator(".event-editor-preview")).toContainText("Europe/Warsaw");
       await page.getByRole("button", { name: "+ Add load", exact: true }).click();
       await page.getByRole("textbox", { name: "Mass (t)", exact: true }).fill("18,025");
 
@@ -1310,10 +1314,64 @@ test.describe("Stage 2 draft entry", () => {
       await page.getByRole("button", { name: "Save draft", exact: true }).click();
       expect((await request).postDataJSON()).toMatchObject({
         draft: true,
-        meetingAt: "2099-10-24T21:30:00.000Z",
+        meetingAt: "2099-10-24T20:30:00.000Z",
         startsAt: "2099-10-24T22:00:00.000Z",
         endsAt: "2099-10-25T21:15:00.000Z",
         prescribedMassKg: "18025",
+      });
+    },
+  );
+
+  test(
+    "the DLC picker finds codes and removes a manual requirement independently of the route",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+      const dlc = catalogItem("e1320000-0000-4000-8000-000000000037", "Fictional roads", "en", {
+        code: "synthetic_pack_37",
+        steamAppId: 1,
+      });
+      const city = catalogItem("e1320000-0000-4000-8000-000000000038", "Fictional harbour", "en", {
+        dlcId: dlc.id,
+      });
+      await page.route("**/api/v1/catalogs/cities?*", (route) =>
+        route.fulfill({ json: catalogList([city]) }),
+      );
+      await page.route(`**/api/v1/catalogs/cities/${city.id}?*`, (route) =>
+        route.fulfill({ json: envelope(city) }),
+      );
+      await page.route("**/api/v1/catalogs/dlcs?*", (route) =>
+        route.fulfill({
+          json: catalogList(
+            new URL(route.request().url()).searchParams.get("search") === dlc.code ? [dlc] : [],
+          ),
+        }),
+      );
+      await page.route(`**/api/v1/catalogs/dlcs/${dlc.id}?*`, (route) =>
+        route.fulfill({ json: envelope(dlc) }),
+      );
+      await page.goto("/account/events/new");
+      const picker = page.getByRole("button", { name: "Required DLC", exact: true });
+      await picker.click();
+      await page.getByRole("searchbox").fill(dlc.code);
+      await page.getByRole("checkbox", { name: `${dlc.nameEn} · ${dlc.code}` }).check();
+      await page.getByRole("button", { name: "Done", exact: true }).click();
+      await chooseCatalogRow(page, "Origin city", city.display.label);
+      await picker.click();
+      const manual = page.getByRole("checkbox", { name: `${dlc.nameEn} · ${dlc.code} · Manual` });
+      await expect(manual).toBeChecked();
+      await manual.uncheck();
+      await expect(page.getByText("Manual · Required by the route", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Done", exact: true }).click();
+      await expect(picker).toContainText(dlc.nameEn);
+      const saved = page.waitForRequest(
+        (request) =>
+          request.method() === "POST" && new URL(request.url()).pathname === "/api/v1/admin/events",
+      );
+      await page.getByRole("button", { name: "Save draft", exact: true }).click();
+      expect((await saved).postDataJSON()).toMatchObject({
+        originCityId: city.id,
+        requiredDlcIds: [],
       });
     },
   );

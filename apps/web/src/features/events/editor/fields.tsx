@@ -283,13 +283,19 @@ export function TimeFields({
   const inferred = (local.startsAt || local.meetingAt || local.endsAt).slice(0, 10);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showEnd, setShowEnd] = useState(!!form.endsAt);
+  const [meetingDate, setMeetingDate] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
   const date = selectedDate ?? inferred;
+  const separateMeetingDate =
+    meetingDate !== null || Boolean(local.meetingAt && local.meetingAt.slice(0, 10) !== date);
 
   function changeDate(next: string) {
     setSelectedDate(next);
-    setEndDate(null);
     const delta = Date.parse(next) - Date.parse(date);
+    setMeetingDate(
+      meetingDate ? shiftWallTime(`${meetingDate}T00:00`, delta).slice(0, 10) || null : null,
+    );
+    setEndDate(endDate ? shiftWallTime(`${endDate}T00:00`, delta).slice(0, 10) || null : null);
     const schedule = Object.fromEntries(
       scheduleFields.map((name) => [name, shiftWallTime(form[name], delta)]),
     );
@@ -297,15 +303,21 @@ export function TimeFields({
   }
 
   function clock(name: (typeof scheduleFields)[number]) {
-    const localDate = (name === "endsAt" ? endDate : null) ?? (local[name].slice(0, 10) || date);
-    const separateDate = name === "endsAt" || (localDate && localDate !== date);
+    const override = name === "meetingAt" ? meetingDate : name === "endsAt" ? endDate : null;
+    const localDate = override ?? (local[name].slice(0, 10) || date);
+    const separateDate =
+      name === "endsAt" ||
+      (name === "meetingAt" && separateMeetingDate) ||
+      (localDate && localDate !== date);
     return (
       <EditorField base={base} name={name} error={errors[name]}>
         {(id, errorId) => (
           <div className={separateDate ? "event-editor-clock-row" : undefined}>
             {separateDate && (
               <div className="event-editor-field">
-                <Label htmlFor={`${id}-date`}>{text.date}</Label>
+                <Label htmlFor={`${id}-date`}>
+                  {name === "meetingAt" ? text.meetingDate : text.date}
+                </Label>
                 <Input
                   id={`${id}-date`}
                   type="date"
@@ -313,6 +325,7 @@ export function TimeFields({
                   disabled={!date}
                   onChange={(event) => {
                     if (!event.target.value) return;
+                    if (name === "meetingAt") setMeetingDate(event.target.value);
                     if (name === "endsAt") setEndDate(event.target.value);
                     if (local[name])
                       onScheduleChange({
@@ -374,6 +387,27 @@ export function TimeFields({
         {clock("startsAt")}
       </div>
       {showEnd && clock("endsAt")}
+      <Button
+        className="event-editor-disclosure"
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={!date}
+        aria-expanded={separateMeetingDate}
+        onClick={() => {
+          if (!separateMeetingDate) {
+            setMeetingDate(date);
+            return;
+          }
+          setMeetingDate(null);
+          if (local.meetingAt)
+            onScheduleChange({
+              meetingAt: shiftWallTime(`${date}T${local.meetingAt.slice(11)}`, -moscowOffsetMs),
+            });
+        }}
+      >
+        {separateMeetingDate ? text.useStartDate : text.separateMeetingDate}
+      </Button>
       <Button
         className="event-editor-disclosure"
         type="button"
