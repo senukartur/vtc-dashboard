@@ -1,6 +1,6 @@
-import { withReadSlot } from "../../shared/read-scheduler.js";
 import type { components } from "@vtc/contracts";
 import { z } from "zod";
+import { withReadSlot } from "../../shared/read-scheduler.js";
 import { csrfEnvelope, receiptEnvelope } from "../admissions/schema.js";
 import { retryDelay } from "../admissions/transport.js";
 export type DTO = components["schemas"];
@@ -137,7 +137,7 @@ function failed(response: Response): never {
     retryDelay(response.headers.get("Retry-After")),
   );
 }
-export async function read<T extends z.ZodType>(path: string, schema: T, signal: AbortSignal) {
+async function readResponse<T extends z.ZodType>(path: string, schema: T, signal: AbortSignal) {
   const bounded = new AbortController();
   const abort = () => bounded.abort();
   if (signal.aborted) bounded.abort();
@@ -155,7 +155,11 @@ export async function read<T extends z.ZodType>(path: string, schema: T, signal:
     if (response.status !== 200) failed(response);
     const parsed = schema.safeParse(await response.json());
     if (!parsed.success) throw new AccountFailure("unavailable");
-    return { data: parsed.data as z.output<T>, etag: response.headers.get("ETag") };
+    return {
+      data: parsed.data as z.output<T>,
+      etag: response.headers.get("ETag"),
+      headers: response.headers,
+    };
   } catch (error) {
     if (error instanceof AccountFailure) throw error;
     throw new AccountFailure("unavailable");
@@ -164,7 +168,19 @@ export async function read<T extends z.ZodType>(path: string, schema: T, signal:
     signal.removeEventListener("abort", abort);
   }
 }
-export const readSelf = (signal: AbortSignal) => read("/me", selfEnvelope, signal);
+export async function read<T extends z.ZodType>(path: string, schema: T, signal: AbortSignal) {
+  const { data, etag } = await readResponse(path, schema, signal);
+  return { data, etag };
+}
+export async function readSelf(signal: AbortSignal) {
+  const { data, etag, headers } = await readResponse("/me", selfEnvelope, signal);
+  return {
+    data,
+    etag,
+    eventsStage2Enabled: headers.get("X-VTC-Events-Stage2") === "1",
+    eventsDraftsEnabled: headers.get("X-VTC-Events-Drafts") === "1",
+  };
+}
 export const readPending = (signal: AbortSignal) =>
   read("/me/email-change", pendingEnvelope, signal);
 export interface Attempt {

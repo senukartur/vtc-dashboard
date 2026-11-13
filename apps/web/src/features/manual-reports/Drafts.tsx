@@ -13,9 +13,12 @@ import "./manual-reports.css";
 
 export const draftsLocation = "/account/trips?tab=drafts";
 
+/** Draft pages with city and cargo labels in the interface language, not the account one. */
 export function useManualDrafts(enabled: boolean, cursor?: string | null, editingOnly = true) {
+  const { i18n } = useTranslation();
+  const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   return useTripQuery(
-    `/me/manual-drafts?${queryString({ state: editingOnly ? "editing" : undefined, limit: 25, cursor })}`,
+    `/me/manual-drafts?${queryString({ state: editingOnly ? "editing" : undefined, locale, limit: 25, cursor })}`,
     "EnvelopeListManualDraft",
     enabled,
   );

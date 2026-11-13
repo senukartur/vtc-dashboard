@@ -185,14 +185,13 @@ test(
       await nav.getByRole("link", { name: "Overview", exact: true }).click();
       await actions.getByRole("link", { name: event.title, exact: true }).click();
       await expect(page).toHaveURL(`${origin}/account/events/${event.id}`);
+      const refreshed = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/me/workspace-summary",
+      );
       await page
         .getByRole("group", { name: "Your response", exact: true })
         .getByRole("button", { name: "Participating", exact: true })
         .click();
-      const refreshed = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === "/api/v1/me/workspace-summary",
-      );
-      await page.getByRole("button", { name: "Save response", exact: true }).click();
       await expect(page.getByText("Response saved.", { exact: true })).toBeVisible();
       const nextEvents =
         eventCount === 1 ? "Events" : `Events (${eventCount - 1} awaiting your response)`;
@@ -671,7 +670,17 @@ test(
       await page.goto("/account/reports/new");
       await catalogLanguage(page);
       await fill(page);
-      await page.getByLabel("Origin company (optional)", { exact: true }).selectOption(company.id);
+      // The shared database may hold more companies in the city, so the picker searches the code.
+      const companyField = page.getByRole("combobox", {
+        name: "Origin company (optional)",
+        exact: true,
+      });
+      await companyField.fill(company.code);
+      await page
+        .getByRole("listbox", { name: "Origin company (optional)", exact: true })
+        .getByRole("option", { name: `Fictional North Depot ${company.code}` })
+        .click();
+      await expect(companyField).toHaveValue(`Fictional North Depot · ${company.code}`);
       await page.getByLabel("Cargo damage (%) (optional)", { exact: true }).fill("0");
       await confirm(page, "Submit for review", "/api/v1/manual-reports");
       await expect(page).toHaveURL(/\/account\/trips\/[0-9a-f-]{36}$/);
@@ -1237,6 +1246,7 @@ test(
           ownerId: fixture.userId,
           limit: "10",
           order: "completion_desc",
+          locale: "en",
         });
         expectOnlyAcceptedCompanyTrip(recent.data, completed.tripId, fixture.userId);
         const history = visitor.getByRole("region", { name: "Accepted trips", exact: true });

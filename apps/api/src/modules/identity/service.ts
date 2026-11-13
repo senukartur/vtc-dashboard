@@ -39,6 +39,7 @@ import {
   type AssignableRole,
   assignableRoles,
   capabilities,
+  drivingRoles,
   type Role,
   requireCapability,
 } from "./permissions.js";
@@ -1847,13 +1848,26 @@ export function createIdentity(
       actor: Actor,
       targetIds: string[] = [],
       capability = "company.read",
+      organizerId?: string,
     ) {
       const current = await lockCompany(tx);
-      const locked = await lockMembers(tx, [...targetIds, actor.userId]);
+      const locked = await lockMembers(tx, [
+        ...targetIds,
+        actor.userId,
+        ...(organizerId ? [organizerId] : []),
+      ]);
       await checkActor(tx, actor, current, locked.get(actor.userId));
       requireCapability(actor, capability);
       for (const id of targetIds) if (!locked.has(id)) throw identityError(404);
-      return { companyId: current.id, members: locked };
+      const [organizer] =
+        organizerId && locked.get(organizerId)?.status === "active"
+          ? await client(tx)
+              .select({ nickname: user.name })
+              .from(user)
+              .where(eq(user.id, organizerId))
+              .for("share")
+          : [];
+      return { companyId: current.id, members: locked, organizer: organizer?.nickname ?? null };
     },
     async eventRosterInTransaction(tx: TxContext, after: string | null, limit: number) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 101)
@@ -1862,6 +1876,42 @@ export function createIdentity(
         .select({ id: membership.userId })
         .from(membership)
         .where(after ? gt(membership.userId, applicationId(after)) : undefined)
+        .orderBy(membership.userId)
+        .limit(limit);
+    },
+    async eventRosterCountInTransaction(tx: TxContext) {
+      const [row] = await client(tx)
+        .select({ total: sql<number | string>`COUNT(*)` })
+        .from(membership);
+      return Number(row?.total ?? 0);
+    },
+    // The caller has authorized event management. Eligibility is the same active
+    // membership and role capability used by events.respond.
+    async eventEligibleMembersInTransaction(
+      tx: TxContext,
+      after: string | null,
+      limit: number,
+      unanswered: (memberId: SQLWrapper) => SQL,
+    ) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 101)
+        throw new Error("EVENT_ROSTER_BOUND_EXCEEDED");
+      const db = client(tx);
+      return db
+        .select({ id: membership.userId })
+        .from(membership)
+        .where(
+          and(
+            after ? gt(membership.userId, applicationId(after)) : undefined,
+            eq(membership.status, "active"),
+            sql`EXISTS (${db
+              .select({ id: roles.userId })
+              .from(roles)
+              .where(
+                and(eq(roles.userId, membership.userId), inArray(roles.role, drivingRoles)),
+              )})`,
+            unanswered(membership.userId),
+          ),
+        )
         .orderBy(membership.userId)
         .limit(limit);
     },

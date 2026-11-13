@@ -165,11 +165,17 @@ export function CreateEventPage() {
         <Link to="/account/events">{t("back")}</Link>
         <h1>{draftText.heading}</h1>
         <Card>
-          {valid ? (
+          {!valid ? (
+            <p role="alert" className="field-error">
+              {draftText.invalidId}
+            </p>
+          ) : session.state === "checking" ? (
+            <p role="status">{t("loading")}</p>
+          ) : session.eventsDraftsEnabled ? (
             <DraftEventEditor id={id} />
           ) : (
             <p role="alert" className="field-error">
-              {draftText.invalidId}
+              {draftText.unavailable}
             </p>
           )}
         </Card>

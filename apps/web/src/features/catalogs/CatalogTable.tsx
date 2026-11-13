@@ -5,17 +5,17 @@ import { formatDecimal } from "../../shared/formatting.js";
 import { Button, Table } from "../../shared/ui/primitives.js";
 import { type CatalogRowFormat, CatalogUpdatedAt, MissingMetadata } from "./CatalogRowMetadata.js";
 import { CompanyLogo } from "./CompanyLogo.js";
-import { tabLabels } from "./model.js";
+import { fallbackBadge, isTranslatable, tabLabels } from "./model.js";
 
 export const adrText = (t: TFunction<"catalogs">, item: CatalogItem) =>
   item.adrClass ? t("adrClass", { class: item.adrClass }) : t("nonHazardous");
 
-export function RowBadges({ item }: { item: CatalogItem }) {
+export function RowBadges({ list, item }: { list: CatalogList; item: CatalogItem }) {
   const { t } = useTranslation("catalogs");
   return (
     <>
       {item.hidden && <span className="catalog-badge">{t("hidden")}</span>}
-      {item.display.englishFallback && <span className="catalog-badge">{t("rowFallback")}</span>}
+      {fallbackBadge(list, item) && <span className="catalog-badge">{t("rowFallback")}</span>}
     </>
   );
 }
@@ -38,6 +38,7 @@ export function CatalogTable({
   onToggleHidden: (item: CatalogItem) => void;
 }) {
   const { t } = useTranslation("catalogs");
+  const translated = isTranslatable(list);
   return (
     // biome-ignore lint/a11y/noNoninteractiveTabindex: The table can overflow on tablet and needs keyboard scrolling.
     <section className="catalog-table-wrap" aria-label={t(tabLabels[list])} tabIndex={0}>
@@ -45,7 +46,7 @@ export function CatalogTable({
         <thead>
           <tr>
             <th>{t("colName")}</th>
-            <th>{t("colNameRu")}</th>
+            {translated && <th>{t("colNameRu")}</th>}
             {list === "cities" && <th>{t("colNameNative")}</th>}
             <th>{t("colCode")}</th>
             {list !== "dlcs" && <th>{t("colDlc")}</th>}
@@ -65,21 +66,23 @@ export function CatalogTable({
                   <span className="catalog-company">
                     <CompanyLogo companyId={item.id} logo={item.logo} />
                     <span>
-                      {item.nameEn} <RowBadges item={item} />
+                      {item.nameEn} <RowBadges list={list} item={item} />
                     </span>
                   </span>
                 ) : (
                   <>
-                    {item.nameEn} <RowBadges item={item} />
+                    {item.nameEn} <RowBadges list={list} item={item} />
                   </>
                 )}
               </td>
-              <td className="catalog-name-ru">{item.nameRu ?? "—"}</td>
+              {translated && <td className="catalog-name-ru">{item.nameRu ?? "—"}</td>}
               {list === "cities" && <td>{item.nameNative ?? "—"}</td>}
               <td className="catalog-code">
                 <code>{item.code}</code>
               </td>
-              {list !== "dlcs" && <td>{item.dlc?.label ?? t("baseGame")}</td>}
+              {list !== "dlcs" && (
+                <td className="catalog-source">{item.dlc?.label ?? t("baseGame")}</td>
+              )}
               {list === "cities" && <td>{item.region?.label ?? "—"}</td>}
               {list === "cargoes" && <td>{adrText(t, item)}</td>}
               {list === "dlcs" && <td>{item.steamAppId ?? "—"}</td>}
@@ -96,7 +99,7 @@ export function CatalogTable({
                 <CatalogUpdatedAt value={item.updatedAt} locale={locale} timezone={timezone} />
               </td>
               {staff && (
-                <td>
+                <td className="catalog-actions-cell">
                   <div className="catalog-row-actions">
                     <Button type="button" size="xs" variant="ghost" onClick={() => onEdit(item)}>
                       {t("edit")}

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { type AdmissionsConfig, admissionsSecurity } from "../../modules/admissions/security.js";
 import { type AnalyticsConfig, validateAnalyticsConfig } from "../../modules/analytics/service.js";
 import { type CatalogConfig, validateCatalogConfig } from "../../modules/catalogs/config.js";
+import type { EventMediaConfig } from "../../modules/events/media.js";
 import { type EventsConfig, validateEventsConfig } from "../../modules/events/service.js";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
 import { type ManualConfig, validateManualConfig } from "../../modules/manual-reports/service.js";
@@ -25,6 +26,7 @@ import {
   validateTripDecisionsConfig,
 } from "../../modules/trip-decisions/service.js";
 import { type TripsConfig, validateTripsConfig } from "../../modules/trips/service.js";
+import { validateBlobConfig } from "../blob-storage/filesystem.js";
 import { rootsOverlap } from "../blob-storage/roots.js";
 import { exactProxyAddress } from "../http/ingress.js";
 
@@ -269,10 +271,26 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
   let events: EventsConfig | undefined;
   if (![undefined, "true", "false"].includes(input.EVENTS_ENABLED))
     throw new Error("Invalid environment fields: EVENTS_ENABLED");
+  if (![undefined, "true", "false"].includes(input.EVENTS_ROUTE_ENABLED))
+    throw new Error("Invalid environment fields: EVENTS_ROUTE_ENABLED");
+  const eventRoutesEnabled = input.EVENTS_ROUTE_ENABLED === "true";
+  if (![undefined, "true", "false"].includes(input.EVENTS_DRAFTS_ENABLED))
+    throw new Error("Invalid environment fields: EVENTS_DRAFTS_ENABLED");
+  const eventDraftsEnabled = input.EVENTS_DRAFTS_ENABLED === "true";
+  if (eventDraftsEnabled && !eventRoutesEnabled)
+    throw new Error("Invalid environment fields: EVENTS_DRAFTS_ENABLED, EVENTS_ROUTE_ENABLED");
+  if (eventRoutesEnabled && (input.EVENTS_ENABLED !== "true" || !catalogs))
+    throw new Error(
+      "Invalid environment fields: EVENTS_ROUTE_ENABLED, EVENTS_ENABLED, CATALOGS_ENABLED",
+    );
   if (input.EVENTS_ENABLED === "true") {
     try {
       if (!identity) throw new Error();
-      events = { cursorKey: input.EVENTS_CURSOR_KEY ?? "" };
+      events = {
+        cursorKey: input.EVENTS_CURSOR_KEY ?? "",
+        ...(eventRoutesEnabled ? { routeEnabled: true } : {}),
+        ...(eventDraftsEnabled ? { draftsEnabled: true } : {}),
+      };
       validateEventsConfig(events);
       if (
         [
@@ -291,6 +309,29 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     } catch {
       throw new Error(
         "Invalid environment fields: EVENTS_ENABLED, EVENTS_CURSOR_KEY, IDENTITY_ENABLED",
+      );
+    }
+  }
+  let eventMedia: EventMediaConfig | undefined;
+  if (events && input.EVENT_MEDIA_ROOT) {
+    try {
+      const separateFrom = [
+        env.WEB_ROOT,
+        ...(input.MANUAL_EVIDENCE_ROOT ? [input.MANUAL_EVIDENCE_ROOT] : []),
+      ];
+      const media = {
+        root: input.EVENT_MEDIA_ROOT,
+        maxFileBytes: Number(input.MANUAL_MAX_FILE_BYTES),
+        maxPixels: Number(input.MANUAL_MAX_PIXELS),
+        timeoutMs: Number(input.MANUAL_UPLOAD_TIMEOUT_MS),
+        separateFrom,
+      };
+      validateBlobConfig(media);
+      if (separateFrom.some((root) => rootsOverlap(media.root, root))) throw Error();
+      eventMedia = media;
+    } catch {
+      throw new Error(
+        "Invalid environment fields: EVENT_MEDIA_ROOT, WEB_ROOT, MANUAL_EVIDENCE_ROOT, MANUAL_MAX_FILE_BYTES, MANUAL_MAX_PIXELS, MANUAL_UPLOAD_TIMEOUT_MS",
       );
     }
   }
@@ -464,6 +505,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     reconciliation,
     manualReports,
     events,
+    eventMedia,
     qualifications,
     telemetry,
     trips,

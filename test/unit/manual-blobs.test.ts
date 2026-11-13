@@ -65,6 +65,41 @@ test("private filesystem fully decodes, preserves original bytes/checksum and su
   await restarted.remove(f.key);
   expect(await restarted.inspect(f.key)).toBeNull();
 });
+test("image renditions keep original bytes and produce bounded, restartable JPEG thumbnails", async () => {
+  const f = await fixture();
+  const config = { ...f.config, maxPixels: 500_000 };
+  const store = createPrivateFilesystem(config);
+  const original = pngBytes(600, 320);
+  const attempt = { id: f.key.id, generation: newId() };
+  const signal = new AbortController().signal;
+  await expect(store.putImage(f.key, bytes(original), "image/jpeg")).rejects.toMatchObject({
+    category: "invalid",
+  });
+  expect(await readdir(f.root)).toEqual([]);
+  expect(await store.putImage(f.key, bytes(original), "image/png")).toMatchObject({
+    contentType: "image/png",
+    width: 600,
+    height: 320,
+  });
+  await store.makeThumbnail(f.key, attempt, signal);
+  const restarted = createPrivateFilesystem(config);
+  await restarted.makeThumbnail(f.key, { id: f.key.id, generation: newId() }, signal);
+  const stream = await restarted.readThumbnail(f.key);
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const jpeg = Buffer.concat(chunks);
+  const jpegKey = { id: newId(), generation: newId() };
+  expect(await restarted.putImage(jpegKey, bytes(jpeg), "image/jpeg")).toMatchObject({
+    contentType: "image/jpeg",
+    width: 480,
+    height: 256,
+  });
+  expect(await readFile(join(f.root, `${f.key.id}.${f.key.generation}.blob`))).toEqual(original);
+  expect(await restarted.imagesPresent(attempt)).toBe(false);
+  await restarted.removeImages(f.key);
+  expect(await restarted.imagesPresent(f.key)).toBe(false);
+  expect(await restarted.imagesPresent(jpegKey)).toBe(true);
+});
 test("invalid/truncated files, oversized chunked input, interrupted writes and cancellation never become immutable objects", async () => {
   const f = await fixture(1000);
   for (const invalid of [Buffer.from("not an image"), pngBytes().subarray(0, 45)]) {

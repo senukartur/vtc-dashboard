@@ -12,6 +12,7 @@ import {
 import { createApp } from "../../apps/api/src/app.ts";
 import {
   CATALOG_IMPORT_MAX_BYTES,
+  canonicalLists,
   catalogLists,
 } from "../../apps/api/src/modules/catalogs/config.ts";
 import { cursorCodec } from "../../apps/api/src/modules/catalogs/cursor.ts";
@@ -264,7 +265,7 @@ test("keyset pages keep a stable order across duplicate names and hidden rows fi
   ).rejects.toMatchObject({ statusCode: 409 });
 });
 
-test.each(catalogLists)(
+test.each(catalogLists.filter((list) => !canonicalLists.includes(list)))(
   "%s filters hidden and untranslated independently of the requested language",
   async (list) => {
     const create = (code: string, game: "ets2" | "ats", nameRu: string | null = null) =>
@@ -301,6 +302,69 @@ test.each(catalogLists)(
       hidden: 1,
       untranslated: 0,
     });
+  },
+);
+
+test.each(canonicalLists)(
+  "%s use only the canonical name: a stored Russian name is kept but never shown, searched or written",
+  async (list) => {
+    const table = list === "dlcs" ? "catalog_dlcs" : "catalog_companies";
+    const create = (code: string, nameEn: string) =>
+      catalogs.create(director, list, newId(), { code, game: "ets2", nameEn, nameRu: "Игнор" });
+    const zulu = await create("zulu", "Zulu Fictional");
+    const alpha = await create("alpha", "Alpha Fictional");
+    // The service never writes a Russian name for these lists, even when one is supplied.
+    const [created] = await control.query<RowDataPacket[]>(
+      `SELECT name_ru FROM ${table} WHERE id=?`,
+      [zulu.id],
+    );
+    expect(created[0]?.name_ru).toBeNull();
+    // A legacy Russian name that would sort first stays in the database untouched.
+    await control.query(`UPDATE ${table} SET name_ru=? WHERE id=?`, ["Аааа", zulu.id]);
+    for (const locale of ["en", "ru"] as const) {
+      const page = await catalogs.list(driver, list, { game: "ets2", locale });
+      expect(page.items.map((row) => row.id)).toEqual([alpha.id, zulu.id]);
+      expect(
+        page.items.map((row) => [row.nameRu, row.display.label, row.display.englishFallback]),
+      ).toEqual([
+        [null, "Alpha Fictional", false],
+        [null, "Zulu Fictional", false],
+      ]);
+      expect(page.items[1]?.display).toMatchObject({
+        requestedLocale: locale,
+        renderedLocale: "en",
+      });
+      expect((await catalogs.get(driver, list, zulu.id, locale)).display.label).toBe(
+        "Zulu Fictional",
+      );
+      const paged = await catalogs.list(driver, list, { game: "ets2", locale, limit: 1 });
+      const next = await catalogs.list(driver, list, {
+        game: "ets2",
+        locale,
+        limit: 1,
+        cursor: paged.nextCursor as string,
+      });
+      expect([...paged.items, ...next.items].map((row) => row.id)).toEqual([alpha.id, zulu.id]);
+      expect(
+        (await catalogs.list(driver, list, { game: "ets2", locale, search: "Аааа" })).total,
+      ).toBe(0);
+      expect(
+        (await catalogs.list(driver, list, { game: "ets2", locale, search: "zulu" })).total,
+      ).toBe(1);
+      await expect(
+        catalogs.list(driver, list, { game: "ets2", locale, untranslated: true }),
+      ).rejects.toMatchObject({ statusCode: 422 });
+    }
+    const summary = (await catalogs.summary(driver, "ets2")).lists[list];
+    expect(summary).toMatchObject({ visible: 2, hidden: 0 });
+    expect(summary).not.toHaveProperty("untranslated");
+    await expect(
+      catalogs.patch(director, list, zulu.id, newId(), { nameRu: "Другое" }),
+    ).rejects.toMatchObject({ statusCode: 422 });
+    const [kept] = await control.query<RowDataPacket[]>(`SELECT name_ru FROM ${table} WHERE id=?`, [
+      zulu.id,
+    ]);
+    expect(kept[0]?.name_ru).toBe("Аааа");
   },
 );
 
@@ -385,10 +449,11 @@ test.each(catalogLists)("%s records the UTC time of actual row changes", async (
   const created = await catalogs.create(director, list, createKey, input);
   expect(created.updatedAt).toBe(now().toISOString());
   instant += 123;
+  // DLCs and companies have no Russian name to send.
   const noOp = await catalogs.patch(director, list, created.id, newId(), {
     code: input.code,
     nameEn: input.nameEn,
-    nameRu: null,
+    ...(canonicalLists.includes(list) ? {} : { nameRu: null }),
     hidden: false,
   });
   expect(noOp.updatedAt).toBe(created.updatedAt);

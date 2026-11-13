@@ -1,6 +1,7 @@
 export const assignableRoles = ["trainee", "driver", "dispatcher", "deputy_director"] as const;
 export type AssignableRole = (typeof assignableRoles)[number];
 export type Role = AssignableRole | "director";
+export const drivingRoles = ["trainee", "driver"] as const;
 
 const administration = [
   "applications.manage",
@@ -12,7 +13,7 @@ const administration = [
 ];
 export function capabilities(roles: readonly Role[]): string[] {
   const result = new Set(["company.read", "trips.read_own_private"]);
-  if (roles.some((role) => role === "trainee" || role === "driver"))
+  if (drivingRoles.some((role) => roles.includes(role)))
     for (const capability of ["trips.submit_own", "events.respond"]) result.add(capability);
   if (roles.some((role) => ["dispatcher", "deputy_director", "director"].includes(role)))
     result.add("trips.review");

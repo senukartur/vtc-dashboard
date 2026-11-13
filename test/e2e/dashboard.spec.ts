@@ -54,8 +54,8 @@ function lastRequest(state: DashboardMockState, path: string) {
 }
 const statsPath = "/api/v1/public/company-stats";
 const periodPaths = ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"] as const;
-// Overview reads gated on the reporting timezone besides the period reads (review queue and recent
-// trips both read /trips).
+// Overview reads gated on the reporting timezone besides the period reads (recent trips read
+// /trips; the review queue card uses the workspace summary).
 const secondaryPaths = ["/api/v1/me/qualification-progress", "/api/v1/trips"] as const;
 /** Period requests to one or both period endpoints, optionally for one date range. */
 function periodRequests(
@@ -295,11 +295,12 @@ test.describe("Company Dashboard E2E", () => {
         expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-11-01");
         expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-12-01");
       }
-      // Progress for both games, the review queue and the recent trips follow the period reads.
+      // Progress for both games and the recent trips follow the period reads.
       await expect
         .poll(() => requestsTo(state, "/api/v1/me/qualification-progress").length)
         .toBe(2);
-      await expect.poll(() => requestsTo(state, "/api/v1/trips").length).toBe(2);
+      await expect.poll(() => requestsTo(state, "/api/v1/trips").length).toBe(1);
+      expect(state.requests.some((url) => url.searchParams.get("scope") === "review")).toBe(false);
       const firstIndex = (path: string) =>
         state.requests.findIndex((url) => url.pathname.startsWith(path));
       const lastPeriod = Math.max(...periodPaths.map(firstIndex));
@@ -950,7 +951,7 @@ test.describe("Company Dashboard E2E", () => {
     "keeps review queue and event failures inside their cards",
     browserCase(["@functional"]),
     async ({ page }) => {
-      await mockDashboardRoutes(page, { failures: { review: 503, event: 503 } });
+      await mockDashboardRoutes(page, { failures: { summary: 503, event: 503 } });
       await page.goto("/account/dashboard");
       await loaded(page);
       await expect(reviewCard(page).getByText("Could not load the review queue")).toBeVisible();
@@ -1085,20 +1086,22 @@ test.describe("Company Dashboard E2E", () => {
   );
 
   test(
-    "counts drivers beyond the widget and marks capped queues",
+    "counts drivers beyond the widget and shows the exact review queue count",
     browserCase(["@functional"]),
     async ({ page }) => {
-      const state = await mockDashboardRoutes(page, {
-        leaderboardSize: 12,
-        reviewNextCursor: true,
-      });
+      const state = await mockDashboardRoutes(page, { leaderboardSize: 12 });
+      // The card shows the workspace summary count, the same as the dispatch header and the menu.
+      state.summary = { ...state.summary, reviewQueue: { count: 12, oldestAgeSeconds: 7200 } };
       await page.goto("/account/dashboard");
       await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(10);
       await expect(kpis(page).getByRole("definition").nth(2)).toHaveText("12");
       expect(lastRequest(state, "/api/v1/analytics/leaderboard")?.searchParams.get("limit")).toBe(
         "100",
       );
-      await expect(reviewCard(page)).toContainText("Trips pending review: 5+");
+      await expect(reviewCard(page)).toContainText("Awaiting your decision: 12");
+      await expect(reviewCard(page)).not.toContainText("+");
+      await switchLanguage(page, "ru");
+      await expect(reviewCard(page)).toContainText("Ждут вашего решения: 12");
     },
   );
 

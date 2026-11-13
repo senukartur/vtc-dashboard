@@ -1,8 +1,11 @@
-import multipart from "@fastify/multipart";
 import type { components } from "@vtc/contracts";
 import { applicationId } from "@vtc/db";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { BlobFailure } from "../../platform/blob-storage/filesystem.js";
+import {
+  checkImageMultipart,
+  multipartOverhead,
+  registerImageMultipart,
+} from "../../platform/http/image-multipart.js";
 import { csrfProtection } from "../identity/http.js";
 import type { Actor, Identity } from "../identity/service.js";
 import { type ManualReports, manualError } from "./service.js";
@@ -49,20 +52,10 @@ export async function registerManualRoutes(
 ) {
   const maxBytes = manual.config.storage?.maxFileBytes ?? 1,
     actors = new WeakMap<FastifyRequest, Actor>(),
-    csrf = csrfProtection(identity.config),
-    oversized = new WeakSet<FastifyRequest>();
-  await app.register(multipart, {
-    limits: {
-      files: 1,
-      fields: 0,
-      parts: 1,
-      fileSize: maxBytes,
-      fieldSize: 1,
-      fieldNameSize: 32,
-      headerPairs: 32,
-    },
-    throwFileSizeLimit: true,
-  });
+    csrf = csrfProtection(identity.config);
+  const isUpload = (request: FastifyRequest) =>
+    request.method === "POST" && request.routeOptions.url === "/api/v1/evidence";
+  const receive = await registerImageMultipart(app, maxBytes, isUpload, manualError);
   async function actor(r: FastifyRequest) {
     const cached = actors.get(r);
     if (cached) return cached;
@@ -91,35 +84,13 @@ export async function registerManualRoutes(
         // Fastify uses Content-Type to select a parser even when Content-Length is zero.
         if (r.headers["content-type"] !== undefined)
           r.headers = { ...r.headers, "content-type": undefined };
-      } else if (r.routeOptions.url === "/api/v1/evidence") {
-        if (
-          r.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "multipart/form-data"
-        )
-          throw manualError(415);
-        if (Number(r.headers["content-length"]) > maxBytes + 16384) throw manualError(413);
+      } else if (isUpload(r)) {
+        checkImageMultipart(r, maxBytes, manualError);
       } else if (
         r.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json"
       )
         throw manualError(415);
     }
-  });
-  app.addHook("preParsing", async (r, reply, payload) => {
-    if (r.routeOptions.url !== "/api/v1/evidence" || r.method !== "POST") return payload;
-    let received = 0;
-    payload.pause();
-    const count = (chunk: Buffer) => {
-      received += chunk.length;
-      if (received <= maxBytes + 16384 || oversized.has(r)) return;
-      oversized.add(r);
-      payload.pause();
-      reply.raw.once("finish", () => payload.destroy());
-      void reply.send(manualError(413));
-    };
-    const cleanup = () => payload.removeListener("data", count);
-    payload.on("data", count);
-    payload.once("end", cleanup);
-    payload.once("close", cleanup);
-    return payload;
   });
   const envelope = (r: FastifyRequest, data: unknown) => ({ data, meta: { requestId: r.id } });
   function route(
@@ -178,7 +149,7 @@ export async function registerManualRoutes(
     (a, r) => manual.listDrafts(a, r.query),
     undefined,
     200,
-    { state: { type: "string", const: "editing" } },
+    { state: { type: "string", const: "editing" }, locale: { type: "string", enum: ["en", "ru"] } },
   );
   route(
     "POST",
@@ -364,7 +335,7 @@ export async function registerManualRoutes(
   app.post(
     "/api/v1/evidence",
     {
-      bodyLimit: maxBytes + 16384,
+      bodyLimit: maxBytes + multipartOverhead,
       schema: { querystring: object({}), response: { 202: ref("EnvelopeEvidence") } },
     },
     async (r, reply) => {
@@ -372,72 +343,18 @@ export async function registerManualRoutes(
         reply.raw.once("finish", () => r.raw.destroy());
         throw manualError(503, "DEPENDENCY_UNAVAILABLE");
       }
-      const abort = new AbortController(),
-        cancel = () => abort.abort();
-      let file: NodeJS.ReadableStream | undefined;
-      let expired = false,
-        uploadStarted = false;
-      const timer = setTimeout(() => {
-        expired = true;
-        cancel();
-        if (file && "destroy" in file) (file as import("node:stream").Readable).destroy();
-        // A premature raw close rejects multipart's pending next(), even before
-        // it has produced a file. Aborting the blob signal alone cannot do that.
-        r.raw.destroy();
-        r.raw.socket.destroy();
-      }, manual.config.storage.timeoutMs);
-      r.raw.once("aborted", cancel);
-      try {
-        const parts = r.parts(),
-          first = await parts.next();
-        if (first.done || first.value.type !== "file" || first.value.fieldname !== "file")
-          throw manualError(422);
-        const part = first.value;
-        file = part.file;
-        abort.signal.throwIfAborted();
-        async function* chunks() {
-          try {
-            for await (const chunk of part.file) {
-              if (oversized.has(r)) throw new BlobFailure("oversized");
-              yield chunk as Buffer;
-            }
-            if (part.file.truncated || oversized.has(r)) throw new BlobFailure("oversized");
-            if (!(await parts.next()).done) throw new BlobFailure("invalid");
-          } catch (error) {
-            if (error instanceof BlobFailure) throw error;
-            throw new BlobFailure(
-              error &&
-                typeof error === "object" &&
-                "statusCode" in error &&
-                error.statusCode === 413
-                ? "oversized"
-                : "invalid",
-            );
-          }
-        }
-        const current = await actor(r);
-        abort.signal.throwIfAborted();
-        uploadStarted = true;
-        const data = await manual.upload(
+      const current = await actor(r);
+      const data = await receive(r, reply, manual.config.storage.timeoutMs, (image) =>
+        manual.upload(
           current,
           key(r),
-          part.filename,
-          chunks(),
-          part.mimetype,
-          abort.signal,
-        );
-        return reply.code(202).send(envelope(r, data));
-      } catch (error) {
-        if (file && "destroy" in file) (file as import("node:stream").Readable).destroy();
-        if (!r.raw.destroyed) reply.raw.once("finish", () => r.raw.destroy());
-        if (oversized.has(r)) throw manualError(413);
-        if (expired && !uploadStarted) throw manualError(503, "DEPENDENCY_UNAVAILABLE");
-        if (error && typeof error === "object" && "statusCode" in error) throw error;
-        throw manualError(422);
-      } finally {
-        clearTimeout(timer);
-        r.raw.removeListener("aborted", cancel);
-      }
+          image.filename,
+          image.bytes,
+          image.contentType,
+          image.signal,
+        ),
+      );
+      return reply.code(202).send(envelope(r, data));
     },
   );
 }

@@ -1,23 +1,25 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
-import { AccountFailure, readSelf, type DTO } from "../features/account/transport.js";
+import { AccountFailure, type DTO, readSelf } from "../features/account/transport.js";
+import i18n, { readStoredLocale, writeStoredLocale } from "../shared/i18n.js";
 import { Button, Card } from "../shared/ui/primitives.js";
 import { clearPrivateQueries } from "./session-cache.js";
-import i18n, { readStoredLocale, writeStoredLocale } from "../shared/i18n.js";
 
 type Session = {
   state: "checking" | "authenticated" | "anonymous" | "unavailable";
   self: DTO["Self"] | null;
+  eventsStage2Enabled: boolean;
+  eventsDraftsEnabled: boolean;
   etag: string | null;
   generation: number;
   refresh: () => Promise<void>;
@@ -132,6 +134,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       value={{
         state,
         self,
+        eventsStage2Enabled: state === "authenticated" && query.data?.eventsStage2Enabled === true,
+        eventsDraftsEnabled: state === "authenticated" && query.data?.eventsDraftsEnabled === true,
         etag: self ? (query.data?.etag ?? null) : null,
         generation,
         refresh: async () => {

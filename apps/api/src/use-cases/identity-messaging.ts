@@ -4,6 +4,8 @@ import { type Admissions, createAdmissions } from "../modules/admissions/service
 import { type AnalyticsConfig, createAnalytics } from "../modules/analytics/index.js";
 import type { CatalogConfig } from "../modules/catalogs/config.js";
 import { createCatalogs } from "../modules/catalogs/service.js";
+import { createEventMedia, type EventMediaConfig } from "../modules/events/media.js";
+import { mediaJobKinds } from "../modules/events/media-jobs.js";
 import { createEvents, type EventsConfig } from "../modules/events/service.js";
 import { createEventWorkspace } from "../modules/events/workspace.js";
 import {
@@ -71,6 +73,7 @@ export function composeIdentity(
   tripDecisionsConfig?: TripDecisionsConfig,
   analyticsConfig?: AnalyticsConfig,
   notificationsConfig?: NotificationsConfig,
+  eventMediaConfig?: EventMediaConfig,
 ) {
   const outbox = createOutbox(unit, { notifications: !!notificationsConfig });
   let identity: Identity;
@@ -246,10 +249,20 @@ export function composeIdentity(
             : {}),
         })
       : undefined;
+  const eventMedia =
+    eventsConfig && eventMediaConfig
+      ? createEventMedia(
+          unit,
+          { ...eventMediaConfig, draftsEnabled: eventsConfig.draftsEnabled === true },
+          eventsConfig.cursorKey,
+          identity,
+        )
+      : undefined;
   const events = eventsConfig
     ? createEvents(unit, eventsConfig, {
         identity,
         outbox,
+        ...(eventMedia ? { media: eventMedia } : {}),
         ...(notificationsConfig
           ? {
               notificationChanged: (
@@ -265,6 +278,16 @@ export function composeIdentity(
               tripChanged: async (tx, eventId, generation) => {
                 if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
                 await tripDecisions.eventChangedInTransaction(tx, eventId, generation);
+              },
+              attendanceTripIds: (tx, actor, eventId, game, memberIds) => {
+                if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                return tripDecisions.eventAttendanceTripIdsInTransaction(
+                  tx,
+                  actor,
+                  eventId,
+                  game,
+                  memberIds,
+                );
               },
             }
           : {}),
@@ -292,27 +315,31 @@ export function composeIdentity(
           manual: manualReports as ManualReports,
         })
       : undefined;
-  const jobsQueue = createQueue(
-    unit,
-    [
-      ...(messaging ? [messaging.handler] : []),
-      ...(manualReports ? [manualReports.handler, manualReports.generationHandler] : []),
-      ...(reconciliation ? [reconciliation.handler] : []),
-      ...(tripDecisions ? [tripDecisions.handler] : []),
-      ...(notifications ? [notifications.handler, notifications.reminderHandler] : []),
-    ],
-    notifications ? [notifications.subscription] : [],
-    undefined,
-    [
-      ...(!messaging ? ["mail.deliver"] : []),
-      ...(!reconciliation ? ["reconciliation.search"] : []),
-      ...(!tripDecisions ? ["trips.reevaluate"] : []),
-      ...(!notifications ? ["notifications.deliver", "notifications.remind"] : []),
-      ...(!manualReports?.config.storage
-        ? ["manual.evidence-delete", "manual.generation-delete"]
-        : []),
-    ],
-  );
+  const jobsQueueFor = (pausedKinds: readonly string[] = []) =>
+    createQueue(
+      unit,
+      [
+        ...(messaging ? [messaging.handler] : []),
+        ...(manualReports ? [manualReports.handler, manualReports.generationHandler] : []),
+        ...(reconciliation ? [reconciliation.handler] : []),
+        ...(tripDecisions ? [tripDecisions.handler] : []),
+        ...(notifications ? [notifications.handler, notifications.reminderHandler] : []),
+        ...(eventMedia?.handlers ?? []),
+      ],
+      notifications ? [notifications.subscription] : [],
+      undefined,
+      [
+        ...pausedKinds,
+        ...(!messaging ? ["mail.deliver"] : []),
+        ...(!reconciliation ? ["reconciliation.search"] : []),
+        ...(!tripDecisions ? ["trips.reevaluate"] : []),
+        ...(!notifications ? ["notifications.deliver", "notifications.remind"] : []),
+        ...(!eventMedia ? mediaJobKinds : []),
+        ...(!manualReports?.config.storage
+          ? ["manual.evidence-delete", "manual.generation-delete"]
+          : []),
+      ],
+    );
   const externalIdentities = externalEnabled ? createExternalIdentities(unit, identity) : undefined;
   const analytics =
     analyticsConfig && trips ? createAnalytics(unit, identity, analyticsConfig) : undefined;
@@ -356,6 +383,7 @@ export function composeIdentity(
     ...(analytics ? { analytics } : {}),
     ...(manualReports ? { manualReports } : {}),
     ...(events ? { events } : {}),
+    ...(eventMedia ? { eventMedia } : {}),
     ...(tripDecisions ? { tripDecisions } : {}),
     ...(qualifications ? { qualifications } : {}),
     ...(reconciliation ? { reconciliation } : {}),
@@ -370,7 +398,8 @@ export function composeIdentity(
       : {}),
     ...(trips ? { trips } : {}),
     ...(externalIdentities ? { externalIdentities } : {}),
-    jobsQueue,
+    jobsQueue: jobsQueueFor(),
+    jobsQueueFor,
     ...(catalogs ? { catalogs } : {}),
     ...(messaging ? { messaging } : {}),
     ...(admissions ? { admissions } : {}),
