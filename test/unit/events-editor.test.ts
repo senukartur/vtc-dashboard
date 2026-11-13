@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   changeEditorCity,
+  changeEditorDepot,
   changeEditorGame,
   eventDefinitionSeed,
   eventEditorDlcs,
@@ -277,4 +278,40 @@ test("changing to the same game in both versions does not apply old-game resets 
     overlaps: [],
     skipped: [],
   });
+});
+
+test("route changes explicitly clear legacy text while unrelated edits retain it", () => {
+  const text = { route: "Fictional previous route", meetingLocation: "Fictional previous depot" };
+  const cleared = { route: null, meetingLocation: null };
+  const base = initialEventEditor({ ...eventDefinitionSeed(member()), ...text }, true);
+  expect(validateEventEditor({ ...base, title: "Fictional new title" }).complete).toMatchObject(
+    text,
+  );
+  expect(validateEventEditor(changeEditorGame(base, "ats")).draft).toMatchObject(cleared);
+  expect(validateEventEditor(changeEditorDepot(base, "origin", null)).complete).toMatchObject(
+    cleared,
+  );
+  const local = changeEditorCity(base, "origin", "e1320000-0000-4000-8000-000000000019");
+  expect(validateEventEditor(local).complete).toMatchObject(cleared);
+  const saved = { ...base, legacyRoute: { ...text, route: "Fictional concurrent route" } };
+  expect(validateEventEditor(rebaseEventEditor(base, local, saved).form).complete).toMatchObject(
+    cleared,
+  );
+  expect(
+    validateEventEditor(
+      rebaseEventEditor(base, { ...base, title: "Fictional new title" }, saved).form,
+    ).complete,
+  ).toMatchObject(saved.legacyRoute);
+});
+
+test("a sparse draft still checks meeting against end when start is absent", () => {
+  const form = {
+    ...initialEventEditor({}),
+    meetingAt: "2099-01-01T12:00",
+    endsAt: "2099-01-01T11:00",
+  };
+  const result = validateEventEditor(form);
+  expect(result.draftErrors).toEqual({ meetingAt: "meetingAfterEnd" });
+  expect(result.draft).toBeUndefined();
+  expect(validateEventEditor({ ...form, endsAt: form.meetingAt }).draft).toBeDefined();
 });

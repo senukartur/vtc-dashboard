@@ -40,6 +40,7 @@ const en = {
   invalidNumber: "Enter a valid nonnegative decimal.",
   invalidTime: "Enter a valid UTC date and time.",
   meetingAfterStart: "Meeting must be at or before the start.",
+  meetingAfterEnd: "Meeting must be at or before the end.",
   endBeforeStart: "End must be at or after the start.",
   resolveDepot: "Confirm or undo this depot selection.",
   errorSummary: "Check these fields",
@@ -75,6 +76,7 @@ const en = {
   latest: "Latest saved title",
   latestValue: "Latest value",
   localValue: "Your value",
+  conflictSelectionUnavailable: "Selection details unavailable",
   overlapHelp:
     "Review the fields changed in both versions. Keeping your edits will use your values for these fields.",
   reselectHelp:
@@ -169,6 +171,7 @@ const ru: Record<keyof typeof en, string> = {
   invalidNumber: "Введите допустимое неотрицательное число.",
   invalidTime: "Введите допустимые дату и время в UTC.",
   meetingAfterStart: "Сбор должен быть до старта или одновременно с ним.",
+  meetingAfterEnd: "Сбор должен быть до окончания события или одновременно с ним.",
   endBeforeStart: "Окончание должно быть после старта или одновременно с ним.",
   resolveDepot: "Подтвердите или отмените выбор базы.",
   errorSummary: "Проверьте поля",
@@ -204,6 +207,7 @@ const ru: Record<keyof typeof en, string> = {
   latest: "Последнее сохранённое название",
   latestValue: "Последнее значение",
   localValue: "Ваше значение",
+  conflictSelectionUnavailable: "Данные выбора недоступны",
   overlapHelp:
     "Проверьте поля, изменённые в обеих версиях. Если сохранить ваши правки, в этих полях будут использованы ваши значения.",
   reselectHelp:

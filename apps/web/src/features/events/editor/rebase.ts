@@ -1,6 +1,12 @@
 import { canonicalDecimal } from "../../trips/transport.js";
 import { utcInput } from "../model.js";
-import { changeEditorGame, type EditorEndpoint, type EditorForm, type FieldName } from "./model.js";
+import {
+  changeEditorGame,
+  clearLegacyRoute,
+  type EditorEndpoint,
+  type EditorForm,
+  type FieldName,
+} from "./model.js";
 
 const independentFields = [
   "title",
@@ -126,7 +132,8 @@ export function rebaseEventEditor(base: EditorForm, local: EditorForm, saved: Ed
     form.requiredDlcIds = [...new Set([...retained, ...added])];
   }
 
-  if (switchGame || ends.some((end) => !sameEndpoint(form[end], saved[end]))) form.legacyRoute = {};
+  if (switchGame || ends.some((end) => !sameEndpoint(form[end], saved[end])))
+    form.legacyRoute = clearLegacyRoute;
   return { form, overlaps, skipped };
 }
 

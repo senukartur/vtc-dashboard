@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { flushSync } from "react-dom";
 import { useSession } from "../../../app/Session.js";
 import { Button } from "../../../shared/ui/primitives.js";
+import { useMemberProfile } from "../../drivers/queries.js";
 import { EventFailureView } from "../components.js";
 import type { DTO } from "../model.js";
 import {
@@ -31,6 +32,7 @@ import {
 import { EditorGallery, useEditorGallery } from "./gallery.js";
 import {
   changeEditorCity,
+  changeEditorDepot,
   changeEditorGame,
   type EditorErrors,
   type EditorForm,
@@ -167,6 +169,8 @@ function EventEditorForm({
   const { definition, eventId } = actions;
   const member = definition.kind === "published" ? definition.member : null;
   const event = member?.event;
+  const latestMember = actions.latest?.kind === "published" ? actions.latest.member : undefined;
+  const latestEvent = latestMember?.event;
   const latestForm = actions.latest && initialEventEditor(definitionFields(actions.latest), true);
   const rebase =
     latestForm &&
@@ -207,6 +211,51 @@ function EventEditorForm({
       : []),
   ];
   const dlcs = useEditorDlcs(form.requiredDlcIds, derived, retainedDlcs);
+  const overlapping = (field: FieldName) => rebase?.overlaps.find((entry) => entry.field === field);
+  const savedOrigin = useEditorCatalogItem(
+    "cities",
+    overlapping("originCityId")?.saved ?? null,
+    locale,
+  );
+  const savedDestination = useEditorCatalogItem(
+    "cities",
+    overlapping("destinationCityId")?.saved ?? null,
+    locale,
+  );
+  const savedCargo = useEditorCatalogItem(
+    "cargoes",
+    overlapping("prescribedCargoId")?.saved ?? null,
+    locale,
+  );
+  const savedTrailer = useEditorCatalogItem(
+    "trailers",
+    overlapping("prescribedTrailerTypeId")?.saved ?? null,
+    locale,
+  );
+  const savedOriginDepot = useRetainedDepot(
+    latestForm?.game ?? "",
+    {
+      cityId: latestForm?.origin.cityId ?? null,
+      depotId: overlapping("originDepotId")?.saved ?? null,
+    },
+    locale,
+  );
+  const savedDestinationDepot = useRetainedDepot(
+    latestForm?.game ?? "",
+    {
+      cityId: latestForm?.destination.cityId ?? null,
+      depotId: overlapping("destinationDepotId")?.saved ?? null,
+    },
+    locale,
+  );
+  const savedDlcs = useEditorDlcs(
+    overlapping("requiredDlcIds") && latestForm ? latestForm.requiredDlcIds : [],
+    [],
+    latestEvent?.requiredDlcs ?? [],
+  );
+  const organizerOverlap = overlapping("organizerMemberId");
+  const savedOrganizer = useMemberProfile(organizerOverlap?.saved ?? "");
+  const localOrganizer = useMemberProfile(organizerOverlap?.local ?? "");
   const catalogErrors: EditorErrors = {};
   if (form.game) {
     for (const [field, item] of [
@@ -261,11 +310,7 @@ function EventEditorForm({
   }
 
   function changeDepot(end: RouteEnd, depot: DTO["CatalogDepot"] | null) {
-    setForm((previous) => ({
-      ...previous,
-      [end]: { ...previous[end], depotId: depot?.id ?? null, depot: depot ?? undefined },
-      legacyRoute: previous[end].depotId === (depot?.id ?? null) ? previous.legacyRoute : {},
-    }));
+    setForm((previous) => changeEditorDepot(previous, end, depot));
     actions.clearStatus();
   }
 
@@ -330,6 +375,71 @@ function EventEditorForm({
       : member?.organizerMemberId && member.organizerMemberId === form.organizerMemberId
         ? event?.organizer
         : undefined;
+
+  const cargoName =
+    cargo?.display.label ??
+    (member?.prescribedCargoId === form.prescribedCargoId
+      ? member?.prescribedCargo?.label
+      : undefined);
+  const trailerName =
+    trailer?.display.label ??
+    (member?.prescribedTrailerTypeId === form.prescribedTrailerTypeId
+      ? member?.prescribedTrailerType?.label
+      : undefined);
+  const depotName = (
+    depot: DTO["CatalogDepot"] | undefined,
+    hint?: DTO["EventStage2CanonicalCatalogOption"] | null,
+  ) =>
+    depot
+      ? `${depot.company.label.label} · ${depot.company.code}`
+      : hint
+        ? `${hint.name} · ${hint.code}`
+        : undefined;
+  const localLabels: Partial<Record<FieldName, string | undefined>> = {
+    originCityId: cityNames[0],
+    destinationCityId: cityNames[1],
+    originDepotId: depotName(originDepot, originDepotHint),
+    destinationDepotId: depotName(destinationDepot, destinationDepotHint),
+    prescribedCargoId: cargoName,
+    prescribedTrailerTypeId: trailerName,
+    organizerMemberId:
+      retainedOrganizer ??
+      (!localOrganizer.isError && localOrganizer.data?.member.id === organizerOverlap?.local
+        ? localOrganizer.data?.member.nickname
+        : undefined),
+  };
+  const savedLabels: typeof localLabels = {
+    originCityId: savedOrigin?.display.label ?? latestEvent?.origin?.label,
+    destinationCityId: savedDestination?.display.label ?? latestEvent?.destination?.label,
+    originDepotId: depotName(savedOriginDepot, latestEvent?.originDepot),
+    destinationDepotId: depotName(savedDestinationDepot, latestEvent?.destinationDepot),
+    prescribedCargoId: savedCargo?.display.label ?? latestMember?.prescribedCargo?.label,
+    prescribedTrailerTypeId:
+      savedTrailer?.display.label ?? latestMember?.prescribedTrailerType?.label,
+    organizerMemberId:
+      latestEvent?.organizer ??
+      (!savedOrganizer.isError && savedOrganizer.data?.member.id === organizerOverlap?.saved
+        ? savedOrganizer.data?.member.nickname
+        : undefined),
+  };
+
+  function overlapLabel(field: FieldName, value: string | null, side: "local" | "saved") {
+    if (value === null) return text.noValue;
+    if (field === "requiredDlcIds") {
+      const entries = side === "local" ? dlcs : savedDlcs;
+      return value
+        .split(", ")
+        .map((id) => {
+          const entry = entries.find((dlc) => dlc.id === id);
+          return entry?.label
+            ? [entry.label, entry.code].filter(Boolean).join(" · ")
+            : text.conflictSelectionUnavailable;
+        })
+        .join(", ");
+    }
+    const labels = side === "local" ? localLabels : savedLabels;
+    return field in labels ? (labels[field] ?? text.conflictSelectionUnavailable) : value;
+  }
 
   if (actions.accessFailure)
     return (
@@ -474,6 +584,7 @@ function EventEditorForm({
               actions={actions}
               blocked={gallery.busy}
               rebase={rebase}
+              overlapLabel={overlapLabel}
               onResolveLatest={resolveLatest}
             />
             <div className="event-editor-inline">
@@ -496,18 +607,8 @@ function EventEditorForm({
           cityNames={cityNames}
           depotNames={depotNames}
           dlcs={dlcs}
-          cargo={
-            cargo?.display.label ??
-            (member?.prescribedCargoId === form.prescribedCargoId
-              ? member?.prescribedCargo?.label
-              : undefined)
-          }
-          trailer={
-            trailer?.display.label ??
-            (member?.prescribedTrailerTypeId === form.prescribedTrailerTypeId
-              ? member?.prescribedTrailerType?.label
-              : undefined)
-          }
+          cargo={cargoName}
+          trailer={trailerName}
           eventId={eventId}
           cover={gallery.cover}
           coverState={

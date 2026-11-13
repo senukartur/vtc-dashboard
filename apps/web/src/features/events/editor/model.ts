@@ -57,6 +57,7 @@ type Issue =
   | "invalidNumber"
   | "invalidTime"
   | "meetingAfterStart"
+  | "meetingAfterEnd"
   | "endBeforeStart"
   | "resolveDepot"
   | "wrongGame";
@@ -121,6 +122,8 @@ export function initialEventEditor(fields?: DraftFields, keepLegacyRoute = false
   };
 }
 
+export const clearLegacyRoute = { route: null, meetingLocation: null } as const;
+
 export function changeEditorGame(form: EditorForm, game: EditorForm["game"]): EditorForm {
   if (form.game === game) return form;
   return {
@@ -134,7 +137,7 @@ export function changeEditorGame(form: EditorForm, game: EditorForm["game"]): Ed
     prescribedCargoId: null,
     prescribedMassKg: "",
     prescribedTrailerTypeId: null,
-    legacyRoute: {},
+    legacyRoute: clearLegacyRoute,
   };
 }
 
@@ -144,7 +147,20 @@ export function changeEditorCity(
   cityId: string | null,
 ): EditorForm {
   if (form[end].cityId === cityId) return form;
-  return { ...form, [end]: endpoint(cityId), legacyRoute: {} };
+  return { ...form, [end]: endpoint(cityId), legacyRoute: clearLegacyRoute };
+}
+
+export function changeEditorDepot(
+  form: EditorForm,
+  end: RouteEnd,
+  depot: DTO["CatalogDepot"] | null,
+): EditorForm {
+  const depotId = depot?.id ?? null;
+  return {
+    ...form,
+    [end]: { ...form[end], depotId, depot: depot ?? undefined },
+    legacyRoute: form[end].depotId === depotId ? form.legacyRoute : clearLegacyRoute,
+  };
 }
 
 const timeFields = ["meetingAt", "startsAt", "endsAt"] as const;
@@ -190,6 +206,7 @@ export function validateEventEditor(
   const { meetingAt, startsAt, endsAt } = times;
   if (meetingAt && startsAt && meetingAt > startsAt) errors.meetingAt = "meetingAfterStart";
   if (endsAt && startsAt && endsAt < startsAt) errors.endsAt = "endBeforeStart";
+  if (meetingAt && endsAt && meetingAt > endsAt) errors.meetingAt ??= "meetingAfterEnd";
 
   const numbers = { distanceKm: null, prescribedMassKg: null } as Record<
     "distanceKm" | "prescribedMassKg",

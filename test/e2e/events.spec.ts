@@ -7,7 +7,13 @@ import {
   stage2LegacyEventId,
   stage2MediaId,
 } from "../fixtures/events-stage-2.ts";
-import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
+import {
+  catalogItem,
+  catalogLanguage,
+  catalogList,
+  chooseCatalogRow,
+  envelope,
+} from "./support/catalogs.ts";
 import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
 import {
   coverCaption,
@@ -1346,6 +1352,19 @@ test.describe("Stage 2 draft entry", () => {
     async ({ page }) => {
       await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
       const draft = fixture();
+      const originalCityId = "e1320000-0000-4000-8000-000000000002";
+      const savedCityId = "e1320000-0000-4000-8000-000000000034";
+      const localCity = catalogItem(
+        "e1320000-0000-4000-8000-000000000033",
+        "Fictional local harbour",
+      );
+      draft.data.fields.originCityId = originalCityId;
+      await page.route("**/api/v1/catalogs/cities?*", (route) =>
+        route.fulfill({ json: catalogList([localCity]) }),
+      );
+      await page.route(`**/api/v1/catalogs/cities/${localCity.id}?*`, (route) =>
+        route.fulfill({ json: envelope(localCity) }),
+      );
       const attempts: { etag: string | undefined; body: typeof draft.data.fields }[] = [];
       await page.route(`**${path}`, async (route) => {
         const request = route.request();
@@ -1358,6 +1377,7 @@ test.describe("Stage 2 draft entry", () => {
             draft.data.fields.title = "Fictional concurrent title";
             draft.data.fields.description = "Fictional concurrent description";
             draft.data.fields.distanceKm = "12.5";
+            draft.data.fields.originCityId = savedCityId;
             return route.fulfill({ status: 412 });
           }
           draft.data.version = 3;
@@ -1369,6 +1389,7 @@ test.describe("Stage 2 draft entry", () => {
       const title = page.getByRole("textbox", { name: "Event title" });
       await title.fill("Fictional local edit");
       await page.getByRole("textbox", { name: "Description" }).fill("Fictional local description");
+      await chooseCatalogRow(page, "Origin city", localCity.display.label);
       const save = page.getByRole("button", { name: "Save draft" });
       await save.click();
       await expect(
@@ -1386,6 +1407,14 @@ test.describe("Stage 2 draft entry", () => {
       await expect(
         page.getByText("Latest value · Fictional concurrent description", { exact: true }),
       ).toBeVisible();
+      await expect(
+        page.getByText("Latest value · Selection details unavailable", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("Your value · Fictional local harbour", { exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText(new RegExp(savedCityId))).toHaveCount(0);
+      await expect(page.getByText(new RegExp(localCity.id))).toHaveCount(0);
       await page.getByRole("button", { name: "Use my edits with the latest version" }).click();
       await save.click();
       await expect(page.getByRole("status").filter({ hasText: "Draft saved." })).toBeVisible();
@@ -1394,6 +1423,7 @@ test.describe("Stage 2 draft entry", () => {
         title: "Fictional local edit",
         description: "Fictional local description",
         distanceKm: "12.5",
+        originCityId: localCity.id,
       });
     },
   );
@@ -1477,6 +1507,8 @@ test.describe("Stage 2 draft entry", () => {
       const state = await mockEventsStage2(page, "manager");
       const detail = stage2Fixture("getEvent", "structured")
         .response as components["schemas"]["EventStage2EnvelopeMember"];
+      detail.data.event.route = "Fictional legacy route";
+      detail.data.event.meetingLocation = "Fictional legacy meeting place";
       const updatedTitle = "Fictional revised structured convoy";
       const adminPath = `/api/v1/admin/events/${detail.data.event.id}`;
       let committed = false;
@@ -1488,11 +1520,16 @@ test.describe("Stage 2 draft entry", () => {
           expect(request.headers()["if-match"]).toBe('"v1"');
           expect(request.postDataJSON()).toMatchObject({
             title: updatedTitle,
-            originDepotId: detail.data.event.originDepot?.id,
+            originDepotId: null,
+            route: null,
+            meetingLocation: null,
             destinationDepotId: detail.data.event.destinationDepot?.id ?? null,
             distanceKm: detail.data.event.distanceKm,
           });
           detail.data.event.title = updatedTitle;
+          detail.data.event.originDepot = null;
+          detail.data.event.route = null;
+          detail.data.event.meetingLocation = null;
           detail.data.event.version = 2;
           committed = true;
           return route.fulfill({ json: detail, headers: { ETag: '"v2"' } });
@@ -1513,6 +1550,10 @@ test.describe("Stage 2 draft entry", () => {
       await expect(dialog.getByRole("group", { name: "Screenshots", exact: true })).toBeVisible();
       await expect(dialog.getByRole("button", { name: "Save draft" })).toHaveCount(0);
       await dialog.getByRole("textbox", { name: "Event title" }).fill(updatedTitle);
+      await dialog
+        .getByRole("group", { name: "Origin depot", exact: true })
+        .getByRole("button", { name: "Clear selection" })
+        .click();
       await dialog.getByRole("button", { name: "Save changes" }).click();
       await expect(dialog.getByRole("status").filter({ hasText: "Changes saved." })).toBeVisible();
       await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -1525,6 +1566,71 @@ test.describe("Stage 2 draft entry", () => {
       ).toBe(true);
     },
   );
+
+  for (const status of [503, 404]) {
+    test(
+      status === 503
+        ? "structured edit keeps local changes when a conflict refresh is temporarily unavailable"
+        : "structured edit closes after a terminal detail refresh",
+      browserCase(["@functional"]),
+      async ({ page }) => {
+        await mockEventsStage2(page, "manager");
+        const detail = stage2Fixture("getEvent", "structured")
+          .response as components["schemas"]["EventStage2EnvelopeMember"];
+        const path = `/api/v1/events/${detail.data.event.id}`;
+        let readsAfterConflict = 0;
+        let conflict = false;
+        await page.route("**/api/v1/**", async (route) => {
+          const request = route.request();
+          const target = new URL(request.url()).pathname;
+          if (
+            target === `/api/v1/admin/events/${detail.data.event.id}` &&
+            request.method() === "PATCH"
+          ) {
+            conflict = true;
+            return route.fulfill({ status: 412 });
+          }
+          if (target === path && request.method() === "GET" && conflict) {
+            readsAfterConflict++;
+            if (status === 404 || readsAfterConflict === 1) return route.fulfill({ status });
+            detail.data.event.title = "Fictional server revision";
+            detail.data.event.version = 2;
+            return route.fulfill({ json: detail, headers: { ETag: '"v2"' } });
+          }
+          return route.fallback();
+        });
+        await page.goto(detailsPath);
+        await page.getByRole("button", { name: "Edit event", exact: true }).click();
+        const dialog = page.getByRole("dialog", { name: "Edit event" });
+        const title = dialog.getByRole("textbox", { name: "Event title" });
+        await title.fill("Fictional unsaved structured title");
+        await dialog.getByRole("button", { name: "Save changes" }).click();
+        if (status === 404) {
+          await expect(dialog).toHaveCount(0);
+          await expect(
+            page
+              .getByRole("alert")
+              .filter({ hasText: "This event is unavailable or you do not have access." }),
+          ).toBeVisible();
+        } else {
+          await expect(
+            dialog.getByRole("alert").filter({ hasText: "The saved definition changed." }),
+          ).toBeVisible();
+          await expect(title).toHaveValue("Fictional unsaved structured title");
+          await dialog.getByRole("button", { name: "Check latest version" }).click();
+          await expect(
+            dialog.getByText("Latest value · Fictional server revision", { exact: true }),
+          ).toBeVisible();
+          await dialog
+            .getByRole("button", { name: "Use my edits with the latest version" })
+            .click();
+          await expect(title).toHaveValue("Fictional unsaved structured title");
+          await expect(dialog.getByRole("button", { name: "Save changes" })).toBeEnabled();
+        }
+        expect(readsAfterConflict).toBeGreaterThan(0);
+      },
+    );
+  }
 
   for (const terminalRead of [false, true]) {
     test(

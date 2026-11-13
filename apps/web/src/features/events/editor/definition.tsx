@@ -10,7 +10,7 @@ import { useEventStage2Query } from "../stage-2-queries.js";
 import { eventStage2Commands, eventStage2Reads } from "../stage-2-transport.js";
 import { type EditorStep, eventEditorAccessLost, useEditorCommands } from "./commands.js";
 import { type DraftFields, eventRevisionTag, type OpenEventDraft } from "./draft.js";
-import { eventDefinitionSeed } from "./model.js";
+import { eventDefinitionSeed, type FieldName } from "./model.js";
 import type { EventEditorRebase } from "./rebase.js";
 import { useEditorText } from "./text.js";
 
@@ -224,11 +224,13 @@ export function DefinitionFeedback({
   actions,
   blocked,
   rebase,
+  overlapLabel,
   onResolveLatest,
 }: {
   actions: ReturnType<typeof useDefinitionActions>;
   blocked?: boolean | undefined;
   rebase: EventEditorRebase | null;
+  overlapLabel: (field: FieldName, value: string | null, side: "local" | "saved") => string;
   onResolveLatest: (keepEdits: boolean) => void;
 }) {
   const { text } = useEditorText();
@@ -267,10 +269,11 @@ export function DefinitionFeedback({
                       <div key={field}>
                         <dt>{text[field]}</dt>
                         <dd>
-                          <strong>{text.latestValue}</strong> · {saved ?? text.noValue}
+                          <strong>{text.latestValue}</strong> ·{" "}
+                          {overlapLabel(field, saved, "saved")}
                         </dd>
                         <dd>
-                          <strong>{text.localValue}</strong> · {local ?? text.noValue}
+                          <strong>{text.localValue}</strong> · {overlapLabel(field, local, "local")}
                         </dd>
                       </div>
                     ))}
