@@ -9,10 +9,7 @@ import { origin, resetAccountLimits, staffContext, write } from "./support/accou
 import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { manualReferenceTimes } from "./support/manual-reference.ts";
-import {
-  seedReviewStage3Duplicate,
-  startReviewStage3Server,
-} from "./support/review-stage-3-real.ts";
+import { startReviewStage3Server } from "./support/review-stage-3-real.ts";
 import {
   diagnosticLocale,
   TripReadLedger,
@@ -87,12 +84,6 @@ test(
       const own = await submit(dispatcherActor, "903000");
       const left = await telemetry();
       const right = await submit(fixture.author, "123400");
-      const duplicateId = await seedReviewStage3Duplicate(
-        server.unit,
-        fixture.userId,
-        left.tripId,
-        right.tripId,
-      );
       const reviewer = await server.actor(dispatcher.email, dispatcher.password);
       const selfResponse = await reviewer.request.get("/api/v1/me");
       expect(selfResponse.status()).toBe(200);
@@ -246,14 +237,34 @@ test(
       await expect(reviewer.locator(".review-history li").first()).toContainText(/accepted/i);
 
       await resetAccountLimits();
+      const candidatesPath = "/api/v1/reconciliation-candidates?view=stage3&game=ets2";
+      async function matchingCandidates(status: "waiting" | "dismissed") {
+        const response = await reviewer.request.get(`${candidatesPath}&status=${status}&limit=100`);
+        expect(response.status()).toBe(200);
+        const { data } = (await response.json()) as Schemas["TripStage3DuplicateListEnvelope"];
+        return data.items.filter(
+          ({ primaryTrip, secondaryTrip }) =>
+            (primaryTrip.id === left.tripId && secondaryTrip.id === right.tripId) ||
+            (primaryTrip.id === right.tripId && secondaryTrip.id === left.tripId),
+        );
+      }
+      // Discovery owns the pair. Wait for its current candidate before binding any UI action.
+      await expect
+        .poll(async () => (await matchingCandidates("waiting")).length, { timeout: 15000 })
+        .toBe(1);
+      const waitingPairs = await matchingCandidates("waiting");
+      expect(waitingPairs).toHaveLength(1);
+      const [duplicate] = waitingPairs;
+      if (!duplicate) throw new Error("STAGE_3_SYNTHETIC_DUPLICATE_REQUIRED");
+      expect(duplicate).toMatchObject({ version: 1, dismissed: false });
+      const duplicateId = duplicate.id;
       await reviewer.goto("/account/review/reconciliation");
-      const pair = reviewer
-        .locator(".dispatch-duplicate")
-        .filter({
-          has: reviewer.locator(`a[href^="/account/review/${left.tripId}?"]`),
-        })
-        .filter({ has: reviewer.locator(`a[href^="/account/review/${right.tripId}?"]`) });
+      const pair = reviewer.locator(".dispatch-duplicate").filter({
+        has: reviewer.locator(`#duplicate-dismiss-${duplicateId}`),
+      });
       await expect(pair).toBeVisible();
+      for (const tripId of [left.tripId, right.tripId])
+        await expect(pair.locator(`a[href^="/account/review/${tripId}?"]`)).toBeVisible();
       await pair.getByRole("button", { name: "These are different trips", exact: true }).click();
       const action = reviewer.locator(".dispatch-duplicate-action");
       await action
@@ -271,6 +282,9 @@ test(
       const status = reviewer.getByRole("combobox", { name: "State", exact: true });
       await status.selectOption("dismissed");
       await reviewer.reload();
+      expect(await matchingCandidates("dismissed")).toEqual([
+        expect.objectContaining({ id: duplicateId, version: 2, dismissed: true }),
+      ]);
       await pair.getByRole("button", { name: "Undo dismissal", exact: true }).click();
       const undone = await committed(`${duplicatePath}/dismissal-reversals`, () =>
         action.getByRole("button", { name: "Undo dismissal", exact: true }).click(),
@@ -282,6 +296,9 @@ test(
       await status.selectOption("waiting");
       await reviewer.reload();
       await expect(pair).toBeVisible();
+      expect(await matchingCandidates("waiting")).toEqual([
+        expect.objectContaining({ id: duplicateId, version: 3, dismissed: false }),
+      ]);
 
       await resetAccountLimits();
       const member = await server.actor(fixture.email, fixture.password);

@@ -1,11 +1,8 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Browser, BrowserContext } from "@playwright/test";
 import { createDatabase, createUnitOfWork } from "@vtc/db";
-import { reconciliationCandidates } from "@vtc/db/reconciliation-schema";
-import { inArray, trips } from "@vtc/db/trips-schema";
-import { ruleIdentity } from "../../../apps/api/src/modules/reconciliation/matcher.ts";
 import { guardedSettings } from "../../persistence/support.ts";
 import { guardedAllocation } from "../../support/environment.ts";
 import { accountSecret, csrf } from "./account.ts";
@@ -116,57 +113,4 @@ export async function startReviewStage3Server(browser: Browser) {
       }
     },
   };
-}
-
-/** Seed one current candidate for distinct, already-assessed synthetic trip roots. */
-export async function seedReviewStage3Duplicate(
-  unit: ReturnType<typeof createUnitOfWork>,
-  ownerId: string,
-  left: string,
-  right: string,
-) {
-  const id = randomUUID();
-  await unit.run(async (tx) => {
-    const db = unit.client(tx);
-    const rows = await db
-      .select()
-      .from(trips)
-      .where(inArray(trips.id, [left, right]))
-      .orderBy(trips.id)
-      .for("update");
-    const [a, b] = rows;
-    if (
-      !a ||
-      !b ||
-      a.id === b.id ||
-      !a.currentFactId ||
-      !b.currentFactId ||
-      [a, b].some(
-        (row) =>
-          row.ownerId !== ownerId || row.game !== "ets2" || row.aliasOf || row.assessmentPending,
-      )
-    )
-      throw new Error("STAGE_3_SYNTHETIC_DUPLICATE_ROOTS_REQUIRED");
-    await db.insert(reconciliationCandidates).values({
-      id,
-      ownerId,
-      game: "ets2",
-      searchHash: createHmac("sha256", guardedAllocation().token).update(id).digest(),
-      primaryTripId: a.id,
-      secondaryTripId: b.id,
-      primaryVersion: a.version,
-      secondaryVersion: b.version,
-      ruleHash: ruleIdentity(browserTripConfig().reconciliation.rule),
-      evidence: {
-        factIds: [a.currentFactId, b.currentFactId].sort(),
-        searchGeneration: randomUUID(),
-        searchComplete: true,
-        supported: false,
-      },
-      reasons: ["manual_actual_time_unknown"],
-      active: true,
-      createdAt: new Date().toISOString(),
-    });
-  });
-  return id;
 }
