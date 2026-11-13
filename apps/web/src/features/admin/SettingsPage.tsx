@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { formatUtc } from "../../shared/formatting.js";
 import {
   Dialog,
   DialogContent,
@@ -11,6 +10,8 @@ import {
   DialogTrigger,
 } from "../../shared/ui/dialog.js";
 import { Badge, Button, Card, Input, Label, Select } from "../../shared/ui/primitives.js";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs.js";
+import { QualificationsPage } from "../qualifications/QualificationsPage.js";
 import {
   CommandFeedback,
   Confirmation,
@@ -19,13 +20,17 @@ import {
   QueryState,
   WorkspaceHeading,
 } from "./components.js";
+import { SettingsAudit } from "./SettingsAudit.js";
 import {
   countdown,
   leadershipView,
   type ReadinessItem,
   readinessItems,
   secondsUntil,
+  settingsTab,
+  settingsTabs,
   sourceBadges,
+  validReportingTimezone,
 } from "./settings-model.js";
 import { type DTO, useWorkspaceCommand, useWorkspaceQuery } from "./transport.js";
 import "./settings.css";
@@ -36,25 +41,19 @@ function TimezoneEditor({
   data,
   etag,
   command,
+  visible,
 }: {
   data: DTO["CompanySettings"];
   etag: string | null;
   command: Command;
+  visible: boolean;
 }) {
   const { t } = useTranslation("administration"),
     session = useSession(),
     [timezone, setTimezone] = useState(data.reportingTimezone ?? "");
+  const input = useRef<HTMLInputElement>(null);
   const [reviewedEtag] = useState(etag);
   const stale = reviewedEtag !== etag;
-  const valid = (() => {
-    try {
-      if (!timezone.trim() || !/^[A-Za-z][A-Za-z0-9_+/-]*$/.test(timezone)) return false;
-      new Intl.DateTimeFormat("en", { timeZone: timezone });
-      return true;
-    } catch {
-      return false;
-    }
-  })();
   const set = !!data.reportingTimezone;
   return (
     <div className="settings-row">
@@ -77,6 +76,7 @@ function TimezoneEditor({
       </div>
       <div className="settings-row-control">
         <Input
+          ref={input}
           id="company-timezone"
           placeholder="Europe/Warsaw"
           autoComplete="off"
@@ -86,24 +86,29 @@ function TimezoneEditor({
           disabled={command.held || command.pending}
           onChange={(e) => setTimezone(e.target.value)}
         />
-        <Confirmation
-          label={t("saveTimezone")}
-          description={t("timezoneHelp")}
-          busy={command.pending}
-          variant="default"
-          disabled={!valid || command.seconds > 0 || command.held || stale}
-          confirm={async () =>
-            !!(await command.run(
-              "/admin/company-settings",
-              "EnvelopeCompanySettings",
-              { reportingTimezone: timezone },
-              reviewedEtag,
-              "PATCH",
-            ))
-          }
-        >
-          <p className="settings-dialog">{timezone}</p>
-        </Confirmation>
+        {visible && (
+          <Confirmation
+            label={t("saveTimezone")}
+            description={t("timezoneHelp")}
+            busy={command.pending}
+            variant="default"
+            restoreFocus={() => input.current}
+            disabled={
+              !validReportingTimezone(timezone) || command.seconds > 0 || command.held || stale
+            }
+            confirm={async () =>
+              !!(await command.run(
+                "/admin/company-settings",
+                "EnvelopeCompanySettings",
+                { reportingTimezone: timezone },
+                reviewedEtag,
+                "PATCH",
+              ))
+            }
+          >
+            <p className="settings-dialog">{timezone}</p>
+          </Confirmation>
+        )}
       </div>
       {stale && (
         <div className="settings-row-wide stack">
@@ -216,77 +221,6 @@ function Sources() {
     </Card>
   );
 }
-function Audit() {
-  const { t, i18n } = useTranslation("administration"),
-    session = useSession(),
-    [cursor, setCursor] = useState<string | null>(null),
-    query = useWorkspaceQuery(
-      `/admin/audit?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-      "EnvelopeListAuditEntry",
-    );
-  const locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    timezone = session.self?.preferences.displayTimezone ?? "UTC",
-    items = query.data?.data.data.items;
-  return (
-    <Card className="settings-audit">
-      <div className="settings-section-head">
-        <h2>{t("audit")}</h2>
-        <p className="muted">{t("settingsUi.auditTimes", { timezone })}</p>
-      </div>
-      <QueryState
-        pending={query.isPending}
-        error={query.isError}
-        retry={query.refetch}
-        empty={items?.length === 0}
-      />
-      {!!items?.length && (
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: This named overflow region needs focus for native keyboard scrolling.
-        <section className="admin-table-scroll" aria-label={t("audit")} tabIndex={0}>
-          <table className="admin-safe-table admin-audit-table settings-audit-table">
-            <thead>
-              <tr>
-                <th scope="col">{t("settingsUi.colTime")}</th>
-                <th scope="col">{t("actor")}</th>
-                <th scope="col">{t("action")}</th>
-                <th scope="col">{t("subject")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    <time dateTime={row.occurredAt}>
-                      {formatUtc(row.occurredAt, locale, timezone)}
-                    </time>
-                  </td>
-                  <td>
-                    {row.actorId ? (
-                      <span className="admin-id settings-break">{row.actorId}</span>
-                    ) : (
-                      t("system")
-                    )}
-                  </td>
-                  <td>
-                    {t(`auditActions.${row.action.replaceAll(".", "_")}`, {
-                      defaultValue: t("auditUnknown"),
-                    })}
-                  </td>
-                  <td>
-                    <span className="admin-id settings-break">{row.subjectId}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-      <div className="settings-audit-foot">
-        <p className="muted">{t("settingsUi.auditFootnote")}</p>
-        <Pager cursor={cursor} next={query.data?.data.data.nextCursor} setCursor={setCursor} />
-      </div>
-    </Card>
-  );
-}
 /** Command outcome without a ticking live region: the wait is plain text. */
 function LeadershipFeedback({
   command,
@@ -336,11 +270,12 @@ function successorLabel(
     ? `${member.nickname} · ${member.roles.map((role) => t(role)).join(", ")}`
     : member.nickname;
 }
-function TransferFlow() {
+function TransferFlow({ visible }: { visible: boolean }) {
   const { t } = useTranslation("administration"),
     session = useSession(),
     location = useLocation(),
     navigate = useNavigate(),
+    currentLocation = useRef(location),
     request = useWorkspaceCommand(),
     confirm = useWorkspaceCommand(),
     [cursor, setCursor] = useState<string | null>(null),
@@ -375,6 +310,7 @@ function TransferFlow() {
     setSeenRefusal(refused);
     if (refused) setOpen(false);
   }
+  if (!visible && open) setOpen(false);
   const now = useClock((at) => !!pending || secondsUntil(resendAt, at) > 0);
   const view = leadershipView({
     pending,
@@ -384,6 +320,9 @@ function TransferFlow() {
     requestSeconds: request.seconds,
     now,
   });
+  useEffect(() => {
+    currentLocation.current = location;
+  }, [location]);
   useEffect(() => {
     if (focusCode) codeInput.current?.focus();
   }, [focusCode]);
@@ -396,7 +335,7 @@ function TransferFlow() {
   useEffect(() => {
     const was = usable.current;
     usable.current = view.codeUsable;
-    if (!was || view.codeUsable || view.step !== "code") return;
+    if (!visible || !was || view.codeUsable || view.step !== "code") return;
     const active = document.activeElement;
     if (active && active !== document.body && !codeStep.current?.contains(active)) return;
     recoverFocus();
@@ -445,8 +384,9 @@ function TransferFlow() {
       setCode("");
       setOpen(false);
       // Only the public nickname is kept in history state for the notice after access changes.
+      const { pathname, search, hash } = currentLocation.current;
       navigate(
-        { pathname: location.pathname, search: location.search, hash: location.hash },
+        { pathname, search, hash },
         { replace: true, state: { leadershipTransferredTo: nickname } },
       );
       session.changed();
@@ -561,7 +501,7 @@ function TransferFlow() {
               </div>
               <div className="admin-actions">
                 <Dialog
-                  open={open}
+                  open={visible && open}
                   onOpenChange={(value) => {
                     if (busy) return;
                     // A held attempt keeps its frozen request; a settled failure is cleared.
@@ -579,6 +519,10 @@ function TransferFlow() {
                   </DialogTrigger>
                   <DialogContent
                     onCloseAutoFocus={(event) => {
+                      if (!visible) {
+                        event.preventDefault();
+                        return;
+                      }
                       // A trigger disabled meanwhile (expired or used-up code) cannot take focus.
                       if (view.codeUsable) return;
                       event.preventDefault();
@@ -651,7 +595,7 @@ function TransferFlow() {
   );
 }
 /** Rendered only for the serving director (`leadership.transfer`). */
-function Leadership() {
+function Leadership({ visible }: { visible: boolean }) {
   const { t } = useTranslation("administration"),
     session = useSession(),
     verified = !!session.self?.emailVerified;
@@ -665,9 +609,10 @@ function Leadership() {
           </Badge>
         </div>
         <p className="muted">{t("settingsUi.oneDirector")}</p>
+        <p className="muted">{t("settingsUi.deputyAfterTransfer")}</p>
       </div>
       {verified ? (
-        <TransferFlow />
+        <TransferFlow visible={visible} />
       ) : (
         <div className="settings-step stack">
           <p>{t("verifyEmailFirst")}</p>
@@ -687,63 +632,133 @@ function Leadership() {
     </aside>
   );
 }
-function Settings() {
+function SettingsRestricted() {
+  const { t } = useTranslation("administration");
+  return (
+    <Card className="settings-restricted">
+      <h2>{t("permission")}</h2>
+      <p>{t("settingsUi.sectionRestricted")}</p>
+    </Card>
+  );
+}
+
+function SettingsGeneral({
+  visible,
+  settings,
+}: {
+  visible: boolean;
+  settings: ReturnType<typeof useWorkspaceQuery<"EnvelopeCompanySettings">>;
+}) {
   const { t } = useTranslation("administration"),
     session = useSession(),
     command = useWorkspaceCommand(),
-    settings = useWorkspaceQuery("/admin/company-settings", "EnvelopeCompanySettings"),
     data = settings.data?.data.data;
-  const qualificationsReady = data && !data.missingSetup.includes("qualification_configuration");
+  return (
+    <div className="settings-layout">
+      <div className="settings-main stack">
+        <Card>
+          <h2>{t("settingsUi.companyName")}</h2>
+          <p>Yukon Union</p>
+        </Card>
+        {data && <Readiness data={data} />}
+        <Card className="settings-reporting" aria-labelledby="settings-reporting-title">
+          <h2 id="settings-reporting-title">{t("settingsUi.reportingTitle")}</h2>
+          <CommandFeedback command={command} />
+          <QueryState
+            pending={settings.isPending}
+            error={settings.isError}
+            retry={settings.refetch}
+          />
+          {data && (
+            <TimezoneEditor
+              data={data}
+              etag={settings.data?.etag ?? null}
+              command={command}
+              visible={visible}
+            />
+          )}
+        </Card>
+        {session.self?.capabilities.includes("connections.manage") ? (
+          <Sources />
+        ) : (
+          <Card className="settings-sources">
+            <h2>{t("sources")}</h2>
+            <p>{t("settingsUi.sectionRestricted")}</p>
+          </Card>
+        )}
+      </div>
+      {session.self?.capabilities.includes("leadership.transfer") &&
+        session.self.capabilities.includes("members.manage") && <Leadership visible={visible} />}
+    </div>
+  );
+}
+
+function SettingsQualificationLevels() {
+  const session = useSession();
+  return session.self?.capabilities.includes("qualifications.manage") ? (
+    <QualificationsPage embedded />
+  ) : (
+    <SettingsRestricted />
+  );
+}
+
+function Settings() {
+  const { t } = useTranslation("administration"),
+    session = useSession(),
+    location = useLocation(),
+    navigate = useNavigate(),
+    tab = settingsTab(new URLSearchParams(location.search).get("tab")),
+    [generalOpened, setGeneralOpened] = useState(tab === "general"),
+    canReadAudit = !!session.self?.capabilities.includes("members.manage"),
+    settings = useWorkspaceQuery(
+      "/admin/company-settings",
+      "EnvelopeCompanySettings",
+      generalOpened || tab === "general" || (tab === "audit" && canReadAudit),
+    );
+  // General holds the timezone command and protected transfer flow for this page visit.
+  if (tab === "general" && !generalOpened) setGeneralOpened(true);
+
   return (
     <div className="administration-page settings-page stack">
       <div className="settings-heading">
         <WorkspaceHeading title={t("settings")} />
-        <p className="muted">{t("settingsUi.subtitle")}</p>
       </div>
-      <div className="settings-layout">
-        <div className="settings-main stack">
-          {data && <Readiness data={data} />}
-          <Card className="settings-reporting" aria-labelledby="settings-reporting-title">
-            <h2 id="settings-reporting-title">{t("settingsUi.reportingTitle")}</h2>
-            <CommandFeedback command={command} />
-            <QueryState
-              pending={settings.isPending}
-              error={settings.isError}
-              retry={settings.refetch}
+      <Tabs
+        value={tab}
+        activationMode="manual"
+        onValueChange={(value) => {
+          const params = new URLSearchParams(location.search);
+          if (value === "general") params.delete("tab");
+          else params.set("tab", value);
+          navigate({ search: params.toString(), hash: location.hash });
+        }}
+      >
+        <TabsList aria-label={t("settings")}>
+          {settingsTabs.map((value) => (
+            <TabsTrigger key={value} value={value}>
+              {t(`settingsUi.tabs.${value}`)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <TabsContent value="general" forceMount hidden={tab !== "general"}>
+          {(generalOpened || tab === "general") && (
+            <SettingsGeneral visible={tab === "general"} settings={settings} />
+          )}
+        </TabsContent>
+        <TabsContent value="qualifications">
+          <SettingsQualificationLevels />
+        </TabsContent>
+        <TabsContent value="audit">
+          {canReadAudit ? (
+            <SettingsAudit
+              reportingTimezone={settings.data?.data.data.reportingTimezone ?? null}
+              timezonePending={settings.isPending}
             />
-            {data && (
-              <TimezoneEditor data={data} etag={settings.data?.etag ?? null} command={command} />
-            )}
-            <div className="settings-row">
-              <div className="settings-row-text">
-                <div className="settings-title-line">
-                  <h3 className="settings-row-title">{t("settingsUi.qualificationsTitle")}</h3>
-                  {data && (
-                    <Badge
-                      size="xs"
-                      className={`settings-tone-${qualificationsReady ? "accepted" : "pending"}`}
-                    >
-                      <span aria-hidden="true">{qualificationsReady ? "✓" : "●"}</span>
-                      {t(
-                        qualificationsReady ? "settingsUi.configured" : "settingsUi.notConfigured",
-                      )}
-                    </Badge>
-                  )}
-                </div>
-                <p className="muted">{t("settingsUi.qualificationsHelp")}</p>
-              </div>
-              <div className="settings-row-control">
-                <Button asChild variant="outline">
-                  <Link to="/account/qualifications">{t("qualificationWorkspace")}</Link>
-                </Button>
-              </div>
-            </div>
-          </Card>
-          <Sources />
-          <Audit />
-        </div>
-        {session.self?.capabilities.includes("leadership.transfer") && <Leadership />}
-      </div>
+          ) : (
+            <SettingsRestricted />
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

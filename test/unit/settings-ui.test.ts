@@ -1,12 +1,18 @@
 import { describe, expect, test } from "vitest";
 import {
+  auditAction,
+  auditActions,
+  auditPath,
   countdown,
   leadershipView,
   readinessItems,
   secondsUntil,
+  settingsTab,
   sourceBadges,
+  validReportingTimezone,
 } from "../../apps/web/src/features/admin/settings-model.ts";
 import { administrationTranslations } from "../../apps/web/src/features/admin/translations.ts";
+import { auditOperations } from "../../packages/db/src/schema/audit.ts";
 
 const now = Date.parse("2026-11-02T12:00:00.000Z");
 const at = (seconds: number) => new Date(now + seconds * 1000).toISOString();
@@ -178,6 +184,35 @@ test("every settingsUi string is non-empty in EN and RU and the slogan is absent
   for (const provider of ["ets2telemetry", "manual", "trucky", "vtcbase"])
     expect(en.map(([key]) => key)).toContain(`sourceNote.${provider}`);
   expect(JSON.stringify(administrationTranslations)).not.toMatch(/Достаточно суров|Юкон\?/);
-  // No company name, public page or Discord settings are offered here.
+  // Public page and Discord settings are outside this workspace.
   expect(JSON.stringify([en, ru])).not.toMatch(/Discord|public page|публичн/i);
+});
+
+test("validates settings navigation and audit filters against the registered actions", () => {
+  expect(settingsTab(null)).toBe("general");
+  expect(settingsTab("GENERAL")).toBe("general");
+  expect(settingsTab("audit")).toBe("audit");
+  expect(settingsTab("qualifications")).toBe("qualifications");
+  expect(Object.keys(auditActions).sort()).toEqual([...auditOperations].sort());
+  for (const label of Object.values(auditActions)) {
+    expect(administrationTranslations.en.auditActions[label]).toBeTruthy();
+    expect(administrationTranslations.ru.auditActions[label]).toBeTruthy();
+  }
+  expect(auditAction("configuration.changed")).toBe("configuration.changed");
+  expect(auditAction("configuration")).toBeNull();
+  expect(auditAction("constructor")).toBeNull();
+  expect(auditPath(null)).toBe("/admin/audit?view=stage3&limit=25");
+  expect(auditPath("roles.changed", "x".repeat(2049))).toBe(
+    "/admin/audit?view=stage3&limit=25&action=roles.changed",
+  );
+  expect(auditPath("roles.changed", "synthetic+/=")).toBe(
+    "/admin/audit?view=stage3&limit=25&action=roles.changed&cursor=synthetic%2B%2F%3D",
+  );
+});
+
+test("checks company zones before formatting or submitting", () => {
+  for (const valid of ["UTC", "Europe/Warsaw", "Etc/GMT+2"])
+    expect(validReportingTimezone(valid)).toBe(true);
+  for (const invalid of [null, undefined, " ", "+02:00", "Company/Missing"])
+    expect(validReportingTimezone(invalid)).toBe(false);
 });

@@ -87,6 +87,8 @@ export type Outcome = number | "abort" | { status: 429; retryAfter: number };
 export type SettingsOptions = {
   role?: "director" | "deputy" | "driver";
   emailVerified?: boolean;
+  omitCapabilities?: string[];
+  delegateQualifications?: boolean;
   reportingTimezone?: string | null;
   missingSetup?: string[];
   /** Starts with a usable code for Volga Ray. */
@@ -124,6 +126,9 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     sourcesStatus: 200,
     auditStatus: 200,
     auditEmpty: false,
+    auditTotal: undefined as number | undefined,
+    auditPageSize: 25,
+    auditStaleCursor: false,
     membersStatus: 200,
     membersEmpty: false,
     challengeStatus: 200,
@@ -147,7 +152,9 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     const roles = state.transferred ? sessionRoles.driver : sessionRoles[state.role];
     value.data.member.roles = roles;
     value.data.emailVerified = state.emailVerified;
-    value.data.capabilities = capabilities(roles);
+    value.data.capabilities = capabilities(roles).filter(
+      (capability) => !options.omitCapabilities?.includes(capability),
+    );
     value.data.preferences.displayTimezone = options.displayTimezone ?? "Europe/Berlin";
     return value;
   };
@@ -158,6 +165,7 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       url = new URL(request.url()),
       path = url.pathname.replace("/api/v1", ""),
       method = request.method();
+    if (options.delegateQualifications && path.includes("qualification")) return route.fallback();
     if (path === "/me") return route.fulfill({ json: self(), headers: { ETag: '"me-1"' } });
     if (path === "/auth/csrf")
       return route.fulfill({ json: envelope({ token: "NONFUNCTIONAL_FIXTURE" }) });
@@ -209,21 +217,86 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     }
     if (method === "GET" && path === "/admin/audit") {
       if (state.auditStatus !== 200) return route.fulfill(failure(state.auditStatus));
-      const entries: S["AuditEntry"][] = [
-        ["configuration.changed", ids.self, ids.company, "2026-10-31T16:02:00.000Z"],
-        ["membership.changed", ids.volga, ids.kestrel, "2026-10-30T08:05:00.000Z"],
-        ["application.reviewed", ids.self, ids.cedar, "2026-10-28T12:10:00.000Z"],
-        ["catalog.published", null, ids.company, "2026-10-02T17:30:00.000Z"],
-        ["synthetic.unregistered", ids.volga, ids.cedar, "2026-09-01T16:00:00.000Z"],
-      ].map(([action, actorId, subjectId, occurredAt], index) => ({
-        id: `d6500000-0000-4000-8000-00000000000${index + 1}`,
-        action: action as string,
-        actorId: actorId as string | null,
-        subjectId: subjectId as string,
-        occurredAt: occurredAt as string,
-      }));
+      const view = url.searchParams.get("view"),
+        action = url.searchParams.get("action"),
+        cursor = url.searchParams.get("cursor"),
+        limit = url.searchParams.get("limit");
+      if (view !== "stage3" || limit !== "25") return route.fulfill(failure(422));
+      if (cursor && (state.auditStaleCursor || cursor !== "synthetic+second/page="))
+        return route.fulfill(failure(409));
+      const base = {
+        actorId: ids.self,
+        actorNickname: "Fictional Director",
+        subjectId: ids.company,
+      };
+      const entries: S["AuditStage3Entry"][] = [
+        {
+          ...base,
+          id: "d6500000-0000-4000-8000-000000000001",
+          action: "configuration.changed",
+          objectType: "company",
+          objectName: "Yukon Union",
+          occurredAt: "2026-10-31T16:02:00.000Z",
+          details: {
+            before: { reportingTimezone: null },
+            after: { reportingTimezone: "America/Edmonton" },
+          },
+        },
+        {
+          ...base,
+          id: "d6500000-0000-4000-8000-000000000002",
+          action: "membership.changed",
+          objectType: "user",
+          objectName: names.cedar,
+          subjectId: ids.cedar,
+          occurredAt: "2026-10-30T08:05:00.000Z",
+          details: {
+            before: { status: "active", role: "trainee" },
+            after: { status: "active", role: "driver" },
+          },
+        },
+        {
+          ...base,
+          id: "d6500000-0000-4000-8000-000000000003",
+          action: "configuration.changed",
+          actorNickname: null,
+          objectType: "company",
+          objectName: null,
+          occurredAt: "2026-10-28T12:10:00.000Z",
+          details: null,
+        },
+        {
+          ...base,
+          id: "d6500000-0000-4000-8000-000000000004",
+          action: "catalog.published",
+          actorId: null,
+          actorNickname: null,
+          objectType: "catalog",
+          objectName: "Fictional catalog",
+          occurredAt: "2026-10-02T17:30:00.000Z",
+          details: null,
+        },
+        {
+          ...base,
+          id: "d6500000-0000-4000-8000-000000000005",
+          action: "synthetic.unregistered",
+          objectType: "application",
+          objectName: null,
+          occurredAt: "2026-09-01T16:00:00.000Z",
+          details: null,
+        },
+      ];
+      const filtered = state.auditEmpty
+        ? []
+        : entries.filter((row) => !action || row.action === action);
+      const offset = cursor ? state.auditPageSize : 0;
       return route.fulfill({
-        json: envelope({ items: state.auditEmpty ? [] : entries, nextCursor: null }),
+        json: envelope({
+          items: filtered.slice(offset, offset + state.auditPageSize),
+          nextCursor:
+            offset + state.auditPageSize < filtered.length ? "synthetic+second/page=" : null,
+          ...(state.auditTotal === undefined ? {} : { total: state.auditTotal }),
+        }),
       });
     }
     if (method === "GET" && path === "/admin/members") {
