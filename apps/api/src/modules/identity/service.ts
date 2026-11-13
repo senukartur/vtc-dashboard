@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { components } from "@vtc/contracts";
 import {
+  type AuditInput,
   applicationId,
   createAudit,
   idColumn,
@@ -47,6 +48,28 @@ import { SUCCESSION_WINDOW_MS, successionWindow } from "./succession-limits.js";
 
 type Self = components["schemas"]["Self"];
 type Member = typeof membership.$inferSelect;
+type IdentityAuditDetails = {
+  [Change in Extract<
+    AuditInput,
+    { subjectKind: "user"; details: unknown }
+  > as Change["operation"]]: Pick<Change, "operation" | "details">;
+};
+type AccessAuditChange =
+  | IdentityAuditDetails[keyof IdentityAuditDetails]
+  | {
+      operation: "membership.changed" | "steam.linked" | "steam.replaced";
+      details?: never;
+    };
+
+function membershipSnapshot(
+  status: Member["status"],
+  assigned: readonly Role[],
+): { status: Member["status"]; role: "trainee" | "driver" | null } {
+  const trainee = assigned.includes("trainee");
+  const driver = assigned.includes("driver");
+  return { status, role: trainee === driver ? null : trainee ? "trainee" : "driver" };
+}
+
 const REMEMBERED_SESSION_SECONDS = 30 * 24 * 60 * 60;
 type AdministrationMemberFilters = { role?: Role | undefined; search?: string | undefined };
 const company = mysqlTable("identity_company", {
@@ -381,11 +404,7 @@ export function createIdentity(
     actorId: string | null,
     id: string,
     current: Company,
-    operation:
-      | "membership.changed"
-      | "leadership.transferred"
-      | "steam.linked"
-      | "steam.replaced" = "membership.changed",
+    change: AccessAuditChange = { operation: "membership.changed" },
   ) {
     if (!ports.accessEvents) throw identityError(503);
     const [member] = await client(tx).select().from(membership).where(eq(membership.userId, id));
@@ -393,7 +412,7 @@ export function createIdentity(
     await audit.append(tx, {
       actorKind: actorId ? "user" : "system",
       actorId,
-      operation,
+      ...change,
       subjectKind: "user",
       subjectId: id,
       companyId: current.id,
@@ -425,6 +444,7 @@ export function createIdentity(
       await client(tx)
         .insert(roles)
         .values(checked.map((role) => ({ userId: id, role })));
+    return checked;
   }
   async function invalidate(tx: TxContext, row: Member, identityChange = false) {
     await ports.invalidateTelemetryCredentials?.(tx, row.userId);
@@ -733,7 +753,7 @@ export function createIdentity(
         .update(membership)
         .set({ identityEpoch: member.identityEpoch + 1, version: member.version + 1 })
         .where(eq(membership.userId, userId));
-      await changed(tx, actorId, userId, current, operation);
+      await changed(tx, actorId, userId, current, { operation });
       return { version: member.version + 1, identityEpoch: member.identityEpoch + 1 };
     },
     // Admissions locks the company before its own rows; no identity table access leaks.
@@ -756,7 +776,14 @@ export function createIdentity(
       return !!existing;
     },
     async onboardingChanged(tx: TxContext, userId: string) {
-      await changed(tx, null, userId, await lockCompany(tx));
+      const current = await lockCompany(tx);
+      await changed(tx, null, userId, current, {
+        operation: "membership.changed",
+        details: {
+          before: null,
+          after: membershipSnapshot("active", await memberRoles(tx, userId, current)),
+        },
+      });
     },
     async rateLimit(
       category: "csrf" | "login" | "challenge" | "command" | "read",
@@ -1396,17 +1423,17 @@ export function createIdentity(
               if (target.version !== expectedVersion) throw identityError(409, "VERSION_CONFLICT");
               if ((input.kind === "reinstate") !== (target.status === "inactive"))
                 throw identityError(409);
+              const explicit = (
+                await client(tx)
+                  .select({ role: roles.role })
+                  .from(roles)
+                  .where(eq(roles.userId, targetId))
+                  .for("update")
+              ).map((row) => row.role);
               if (input.kind === "membership" && input.membership) {
                 // Direct Trainee/Driver change (VTC-064A): replaces only the membership role.
                 // Other roles, qualifications, sessions, credentials and epochs stay unchanged,
                 // like trainee promotion; capabilities are recomputed from roles per request.
-                const explicit = (
-                  await client(tx)
-                    .select({ role: roles.role })
-                    .from(roles)
-                    .where(eq(roles.userId, targetId))
-                    .for("update")
-                ).map((row) => row.role);
                 const opposite = input.membership === "trainee" ? "driver" : "trainee";
                 if (explicit.includes(input.membership) && !explicit.includes(opposite))
                   throw identityError(409, "STATE_CONFLICT");
@@ -1418,7 +1445,13 @@ export function createIdentity(
                   .update(membership)
                   .set({ version: target.version + 1 })
                   .where(eq(membership.userId, targetId));
-                await changed(tx, actor.userId, targetId, current);
+                await changed(tx, actor.userId, targetId, current, {
+                  operation: "membership.changed",
+                  details: {
+                    before: membershipSnapshot(target.status, explicit),
+                    after: membershipSnapshot(target.status, [input.membership]),
+                  },
+                });
                 return { id: targetId, version: target.version + 1 };
               }
               const instant = now().toISOString();
@@ -1438,16 +1471,37 @@ export function createIdentity(
                 );
               }
               await invalidate(tx, target, input.kind !== "roles");
-              await replaceRoles(
+              const assigned = await replaceRoles(
                 tx,
                 targetId,
                 input.kind === "deactivate" ? [] : (input.roles ?? []),
               );
+              const status = input.kind === "deactivate" ? "inactive" : "active";
               await client(tx)
                 .update(membership)
-                .set({ status: input.kind === "deactivate" ? "inactive" : "active" })
+                .set({ status })
                 .where(eq(membership.userId, targetId));
-              await changed(tx, actor.userId, targetId, current);
+              await changed(
+                tx,
+                actor.userId,
+                targetId,
+                current,
+                input.kind === "roles"
+                  ? {
+                      operation: "roles.changed",
+                      details: {
+                        before: { roles: explicit.sort() },
+                        after: { roles: [...assigned].sort() },
+                      },
+                    }
+                  : {
+                      operation: "membership.changed",
+                      details: {
+                        before: membershipSnapshot(target.status, explicit),
+                        after: membershipSnapshot(status, assigned),
+                      },
+                    },
+              );
               return { id: targetId, version: target.version + 1 };
             },
           );
@@ -1526,7 +1580,13 @@ export function createIdentity(
                   .update(membership)
                   .set({ version: sql`${membership.version} + 1` })
                   .where(eq(membership.userId, id));
-                await changed(tx, actor.userId, id, current, "leadership.transferred");
+                await changed(tx, actor.userId, id, current, {
+                  operation: "leadership.transferred",
+                  details: {
+                    before: { director: id === current.directorUserId },
+                    after: { director: id === successorId },
+                  },
+                });
               }
               return { id: current.id, version: current.version + 1 };
             },
@@ -1752,6 +1812,10 @@ export function createIdentity(
               companyId: current.id,
               reason: "operator_request",
               occurredAt: now().toISOString(),
+              details: {
+                before: { reportingTimezone: current.reportingTimezone },
+                after: { reportingTimezone },
+              },
             });
             return { id: current.id, version: current.version + 1 };
           },
@@ -1988,7 +2052,13 @@ export function createIdentity(
         .update(membership)
         .set({ version: member.version + 1 })
         .where(eq(membership.userId, targetId));
-      await changed(tx, actor.userId, targetId, current);
+      await changed(tx, actor.userId, targetId, current, {
+        operation: "membership.changed",
+        details: {
+          before: membershipSnapshot(member.status, assigned),
+          after: membershipSnapshot(member.status, ["driver"]),
+        },
+      });
     },
     // Transaction-scoped seam for future source/qualification coordinators. Current state is authoritative.
     async authorizeInTransaction(tx: TxContext, actor: Actor, capability: string) {
@@ -2005,6 +2075,20 @@ export function createIdentity(
         .from(membership)
         .where(eq(membership.status, "active"));
       return Number(row?.count ?? 0);
+    },
+    // Administration has already authorized the caller on this transaction.
+    async auditNicknamesInTransaction(tx: TxContext, ids: readonly string[]) {
+      const unique = [...new Set(ids)];
+      if (unique.length > 200) throw new Error("AUDIT_NICKNAME_BOUND_EXCEEDED");
+      if (!unique.length) return new Map<string, string>();
+      const rows = await client(tx)
+        .select({ id: user.id, nickname: user.name })
+        .from(user)
+        .innerJoin(membership, eq(membership.userId, user.id))
+        .where(inArray(user.id, unique.map(applicationId)));
+      return new Map(
+        rows.filter((row) => row.nickname.trim()).map((row) => [row.id, row.nickname]),
+      );
     },
     async memberSummariesInTransaction(tx: TxContext, ids: string[]) {
       const current = await lockCompany(tx);
