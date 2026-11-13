@@ -186,7 +186,8 @@ async function reload(page: Page, locale: Locale) {
 const isTouch = (info: TestInfo) => info.project.name === "mobile-chromium";
 const count = (state: DashboardMockState, pattern: RegExp) =>
   state.requests.filter((url) => pattern.test(url.pathname + url.search)).length;
-const summaryReads = (state: DashboardMockState) => count(state, /\/me\/workspace-summary$/);
+const summaryReads = (state: DashboardMockState) =>
+  count(state, /^\/api\/v1\/me\/workspace-summary\?view=stage3$/);
 
 test(
   "workspace actions survive analytics failure and show exact bounded destinations",
