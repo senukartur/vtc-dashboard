@@ -1280,7 +1280,7 @@ test.describe("Stage 2 draft entry", () => {
       .response as components["schemas"]["EventStage2EnvelopeDraft"];
 
   test(
-    "a manager opens a draft directly, saves it and reloads without requesting media",
+    "a manager opens a draft, retries its exact save and reloads without mutating media",
     browserCase(["@functional"]),
     async ({ page }) => {
       await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
@@ -1294,9 +1294,13 @@ test.describe("Stage 2 draft entry", () => {
       };
       draft.data.fields = { ...draft.data.fields, ...retained };
       const expected = { ...draft.data.fields, title: "Fictional draft revision" };
-      const requests: string[] = [];
+      const mediaWrites: string[] = [];
       const writes: { body: unknown; etag: string | undefined; key: string | undefined }[] = [];
-      page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (path.endsWith("/media") && request.method() !== "GET")
+          mediaWrites.push(request.method());
+      });
       let loseReceipt = true;
       await page.route(`**${path}`, async (route) => {
         const request = route.request();
@@ -1323,12 +1327,16 @@ test.describe("Stage 2 draft entry", () => {
       await page.getByRole("button", { name: "Retry the same request" }).click();
       await expect(page.getByRole("status").filter({ hasText: "Draft saved." })).toBeVisible();
       expect(writes).toEqual([
-        { body: expected, etag: '"v1"', key: expect.stringMatching(/^[a-f0-9-]{36}$/) },
-        { body: expected, etag: '"v1"', key: writes[0]?.key },
+        {
+          body: expect.objectContaining(expected),
+          etag: '"v1"',
+          key: expect.stringMatching(/^[a-f0-9-]{36}$/),
+        },
+        { body: writes[0]?.body, etag: '"v1"', key: writes[0]?.key },
       ]);
       await page.reload();
       await expect(title).toHaveValue("Fictional draft revision");
-      expect(requests.filter((request) => request.endsWith("/media"))).toEqual([]);
+      expect(mediaWrites).toEqual([]);
     },
   );
 
@@ -1364,18 +1372,21 @@ test.describe("Stage 2 draft entry", () => {
       const save = page.getByRole("button", { name: "Save draft" });
       await save.click();
       await expect(
-        page.getByRole("alert").filter({ hasText: "The saved draft changed." }),
+        page.getByRole("alert").filter({ hasText: "The saved definition changed." }),
       ).toBeVisible();
       await expect(title).toHaveValue("Fictional local edit");
       await expect(save).toBeDisabled();
-      await page.getByRole("button", { name: "Check latest draft" }).click();
-      await expect(page.getByText("Latest saved title", { exact: true })).toBeVisible();
-      await expect(page.getByText("Fictional concurrent title", { exact: true })).toBeVisible();
-      await expect(page.getByText("Latest saved description", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Check latest version" }).click();
       await expect(
-        page.getByText("Fictional concurrent description", { exact: true }),
+        page.getByText("Latest saved title · Fictional concurrent title", { exact: true }),
       ).toBeVisible();
-      await page.getByRole("button", { name: "Keep my edits" }).click();
+      await expect(
+        page.getByText("Latest value · Fictional concurrent title", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("Latest value · Fictional concurrent description", { exact: true }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Use my edits with the latest version" }).click();
       await save.click();
       await expect(page.getByRole("status").filter({ hasText: "Draft saved." })).toBeVisible();
       expect(attempts.map(({ etag }) => etag)).toEqual(['"v1"', '"v2"']);
@@ -1384,6 +1395,134 @@ test.describe("Stage 2 draft entry", () => {
         description: "Fictional local description",
         distanceKm: "12.5",
       });
+    },
+  );
+
+  test(
+    "a reopened draft publishes with the fresh revision after saving and without reading the retired draft",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+      const draft = fixture();
+      const definition = stage2Fixture("publishEventDraft", "retains-identity")
+        .response as components["schemas"]["EventStage2EnvelopeMember"];
+      const publishedDefinition = stage2Fixture("getEvent", "structured")
+        .response as components["schemas"]["EventStage2EnvelopeMember"];
+      const source = publishedDefinition.data;
+      draft.data.fields = {
+        title: source.event.title,
+        description: source.event.description,
+        game: source.event.game,
+        platform: source.event.platform,
+        server: source.event.server,
+        meetingAt: source.event.meetingAt,
+        startsAt: source.event.startsAt,
+        originCityId: source.event.origin?.entityId ?? null,
+        destinationCityId: source.event.destination?.entityId ?? null,
+        organizerMemberId: source.organizerMemberId,
+        visibility: source.visibility,
+      };
+      definition.data.event.id = stage2DraftId;
+      let published = false;
+      let retiredReads = 0;
+      const writes: { method: string; etag: string | undefined }[] = [];
+      await page.route("**/api/v1/**", async (route) => {
+        const request = route.request();
+        const target = new URL(request.url()).pathname;
+        const method = request.method();
+        const etag = request.headers()["if-match"];
+        if (target === path) {
+          if (method === "PATCH") {
+            writes.push({ method, etag });
+            draft.data.fields = request.postDataJSON();
+            draft.data.version = 2;
+          } else if (published) {
+            retiredReads++;
+            return route.fulfill({ status: 404 });
+          }
+          return route.fulfill({ json: draft, headers: { ETag: `"v${draft.data.version}"` } });
+        }
+        if (target === `/api/v1/admin/events/${stage2DraftId}/publication` && method === "POST") {
+          writes.push({ method, etag });
+          published = true;
+          definition.data.event.title = draft.data.fields.title ?? "";
+          return route.fulfill({ json: definition, headers: { ETag: '"v1"' } });
+        }
+        if (target === `/api/v1/events/${stage2DraftId}` && method === "GET" && published) {
+          return route.fulfill({ json: definition, headers: { ETag: '"v1"' } });
+        }
+        return route.fallback();
+      });
+
+      await page.goto(url);
+      const title = page.getByRole("textbox", { name: "Event title" });
+      await title.fill("Fictional published draft");
+      await title.press("Enter");
+      expect(writes).toEqual([]);
+      await page.getByRole("button", { name: "Publish event", exact: true }).press("Space");
+      await expect(page).toHaveURL(`/account/events/${stage2DraftId}`);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("Fictional published draft");
+      expect(writes).toEqual([
+        { method: "PATCH", etag: '"v1"' },
+        { method: "POST", etag: '"v2"' },
+      ]);
+      expect(retiredReads).toBe(0);
+    },
+  );
+
+  test(
+    "a manager edits a structured published event through the detail dialog",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockEventsStage2(page, "manager");
+      const detail = stage2Fixture("getEvent", "structured")
+        .response as components["schemas"]["EventStage2EnvelopeMember"];
+      const updatedTitle = "Fictional revised structured convoy";
+      const adminPath = `/api/v1/admin/events/${detail.data.event.id}`;
+      let committed = false;
+      await page.route("**/api/v1/**", async (route) => {
+        const request = route.request();
+        const current = new URL(request.url());
+        if (current.pathname === adminPath && request.method() === "PATCH") {
+          expect(current.searchParams.get("locale")).toBe("en");
+          expect(request.headers()["if-match"]).toBe('"v1"');
+          expect(request.postDataJSON()).toMatchObject({
+            title: updatedTitle,
+            originDepotId: detail.data.event.originDepot?.id,
+            destinationDepotId: detail.data.event.destinationDepot?.id ?? null,
+            distanceKm: detail.data.event.distanceKm,
+          });
+          detail.data.event.title = updatedTitle;
+          detail.data.event.version = 2;
+          committed = true;
+          return route.fulfill({ json: detail, headers: { ETag: '"v2"' } });
+        }
+        if (
+          current.pathname === `/api/v1/events/${detail.data.event.id}` &&
+          request.method() === "GET" &&
+          committed
+        ) {
+          return route.fulfill({ json: detail, headers: { ETag: '"v2"' } });
+        }
+        return route.fallback();
+      });
+      await page.goto(detailsPath);
+      const edit = page.getByRole("button", { name: "Edit event", exact: true });
+      await edit.click();
+      const dialog = page.getByRole("dialog", { name: "Edit event" });
+      await expect(dialog.getByRole("group", { name: "Screenshots", exact: true })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Save draft" })).toHaveCount(0);
+      await dialog.getByRole("textbox", { name: "Event title" }).fill(updatedTitle);
+      await dialog.getByRole("button", { name: "Save changes" }).click();
+      await expect(dialog.getByRole("status").filter({ hasText: "Changes saved." })).toBeVisible();
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(updatedTitle);
+      await expect(edit).toBeFocused();
+      expect(
+        state.requests.some(
+          ({ route }) => route === `GET /admin/events/${detail.data.event.id}/media`,
+        ),
+      ).toBe(true);
     },
   );
 
@@ -1420,7 +1559,7 @@ test.describe("Stage 2 draft entry", () => {
         ).toBeVisible();
         await expect(title).toHaveCount(0);
         await expect(page.getByRole("button", { name: "Retry the same request" })).toHaveCount(0);
-        await expect(page.getByRole("button", { name: "Check latest draft" })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Check latest version" })).toHaveCount(0);
         expect(writes).toBe(1);
         expect(terminalReads).toBe(terminalRead ? 1 : 0);
       },
@@ -1450,7 +1589,7 @@ test.describe("Stage 2 draft entry", () => {
   for (const routesEnabled of [false, true]) {
     test(
       routesEnabled
-        ? "a manager sees legacy creation when routes are on and drafts are off"
+        ? "a manager can publish directly when routes are on and drafts are off"
         : "a manager sees legacy creation when routes and drafts are off",
       browserCase(["@functional"]),
       async ({ page }) => {
@@ -1461,6 +1600,8 @@ test.describe("Stage 2 draft entry", () => {
           const path = new URL(request.url()).pathname;
           if (
             path.startsWith("/api/v1/admin/events/drafts/") ||
+            path.endsWith("/media") ||
+            path === "/api/v1/me/upload-policy" ||
             (path === "/api/v1/admin/events" && request.method() === "POST")
           ) {
             draftTraffic.push(request.method());
@@ -1485,6 +1626,14 @@ test.describe("Stage 2 draft entry", () => {
           page.getByRole("heading", { name: "Create event", exact: true }),
         ).toBeVisible();
         await expect(page.getByRole("textbox", { name: "Event title" })).toBeVisible();
+        await expect(
+          page.getByRole("button", {
+            name: routesEnabled ? "Publish event" : "Create event",
+            exact: true,
+          }),
+        ).toBeEnabled();
+        await expect(page.getByRole("group", { name: "Screenshots", exact: true })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Save draft", exact: true })).toHaveCount(0);
         expect(draftTraffic).toEqual([]);
       },
     );
