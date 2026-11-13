@@ -239,7 +239,12 @@ async function mockPromotions(
       const failure = state.fail;
       state.fail = null;
       if (failure === "conflict") {
-        state.current = { ...state.current, version: 8, nextLevel: changedLevel };
+        state.current = {
+          ...chosen,
+          version: chosen.version + 1,
+          nextLevel: changedLevel,
+        };
+        if (state.other?.member.id === chosen.member.id) state.other = null;
         return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
       }
       state.committed = true;
@@ -390,7 +395,9 @@ test(
     );
     await tabs(page).getByRole("link", { name: "History" }).click();
     await expect(history(page)).toContainText("Verified progress");
-    await tabs(page).getByRole("link", { name: "Ready" }).click();
+    const readyTab = tabs(page).getByRole("link", { name: "Ready" });
+    await readyTab.click();
+    await expect(readyTab).toHaveAttribute("aria-current", "page");
     await page.getByRole("combobox", { name: "Game" }).selectOption("ats");
     await expect(candidates(page).getByRole("rowheader")).toContainText(ats.nickname);
   },
@@ -423,6 +430,61 @@ test(
     expect(state.commands[1]).toMatchObject({
       version: '"v8"',
       body: { targetLevelId: changedLevel.id },
+    });
+    expect(state.commands[1]?.key).not.toBe(state.commands[0]?.key);
+  },
+);
+
+test(
+  "A stale confirmation on page two exposes conflict and requires a fresh confirmation",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockPromotions(page);
+    state.other = { ...first, member: second, assignmentId: id(17), version: 12 };
+    state.fail = "conflict";
+    await page.goto(path);
+    await page.getByRole("button", { name: "Next page" }).click();
+    await expect(page).toHaveURL(/cursor=second-candidate-page$/);
+
+    const promote = page.getByRole("button", { name: `Promote ${second.nickname}` });
+    const dialog = confirmDialog(page);
+    const confirm = dialog.getByRole("button", { name: "Confirm promotion" });
+    const reason = dialog.getByRole("textbox", { name: "Reason" });
+    await promote.click();
+    await reason.fill("Review changed qualification");
+    await confirm.click();
+    await expect(page).toHaveURL(/game=ets2&tab=ready$/);
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("alert")).toContainText("eligibility or next level changed");
+    const review = page.getByRole("button", { name: "Review updated candidates" });
+    await expect(review).toBeFocused();
+    await expect(promote).toBeDisabled();
+
+    await review.click();
+    await expect(heading(page)).toBeFocused();
+    await expect(promote).toBeEnabled();
+    expect(state.commands).toHaveLength(1);
+    await promote.click();
+    await expect(dialog).toContainText(changedLevel.name);
+    await expect(reason).toHaveValue("Review changed qualification");
+    expect(state.commands).toHaveLength(1);
+    await confirm.click();
+    await expect(page.getByText(`${second.nickname} was promoted in ETS2.`)).toBeVisible();
+    expect(state.commands).toHaveLength(2);
+    expect(state.commands[0]).toMatchObject({
+      path: `/api/v1/admin/members/${second.id}/promotions`,
+      version: '"v12"',
+      body: { targetLevelId: nextLevel.id },
+    });
+    expect(state.commands[1]).toMatchObject({
+      path: `/api/v1/admin/members/${second.id}/promotions`,
+      version: '"v13"',
+      body: {
+        game: "ets2",
+        assignmentId: id(17),
+        targetLevelId: changedLevel.id,
+        reason: "Review changed qualification",
+      },
     });
     expect(state.commands[1]?.key).not.toBe(state.commands[0]?.key);
   },

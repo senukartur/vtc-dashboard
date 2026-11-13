@@ -101,11 +101,11 @@ function PromotionsWorkspace() {
     if (cursor) {
       if (open) {
         // Cursor replacement closes a location-bound preview. Keep its focus on this page.
-        focusReturn.current = "heading";
+        focusReturn.current = command.conflict ? "recovery" : "heading";
       }
       setParams(searchParams({ tab, game, memberId }), { replace: true });
     }
-  }, [changed, cursor, game, memberId, open, setParams, tab]);
+  }, [changed, command.conflict, cursor, game, memberId, open, setParams, tab]);
 
   function firstPage(replace = false) {
     if (cursor) setParams(searchParams(filters), { replace });
@@ -206,18 +206,30 @@ function PromotionsWorkspace() {
         <div className="promotion-recovery stack">
           {command.busy && <p role="status">{t("saving")}</p>}
           {command.held && <p role="status">{t("uncertain")}</p>}
+          {command.conflict && (
+            <p role="alert" className="field-error">
+              {t("conflict")}
+            </p>
+          )}
           <div className="promotion-selected">
             <Button
               ref={recovery}
               type="button"
               variant="outline"
+              aria-disabled={command.conflict && command.blocked ? true : undefined}
               onClick={() => {
+                if (command.conflict) {
+                  if (command.blocked) return;
+                  heading.current?.focus();
+                  command.reviewAgain();
+                  return;
+                }
                 trigger.current = null;
                 focusReturn.current = null;
                 command.openPreview();
               }}
             >
-              {t(command.held ? "recover" : "openPreview")}
+              {t(command.conflict ? "reviewCandidates" : command.held ? "recover" : "openPreview")}
             </Button>
           </div>
         </div>
