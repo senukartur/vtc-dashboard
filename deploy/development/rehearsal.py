@@ -852,6 +852,8 @@ def core():
         notification_grants = json.loads((base / 'notifications-grants.prepared.json').read_text())
         baseline = json.loads((base / 'activation-grants.json').read_text())
         deltas = {}
+        dispatch_tables = {'trip_review_reasons', 'reconciliation_candidate_dismissals'}
+        applied = []
         for role in ['runtime', 'jobs']:
             combined = {table: set(permissions) for table, permissions in manual_grants[role].items()}
             for table, permissions in prepared[role].items():
@@ -866,14 +868,29 @@ def core():
                 assert re.fullmatch('[a-z_]+', table)
                 assert all(re.fullmatch(r'SELECT|INSERT|UPDATE|DELETE|UPDATE\([a-z_,]+\)', p) for p in permissions)
                 deltas[role][table] = sorted(permissions)
-                sql(f"GRANT {','.join(sorted(permissions))} ON vtc.{table} TO 'vtc_{role}'@'%';")
+
+        def apply_decision_grants(dispatch):
+            for role, tables in deltas.items():
+                for table, permissions in tables.items():
+                    if (table in dispatch_tables) == dispatch:
+                        sql(f"GRANT {','.join(permissions)} ON vtc.{table} TO 'vtc_{role}'@'%';")
+                        applied.append((role, table, permissions))
+
+        def decision_proof(service, phase):
+            print(f'Trip decision restricted grants phase: {phase} STARTED', flush=True)
+            compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                     f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                     'node', 'operations/trip-decisions-grants-smoke.mjs', phase], revision=revision)
+            print(f'Trip decision restricted grants phase: {phase} PASS', flush=True)
+
         try:
-            for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker')]:
-                print(f'Trip decision restricted grants phase: {phase} STARTED', flush=True)
-                compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
-                         f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
-                         'node', 'operations/trip-decisions-grants-smoke.mjs', phase], revision=revision)
-                print(f'Trip decision restricted grants phase: {phase} PASS', flush=True)
+            apply_decision_grants(False)
+            decision_proof('manual-runtime', 'produce')
+            decision_proof('manual-worker', 'worker')
+            apply_decision_grants(True)
+            decision_proof('manual-runtime', 'produce-stage3')
+            decision_proof('trip-decision-seed', 'seed-stage3-worker')
+            decision_proof('manual-worker', 'worker-stage3')
             for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker'), ('manual-runtime', 'read')]:
                 print(f'Notification restricted grants phase: {phase} STARTED', flush=True)
                 previous_grants = None
@@ -907,16 +924,15 @@ def core():
                         print('Notification worker profile: exact prior table/column grants restored and read back', flush=True)
                 print(f'Notification restricted grants phase: {phase} PASS', flush=True)
         finally:
-            for role, tables in deltas.items():
-                for table, permissions in tables.items():
-                    sql(f"REVOKE {','.join(permissions)} ON vtc.{table} FROM 'vtc_{role}'@'%';")
+            for role, table, permissions in reversed(applied):
+                sql(f"REVOKE {','.join(permissions)} ON vtc.{table} FROM 'vtc_{role}'@'%';")
             for role in ['runtime', 'jobs']:
                 sql(f"REVOKE SELECT ON vtc.synthetic_trip_decision_guard FROM 'vtc_{role}'@'%';")
             sql("DROP TABLE vtc.synthetic_trip_decision_guard;")
             for role in ['runtime', 'jobs']:
                 sql(f"REVOKE SELECT ON vtc.synthetic_notification_guard FROM 'vtc_{role}'@'%';")
             sql("DROP TABLE vtc.synthetic_notification_guard;")
-        print('Trip decision restricted grants: runtime accept/replay/derived correction, separate worker catch-up/duplicate pass, source/history/DDL denials passed; hosted activation pending', flush=True)
+        print('Trip decision restricted grants: legacy writes with both Stage 3 tables denied, enabled runtime decisions and dismissals, enabled worker reason writes, immutable source/history and DDL denials passed; hosted activation pending', flush=True)
     with rehearsal_phase('core-worker-cleanup-races'):
         # Real Docker objects prove absence after a lost removal reply and after an
         # auto-removal wins the inventory/inspection race. Only the reply boundary is injected.

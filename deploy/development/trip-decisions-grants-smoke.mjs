@@ -17,7 +17,11 @@ import { composeIdentity } from "../dist/use-cases/identity-messaging.js";
 assert.equal(process.env.MANUAL_SYNTHETIC_ACK, "synthetic-only");
 const phase = process.argv[2],
   run = process.env.MANUAL_REHEARSAL_RUN ?? "";
-assert.ok(["seed", "produce", "worker"].includes(phase));
+assert.ok(
+  ["seed", "produce", "worker", "produce-stage3", "seed-stage3-worker", "worker-stage3"].includes(
+    phase,
+  ),
+);
 assert.match(run, /^[a-f0-9]{32}$/);
 const mysql = createRequire(import.meta.resolve("@vtc/db"))("mysql2/promise"),
   connection = await mysql.createConnection(settingsFromEnvironment());
@@ -52,9 +56,12 @@ const compose = (stage3 = false) =>
     undefined,
     stage3,
   );
-const composed = compose();
+const stage3 = phase === "produce-stage3" || phase === "worker-stage3";
+const composed = compose(stage3);
 const {
   identity,
+  workspaceSummary,
+  reconciliation,
   catalogs,
   qualifications,
   trips: _tripService,
@@ -112,7 +119,7 @@ try {
     });
     step = "seed_facts";
     const tripIds = [];
-    for (let n = 0; n < 4; n++)
+    for (let n = 0; n < 6; n++)
       await unit.run(async (tx) => {
         const tripId = newId(),
           sourceId = newId(),
@@ -139,7 +146,7 @@ try {
             game: "ets2",
             version: 1,
             outcome: "delivered",
-            recording: "complete",
+            recording: n === 4 ? "partial" : "complete",
             decision: "unassessed",
             currentFactId: factId,
             ...(n >= 2 && { assessmentPending: false }),
@@ -181,7 +188,7 @@ try {
           ownerUserId: ownerId,
           game: "ets2",
           outcome: "delivered",
-          recording: "complete",
+          recording: n === 4 ? "partial" : "complete",
           start: { utc: time, basis: "event", verifiedActual: true },
           end: { utc: time, basis: "event", verifiedActual: true },
           origin: known(pins.get("origin"), "synthetic.origin"),
@@ -244,183 +251,245 @@ try {
         });
     });
     await connection.execute("UPDATE synthetic_trip_decision_guard SET refs=? WHERE id=1", [
-      JSON.stringify({ runtimeTripId: tripIds[0], workerTripId: tripIds[1], candidateId }),
+      JSON.stringify({
+        runtimeTripId: tripIds[0],
+        workerTripId: tripIds[1],
+        candidateId,
+        stage3WorkerTripId: tripIds[4],
+        stage3RuntimeTripId: tripIds[5],
+      }),
     ]);
   } else {
     const refs = typeof guard[0].refs === "string" ? JSON.parse(guard[0].refs) : guard[0].refs;
-    if (phase === "produce") {
-      step = "runtime_review";
-      const login = await identity.login("manual-rehearsal-director@example.invalid", password),
-        actor = await identity.authenticate(
-          new Headers({ cookie: login.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
-        ),
-        id = refs.runtimeTripId,
-        review = await service.review(actor, id),
-        commandKey = newId(),
-        input = {
-          decision: "accept",
-          reviewedRevisionId: review.data.factRevisionId,
-          factRevisionId: review.data.factRevisionId,
-          proposalId: null,
-          reason: "Fictional restricted runtime acceptance",
-        };
-      step = "runtime_decision";
-      const accepted = await service.decide(actor, id, commandKey, review.version, input);
-      assert.equal(accepted.data.outcome, "accepted");
-      assert.deepEqual(
-        await service.decide(actor, id, commandKey, review.version, input),
-        accepted,
+    if (phase === "seed-stage3-worker") {
+      step = "seed_stage3_worker_input";
+      const [result] = await connection.execute(
+        "UPDATE trips SET assessment_pending=TRUE WHERE id=? AND decision='unassessed' AND assessment_pending=FALSE",
+        [refs.stage3WorkerTripId],
       );
-      step = "runtime_correction";
-      const ownerLogin = await identity.login("decision-proof-driver@example.invalid", password),
-        owner = await identity.authenticate(
-          new Headers({ cookie: ownerLogin.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
+      assert.equal(result.affectedRows, 1);
+    } else {
+      const denied = (error) => [1044, 1142, 1143, 1227].includes(error.errno);
+      if (!stage3) {
+        step = "disabled_stage3_tables_denied";
+        for (const table of ["trip_review_reasons", "reconciliation_candidate_dismissals"])
+          await assert.rejects(connection.query(`SELECT 1 FROM ${table} LIMIT 1`), denied);
+      }
+      if (phase === "produce") {
+        step = "runtime_review";
+        const login = await identity.login("manual-rehearsal-director@example.invalid", password),
+          actor = await identity.authenticate(
+            new Headers({ cookie: login.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
+          ),
+          id = refs.runtimeTripId,
+          review = await service.review(actor, id),
+          commandKey = newId(),
+          input = {
+            decision: "accept",
+            reviewedRevisionId: review.data.factRevisionId,
+            factRevisionId: review.data.factRevisionId,
+            proposalId: null,
+            reason: "Fictional restricted runtime acceptance",
+          };
+        step = "runtime_decision";
+        const accepted = await service.decide(actor, id, commandKey, review.version, input);
+        assert.equal(accepted.data.outcome, "accepted");
+        assert.deepEqual(
+          await service.decide(actor, id, commandKey, review.version, input),
+          accepted,
         );
-      const request = await manual.requestCorrection(owner, id, newId(), accepted.version, {
-        reason: "Fictional linked runtime request",
-      });
-      const proposal = await service.propose(actor, id, newId(), request.version, {
-          reason: "Fictional supported distance correction",
-          evidenceIds: [],
-          actualDistanceM: "200000",
-          correctionRequestId: request.id,
-        }),
-        detail = await service.getProposal(actor, id, proposal.data.id),
-        corrected = await service.proposalDecision(
+        step = "runtime_correction";
+        const ownerLogin = await identity.login("decision-proof-driver@example.invalid", password),
+          owner = await identity.authenticate(
+            new Headers({ cookie: ownerLogin.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
+          );
+        const request = await manual.requestCorrection(owner, id, newId(), accepted.version, {
+          reason: "Fictional linked runtime request",
+        });
+        const proposal = await service.propose(actor, id, newId(), request.version, {
+            reason: "Fictional supported distance correction",
+            evidenceIds: [],
+            actualDistanceM: "200000",
+            correctionRequestId: request.id,
+          }),
+          detail = await service.getProposal(actor, id, proposal.data.id),
+          corrected = await service.proposalDecision(
+            actor,
+            id,
+            detail.data.id,
+            newId(),
+            detail.version,
+            {
+              decision: "approve",
+              reviewedRevisionId: detail.data.revisionId,
+              reason: "Fictional verified corrected distance",
+            },
+          );
+        assert.notEqual(corrected.data.basis.factRevisionId, review.data.factRevisionId);
+        const requestReadback = await manual.corrections(owner, id, {}, request.id);
+        assert.equal(requestReadback.data.status, "resolved");
+        assert.deepEqual(requestReadback.data.history.map((h) => h.status).sort(), [
+          "pending",
+          "resolved",
+        ]);
+        const related = await service.proposals(actor, id);
+        const originating = related.items.find(
+          (p) => p.kind === "correction_request" && p.correctionRequestId === request.id,
+        );
+        assert.equal(originating.state, "approved");
+        assert.equal(detail.data.correctionRequestId, request.id);
+        const [credit] = await unit.run((tx) =>
+          unit.client(tx).select().from(tripContributions).where(eq(tripContributions.tripId, id)),
+        );
+        assert.equal(credit.credited, true);
+        assert.equal(credit.factId, corrected.data.basis.factRevisionId);
+        assert.equal(credit.actualDistanceM, "200000.000000000000000000");
+        step = "runtime_disabled_workspace";
+        const workspace = await workspaceSummary.readStage3(actor);
+        assert.ok(workspace.legacyReviewQueue);
+        assert.equal(workspace.reviewQueue, undefined);
+        await manual.requestCorrection(owner, id, newId(), corrected.version, {
+          reason: "Fictional pending request observed by restricted worker",
+        });
+      } else if (phase === "produce-stage3") {
+        step = "runtime_stage3_projection_and_dismissal";
+        const login = await identity.login("manual-rehearsal-director@example.invalid", password);
+        const actor = await identity.authenticate(
+          new Headers({
+            cookie: login.cookies.map((entry) => entry.split(";", 1)[0]).join("; "),
+          }),
+        );
+        const id = refs.stage3RuntimeTripId;
+        const review = await service.reviewStage3(actor, id);
+        const accepted = await service.decide(
           actor,
           id,
-          detail.data.id,
           newId(),
-          detail.version,
+          review.version,
           {
-            decision: "approve",
-            reviewedRevisionId: detail.data.revisionId,
-            reason: "Fictional verified corrected distance",
+            decision: "accept",
+            proposalId: null,
+            factRevisionId: review.data.factRevisionId,
+            reviewedRevisionId: review.data.factRevisionId,
           },
+          true,
         );
-      assert.notEqual(corrected.data.basis.factRevisionId, review.data.factRevisionId);
-      const requestReadback = await manual.corrections(owner, id, {}, request.id);
-      assert.equal(requestReadback.data.status, "resolved");
-      assert.deepEqual(requestReadback.data.history.map((h) => h.status).sort(), [
-        "pending",
-        "resolved",
-      ]);
-      const related = await service.proposals(actor, id);
-      const originating = related.items.find(
-        (p) => p.kind === "correction_request" && p.correctionRequestId === request.id,
-      );
-      assert.equal(originating.state, "approved");
-      assert.equal(detail.data.correctionRequestId, request.id);
-      const [credit] = await unit.run((tx) =>
-        unit.client(tx).select().from(tripContributions).where(eq(tripContributions.tripId, id)),
-      );
-      assert.equal(credit.credited, true);
-      assert.equal(credit.factId, corrected.data.basis.factRevisionId);
-      assert.equal(credit.actualDistanceM, "200000.000000000000000000");
-      step = "runtime_stage3_projection_and_dismissal";
-      const staged = compose(true);
-      const candidates = await staged.reconciliation.stage3List(actor, { game: "ets2" });
-      assert.equal(
-        candidates.items.some(({ id }) => id === refs.candidateId),
-        true,
-      );
-      const dismissalKey = newId();
-      const dismissal = await staged.reconciliation.dismissCandidate(
-        actor,
-        refs.candidateId,
-        dismissalKey,
-        1,
-        { reason: "Fictional restricted dismissal" },
-      );
-      assert.equal(dismissal.version, 2);
-      const undo = await staged.reconciliation.dismissCandidate(
-        actor,
-        refs.candidateId,
-        newId(),
-        2,
-        null,
-      );
-      assert.equal(undo.version, 3);
-      assert.deepEqual(
-        await staged.reconciliation.dismissCandidate(actor, refs.candidateId, dismissalKey, 1, {
-          reason: "Fictional restricted dismissal",
-        }),
-        dismissal,
-      );
-      await staged.manualReports.requestCorrection(owner, id, newId(), corrected.version, {
-        reason: "Fictional pending request observed by restricted worker",
-      });
-    } else {
-      step = "worker_pending_requests";
-      assert.equal(
-        await unit.run(async (tx) => {
-          await identity.qualificationContextInTransaction(tx, []);
-          return manual.hasPendingCorrectionsInTransaction(tx, refs.runtimeTripId);
-        }),
-        true,
-      );
-      await assert.rejects(
-        connection.query("UPDATE manual_correction_requests SET status=status"),
-        (e) => [1044, 1142, 1143, 1227].includes(e.errno),
-      );
-      step = "worker_catchup";
-      const staged = compose(true);
-      const workerService = staged.tripDecisions;
-      await assert.rejects(
-        connection.query("UPDATE reconciliation_candidate_dismissals SET reason=reason"),
-        (e) => [1044, 1142, 1143, 1227].includes(e.errno),
-      );
-      await workerService.catchup();
-      await runPass(createQueue(unit, [workerService.handler]), new AbortController().signal);
-      const [credit] = await unit.run((tx) =>
-        unit
-          .client(tx)
-          .select()
-          .from(tripContributions)
-          .where(eq(tripContributions.tripId, refs.workerTripId)),
-      );
-      assert.equal(credit.credited, true);
-      assert.equal(credit.actualDistanceM, "123400.000000000000000000");
-      const before = JSON.stringify(credit);
-      await runPass(createQueue(unit, [service.handler]), new AbortController().signal);
-      const [after] = await unit.run((tx) =>
-        unit
-          .client(tx)
-          .select()
-          .from(tripContributions)
-          .where(eq(tripContributions.tripId, refs.workerTripId)),
-      );
-      assert.equal(JSON.stringify(after), before);
+        assert.equal(accepted.data.outcome, "accepted");
+        assert.equal(accepted.data.reason, null);
+        const workspace = await workspaceSummary.readStage3(actor);
+        assert.ok(workspace.reviewQueue);
+        assert.equal(workspace.legacyReviewQueue, undefined);
+        const candidates = await reconciliation.stage3List(actor, { game: "ets2" });
+        assert.equal(
+          candidates.items.some(({ id }) => id === refs.candidateId),
+          true,
+        );
+        const dismissalKey = newId();
+        const value = { reason: "Fictional restricted dismissal" };
+        const dismissal = await reconciliation.dismissCandidate(
+          actor,
+          refs.candidateId,
+          dismissalKey,
+          1,
+          value,
+        );
+        assert.equal(dismissal.version, 2);
+        const undo = await reconciliation.dismissCandidate(
+          actor,
+          refs.candidateId,
+          newId(),
+          2,
+          null,
+        );
+        assert.equal(undo.version, 3);
+        assert.deepEqual(
+          await reconciliation.dismissCandidate(actor, refs.candidateId, dismissalKey, 1, value),
+          dismissal,
+        );
+      } else if (phase === "worker-stage3") {
+        step = "worker_stage3_reason_projection";
+        await assert.rejects(
+          connection.query("UPDATE reconciliation_candidate_dismissals SET reason=reason"),
+          denied,
+        );
+        await service.catchup();
+        const queue = createQueue(unit, [service.handler]);
+        await runPass(queue, new AbortController().signal);
+        const read = async () => {
+          const [rows] = await connection.execute(
+            "SELECT r.code, t.queued_at FROM trip_review_reasons r JOIN trips t ON t.id=r.trip_id WHERE r.trip_id=? ORDER BY r.code",
+            [refs.stage3WorkerTripId],
+          );
+          return rows;
+        };
+        const first = await read();
+        assert.ok(first.length > 0 && first.every((row) => row.queued_at !== null));
+        await runPass(queue, new AbortController().signal);
+        assert.deepEqual(await read(), first);
+      } else {
+        step = "worker_pending_requests";
+        assert.equal(
+          await unit.run(async (tx) => {
+            await identity.qualificationContextInTransaction(tx, []);
+            return manual.hasPendingCorrectionsInTransaction(tx, refs.runtimeTripId);
+          }),
+          true,
+        );
+        await assert.rejects(
+          connection.query("UPDATE manual_correction_requests SET status=status"),
+          (e) => [1044, 1142, 1143, 1227].includes(e.errno),
+        );
+        step = "worker_catchup";
+        await service.catchup();
+        await runPass(createQueue(unit, [service.handler]), new AbortController().signal);
+        const [credit] = await unit.run((tx) =>
+          unit
+            .client(tx)
+            .select()
+            .from(tripContributions)
+            .where(eq(tripContributions.tripId, refs.workerTripId)),
+        );
+        assert.equal(credit.credited, true);
+        assert.equal(credit.actualDistanceM, "123400.000000000000000000");
+        const before = JSON.stringify(credit);
+        await runPass(createQueue(unit, [service.handler]), new AbortController().signal);
+        const [after] = await unit.run((tx) =>
+          unit
+            .client(tx)
+            .select()
+            .from(tripContributions)
+            .where(eq(tripContributions.tripId, refs.workerTripId)),
+        );
+        assert.equal(JSON.stringify(after), before);
+      }
+      step = "immutable_denials";
+      for (const statement of [
+        "CREATE TABLE forbidden_decision (id INT)",
+        "UPDATE manual_correction_requests SET reason=reason",
+        "DELETE FROM manual_correction_requests",
+        "UPDATE manual_correction_history SET reason=reason",
+        "DELETE FROM manual_correction_history",
+        "UPDATE trip_decisions SET reason=reason",
+        "DELETE FROM trip_decisions",
+        "UPDATE trip_proposals SET reason=reason",
+        "DELETE FROM trip_proposals",
+        "UPDATE trip_proposal_reviews SET reason=reason",
+        "DELETE FROM trip_proposal_reviews",
+        "UPDATE trip_decision_commands SET result=result",
+        "DELETE FROM trip_decision_commands",
+        "UPDATE trip_resolutions SET reason=reason",
+        "DELETE FROM trip_resolutions",
+        "UPDATE source_messages SET revision=revision",
+        "DELETE FROM source_messages",
+        "UPDATE trip_facts SET actual_distance_m=actual_distance_m",
+        "DELETE FROM trip_facts",
+        "UPDATE trip_contribution_history SET snapshot=snapshot",
+        "UPDATE reconciliation_candidates SET evidence=evidence",
+        "DELETE FROM reconciliation_candidate_dismissals",
+        "UPDATE reconciliation_candidate_dismissals SET candidate_id=candidate_id",
+      ])
+        await assert.rejects(connection.query(statement), denied);
     }
-    step = "immutable_denials";
-    for (const statement of [
-      "CREATE TABLE forbidden_decision (id INT)",
-      "UPDATE manual_correction_requests SET reason=reason",
-      "DELETE FROM manual_correction_requests",
-      "UPDATE manual_correction_history SET reason=reason",
-      "DELETE FROM manual_correction_history",
-      "UPDATE trip_decisions SET reason=reason",
-      "DELETE FROM trip_decisions",
-      "UPDATE trip_proposals SET reason=reason",
-      "DELETE FROM trip_proposals",
-      "UPDATE trip_proposal_reviews SET reason=reason",
-      "DELETE FROM trip_proposal_reviews",
-      "UPDATE trip_decision_commands SET result=result",
-      "DELETE FROM trip_decision_commands",
-      "UPDATE trip_resolutions SET reason=reason",
-      "DELETE FROM trip_resolutions",
-      "UPDATE source_messages SET revision=revision",
-      "DELETE FROM source_messages",
-      "UPDATE trip_facts SET actual_distance_m=actual_distance_m",
-      "DELETE FROM trip_facts",
-      "UPDATE trip_contribution_history SET snapshot=snapshot",
-      "UPDATE reconciliation_candidates SET evidence=evidence",
-      "DELETE FROM reconciliation_candidate_dismissals",
-      "UPDATE reconciliation_candidate_dismissals SET candidate_id=candidate_id",
-    ])
-      await assert.rejects(connection.query(statement), (e) =>
-        [1044, 1142, 1143, 1227].includes(e.errno),
-      );
   }
   console.log(JSON.stringify({ event: "trip_decision_restricted_proof", phase, result: "pass" }));
 } catch {

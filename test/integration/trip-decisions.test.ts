@@ -4130,7 +4130,7 @@ test("Stage 3 Dispatch selectors share authorized counts, exact filters, ordered
   if (!on.trips || !on.manualReports || !on.tripDecisions || !off.tripDecisions)
     throw new Error("SYNTHETIC_COMPOSITION_MISSING");
   const author = await member(),
-    viewer = await member(["dispatcher"]);
+    viewer = await member(["driver", "dispatcher"]);
   const login = await on.identity.login(`${viewer.userId}@example.invalid`, password);
   const viewerHeaders = { cookie: login.cookies.map((v) => v.split(";", 1)[0]).join("; ") };
   const actor = await on.identity.authenticate(new Headers(viewerHeaders));
@@ -4279,7 +4279,8 @@ test("Stage 3 review keeps both independent sources and gates retained manual re
   );
   expect(accepted.data.reason).toBeNull();
   const telemetry = overweight();
-  telemetry.snapshot.cargoDamage = { available: true, value: 0.25 };
+  const damage = { available: true, value: 0.25, unit: "fraction" } as const;
+  telemetry.snapshot.cargoDamage = damage;
   const incoming = await retryTransaction(
     unit,
     (tx) =>
