@@ -116,11 +116,21 @@ for (const locale of ["en", "ru"] as const) {
         await expect(dialog).toHaveCount(0);
         await expect(inserted).toBeVisible();
         await panel.getByRole("button", { name: s.reviewArchive, exact: true }).click();
-        await dialog.getByRole("button", { name: s.confirmArchive, exact: true }).click();
-        await expect(inserted).toHaveCount(0);
-        expect((await snapshot()).levels.map((row) => row.id)).toEqual(
-          original.levels.map((row) => row.id),
+        const committedArchive = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === `${api}/levels/${archived.id}/archive` &&
+            response.request().method() === "POST",
         );
+        await dialog.getByRole("button", { name: s.confirmArchive, exact: true }).click();
+        const archivedResponse = await committedArchive;
+        expect(archivedResponse.status()).toBe(200);
+        expect(archivedResponse.headers().etag).toBe(`"v${latest.revision + 1}"`);
+        await expect(dialog).toHaveCount(0);
+        await expect(table).toBeVisible();
+        await expect(inserted).toHaveCount(0);
+        const refreshed = await snapshot();
+        expect(refreshed.revision).toBe(latest.revision + 1);
+        expect(refreshed.levels.map((row) => row.id)).toEqual(original.levels.map((row) => row.id));
         needsCleanup = false;
         await page.reload();
         await expect(table).toBeVisible();
