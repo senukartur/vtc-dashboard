@@ -498,7 +498,16 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  const dispatchReviewStage3Enabled = input.DISPATCH_REVIEW_STAGE3_ENABLED === "true";
+  if (
+    ![undefined, "true", "false"].includes(input.DISPATCH_REVIEW_STAGE3_ENABLED) ||
+    (dispatchReviewStage3Enabled && !tripDecisions)
+  )
+    throw new Error(
+      "Invalid environment fields: DISPATCH_REVIEW_STAGE3_ENABLED, TRIP_DECISIONS_ENABLED",
+    );
   return {
+    dispatchReviewStage3Enabled,
     notifications,
     analytics,
     tripDecisions,

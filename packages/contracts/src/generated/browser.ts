@@ -6056,6 +6056,11 @@ export interface components {
         };
         WorkspaceStage3Summary: {
             computedAt: components["schemas"]["Timestamp"];
+            /** @description Compatibility summary when Stage 3 dispatch review is disabled and the current viewer has trips.review and an enabled legacy Trips source. Mutually exclusive with reviewQueue. Exclude the viewer's own trips. */
+            legacyReviewQueue?: {
+                count: number;
+                oldestAgeSeconds: number | null;
+            };
             /** @description Requires applications.manage and enabled Admissions reads. Count submitted applications. */
             newApplicationsCount?: number;
             /** @description Requires qualifications.manage and enabled qualification progress reads. Use the authorized per-game promotion-candidate population. */

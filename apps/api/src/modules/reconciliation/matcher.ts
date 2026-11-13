@@ -8,6 +8,7 @@ export interface MatchingRule {
 }
 export interface ReconciliationConfig {
   key: string;
+  dispatchReviewStage3Enabled?: boolean;
   rule?: MatchingRule;
 }
 export const candidateBound = 100;

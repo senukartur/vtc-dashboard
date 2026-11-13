@@ -10638,6 +10638,55 @@
       }
     },
     {
+      "id": "getMyWorkspaceSummary:stage-3-dispatch-on-empty",
+      "operationId": "getMyWorkspaceSummary",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "response": {
+        "data": {
+          "computedAt": "2026-01-05T12:00:00.125Z",
+          "reviewQueue": {
+            "computedAt": "2026-01-05T12:00:00.125Z",
+            "waitingCount": 0,
+            "oldestQueuedAt": null,
+            "oldestAgeSeconds": null,
+            "duplicateCount": 0
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "getMyWorkspaceSummary:stage-3-dispatch-off-promotions-on",
+      "operationId": "getMyWorkspaceSummary",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "response": {
+        "data": {
+          "computedAt": "2026-01-05T12:00:00.125Z",
+          "legacyReviewQueue": {
+            "count": 2,
+            "oldestAgeSeconds": 86400
+          },
+          "promotionsReady": {
+            "ets2": 1,
+            "ats": 0
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
       "id": "getMyWorkspaceSummary:stage-3-limited",
       "operationId": "getMyWorkspaceSummary",
       "operationExtension": "x-stage-3-operation",

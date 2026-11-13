@@ -240,7 +240,14 @@ export async function createApp(options: AppOptions) {
     );
   }
   if (options.identity && options.trips)
-    await registerTripRoutes(app, options.identity, options.trips);
+    await registerTripRoutes(
+      app,
+      options.identity,
+      options.trips,
+      options.tripDecisions?.config.dispatchReviewStage3Enabled
+        ? options.tripDecisions.reviewQueue
+        : undefined,
+    );
   if (options.identity && options.telemetry)
     await registerTelemetryRoutes(app, options.identity, options.telemetry);
   if (options.identity && options.qualifications)
