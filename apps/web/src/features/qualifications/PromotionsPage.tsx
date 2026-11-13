@@ -1,10 +1,11 @@
-import { type RefObject, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { Card, Label, Select } from "../../shared/ui/primitives.js";
+import { Button, Card, Label, Select } from "../../shared/ui/primitives.js";
 import { PageNav } from "./components.js";
-import { PromotionConfirmation, type ReadyCandidate } from "./PromotionConfirmation.js";
+import { usePromotionCommand } from "./PromotionCommandProvider.js";
+import { PromotionConfirmation } from "./PromotionConfirmation.js";
 import {
   CandidateTable,
   HistoryMemberFilter,
@@ -19,8 +20,6 @@ import "./promotions.css";
 const tabs = ["ready", "all", "history"] as const;
 type Tab = (typeof tabs)[number];
 type Filters = { tab: Tab; game: Game; memberId: string | null };
-type Notice = { kind: "committed" | "conflict"; nickname: string; game: Game };
-type Preview = { candidate: ReadyCandidate; initialReason: string };
 type ListPage = { items: unknown[]; total: number; nextCursor: string | null };
 
 function searchParams({ tab, game, memberId }: Filters, cursor: string | null = null) {
@@ -31,7 +30,7 @@ function searchParams({ tab, game, memberId }: Filters, cursor: string | null = 
 }
 
 export function PromotionsPage() {
-  const { self, generation } = useSession();
+  const { self } = useSession();
   const { t } = useTranslation("promotions");
   if (!self?.capabilities.includes("qualifications.manage"))
     return (
@@ -42,15 +41,13 @@ export function PromotionsPage() {
         </Card>
       </div>
     );
-  const scope = [generation, self.member.id, self.identityEpoch, self.capabilities.join(",")].join(
-    ":",
-  );
-  return <PromotionsWorkspace key={scope} />;
+  return <PromotionsWorkspace />;
 }
 
 function PromotionsWorkspace() {
   const { t, i18n } = useTranslation("promotions");
   const [params, setParams] = useSearchParams();
+  const command = usePromotionCommand();
   const tabValue = params.get("tab");
   const tab: Tab = tabValue === "all" || tabValue === "history" ? tabValue : "ready";
   const game = params.get("game") === "ats" ? "ats" : "ets2";
@@ -61,12 +58,12 @@ function PromotionsWorkspace() {
   const cursor = cursorValue && cursorValue.length <= 2048 ? cursorValue : null;
   const [selection, setSelection] = useState<DTO["MemberSummary"] | null>(null);
   const previous = useRef(new Map<string, string | null>());
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [notice, setNotice] = useState<Notice | null>(null);
-  const [saved, setSaved] = useState<{ memberId: string; game: Game; reason: string } | null>(null);
+  const handledChange = useRef<typeof command.changed>(null);
+  const recovery = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
-  const focusHeading = useRef(false);
+  const focusReturn = useRef<"trigger" | "recovery" | "heading" | null>(null);
+
   const candidates = usePromotionCandidates(
     game,
     tab === "all" ? "all" : "eligible",
@@ -79,6 +76,37 @@ function PromotionsWorkspace() {
   const total = data?.total;
   const pageKey = searchParams(filters).toString();
 
+  const { changed, notice, candidate, saved, open } = command;
+  const wasOpen = useRef(open);
+
+  useLayoutEffect(() => {
+    if (!open && wasOpen.current && notice) focusReturn.current = "heading";
+    wasOpen.current = open;
+  }, [notice, open]);
+
+  useEffect(() => {
+    if (!changed || handledChange.current === changed) return;
+    handledChange.current = changed;
+    if (changed.candidate.game !== game) return;
+    if (tab === "history" && memberId && memberId !== changed.candidate.member.id) return;
+    for (const key of previous.current.keys()) {
+      const paging = new URLSearchParams(key);
+      const previousMember = paging.get("memberId");
+      if (
+        paging.get("game") === game &&
+        (!previousMember || previousMember === changed.candidate.member.id)
+      )
+        previous.current.delete(key);
+    }
+    if (cursor) {
+      if (open) {
+        // Cursor replacement closes a location-bound preview. Keep its focus on this page.
+        focusReturn.current = "heading";
+      }
+      setParams(searchParams({ tab, game, memberId }), { replace: true });
+    }
+  }, [changed, cursor, game, memberId, open, setParams, tab]);
+
   function firstPage(replace = false) {
     if (cursor) setParams(searchParams(filters), { replace });
   }
@@ -87,30 +115,24 @@ function PromotionsWorkspace() {
     setParams(searchParams({ ...filters, memberId: member?.id ?? null }));
   }
   function promote(candidate: Candidate, button: HTMLButtonElement) {
-    if (preview || !candidate.eligible || !candidate.nextLevel) return;
-    trigger.current = button;
-    focusHeading.current = false;
-    setNotice(null);
-    setPreview({
-      candidate: { ...candidate, nextLevel: candidate.nextLevel },
-      initialReason:
-        saved?.memberId === candidate.member.id && saved.game === candidate.game
-          ? saved.reason
-          : "",
-    });
-  }
-  function close(result?: { kind: "committed" | "conflict"; reason: string }) {
-    if (preview && result) {
-      const { candidate } = preview;
-      focusHeading.current = true;
-      setNotice({ kind: result.kind, nickname: candidate.member.nickname, game: candidate.game });
-      setSaved(
-        result.kind === "conflict"
-          ? { memberId: candidate.member.id, game: candidate.game, reason: result.reason }
-          : null,
-      );
+    if (command.candidate || !candidate.eligible || !candidate.nextLevel) return;
+    if (command.select({ ...candidate, nextLevel: candidate.nextLevel })) {
+      trigger.current = button;
+      focusReturn.current = null;
     }
-    setPreview(null);
+  }
+  function dismiss() {
+    focusReturn.current = command.held || !trigger.current ? "recovery" : "trigger";
+    command.dismiss();
+  }
+  function restoreFocus() {
+    const target = focusReturn.current;
+    focusReturn.current = null;
+    // Browser navigation can close the dialog while another view already owns focus.
+    if (!target || !heading.current?.isConnected) return;
+    const control =
+      target === "trigger" ? trigger.current : target === "recovery" ? recovery.current : null;
+    (control?.isConnected ? control : heading.current).focus();
   }
   const number = new Intl.NumberFormat(i18n.resolvedLanguage === "en" ? "en" : "ru");
   const selectedLabel =
@@ -174,8 +196,31 @@ function PromotionsWorkspace() {
         >
           {notice.kind === "conflict"
             ? t("conflict")
-            : t("committed", { nickname: notice.nickname, game: notice.game.toUpperCase() })}
+            : t("committed", {
+                nickname: notice.candidate.member.nickname,
+                game: notice.candidate.game.toUpperCase(),
+              })}
         </p>
+      )}
+      {candidate && !open && (
+        <div className="promotion-recovery stack">
+          {command.busy && <p role="status">{t("saving")}</p>}
+          {command.held && <p role="status">{t("uncertain")}</p>}
+          <div className="promotion-selected">
+            <Button
+              ref={recovery}
+              type="button"
+              variant="outline"
+              onClick={() => {
+                trigger.current = null;
+                focusReturn.current = null;
+                command.openPreview();
+              }}
+            >
+              {t(command.held ? "recover" : "openPreview")}
+            </Button>
+          </div>
+        </div>
       )}
       <Card className="promotion-results stack">
         <PromotionReadState query={query} cursor={cursor} onFirstPage={() => firstPage(true)} />
@@ -191,7 +236,7 @@ function PromotionsWorkspace() {
           <CandidateTable
             items={candidates.data.data.data.items}
             onPromote={promote}
-            blocked={!!preview}
+            blocked={!!candidate}
           />
         )}
         {(cursor || data?.nextCursor) && !query.isError && (
@@ -210,27 +255,20 @@ function PromotionsWorkspace() {
           />
         )}
       </Card>
-      {preview && (
+      {open && candidate && (
         <PromotionConfirmation
-          {...preview}
-          onRefresh={() => {
-            previous.current.clear();
-            firstPage(true);
-          }}
-          onClose={close}
-          onFocusReturn={() => restoreFocus(trigger, heading, focusHeading.current)}
+          candidate={candidate}
+          initialReason={
+            command.attemptReason ??
+            (saved?.candidate.member.id === candidate.member.id &&
+            saved.candidate.game === candidate.game
+              ? saved.reason
+              : "")
+          }
+          onDismiss={dismiss}
+          onFocusReturn={restoreFocus}
         />
       )}
     </div>
   );
-}
-
-function restoreFocus(
-  trigger: RefObject<HTMLButtonElement | null>,
-  heading: RefObject<HTMLHeadingElement | null>,
-  forceHeading: boolean,
-) {
-  const origin = trigger.current;
-  if (!forceHeading && origin?.isConnected) origin.focus();
-  else heading.current?.focus();
 }

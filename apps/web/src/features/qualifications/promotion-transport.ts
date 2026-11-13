@@ -5,6 +5,18 @@ type CandidateFilter = operations["listPromotionCandidates"]["parameters"]["quer
 type HistoryFilter = NonNullable<operations["listPromotionHistory"]["parameters"]["query"]>;
 export type Candidate = DTO["QualificationStage3PromotionCandidate"];
 
+export function promotionInput(
+  candidate: Candidate & { nextLevel: NonNullable<Candidate["nextLevel"]> },
+  reason: string,
+): DTO["PromotionInput"] {
+  return {
+    game: candidate.game,
+    assignmentId: candidate.assignmentId,
+    targetLevelId: candidate.nextLevel.id,
+    reason,
+  };
+}
+
 export const promotionCandidatesPath = "/admin/promotion-candidates";
 export const promotionHistoryPath = "/admin/promotion-history";
 export const qualificationMembersPath = "/admin/qualification-members";

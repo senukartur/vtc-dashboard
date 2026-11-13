@@ -25,6 +25,7 @@ import { RouteErrorBoundary } from "./RouteErrorBoundary.js";
 import { ProtectedAccount, SessionProvider } from "./Session.js";
 import { createAppQueryClient } from "./session-cache.js";
 import { NotificationsProvider } from "../features/notifications/controller.js";
+import { PromotionCommandProvider } from "../features/qualifications/PromotionCommandProvider.js";
 const NotificationsPage = lazy(() =>
   import("../features/notifications/page.js").then((module) => ({
     default: module.NotificationsPage,
@@ -303,9 +304,11 @@ export function App({ handoff }: { handoff: LinkHandoff }) {
       <BrowserRouter>
         <SessionProvider>
           <SignOutProvider>
-            <NotificationsProvider>
-              <Shell handoff={handoff} />
-            </NotificationsProvider>
+            <PromotionCommandProvider>
+              <NotificationsProvider>
+                <Shell handoff={handoff} />
+              </NotificationsProvider>
+            </PromotionCommandProvider>
           </SignOutProvider>
         </SessionProvider>
       </BrowserRouter>

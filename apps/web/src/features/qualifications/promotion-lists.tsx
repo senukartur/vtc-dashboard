@@ -120,6 +120,9 @@ export function CandidateTable({
           <tr key={candidate.assignmentId} role="row">
             <th scope="row" role="rowheader">
               {candidate.member.nickname}
+              <code className="promotion-member-id" title={candidate.member.id}>
+                {candidate.member.id.slice(-12)}
+              </code>
             </th>
             <PromotionCell label={t("game")}>{candidate.game.toUpperCase()}</PromotionCell>
             <PromotionCell label={t("transition")}>
@@ -147,6 +150,7 @@ export function CandidateTable({
                   type="button"
                   aria-disabled={blocked || undefined}
                   aria-label={t("promoteDriver", { nickname: candidate.member.nickname })}
+                  aria-description={candidate.member.id}
                   onClick={(event) => onPromote(candidate, event.currentTarget)}
                 >
                   {t("promote")}
@@ -185,6 +189,9 @@ export function HistoryTable({ items }: { items: HistoryItem[] }) {
           <tr key={`${item.kind}:${item.id}`} role="row">
             <th scope="row" role="rowheader">
               {item.member.nickname}
+              <code className="promotion-member-id" title={item.member.id}>
+                {item.member.id.slice(-12)}
+              </code>
             </th>
             <PromotionCell label={t("game")}>{item.game.toUpperCase()}</PromotionCell>
             <PromotionCell label={t("action")}>
@@ -245,7 +252,10 @@ export function HistoryMemberFilter({
       </div>
       {memberId && (
         <div className="promotion-selected">
-          <span>{memberLabel ?? memberId}</span>
+          <span>
+            {memberLabel}
+            <code className="promotion-member-id">{memberId}</code>
+          </span>
           <Button type="button" variant="outline" onClick={() => onSelect(null)}>
             {t("allMembers")}
           </Button>
@@ -302,15 +312,12 @@ function HistoryMemberResults({
               {t("chooseMember")}
             </option>
             {items.map((member) => {
-              const duplicate = items.some(
-                (other) => other.id !== member.id && other.nickname === member.nickname,
-              );
               const former = member.formerMember ? ` · ${t("former")}` : "";
               return (
                 <option key={member.id} value={member.id}>
                   {member.nickname}
                   {former}
-                  {duplicate ? ` · ${member.id}` : ""}
+                  {` · ${member.id}`}
                 </option>
               );
             })}

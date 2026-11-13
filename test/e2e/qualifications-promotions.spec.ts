@@ -106,7 +106,11 @@ function defer() {
 
 async function mockPromotions(
   page: Page,
-  { role = "director", locale = "en" }: { role?: Role; locale?: "ru" | "en" } = {},
+  {
+    role = "director",
+    locale = "en",
+    selfPromotion = false,
+  }: { role?: Role; locale?: "ru" | "en"; selfPromotion?: boolean } = {},
 ) {
   const self = accountFixture(locale);
   self.data.member.roles = [role];
@@ -115,17 +119,22 @@ async function mockPromotions(
   const state = {
     reads: [] as URL[],
     commands: [] as {
+      path: string;
       body: S["PromotionInput"];
       key: string | undefined;
       version: string | undefined;
       csrf: string | undefined;
     }[],
-    current: { ...first },
+    current: selfPromotion ? { ...first, member: self.data.member } : { ...first },
+    other: null as Candidate | null,
     committed: false,
     fail: null as "conflict" | "uncertain" | "invalidReceipt" | null,
     gate: null as Promise<void> | null,
     forbidden: false,
     selfReads: 0,
+    candidateReadsAfterSelfRefresh: 0,
+    summaryReadsAfterSelfRefresh: 0,
+    selfRefreshed: false,
   };
   await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);
@@ -136,16 +145,19 @@ async function mockPromotions(
     const cursor = url.searchParams.get("cursor");
     if (url.pathname === "/api/v1/me") {
       state.selfReads++;
+      state.selfRefreshed = selfPromotion && self.data.capabilities.includes("trips.submit_own");
       return route.fulfill({ json: self });
     }
     if (url.pathname === "/api/v1/auth/csrf")
       return route.fulfill({ json: envelope({ token: "synthetic-csrf" }) });
     if (url.pathname === summaryPath) {
       state.reads.push(url);
+      if (state.selfRefreshed) state.summaryReadsAfterSelfRefresh++;
       return route.fulfill({ json: envelope({ computedAt: instant }) });
     }
     if (url.pathname === candidatePath) {
       state.reads.push(url);
+      if (state.selfRefreshed) state.candidateReadsAfterSelfRefresh++;
       if (state.forbidden) return route.fulfill({ status: 403, json: {} });
       if (cursor === "expired")
         return route.fulfill({
@@ -166,10 +178,10 @@ async function mockPromotions(
         game === "ats"
           ? [atsCandidate]
           : all
-            ? [state.committed ? promoted : state.current, terminal]
+            ? [state.committed ? promoted : state.current, state.other ?? terminal]
             : state.committed
               ? []
-              : [state.current];
+              : [state.current, ...(state.other ? [state.other] : [])];
       return route.fulfill({
         json: envelope({
           items: cursor ? rows.slice(1) : rows.slice(0, 1),
@@ -198,7 +210,9 @@ async function mockPromotions(
     if (url.pathname === searchPath) {
       state.reads.push(url);
       const term = url.searchParams.get("search")?.toLowerCase() ?? "";
-      const rows = [main, second, ats].filter((item) => item.nickname.toLowerCase().includes(term));
+      const rows = [state.current.member, state.other?.member ?? second, ats].filter((item) =>
+        item.nickname.toLowerCase().includes(term),
+      );
       return route.fulfill({
         json: envelope({
           items: cursor ? rows.slice(1) : rows.slice(0, 1),
@@ -207,11 +221,15 @@ async function mockPromotions(
       });
     }
     if (
-      url.pathname === `/api/v1/admin/members/${state.current.member.id}/promotions` &&
+      /^\/api\/v1\/admin\/members\/[^/]+\/promotions$/.test(url.pathname) &&
       req.method() === "POST"
     ) {
+      const memberId = url.pathname.split("/").at(-2);
+      const chosen = [state.current, state.other].find((item) => item?.member.id === memberId);
+      if (!chosen) return route.fulfill({ status: 404, json: {} });
       const headers = req.headers();
       state.commands.push({
+        path: url.pathname,
         body: req.postDataJSON(),
         key: headers["idempotency-key"],
         version: headers["if-match"],
@@ -225,16 +243,18 @@ async function mockPromotions(
         return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
       }
       state.committed = true;
+      if (selfPromotion) {
+        self.data.member.roles = [role, "driver"];
+        self.data.capabilities = capabilities([role, "driver"]);
+      }
       if (failure === "uncertain") return route.abort("failed");
       const body: S["Assignment"] = {
         id: id(13),
         periodId: id(13),
-        game: state.current.game,
+        game: chosen.game,
         assignedAt: historyInstant,
         levelId:
-          failure === "invalidReceipt"
-            ? firstLevel.id
-            : (state.current.nextLevel?.id ?? nextLevel.id),
+          failure === "invalidReceipt" ? firstLevel.id : (chosen.nextLevel?.id ?? nextLevel.id),
       };
       return route.fulfill({ headers: { ETag: '"v9"' }, json: envelope(body) });
     }
@@ -256,7 +276,7 @@ test(
     const state = await mockPromotions(page);
     await page.goto(`${path}?game=all&tab=unsupported&memberId=invalid`);
     await expect(heading(page)).toBeVisible();
-    await expect(candidates(page).getByRole("rowheader")).toHaveText(main.nickname);
+    await expect(candidates(page).getByRole("rowheader")).toContainText(main.nickname);
     await expect(page.getByText("1 candidate", { exact: true })).toBeVisible();
     await expect(candidates(page)).toContainText("19 Oct 2026, 08:15");
     await expect(candidates(page)).toContainText("1.250000000000000000001 km / 1 km");
@@ -270,15 +290,15 @@ test(
     await tabs(page).getByRole("link", { name: "All", exact: true }).click();
     await expect(page.getByText("2 candidates", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Next page" }).click();
-    await expect(candidates(page).getByRole("rowheader")).toHaveText(second.nickname);
+    await expect(candidates(page).getByRole("rowheader")).toContainText(second.nickname);
     await expect(candidates(page)).toContainText("No next level");
     await expect(candidates(page)).toContainText("3 / No minimum");
     await expect(candidates(page).getByRole("button", { name: /Promote/ })).toHaveCount(0);
     await page.getByRole("button", { name: "Previous page" }).click();
-    await expect(candidates(page).getByRole("rowheader")).toHaveText(main.nickname);
+    await expect(candidates(page).getByRole("rowheader")).toContainText(main.nickname);
 
     await page.getByRole("combobox", { name: "Game" }).selectOption("ats");
-    await expect(candidates(page).getByRole("rowheader")).toHaveText(ats.nickname);
+    await expect(candidates(page).getByRole("rowheader")).toContainText(ats.nickname);
     await expect(candidates(page)).toContainText("Unknown");
     expect(
       state.reads
@@ -306,7 +326,7 @@ test(
     await expect(history(page).locator("time")).toHaveAttribute("datetime", instant);
     await page.getByRole("searchbox", { name: "Search by nickname" }).fill("  tunDra  ");
     await page.getByRole("combobox", { name: "Select a driver" }).selectOption(second.id);
-    await expect(history(page).getByRole("rowheader")).toHaveText(second.nickname);
+    await expect(history(page).getByRole("rowheader")).toContainText(second.nickname);
     await expect(page.getByText("1 action", { exact: true })).toBeVisible();
     expect(state.reads.find((url) => url.pathname === searchPath)?.searchParams.toString()).toBe(
       "view=stage3&search=tunDra&limit=25",
@@ -316,7 +336,7 @@ test(
     expect(request?.searchParams.get("cursor")).toBeNull();
     expect(state.reads.filter((url) => url.pathname === candidatePath)).toHaveLength(0);
     await page.getByRole("button", { name: "All drivers", exact: true }).click();
-    await expect(history(page).getByRole("rowheader")).toHaveText(main.nickname);
+    await expect(history(page).getByRole("rowheader")).toContainText(main.nickname);
   },
 );
 
@@ -347,6 +367,7 @@ test(
       await expect(dialog).toBeVisible();
       await expect.poll(() => state.commands.length).toBe(1);
       expect(state.commands[0]).toEqual({
+        path: `/api/v1/admin/members/${main.id}/promotions`,
         body: {
           game: "ets2",
           assignmentId: first.assignmentId,
@@ -371,7 +392,7 @@ test(
     await expect(history(page)).toContainText("Verified progress");
     await tabs(page).getByRole("link", { name: "Ready" }).click();
     await page.getByRole("combobox", { name: "Game" }).selectOption("ats");
-    await expect(candidates(page).getByRole("rowheader")).toHaveText(ats.nickname);
+    await expect(candidates(page).getByRole("rowheader")).toContainText(ats.nickname);
   },
 );
 
@@ -432,6 +453,163 @@ for (const failure of ["uncertain", "invalidReceipt"] as const)
   );
 
 test(
+  "A lost receipt is recoverable after navigating Back and Forward",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockPromotions(page);
+    const gate = defer();
+    state.fail = "uncertain";
+    state.gate = gate.promise;
+    await page.goto("/account/dashboard");
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("link", { name: "Promotions", exact: true })
+      .click();
+    await page.getByRole("button", { name: `Promote ${main.nickname}` }).click();
+    const dialog = confirmDialog(page);
+    await dialog.getByRole("textbox", { name: "Reason" }).fill("Verified progress");
+    await dialog.getByRole("button", { name: "Confirm promotion" }).click();
+    try {
+      await expect.poll(() => state.commands.length).toBe(1);
+      await page.goBack();
+      await expect(page).toHaveURL(/\/account\/dashboard$/);
+      await expect(dialog).toHaveCount(0);
+      await page.goForward();
+      await expect(heading(page)).toBeVisible();
+      await expect(page.getByText("Confirming…", { exact: true })).toBeVisible();
+    } finally {
+      gate.release();
+    }
+    await page.getByRole("button", { name: "Retry original confirmation" }).click();
+    await expect(dialog.getByRole("textbox", { name: "Reason" })).toHaveValue("Verified progress");
+    await dialog.getByRole("button", { name: "Retry original confirmation" }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(state.commands).toEqual([state.commands[0], state.commands[0]]);
+    await expect(page.getByText(`${main.nickname} was promoted in ETS2.`)).toBeVisible();
+  },
+);
+
+test(
+  "A delayed receipt resets only the affected current cursor",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockPromotions(page);
+    const gate = defer();
+    state.gate = gate.promise;
+    await page.goto(path);
+    await expect(candidates(page)).toBeVisible();
+    await tabs(page).getByRole("link", { name: "All", exact: true }).click();
+    await page.getByRole("button", { name: `Promote ${main.nickname}` }).click();
+    const dialog = confirmDialog(page);
+    await dialog.getByRole("textbox", { name: "Reason" }).fill("Verified progress");
+    await dialog.getByRole("button", { name: "Confirm promotion" }).click();
+    try {
+      await expect.poll(() => state.commands.length).toBe(1);
+      await page.goBack();
+      await expect(dialog).toHaveCount(0);
+      await tabs(page).getByRole("link", { name: "History", exact: true }).click();
+      await page.getByRole("button", { name: "Next page" }).click();
+      await expect(page).toHaveURL(/tab=history&cursor=second-history-page$/);
+      await expect(history(page)).toContainText("Initial assignment");
+    } finally {
+      gate.release();
+    }
+    await expect(page.getByText(`${main.nickname} was promoted in ETS2.`)).toBeVisible();
+    await expect(page).toHaveURL(/game=ets2&tab=history$/);
+    await expect(history(page)).toContainText("Verified progress");
+  },
+);
+
+test(
+  "An ETS2 receipt leaves the currently selected ATS History view alone",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockPromotions(page);
+    const gate = defer();
+    state.gate = gate.promise;
+    await page.goto(path);
+    await expect(candidates(page)).toBeVisible();
+    await tabs(page).getByRole("link", { name: "All", exact: true }).click();
+    await page.getByRole("button", { name: `Promote ${main.nickname}` }).click();
+    const dialog = confirmDialog(page);
+    await dialog.getByRole("textbox", { name: "Reason" }).fill("Verified progress");
+    await dialog.getByRole("button", { name: "Confirm promotion" }).click();
+    try {
+      await expect.poll(() => state.commands.length).toBe(1);
+      await page.goBack();
+      await expect(dialog).toHaveCount(0);
+      await page.getByRole("combobox", { name: "Game" }).selectOption("ats");
+      await tabs(page).getByRole("link", { name: "History", exact: true }).click();
+      await expect(page).toHaveURL(/game=ats&tab=history$/);
+    } finally {
+      gate.release();
+    }
+    await expect(page.getByText(`${main.nickname} was promoted in ETS2.`)).toBeVisible();
+    await expect(page).toHaveURL(/game=ats&tab=history$/);
+    await expect(page.getByText("No qualification actions match these filters.")).toBeVisible();
+  },
+);
+
+test(
+  "Deputy self-promotion retains confirmation success after new driving capabilities",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockPromotions(page, { role: "deputy_director", selfPromotion: true });
+    const nickname = state.current.member.nickname;
+    await page.goto(path);
+    const newReport = page.getByRole("link", { name: "New report", exact: true });
+    await expect(newReport).toHaveCount(0);
+    await page.getByRole("button", { name: `Promote ${nickname}` }).click();
+    const dialog = confirmDialog(page);
+    await dialog.getByRole("textbox", { name: "Reason" }).fill("Verified progress");
+    await dialog.getByRole("button", { name: "Confirm promotion" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(heading(page)).toBeFocused();
+    await expect(page.getByText(`${nickname} was promoted in ETS2.`)).toBeVisible();
+    await expect(page.getByText("No drivers are ready for promotion in this game.")).toBeVisible();
+    await expect(newReport).toBeVisible();
+    expect(state.candidateReadsAfterSelfRefresh).toBeGreaterThan(0);
+    expect(state.summaryReadsAfterSelfRefresh).toBeGreaterThan(0);
+    expect(state.commands).toHaveLength(1);
+    expect(state.commands[0]?.path).toBe(`/api/v1/admin/members/${fixtureId}/promotions`);
+  },
+);
+
+test(
+  "A duplicate nickname stays distinguishable across candidate pages and in confirmation",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockPromotions(page);
+    const duplicate = {
+      ...first,
+      member: { ...second, nickname: main.nickname },
+      assignmentId: id(17),
+      version: 12,
+    };
+    state.other = duplicate;
+    await page.goto(path);
+    await expect(candidates(page).getByRole("rowheader")).toContainText(main.id.slice(-12));
+    await page.getByRole("button", { name: "Next page" }).click();
+    const secondRow = candidates(page)
+      .getByRole("row")
+      .filter({ hasText: duplicate.member.id.slice(-12) });
+    await expect(secondRow.getByRole("rowheader")).toContainText(main.nickname);
+    await secondRow.getByRole("button", { name: `Promote ${main.nickname}` }).click();
+    const dialog = confirmDialog(page);
+    await expect(dialog.getByText(duplicate.member.id, { exact: true })).toBeVisible();
+    await dialog.getByRole("textbox", { name: "Reason" }).fill("Verified progress");
+    await dialog.getByRole("button", { name: "Confirm promotion" }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(state.commands).toHaveLength(1);
+    expect(state.commands[0]).toMatchObject({
+      path: `/api/v1/admin/members/${duplicate.member.id}/promotions`,
+      body: { assignmentId: duplicate.assignmentId },
+      version: '"v12"',
+    });
+  },
+);
+
+test(
   "An expired cursor returns to the first page",
   browserCase(["@functional"]),
   async ({ page }) => {
@@ -439,7 +617,7 @@ test(
     await page.goto(`${path}?game=ets2&tab=ready&cursor=expired`);
     await expect(page.getByRole("alert")).toContainText("This page has expired");
     await page.getByRole("button", { name: "First page" }).click();
-    await expect(candidates(page).getByRole("rowheader")).toHaveText(main.nickname);
+    await expect(candidates(page).getByRole("rowheader")).toContainText(main.nickname);
     expect(new URL(page.url()).searchParams.has("cursor")).toBe(false);
   },
 );
@@ -525,7 +703,7 @@ for (const locale of ["en", "ru"] as const)
       await expect(page.getByRole("heading", { level: 1, name: ui.title })).toBeVisible();
       const table = page.getByRole("table", { name: ui.table });
       await expect(table.getByRole("columnheader")).toHaveText(ui.columns);
-      await expect(table.getByRole("rowheader")).toHaveText(main.nickname);
+      await expect(table.getByRole("rowheader")).toContainText(main.nickname);
       await expect(
         page.getByRole("navigation", { name: ui.tabs }).locator('a[aria-current="page"]'),
       ).toHaveCount(1);

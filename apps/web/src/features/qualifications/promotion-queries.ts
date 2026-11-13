@@ -48,7 +48,7 @@ export function usePromotionMemberSearch(search: string, cursor: string | null) 
 export function useRefreshPromotionReads() {
   const client = useQueryClient();
   const session = useSession();
-  return async ({ game, member }: Candidate) => {
+  return async ({ game, member }: Candidate, { committed }: { committed: boolean }) => {
     const selfId = session.self?.member.id;
     const filters = {
       predicate: ({ queryKey: key }: { queryKey: readonly unknown[] }) => {
@@ -99,6 +99,9 @@ export function useRefreshPromotionReads() {
         { cancelRefetch: false },
       );
     };
-    await Promise.all([refreshReads(), refreshWorkspaceSummary(client, session)]);
+    await Promise.all([
+      refreshReads(),
+      committed ? refreshWorkspaceSummary(client, session) : undefined,
+    ]);
   };
 }

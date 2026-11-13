@@ -65,6 +65,15 @@
   width: 100%;
   min-width: 0;
 }
+.promotion-reason-field {
+  gap: 5px;
+}
+.promotion-member-id {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-small);
+  font-weight: normal;
+}
 .promotion-field textarea {
   width: 100%;
   min-height: 80px;

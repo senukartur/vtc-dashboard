@@ -53,6 +53,7 @@ export const promotionTranslations = {
     confirm: "Confirm promotion",
     cancel: "Cancel",
     closePreview: "Close preview",
+    openPreview: "Open promotion preview",
     saving: "Confirming…",
     recover: "Retry original confirmation",
     uncertain:
@@ -119,6 +120,7 @@ export const promotionTranslations = {
     confirm: "Подтвердить повышение",
     cancel: "Отмена",
     closePreview: "Закрыть подтверждение",
+    openPreview: "Открыть подтверждение",
     saving: "Подтверждение…",
     recover: "Повторить исходное подтверждение",
     uncertain: "Результат неизвестен. Повторите исходное подтверждение, чтобы проверить результат.",
