@@ -1,6 +1,8 @@
-// Pure view model for company settings and the leadership transfer panel. It only decides what
-// the page shows; request paths, bodies, keys and command state stay in SettingsPage. Every
-// countdown is derived from server values (`expiresAt`, `resendAvailableAt`, Retry-After).
+import type { components } from "@vtc/contracts";
+import type { TFunction } from "i18next";
+
+// Pure helpers for company settings, leadership transfer and the audit log. Countdown values
+// come from the server (`expiresAt`, `resendAvailableAt`, Retry-After).
 
 /** Whole seconds until `iso`, rounded up; 0 when past, missing or invalid. */
 export function secondsUntil(iso: string | null | undefined, now: number): number {
@@ -99,4 +101,136 @@ export function sourceBadges(source: { implemented: boolean; runtimeEnabled: boo
     implemented: source.implemented ? "implemented" : "planned",
     runtime: !source.implemented ? "unavailable" : source.runtimeEnabled ? "enabled" : "disabled",
   };
+}
+
+export const settingsTabs = ["general", "qualifications", "audit"] as const;
+type SettingsTab = (typeof settingsTabs)[number];
+
+export function settingsTab(value: string | null): SettingsTab {
+  return settingsTabs.find((tab) => tab === value) ?? "general";
+}
+
+export function validReportingTimezone(value: string | null | undefined): value is string {
+  if (!value || !/^[A-Za-z][A-Za-z0-9_+/-]*$/.test(value)) return false;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const auditActions = {
+  "configuration.changed": "configuration_changed",
+  "membership.changed": "membership_changed",
+  "report.reviewed": "report_reviewed",
+  "leadership.transferred": "leadership_transferred",
+  "catalog.published": "catalog_published",
+  "catalog.imported": "catalog_imported",
+  "catalog.changed": "catalog_changed",
+  "application.submitted": "application_submitted",
+  "application.reviewed": "application_reviewed",
+  "invitation.reissued": "invitation_reissued",
+  "invitation.copied": "invitation_copied",
+  "invitation.redeemed": "invitation_redeemed",
+  "steam.linked": "steam_linked",
+  "steam.replaced": "steam_replaced",
+  "trip.reconciled": "trip_reconciled",
+  "manual.submitted": "manual_submitted",
+  "manual.correction_requested": "manual_correction_requested",
+  "report.accepted_over_limits": "report_accepted_over_limits",
+  "roles.changed": "roles_changed",
+  "duplicate.dismissed": "duplicate_dismissed",
+  "duplicate.dismissal_undone": "duplicate_dismissal_undone",
+  "qualification.assigned": "qualification_assigned",
+  "qualification.promoted": "qualification_promoted",
+  "qualification.level_changed": "qualification_level_changed",
+  "qualification.rules_published": "qualification_rules_published",
+} as const;
+type AuditAction = keyof typeof auditActions;
+
+export function auditAction(value: string | null): AuditAction | null {
+  return value && Object.hasOwn(auditActions, value) ? (value as AuditAction) : null;
+}
+
+export function auditPath(action: AuditAction | null, cursor?: string): string {
+  const params = new URLSearchParams({ view: "stage3", limit: "25" });
+  if (action) params.set("action", action);
+  if (cursor && cursor.length <= 2048) params.set("cursor", cursor);
+  return `/admin/audit?${params}`;
+}
+
+export function shortAuditId(id: string): string {
+  // UUID v4 references remain identifiable without a full technical identifier.
+  return id.slice(0, 8);
+}
+
+export function auditSnapshot(
+  row: components["schemas"]["AuditStage3Entry"],
+  side: "before" | "after",
+  t: TFunction<"administration">,
+): string {
+  if (!row.details || row.details[side] === null) return t("settingsUi.audit.noSnapshot");
+
+  switch (row.action) {
+    case "configuration.changed":
+      return row.details[side].reportingTimezone ?? t("notSet");
+    case "roles.changed":
+      return (
+        row.details[side].roles.map((role) => t(role)).join(", ") || t("settingsUi.audit.none")
+      );
+    case "membership.changed": {
+      const { role, status } = row.details[side];
+      const membership = t(`settingsUi.audit.value.${status}`);
+      return role ? [membership, t(role)].join(" · ") : membership;
+    }
+    case "leadership.transferred":
+      return t(row.details[side].director ? "director" : "settingsUi.audit.value.notDirector");
+    case "application.submitted":
+    case "application.reviewed":
+      return t(`settingsUi.audit.value.${row.details[side].status}`);
+    case "invitation.reissued":
+    case "invitation.copied":
+    case "invitation.redeemed":
+      return t(`settingsUi.audit.value.${row.details[side].state}`);
+    case "report.reviewed":
+    case "report.accepted_over_limits": {
+      const { acceptedOverLimits, decision } = row.details[side];
+      const label = t(`settingsUi.audit.value.${decision}`);
+      return acceptedOverLimits
+        ? [label, t("settingsUi.audit.value.overLimits")].join(" · ")
+        : label;
+    }
+    case "trip.reconciled":
+      return t(`settingsUi.audit.value.${row.details[side].state}`);
+    case "duplicate.dismissed":
+    case "duplicate.dismissal_undone": {
+      const { dismissed, version } = row.details[side];
+      return [
+        t(dismissed ? "settingsUi.audit.value.dismissed" : "settingsUi.audit.value.open"),
+        t("settingsUi.audit.version", { version }),
+      ].join(" · ");
+    }
+    case "qualification.assigned":
+    case "qualification.promoted": {
+      const { game, levelId } = row.details[side];
+      return t("settingsUi.audit.levelReference", {
+        game: game.toUpperCase(),
+        id: shortAuditId(levelId),
+      });
+    }
+    case "qualification.level_changed": {
+      const { game, active, position, version } = row.details[side];
+      return [
+        game.toUpperCase(),
+        t(active ? "settingsUi.audit.value.active" : "settingsUi.audit.value.inactive"),
+        t("settingsUi.audit.position", { position }),
+        t("settingsUi.audit.version", { version }),
+      ].join(" · ");
+    }
+    case "qualification.rules_published": {
+      const { game, version } = row.details[side];
+      return [game.toUpperCase(), t("settingsUi.audit.version", { version })].join(" · ");
+    }
+  }
 }
