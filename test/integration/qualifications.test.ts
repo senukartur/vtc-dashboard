@@ -1072,6 +1072,127 @@ test("one current freight summary preserves exact mass, omitted restrictions and
   expect(staff.levels[0]?.effectiveRule?.rules).toHaveLength(2);
 });
 
+test("staff can page archived levels for historical gaps without making them current choices", async () => {
+  const archive = async (game: Game) => {
+    const { data, version } = await ladderService.ladder(director, game);
+    const source = data.levels.at(-1);
+    const target = data.levels[0];
+    if (!source || !target) throw new Error("SYNTHETIC_LEVEL_MISSING");
+    await ladderService.changeLadder(director, game, newId(), version, {
+      type: "archive",
+      levelId: source.id,
+      input: { targetLevelId: target.id, observedDriverCount: source.currentDriverCount },
+    });
+    return { id: source.id, game, name: source.name };
+  };
+  await publish("ets2", 3, null, null);
+  const first = await archive("ets2");
+  const second = await archive("ets2");
+  const otherGame = await archive("ats");
+  const app = await createApp({
+    identity,
+    qualifications: service,
+    checkReadiness: async () => true,
+  });
+  try {
+    const read = (query: string, cookie?: string) =>
+      app.inject({
+        url: `/api/v1/admin/qualification-levels/archived?${query}`,
+        headers: cookie ? { cookie } : {},
+      });
+    expect((await read("game=ets2")).statusCode).toBe(401);
+    expect((await read("game=ets2", ownerCookie)).statusCode).toBe(403);
+    expect((await read("game=ets2&limit=101", directorCookie)).statusCode).toBe(422);
+    expect((await read("game=ets2&purpose=initial", directorCookie)).statusCode).toBe(422);
+    const initialPage = await read("game=ets2&limit=1", directorCookie);
+    expect(initialPage.statusCode).toBe(200);
+    expect(initialPage.headers["cache-control"]).toBe("no-store");
+    const initial = initialPage.json()
+      .data as components["schemas"]["ListQualificationArchivedLevel"];
+    expect(initial.items).toEqual([second]);
+    expect(initial.nextCursor).not.toBeNull();
+    const cursor = encodeURIComponent(initial.nextCursor as string);
+    const more = await read(`game=ets2&limit=1&cursor=${cursor}`, directorCookie);
+    expect(more.json().data).toEqual({ items: [first], nextCursor: null });
+    expect((await read("game=ats", deputyCookie)).json().data).toEqual({
+      items: [otherGame],
+      nextCursor: null,
+    });
+    for (const [query, cookie] of [
+      [`game=ats&limit=1&cursor=${cursor}`, directorCookie],
+      [`game=ets2&limit=2&cursor=${cursor}`, directorCookie],
+      [`game=ets2&limit=1&cursor=${cursor}`, deputyCookie],
+    ] as const)
+      expect((await read(query, cookie)).statusCode).toBe(409);
+    const login = await identity.login("qualification-director@example.invalid", password);
+    const secondSession = login.cookies.map((cookie) => cookie.split(";", 1)[0]).join("; ");
+    expect((await read(`game=ets2&limit=1&cursor=${cursor}`, secondSession)).statusCode).toBe(409);
+    await expect(
+      service.archivedLevels({ ...director, accessEpoch: director.accessEpoch + 1 }, "ets2"),
+    ).rejects.toMatchObject({ statusCode: 401 });
+
+    const [plan] = await control.query<RowDataPacket[]>(
+      "EXPLAIN SELECT id,game,name FROM qualification_levels WHERE game='ets2' AND active_position IS NULL AND id>? ORDER BY id LIMIT 26 FOR SHARE",
+      [second.id],
+    );
+    expect(plan[0]?.key).toBe("qualification_level_position");
+    expect(String(plan[0]?.Extra)).not.toContain("Using filesort");
+  } finally {
+    await app.close();
+  }
+
+  const target = await member(["trainee", "dispatcher"], false);
+  const assignedAt = iso();
+  tick();
+  const endedAt = iso();
+  tick();
+  const { version } = await service.history(director, target.actor.userId, "ets2", {}, true);
+  const currentAssignment = {
+    game: "ets2" as const,
+    levelId: first.id,
+    purpose: "administrative_correction" as const,
+    reason: "Fictional archived choice",
+  };
+  await expect(
+    service.assign(director, target.actor.userId, newId(), version, currentAssignment),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  const historical = {
+    ...currentAssignment,
+    purpose: "historical_resolution" as const,
+    assignedAt,
+    endedAt,
+  };
+  const recorded = await service.assign(
+    director,
+    target.actor.userId,
+    newId(),
+    version,
+    historical,
+  );
+  const recordedId = (recorded.data as components["schemas"]["Assignment"]).id;
+  const history = await service.actionHistory(director, target.actor.userId, "ets2");
+  expect(history.data.items).toMatchObject([
+    { id: recordedId, levelId: first.id, levelName: first.name, assignedAt, endedAt },
+  ]);
+  expect((await service.rules(director, first.id, {}, undefined, true)).items).toHaveLength(1);
+  expect((await service.levels(director, "ets2")).items.map((row) => row.id)).not.toContain(
+    first.id,
+  );
+  await expect(
+    service.assign(director, target.actor.userId, newId(), history.version, historical),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  await expect(
+    service.progress(director, target.actor.userId, "ets2", "admin"),
+  ).rejects.toMatchObject({ publicCode: "SETUP_REQUIRED" });
+  const summary = await unit.run((tx) =>
+    identity.memberSummariesInTransaction(tx, [target.actor.userId]),
+  );
+  expect([...(summary.get(target.actor.userId)?.roles ?? [])].sort()).toEqual([
+    "dispatcher",
+    "trainee",
+  ]);
+});
+
 test("a former top uses immutable freight rules and needs a new promotion publication generation", async () => {
   const originalTop = structuralLevels.ets2[3];
   await publish("ets2", 3, null, null);
@@ -1224,6 +1345,123 @@ test("archive rechecks count and target, transfers at one instant, and preserves
     unit.client(tx).select().from(qualificationLevels).where(eq(qualificationLevels.id, source.id)),
   );
   expect(archived?.activePosition).toBeNull();
+});
+
+test("archive closes and replaces a representative roster under one fence with a linear write budget", async () => {
+  const rosterSize = 30;
+  const ids = Array.from({ length: rosterSize }, () => newId());
+  const credential = await identity.prepareCredential(password);
+  const initialize = createQualificationInitialization(unit);
+  await unit.run(async (tx) => {
+    await identity.onboardingCompany(tx);
+    for (const userId of ids) {
+      await identity.insertWithCredential(tx, {
+        userId,
+        email: `${userId}@example.invalid`,
+        name: "Fictional archive roster member",
+        ...credential,
+        roles: ["driver", "dispatcher"],
+      });
+      await initialize.initialize(tx, { userId, games: ["ets2"], assignedAt: iso() });
+    }
+  });
+  tick();
+  const { data, version } = await ladderService.ladder(director, "ets2");
+  const [source, target] = data.levels;
+  if (!source || !target) throw new Error("SYNTHETIC_LEVEL_MISSING");
+  expect(source.currentDriverCount).toBeGreaterThanOrEqual(rosterSize);
+  const transfers = source.currentDriverCount;
+  const statements = { select: 0, update: 0, insert: 0 };
+  const measuredUnit = {
+    ...unit,
+    client(tx: Parameters<UnitOfWork["client"]>[0]) {
+      const db = unit.client(tx);
+      return new Proxy(db, {
+        get(database, property, receiver) {
+          if (property === "select" || property === "update" || property === "insert") {
+            return (...args: unknown[]) => {
+              statements[property]++;
+              return Reflect.apply(database[property], database, args);
+            };
+          }
+          return Reflect.get(database, property, receiver);
+        },
+      });
+    },
+  };
+  const measuredIdentity = createIdentity(
+    measuredUnit,
+    identityConfig,
+    { accessEvents: identityAccessEvents(measuredUnit) },
+    now,
+  );
+  const membershipLocked = deferred<void>();
+  const releaseArchive = deferred<void>();
+  const readerStarted = deferred<void>();
+  const fencedIdentity = {
+    ...measuredIdentity,
+    async qualificationContextInTransaction(
+      ...args: Parameters<Identity["qualificationContextInTransaction"]>
+    ) {
+      const result = await measuredIdentity.qualificationContextInTransaction(...args);
+      if (args[1].length === transfers) {
+        membershipLocked.resolve();
+        await releaseArchive.promise;
+      }
+      return result;
+    },
+  };
+  const fenced = createQualifications(
+    measuredUnit,
+    { ...config, ladderEditsEnabled: true },
+    { identity: fencedIdentity, trips: tripService },
+    now,
+  );
+  const archive = fenced.changeLadder(director, "ets2", newId(), version, {
+    type: "archive",
+    levelId: source.id,
+    input: { targetLevelId: target.id, observedDriverCount: transfers },
+  });
+  let read: ReturnType<Qualifications["ladder"]> | undefined;
+  try {
+    await bounded(membershipLocked.promise, "archive roster membership lock");
+    const reader = createQualifications(
+      unit,
+      config,
+      {
+        identity: {
+          ...identity,
+          qualificationContextInTransaction(...args) {
+            readerStarted.resolve();
+            return identity.qualificationContextInTransaction(...args);
+          },
+        },
+        trips: tripService,
+      },
+      now,
+    );
+    read = reader.ladder(director, "ets2");
+    await bounded(readerStarted.promise, "competing ladder read");
+  } finally {
+    releaseArchive.resolve();
+    await archive;
+  }
+  const after = await read;
+  expect(after?.version).toBe(version + 1);
+  expect(after?.data.levels.some((row) => row.id === source.id)).toBe(false);
+  expect(after?.data.levels[0]?.currentDriverCount).toBe(target.currentDriverCount + transfers);
+  expect(statements.select).toBeLessThanOrEqual(3 * transfers + 20);
+  expect(statements.update).toBeLessThanOrEqual(2 * transfers + 10);
+  expect(statements.insert).toBeLessThanOrEqual(3 * transfers + 10);
+  console.log(
+    JSON.stringify({ event: "qualification_archive_statement_count", transfers, ...statements }),
+  );
+  const one = ids[0] as string;
+  const history = await ladderService.actionHistory(director, one, "ets2");
+  expect(history.data.items).toMatchObject([
+    { levelId: target.id, assignedAt: iso(), endedAt: null, purpose: "ladder_archive_transfer" },
+    { levelId: source.id, endedAt: iso(), purpose: "initial" },
+  ]);
 });
 
 test("admission holds the same company fence as archive and stale observed counts cannot move a new member", async () => {

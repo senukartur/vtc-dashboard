@@ -107,6 +107,7 @@ export function affectedRead(
     return (
       game === change.game &&
       (url.pathname === "/qualification-levels" ||
+        (change.archive && url.pathname === "/admin/qualification-levels/archived") ||
         /\/qualification-(?:progress|assignments|action-history)$/.test(url.pathname))
     );
   if (change.kind === "level")

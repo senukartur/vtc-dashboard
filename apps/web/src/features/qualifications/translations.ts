@@ -1,6 +1,9 @@
 export const qualificationTranslations = {
   en: {
     assignmentId: "Assignment ID",
+    archivedLevel: "Archived level",
+    archivedLevels: "Archived levels",
+    noArchivedLevels: "No archived levels for this game.",
     catalogLabelLoading: "Loading catalog label…",
     catalogLabelUnavailable: "Catalog label unavailable",
     staffHistoryHelp:
@@ -38,12 +41,18 @@ export const qualificationTranslations = {
     ladderOrderWarning:
       "This order determines the starting level and the next promotion for this game.",
     ladderOrderChanged:
-      "The ladder now has different levels. Review the current order before moving them again.",
+      "The ladder order changed. Review the current order and apply your moves again.",
+    ladderReviewOrder: "Use current order",
     ladderMaxLevels: "The ladder has the maximum of {{count}} active levels.",
     ladderAdd: "Add level",
     ladderPosition: "Position",
+    ladderChoosePosition: "Choose a position",
     ladderBefore: "{{position}} · Before {{name}}",
     ladderAtTop: "{{position}} · At the top",
+    ladderLevelPosition: "{{position}} · {{name}}",
+    ladderInsertionChanged: "The ladder order changed. Review your insertion position.",
+    ladderInsertionMissing: "The level you chose is no longer active. Choose a new position.",
+    ladderReviewPosition: "Use this position",
     ladderOptionalReason: "Reason (optional)",
     ladder_archive_transfer: "Transfer from archived level",
     trainee: "Trainee",
@@ -209,6 +218,9 @@ export const qualificationTranslations = {
   },
   ru: {
     assignmentId: "Идентификатор назначения",
+    archivedLevel: "Архивный уровень",
+    archivedLevels: "Архивные уровни",
+    noArchivedLevels: "Для этой игры нет архивных уровней.",
     catalogLabelLoading: "Загрузка названия из каталога…",
     catalogLabelUnavailable: "Название из каталога недоступно",
     staffHistoryHelp:
@@ -248,12 +260,18 @@ export const qualificationTranslations = {
     ladderOrderWarning:
       "Этот порядок определяет начальный уровень и следующую ступень повышения в этой игре.",
     ladderOrderChanged:
-      "Состав лестницы изменился. Проверьте текущий порядок перед новым перемещением.",
+      "Порядок уровней изменился. Проверьте текущий порядок и повторите перемещения.",
+    ladderReviewOrder: "Использовать текущий порядок",
     ladderMaxLevels: "Достигнут предел активных уровней ({{count}}).",
     ladderAdd: "Добавить уровень",
     ladderPosition: "Позиция",
+    ladderChoosePosition: "Выберите позицию",
     ladderBefore: "{{position}} · Перед «{{name}}»",
     ladderAtTop: "{{position}} · Высший уровень",
+    ladderLevelPosition: "{{position}} · {{name}}",
+    ladderInsertionChanged: "Порядок уровней изменился. Проверьте позицию нового уровня.",
+    ladderInsertionMissing: "Выбранный уровень больше не активен. Выберите новую позицию.",
+    ladderReviewPosition: "Использовать эту позицию",
     ladderOptionalReason: "Причина (необязательно)",
     ladder_archive_transfer: "Перевод с архивного уровня",
     trainee: "Стажёр",

@@ -185,6 +185,24 @@ export async function registerQualificationRoutes(
       return envelope(request, result.data);
     },
   );
+  app.get<{ Querystring: Page & { game: Game } }>(
+    "/api/v1/admin/qualification-levels/archived",
+    {
+      schema: {
+        querystring: object({ ...page, game }, ["game"]),
+        response: { 200: ref("EnvelopeListQualificationArchivedLevel") },
+      },
+    },
+    async (request) =>
+      envelope(
+        request,
+        await qualifications.archivedLevels(
+          await actor(request),
+          request.query.game,
+          request.query,
+        ),
+      ),
+  );
   app.get<{ Params: { levelId: string }; Querystring: Page }>(
     "/api/v1/admin/qualification-levels/:levelId/rule-versions",
     {

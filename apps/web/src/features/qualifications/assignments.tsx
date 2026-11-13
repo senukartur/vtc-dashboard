@@ -1,9 +1,19 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Card, Input, Label } from "../../shared/ui/primitives.js";
-import { Confirm, Failure, LevelContext, MemberContext, Recovery } from "./components.js";
-import { useQualificationCommand } from "./queries.js";
+import {
+  Confirm,
+  Failure,
+  LevelContext,
+  MemberContext,
+  PageNav,
+  Recovery,
+  State,
+} from "./components.js";
+import { useQualificationCommand, useQualificationQuery } from "./queries.js";
 import { type DTO, type Game, utcInput } from "./transport.js";
+
+type ArchivedLevel = DTO["QualificationArchivedLevel"];
 
 export function AssignmentEditor({
   game,
@@ -39,22 +49,25 @@ export function AssignmentEditor({
     [reason, setReason] = useState(""),
     [start, setStart] = useState(""),
     [end, setEnd] = useState(""),
+    [archived, setArchived] = useState<ArchivedLevel>(),
     [success, setSuccess] = useState(false);
   const historical = purpose === "historical_resolution",
     assignedAt = utcInput(start),
     endedAt = utcInput(end),
     current = levels.find((l) => l.id === progress?.assignment.levelId),
     next = current && levels.find((l) => l.position === current.position + 1);
+  const active = levels.find((level) => level.id === levelId && level.game === game);
+  const archivedTarget = historical && archived?.game === game ? archived : undefined;
   const ready =
     !!etag &&
-    !!levelId &&
+    !!(active || archivedTarget) &&
     !!reason.trim() &&
     (!historical ||
       (!!assignedAt && !!endedAt && assignedAt < endedAt && Date.parse(endedAt) < Date.now())) &&
     (!former || historical);
   const input: DTO["AssignmentInput"] = {
     game,
-    levelId,
+    levelId: archivedTarget?.id ?? levelId,
     purpose,
     reason,
     ...(historical && assignedAt && endedAt ? { assignedAt, endedAt } : {}),
@@ -85,7 +98,9 @@ export function AssignmentEditor({
           id="assignment-purpose"
           value={purpose}
           onChange={(e) => {
-            setPurpose(e.target.value as typeof purpose);
+            const nextPurpose = e.target.value as typeof purpose;
+            setPurpose(nextPurpose);
+            if (historical !== (nextPurpose === "historical_resolution")) setArchived(undefined);
             setSuccess(false);
           }}
         >
@@ -106,9 +121,10 @@ export function AssignmentEditor({
         <select
           className="input"
           id="assignment-level"
-          value={levelId}
+          value={archivedTarget ? "" : levelId}
           onChange={(e) => {
             setLevel(e.target.value);
+            setArchived(undefined);
             setSuccess(false);
           }}
         >
@@ -123,6 +139,16 @@ export function AssignmentEditor({
         </select>
         {historical && (
           <>
+            <ArchivedLevelPicker
+              key={game}
+              game={game}
+              selected={archivedTarget}
+              onSelect={(level) => {
+                setArchived(level);
+                if (level) setLevel("");
+                setSuccess(false);
+              }}
+            />
             <Label htmlFor="assignment-start">{t("assignedAt")}</Label>
             <Input
               id="assignment-start"
@@ -165,7 +191,17 @@ export function AssignmentEditor({
           onConfirm={() => confirm(false)}
         >
           <MemberContext name={memberName} id={memberId} />
-          <LevelContext level={levels.find((l) => l.id === levelId)} />
+          {archivedTarget ? (
+            <p className="qualification-command-context">
+              <strong>
+                {archivedTarget.game.toUpperCase()} · {t("archivedLevel")}
+              </strong>
+              <span>{archivedTarget.name}</span>
+              <code>{archivedTarget.id}</code>
+            </p>
+          ) : (
+            <LevelContext level={active} />
+          )}
           <p>{t(purpose)}</p>
           <p>{reason}</p>
           {historical && (
@@ -207,5 +243,60 @@ export function AssignmentEditor({
       />
       {success && <p role="status">{t("success")}</p>}
     </Card>
+  );
+}
+
+function ArchivedLevelPicker({
+  game,
+  selected,
+  onSelect,
+}: {
+  game: Game;
+  selected: ArchivedLevel | undefined;
+  onSelect: (level: ArchivedLevel | undefined) => void;
+}) {
+  const { t } = useTranslation("qualifications");
+  const [cursors, setCursors] = useState<string[]>([]);
+  const params = new URLSearchParams({ game, limit: "25" });
+  const cursor = cursors.at(-1);
+  if (cursor) params.set("cursor", cursor);
+  const query = useQualificationQuery(
+    `/admin/qualification-levels/archived?${params}`,
+    "EnvelopeListQualificationArchivedLevel",
+  );
+  const page = query.data?.data.data;
+  const items = page?.items.filter((row) => row.game === game) ?? [];
+  const options =
+    selected && !items.some((row) => row.id === selected.id) ? [selected, ...items] : items;
+  const nameCounts = new Map<string, number>();
+  for (const row of options) nameCounts.set(row.name, (nameCounts.get(row.name) ?? 0) + 1);
+  return (
+    <>
+      <Label htmlFor="assignment-archived-level">{t("archivedLevels")}</Label>
+      <select
+        id="assignment-archived-level"
+        className="input"
+        value={selected?.id ?? ""}
+        disabled={options.length === 0}
+        onChange={(event) => onSelect(options.find((row) => row.id === event.target.value))}
+      >
+        <option value="">—</option>
+        {options.map((row) => (
+          <option key={row.id} value={row.id}>
+            {(nameCounts.get(row.name) ?? 0) > 1 ? `${row.name} · ${row.id}` : row.name}
+          </option>
+        ))}
+      </select>
+      <State query={query} />
+      {page && items.length === 0 && <p>{t("noArchivedLevels")}</p>}
+      {(cursors.length > 0 || page?.nextCursor) && (
+        <PageNav
+          hasPrevious={cursors.length > 0}
+          next={page?.nextCursor}
+          onPrevious={() => setCursors((previous) => previous.slice(0, -1))}
+          onNext={(next) => setCursors((previous) => [...previous, next])}
+        />
+      )}
+    </>
   );
 }

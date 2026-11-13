@@ -1,6 +1,6 @@
 // Explicit roles preserve the table semantics when narrow layouts switch cells to block display.
 // biome-ignore-all lint/a11y/noRedundantRoles: mobile WebKit may drop implicit table roles.
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
@@ -21,6 +21,14 @@ const maxLevels = 25;
 type Ladder = DTO["QualificationLadder"];
 type LadderLevel = DTO["QualificationLadderLevel"];
 type Command = ReturnType<typeof useQualificationCommand>;
+type Edit = "add" | "reorder" | "archive";
+type EditInput = DTO[
+  | "QualificationLadderAddInput"
+  | "QualificationLadderOrderInput"
+  | "QualificationLadderArchiveInput"];
+type Insertion = { etag: string | null; before: string | null };
+type AddDraft = { name: string; reason: string; insertion?: Insertion };
+const emptyAddDraft: AddDraft = { name: "", reason: "" };
 
 export function QualificationLevelsSettingsPanel() {
   const session = useSession();
@@ -65,8 +73,10 @@ function LadderSettings({ game }: { game: Game }) {
   const [selectedId, setSelected] = useState<string | null>(null);
   const [archiveId, setArchive] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [reorderDraft, setReorderDraft] = useState<string[]>();
+  const [reorderDraft, setReorderDraft] = useState<{ etag: string; ids: string[] }>();
   const [reorderReason, setReorderReason] = useState("");
+  const [addDraft, setAddDraft] = useState<AddDraft>(emptyAddDraft);
+  const attemptedEdit = useRef<Edit | null>(null);
   const reasonId = useId();
   if (!ladder || ladder.game !== game)
     return query.isError || query.isPending ? (
@@ -78,10 +88,8 @@ function LadderSettings({ game }: { game: Game }) {
   const hold = !etag || command.pending || command.seconds > 0 || command.canRecover;
   const levels = ladder.levels;
   const currentIds = levels.map((row) => row.id);
-  const draftMatches =
-    reorderDraft?.length === currentIds.length &&
-    reorderDraft.every((id) => currentIds.includes(id));
-  const order = draftMatches ? reorderDraft : currentIds;
+  const staleOrder = reorderDraft !== undefined && reorderDraft.etag !== etag;
+  const order = reorderDraft && !staleOrder ? reorderDraft.ids : currentIds;
   const changed = order.some((id, index) => id !== levels[index]?.id);
   const orderInput: DTO["QualificationLadderOrderInput"] = {
     levelIds: order,
@@ -94,20 +102,37 @@ function LadderSettings({ game }: { game: Game }) {
   const selected = levels.find((row) => row.id === selectedId);
   const archiving = levels.find((row) => row.id === archiveId);
   function move(index: number, delta: number) {
+    if (!etag || staleOrder) return;
     const ids = [...order];
     const current = ids[index];
     const neighbor = ids[index + delta];
     if (!current || !neighbor) return;
     ids[index] = neighbor;
     ids[index + delta] = current;
-    setReorderDraft(ids);
+    setReorderDraft({ etag, ids });
     setSuccess(false);
   }
   function committed() {
-    setReorderDraft(undefined);
-    setReorderReason("");
-    setArchive(null);
+    if (attemptedEdit.current === "reorder") {
+      setReorderDraft(undefined);
+      setReorderReason("");
+    }
+    if (attemptedEdit.current === "archive") setArchive(null);
+    if (attemptedEdit.current === "add") setAddDraft(emptyAddDraft);
+    attemptedEdit.current = null;
     setSuccess(true);
+  }
+  async function submit(edit: Edit, path: string, input: EditInput, revision: string) {
+    attemptedEdit.current = edit;
+    const result = await command.run(
+      path,
+      input,
+      "EnvelopeQualificationLadderRevision",
+      revision,
+      edit === "reorder" ? "PATCH" : "POST",
+    );
+    if (result) committed();
+    return result;
   }
   return (
     <>
@@ -191,7 +216,7 @@ function LadderSettings({ game }: { game: Game }) {
                         <Button
                           type="button"
                           variant="outline"
-                          disabled={hold || index === 0}
+                          disabled={hold || staleOrder || index === 0}
                           aria-label={t("ladderMoveUpName", { name: row.name })}
                           onClick={() => move(index, -1)}
                         >
@@ -200,7 +225,7 @@ function LadderSettings({ game }: { game: Game }) {
                         <Button
                           type="button"
                           variant="outline"
-                          disabled={hold || index === rows.length - 1}
+                          disabled={hold || staleOrder || index === rows.length - 1}
                           aria-label={t("ladderMoveDownName", { name: row.name })}
                           onClick={() => move(index, 1)}
                         >
@@ -223,7 +248,7 @@ function LadderSettings({ game }: { game: Game }) {
                         variant="outline"
                         aria-label={t("ladderArchiveName", { name: row.name })}
                         aria-expanded={row.id === archiving?.id}
-                        disabled={hold || levels.length === 1 || changed}
+                        disabled={hold || levels.length === 1 || changed || staleOrder}
                         onClick={() => setArchive(row.id === archiving?.id ? null : row.id)}
                       >
                         {t("ladderArchive")}
@@ -236,8 +261,18 @@ function LadderSettings({ game }: { game: Game }) {
           })}
         </tbody>
       </table>
-      {ladder.ladderEditsEnabled && reorderDraft && !draftMatches && (
-        <p role="status">{t("ladderOrderChanged")}</p>
+      {ladder.ladderEditsEnabled && staleOrder && (
+        <div className="stack">
+          <p role="status">{t("ladderOrderChanged")}</p>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={hold}
+            onClick={() => setReorderDraft(undefined)}
+          >
+            {t("ladderReviewOrder")}
+          </Button>
+        </div>
       )}
       {ladder.ladderEditsEnabled && changed && (
         <div className="stack">
@@ -245,21 +280,15 @@ function LadderSettings({ game }: { game: Game }) {
           <div className="qualification-actions">
             <Confirm
               label={t("ladderSaveOrder")}
-              guard={JSON.stringify([etag, orderInput])}
+              guard={JSON.stringify([reorderDraft?.etag, orderInput, rows.map((row) => row.name)])}
               disabled={hold}
               pending={command.pending}
               failure={command.failure}
-              onConfirm={async () => {
-                const result = await command.run(
-                  `${root}/order`,
-                  orderInput,
-                  "EnvelopeQualificationLadderRevision",
-                  etag,
-                  "PATCH",
-                );
-                if (result) committed();
-                return result;
-              }}
+              onConfirm={() =>
+                reorderDraft && !staleOrder
+                  ? submit("reorder", `${root}/order`, orderInput, reorderDraft.etag)
+                  : Promise.resolve(undefined)
+              }
             >
               <p>{t("ladderOrderWarning")}</p>
               <ol>
@@ -291,8 +320,8 @@ function LadderSettings({ game }: { game: Game }) {
           root={root}
           etag={etag}
           command={command}
-          hold={hold}
-          onCommit={committed}
+          hold={hold || changed || staleOrder}
+          submit={submit}
         />
       )}
       {selected && (
@@ -314,8 +343,10 @@ function LadderSettings({ game }: { game: Game }) {
             root={root}
             etag={etag}
             command={command}
-            hold={hold || changed}
-            onCommit={committed}
+            hold={hold || changed || staleOrder}
+            submit={submit}
+            draft={addDraft}
+            setDraft={setAddDraft}
           />
         ) : (
           <p>{t("ladderMaxLevels", { count: maxLevels })}</p>
@@ -344,21 +375,33 @@ type StructuralForm = {
   etag: string | null;
   command: Command;
   hold: boolean;
-  onCommit: () => void;
+  submit: (edit: Edit, path: string, input: EditInput, revision: string) => Promise<unknown>;
 };
 
-function AddLevel({ ladder, root, etag, command, hold, onCommit }: StructuralForm) {
+function AddLevel({
+  ladder,
+  root,
+  etag,
+  command,
+  hold,
+  submit,
+  draft,
+  setDraft,
+}: StructuralForm & { draft: AddDraft; setDraft: (draft: AddDraft) => void }) {
   const { t } = useTranslation("qualifications");
   const id = useId();
-  const [name, setName] = useState("");
-  const [position, setPosition] = useState<number>();
-  const [reason, setReason] = useState("");
-  const max = ladder.levels.length + 1;
-  const selectedPosition = Math.min(position ?? max, max);
+  const insertion = draft.insertion ?? { etag, before: null };
+  const anchor = ladder.levels.find((row) => row.id === insertion.before);
+  const missingAnchor = insertion.before !== null && !anchor;
+  const staleInsertion = insertion.etag !== etag;
+  const position = anchor?.position ?? ladder.levels.length + 1;
+  const placement = anchor
+    ? t("ladderBefore", { name: anchor.name, position })
+    : t("ladderAtTop", { position });
   const input: DTO["QualificationLadderAddInput"] = {
-    name: name.trim(),
-    position: selectedPosition,
-    ...(reason.trim() && { reason: reason.trim() }),
+    name: draft.name.trim(),
+    position,
+    ...(draft.reason.trim() && { reason: draft.reason.trim() }),
   };
   return (
     <Card className="stack">
@@ -368,11 +411,11 @@ function AddLevel({ ladder, root, etag, command, hold, onCommit }: StructuralFor
           <Label htmlFor={`${id}-name`}>{t("name")}</Label>
           <Input
             id={`${id}-name`}
-            value={name}
+            value={draft.name}
             required
             maxLength={128}
             disabled={hold}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => setDraft({ ...draft, name: event.target.value, insertion })}
           />
         </div>
         <div className="stack">
@@ -380,45 +423,71 @@ function AddLevel({ ladder, root, etag, command, hold, onCommit }: StructuralFor
           <select
             className="input"
             id={`${id}-position`}
-            value={selectedPosition}
+            value={missingAnchor ? "" : (insertion.before ?? "append")}
             disabled={hold}
-            onChange={(event) => setPosition(Number(event.target.value))}
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                insertion: {
+                  etag,
+                  before: event.target.value === "append" ? null : event.target.value,
+                },
+              })
+            }
           >
+            {missingAnchor && (
+              <option value="" disabled>
+                {t("ladderChoosePosition")}
+              </option>
+            )}
             {ladder.levels.map((row) => (
-              <option key={row.id} value={row.position}>
+              <option key={row.id} value={row.id}>
                 {t("ladderBefore", { name: row.name, position: row.position })}
               </option>
             ))}
-            <option value={max}>{t("ladderAtTop", { position: max })}</option>
+            <option value="append">
+              {t("ladderAtTop", { position: ladder.levels.length + 1 })}
+            </option>
           </select>
         </div>
       </div>
-      <Reason id={id} value={reason} onChange={setReason} disabled={hold} />
+      {missingAnchor ? (
+        <p role="status">{t("ladderInsertionMissing")}</p>
+      ) : staleInsertion ? (
+        <div className="stack">
+          <p role="status">{t("ladderInsertionChanged")}</p>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={hold}
+            onClick={() => setDraft({ ...draft, insertion: { ...insertion, etag } })}
+          >
+            {t("ladderReviewPosition")}
+          </Button>
+        </div>
+      ) : null}
+      <Reason
+        id={id}
+        value={draft.reason}
+        onChange={(reason) => setDraft({ ...draft, reason, insertion })}
+        disabled={hold}
+      />
       <Confirm
         label={t("ladderAdd")}
-        guard={JSON.stringify([etag, input])}
-        disabled={hold || !input.name}
+        guard={JSON.stringify([etag, insertion, placement, input])}
+        disabled={hold || !input.name || missingAnchor || staleInsertion}
         pending={command.pending}
         failure={command.failure}
-        onConfirm={async () => {
-          const result = await command.run(
-            `${root}/levels`,
-            input,
-            "EnvelopeQualificationLadderRevision",
-            etag,
-          );
-          if (result) {
-            setName("");
-            setPosition(undefined);
-            setReason("");
-            onCommit();
-          }
-          return result;
-        }}
+        onConfirm={() =>
+          !missingAnchor && !staleInsertion && insertion.etag
+            ? submit("add", `${root}/levels`, input, insertion.etag)
+            : Promise.resolve(undefined)
+        }
       >
         <p>
-          {ladder.game.toUpperCase()} · {t("stage")} {input.position} · {input.name}
+          {ladder.game.toUpperCase()} · {input.name}
         </p>
+        <p>{placement}</p>
         {input.reason && <p>{input.reason}</p>}
       </Confirm>
     </Card>
@@ -432,7 +501,7 @@ function ArchiveLevel({
   etag,
   command,
   hold,
-  onCommit,
+  submit,
 }: StructuralForm & { level: LadderLevel }) {
   const { t } = useTranslation("qualifications");
   const id = useId();
@@ -442,55 +511,57 @@ function ArchiveLevel({
   const defaultTarget = ladder.levels.find(
     (row) => row.position === (level.position === 1 ? 2 : level.position - 1),
   );
-  const selected = available.find((row) => row.id === target) ?? defaultTarget;
-  if (!selected) return null;
+  const selected = target ? available.find((row) => row.id === target) : defaultTarget;
+  const label = (row: LadderLevel) =>
+    t("ladderLevelPosition", { position: row.position, name: row.name });
+  if (!defaultTarget) return null;
   const input: DTO["QualificationLadderArchiveInput"] = {
-    targetLevelId: selected.id,
+    targetLevelId: selected?.id ?? "",
     observedDriverCount: level.currentDriverCount,
     ...(reason.trim() && { reason: reason.trim() }),
   };
   return (
     <Card className="stack">
-      <h3>{t("ladderArchiveName", { name: level.name })}</h3>
+      <h3>{t("ladderArchiveName", { name: label(level) })}</h3>
       <p>{t("ladderArchiveWarning")}</p>
       <p>{t("ladderDriverCount", { count: level.currentDriverCount })}</p>
       <Label htmlFor={`${id}-target`}>{t("ladderArchiveTarget")}</Label>
       <select
         className="input"
         id={`${id}-target`}
-        value={selected.id}
+        value={selected?.id ?? ""}
         disabled={hold}
         onChange={(event) => setTarget(event.target.value)}
       >
+        {!selected && (
+          <option value="" disabled>
+            {t("ladderArchiveTarget")}
+          </option>
+        )}
         {available.map((row) => (
           <option value={row.id} key={row.id}>
-            {row.name}
+            {label(row)}
           </option>
         ))}
       </select>
       <Reason id={id} value={reason} onChange={setReason} disabled={hold} />
       <Confirm
         label={t("ladderArchiveReview")}
-        guard={JSON.stringify([etag, level.id, input])}
-        disabled={hold}
+        guard={JSON.stringify([etag, level.id, label(level), selected && label(selected), input])}
+        disabled={hold || !selected}
         pending={command.pending}
         failure={command.failure}
-        title={t("ladderArchiveName", { name: level.name })}
+        title={t("ladderArchiveName", { name: label(level) })}
         description={t("ladderArchiveWarning")}
         destructiveLabel={t("ladderArchive")}
-        onConfirm={async () => {
-          const result = await command.run(
-            `${root}/levels/${level.id}/archive`,
-            input,
-            "EnvelopeQualificationLadderRevision",
-            etag,
-          );
-          if (result) onCommit();
-          return result;
-        }}
+        onConfirm={() =>
+          selected && etag
+            ? submit("archive", `${root}/levels/${level.id}/archive`, input, etag)
+            : Promise.resolve(undefined)
+        }
       >
         <p>
-          {ladder.game.toUpperCase()} · {level.name} → {selected.name}
+          {ladder.game.toUpperCase()} · {label(level)} → {selected && label(selected)}
         </p>
         <p>{t("ladderDriverCount", { count: level.currentDriverCount })}</p>
         {input.reason && <p>{input.reason}</p>}

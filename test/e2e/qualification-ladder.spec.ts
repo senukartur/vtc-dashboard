@@ -1,11 +1,17 @@
 import { randomUUID } from "node:crypto";
+import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { resetAccountLimits, staffContext, write } from "./support/account.ts";
-import { catalogLanguage } from "./support/catalogs.ts";
+import { catalogLanguage, envelope, mockCatalogs } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
 type Ladder = components["schemas"]["QualificationLadder"];
+const ids = [
+  "d4100000-0000-4000-8000-000000000001",
+  "d4100000-0000-4000-8000-000000000002",
+  "d4100000-0000-4000-8000-000000000003",
+] as const;
 const path = "/account/admin/settings?tab=qualifications";
 const api = "/api/v1/admin/qualification-ladders/ats";
 const labels = {
@@ -21,6 +27,7 @@ const labels = {
     reviewArchive: "Review archive",
     confirmArchive: "Archive level",
     target: "Transfer drivers to",
+    position: "Position",
     count: "Drivers",
     warning: "Current drivers will move to the selected level with fresh progress.",
     zero: "0 assigned drivers",
@@ -37,11 +44,185 @@ const labels = {
     reviewArchive: "Проверить архивацию",
     confirmArchive: "Архивировать уровень",
     target: "Перевести водителей на уровень",
+    position: "Позиция",
     count: "Водители",
     warning: "Текущие водители перейдут на выбранный уровень и начнут прогресс заново.",
     zero: "0 назначенных водителей",
   },
 };
+
+async function mockLadder(page: Page) {
+  await mockCatalogs(page, true, {
+    capabilities: ["company.read", "company.configure", "qualifications.manage"],
+  });
+  let revision = 1;
+  let order: readonly (typeof ids)[number][] = ids;
+  let failNext = false;
+  const commands: { etag: string | undefined; key: string | undefined; input: unknown }[] = [];
+  await page.route("**/api/v1/admin/qualification-ladders/ats**", async (route) => {
+    const request = route.request();
+    const etag = `"v${revision}"`;
+    if (request.method() === "GET") {
+      const data: Ladder = {
+        game: "ats",
+        revision,
+        asOf: "2026-10-20T12:00:00.000Z",
+        ladderEditsEnabled: true,
+        levels: order.map((id, index) => ({
+          id,
+          game: "ats",
+          name: `Fictional level ${ids.indexOf(id) + 1}`,
+          position: index + 1,
+          version: 1,
+          terminal: index === order.length - 1,
+          configured: false,
+          promotionConfigured: false,
+          ruleVersionId: null,
+          effectiveRule: null,
+          freightRuleSummary: null,
+          requiredTrips: null,
+          requiredDistanceM: null,
+          currentDriverCount: 0,
+        })),
+      };
+      return route.fulfill({ headers: { etag }, json: envelope(data) });
+    }
+    commands.push({
+      etag: request.headers()["if-match"],
+      key: request.headers()["idempotency-key"],
+      input: request.postDataJSON(),
+    });
+    if (failNext) {
+      failNext = false;
+      return route.abort("failed");
+    }
+    if (request.headers()["if-match"] !== etag)
+      return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
+    return route.fulfill({
+      status: request.method() === "PATCH" ? 200 : 201,
+      headers: { etag },
+      json: envelope({ game: "ats", revision }),
+    });
+  });
+  return {
+    commands,
+    external(next: readonly (typeof ids)[number][]) {
+      order = next;
+      revision++;
+    },
+    failResponse() {
+      failNext = true;
+    },
+  };
+}
+
+for (const orderOfConflict of ["read first", "command first"] as const) {
+  test(
+    `P11 rechecks order and insertion after ${orderOfConflict}`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const server = await mockLadder(page);
+      await page.goto(`${path}&game=ats`);
+      const panel = page.getByRole("region", { name: labels.en.ladder });
+      const table = panel.getByRole("table");
+      const rows = table.getByRole("rowheader");
+      const move = (name: string) =>
+        table.getByRole("button", { name: `Move ${name} up`, exact: true });
+      const saveOrder = panel.getByRole("button", { name: labels.en.saveOrder, exact: true });
+      const dialog = page.getByRole("dialog");
+      const confirm = dialog.getByRole("button", { name: labels.en.confirm, exact: true });
+      const name = panel.getByLabel(labels.en.name, { exact: true });
+      const position = panel.getByLabel("Position", { exact: true });
+      const add = panel.getByRole("button", { name: labels.en.add, exact: true });
+      await expect(rows.first()).toContainText("Fictional level 1");
+      await name.fill("Fictional insertion");
+      await position.selectOption(ids[1]);
+      await panel.getByLabel("Reason (optional)", { exact: true }).fill("Fictional add reason");
+      await move("Fictional level 3").click();
+      await panel
+        .getByLabel("Reason (optional)", { exact: true })
+        .first()
+        .fill("Fictional reorder reason");
+      await saveOrder.click();
+      if (orderOfConflict === "read first") {
+        server.external([ids[0], ids[2], ids[1]]);
+        await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+        await expect(dialog).toHaveCount(0);
+        expect(server.commands).toHaveLength(0);
+        await expect(rows.nth(1)).toContainText("Fictional level 3");
+      } else {
+        server.external([ids[0], ids[2], ids[1]]);
+        server.external(ids);
+        await confirm.click();
+        await expect(dialog).toHaveCount(0);
+        expect(server.commands).toHaveLength(1);
+        expect(server.commands[0]?.etag).toBe('"v1"');
+        await expect(rows.nth(1)).toContainText("Fictional level 2");
+      }
+      const beforeReview = server.commands.length;
+      await expect(
+        panel.getByText("The ladder order changed. Review the current order", { exact: false }),
+      ).toBeVisible();
+      await expect(saveOrder).toHaveCount(0);
+      await expect(move("Fictional level 3")).toBeDisabled();
+      await panel.getByRole("button", { name: "Use current order", exact: true }).click();
+      await expect(saveOrder).toHaveCount(0);
+      expect(server.commands).toHaveLength(beforeReview);
+      await move("Fictional level 3").click();
+      await expect(panel.getByLabel("Reason (optional)", { exact: true }).first()).toHaveValue(
+        "Fictional reorder reason",
+      );
+      await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+
+      await expect(name).toHaveValue("Fictional insertion");
+      await expect(position).toHaveValue(ids[1]);
+      await expect(add).toBeDisabled();
+      await panel.getByRole("button", { name: "Use this position", exact: true }).click();
+      await add.click();
+      const reviewedPosition = orderOfConflict === "read first" ? 3 : 2;
+      await expect(
+        dialog.getByText(`${reviewedPosition} · Before Fictional level 2`, { exact: true }),
+      ).toBeVisible();
+      await expect(dialog.getByText("Fictional add reason", { exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+      server.external([ids[0], ids[2]]);
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await expect(position).toHaveValue("");
+      await expect(add).toBeDisabled();
+      await expect(
+        panel.getByRole("button", { name: "Use this position", exact: true }),
+      ).toHaveCount(0);
+      await position.selectOption(ids[2]);
+      await add.click();
+      await expect(dialog.getByText("2 · Before Fictional level 3", { exact: true })).toBeVisible();
+      server.failResponse();
+      await confirm.click();
+      await expect.poll(() => server.commands.length).toBe(beforeReview + 1);
+      await page.keyboard.press("Escape");
+      const recover = panel.getByRole("button", { name: "Check the previous action", exact: true });
+      await expect(recover).toBeVisible();
+      server.external([ids[2], ids[0]]);
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await expect(rows.first()).toContainText("Fictional level 3");
+      await recover.click();
+      await expect.poll(() => server.commands.length).toBe(beforeReview + 2);
+      expect(server.commands.at(-1)).toEqual(server.commands.at(-2));
+      await expect(name).toHaveValue("Fictional insertion");
+      await expect(add).toBeDisabled();
+      await panel.getByRole("button", { name: "Use this position", exact: true }).click();
+      await add.click();
+      await expect(dialog.getByText("1 · Before Fictional level 3", { exact: true })).toBeVisible();
+      await confirm.click();
+      await expect(dialog).toHaveCount(0);
+      const last = server.commands.at(-1);
+      expect(last).toMatchObject({
+        etag: orderOfConflict === "read first" ? '"v4"' : '"v5"',
+        input: { name: "Fictional insertion", position: 1, reason: "Fictional add reason" },
+      });
+      expect(last?.key).not.toBe(server.commands.at(-2)?.key);
+    },
+  );
+}
 
 for (const locale of ["en", "ru"] as const) {
   test(
@@ -79,6 +260,7 @@ for (const locale of ["en", "ru"] as const) {
         const add = panel.getByRole("button", { name: s.add, exact: true });
         await expect(add).toBeDisabled();
         await panel.getByLabel(s.name, { exact: true }).fill(name);
+        await expect(panel.getByLabel(s.position, { exact: true })).toHaveValue("append");
         await add.click();
         const dialog = page.getByRole("dialog");
         await expect(dialog.getByText(name, { exact: false })).toBeVisible();
@@ -105,9 +287,21 @@ for (const locale of ["en", "ru"] as const) {
           .getByRole("button", { name: s.archive.replace("{{name}}", name), exact: true })
           .click();
         await expect(panel.getByLabel(s.target, { exact: true })).toHaveValue(previous.id);
+        await expect(
+          panel.getByLabel(s.target, { exact: true }).getByRole("option", {
+            name: `${previous.position} · ${previous.name}`,
+            exact: true,
+          }),
+        ).toHaveCount(1);
         await expect(panel.getByText(s.zero, { exact: true })).toBeVisible();
         await panel.getByRole("button", { name: s.reviewArchive, exact: true }).click();
         await expect(dialog.getByText(name, { exact: false }).first()).toBeVisible();
+        await expect(
+          dialog.getByText(
+            `ATS · ${archived.position} · ${name} → ${previous.position} · ${previous.name}`,
+            { exact: true },
+          ),
+        ).toBeVisible();
         await expect(dialog).toHaveAccessibleDescription(
           new RegExp(s.warning.replaceAll(".", "\\.")),
         );

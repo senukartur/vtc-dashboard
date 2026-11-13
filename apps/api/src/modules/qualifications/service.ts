@@ -716,6 +716,35 @@ export function createQualifications(
         );
       });
     },
+    async archivedLevels(
+      actor: Actor,
+      selectedGame: Game,
+      options: Page = {},
+    ): Promise<S["ListQualificationArchivedLevel"]> {
+      game(selectedGame);
+      return ports.identity.transaction(async (tx) => {
+        await ports.identity.qualificationContextInTransaction(tx, [], actor);
+        const paging = page(actor, ["archived-levels", selectedGame, options.limit ?? 25], options);
+        const rows = await c(tx)
+          .select({
+            id: qualificationLevels.id,
+            game: qualificationLevels.game,
+            name: qualificationLevels.name,
+          })
+          .from(qualificationLevels)
+          .where(
+            and(
+              eq(qualificationLevels.game, selectedGame),
+              isNull(qualificationLevels.activePosition),
+              paging.after ? gt(qualificationLevels.id, paging.after.id) : undefined,
+            ),
+          )
+          .orderBy(asc(qualificationLevels.id))
+          .limit(paging.limit + 1)
+          .for("share");
+        return paging.finish(rows, (row) => ({ id: row.id, time: null }));
+      });
+    },
     async rules(
       actor: Actor,
       levelId: string,
