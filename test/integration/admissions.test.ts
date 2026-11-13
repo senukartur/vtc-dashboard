@@ -56,6 +56,7 @@ import {
   admissionsEvents,
   identityAccessEvents,
 } from "../../apps/api/src/platform/outbox/events.ts";
+import { createAdministration } from "../../apps/api/src/use-cases/administration.ts";
 import {
   guardedSettings,
   reset,
@@ -481,6 +482,19 @@ test("actual messaging rejection and explicit invitation email request enqueue a
     reason: "Fictional review reason",
   });
   expect(repeated.decision?.id).toBe(rejected.decision?.id);
+  const audit = await createAdministration(unit, identity, {
+    telemetry: false,
+    manual: false,
+    qualifications: false,
+    externalIdentities: false,
+    admissions: true,
+    mail: true,
+  }).auditStage3(director, { action: "application.reviewed", limit: 100 });
+  expect(audit.items.filter((row) => row.subjectId === app.id)).toEqual([
+    expect.objectContaining({
+      details: { before: { status: "submitted" }, after: { status: "rejected" } },
+    }),
+  ]);
   const reapplied = await submitted(admissions, input(app.email));
   expect(reapplied.id).not.toBe(app.id);
   const history = await admissions.list(director, { historyId: app.id, limit: 1 });
@@ -582,6 +596,83 @@ test("disabled mail preserves seven-day copy and redemption; rejection fails clo
   expect(await count("identity_sessions", "WHERE user_id=?", [redeemed.id])).toBe(0);
   expect(await status(noMail.copy(director, fixture.invitationId, 2))).toBe(409);
 });
+
+test("audit labels use authorized Admissions projections and retain invitation generation transitions", async () => {
+  const fixture = await approved();
+  const replacement = await admissions.reissue(director, fixture.invitationId, newId(), 1);
+  const { link } = await admissions.copy(director, replacement.id, 1);
+  const token = new URL(link).searchParams.get("token");
+  if (!token) throw new Error("SYNTHETIC_TOKEN_MISSING");
+  const redeemed = await admissions.redeem(`pre:${newId()}`, newId(), token, password);
+  const flags = {
+    telemetry: false,
+    manual: false,
+    qualifications: false,
+    externalIdentities: false,
+    admissions: true,
+    mail: true,
+  };
+  const projectLabels = vi.fn(admissions.auditLabelsInTransaction);
+  const sources = { admissions: { ...admissions, auditLabelsInTransaction: projectLabels } };
+  const administration = createAdministration(unit, identity, flags, false, sources);
+  const expected = [
+    ["application.submitted", fixture.app.id, "application", null, { status: "submitted" }],
+    [
+      "application.reviewed",
+      fixture.app.id,
+      "application",
+      { status: "submitted" },
+      { status: "approved" },
+    ],
+    [
+      "invitation.copied",
+      fixture.invitationId,
+      "invitation",
+      { state: "active" },
+      { state: "active" },
+    ],
+    ["invitation.reissued", replacement.id, "invitation", null, { state: "active" }],
+    ["invitation.copied", replacement.id, "invitation", { state: "active" }, { state: "active" }],
+    ["invitation.redeemed", replacement.id, "invitation", { state: "active" }, { state: "used" }],
+    ["membership.changed", redeemed.id, "user", null, { status: "active", role: "trainee" }],
+  ] as const;
+  for (const [action, subjectId, objectType, before, after] of expected) {
+    const audit = await administration.auditStage3(director, { action, limit: 100 });
+    expect(audit.items.filter((row) => row.subjectId === subjectId)).toEqual([
+      expect.objectContaining({
+        objectType,
+        objectName: fixture.app.nickname,
+        details: { before, after },
+      }),
+    ]);
+  }
+  const page = await administration.auditStage3(director, {
+    action: "invitation.copied",
+    limit: 1,
+  });
+  expect(page.nextCursor).toEqual(expect.any(String));
+  expect(projectLabels).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.anything(),
+    [],
+    [page.items[0]?.subjectId],
+  );
+  projectLabels.mockClear();
+  const disabled = createAdministration(
+    unit,
+    identity,
+    { ...flags, admissions: false },
+    false,
+    sources,
+  );
+  const withoutLabel = await disabled.auditStage3(director, {
+    action: "invitation.copied",
+    limit: 1,
+  });
+  expect(withoutLabel.items).toEqual(page.items.map((row) => ({ ...row, objectName: null })));
+  expect(projectLabels).not.toHaveBeenCalled();
+});
+
 test.each([
   ["approve", "approve"],
   ["approve", "reject"],
