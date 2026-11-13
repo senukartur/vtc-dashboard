@@ -431,6 +431,10 @@ try {
           candidates.items.some(({ id }) => id === refs.candidateId),
           true,
         );
+        await assert.rejects(
+          connection.query("UPDATE reconciliation_commands SET result=result"),
+          denied,
+        );
         const dismissalKey = newId();
         const value = { reason: "Fictional restricted dismissal" };
         const dismissal = await reconciliation.dismissCandidate(

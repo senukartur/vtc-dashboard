@@ -122,7 +122,8 @@ export function createReconciliation(
       eq(reconciliationCommands.operation, operation),
       eq(reconciliationCommands.key, key),
     );
-    const [saved] = await c(tx).select().from(reconciliationCommands).where(where).for("update");
+    // Callers hold the company write lock. Read the immutable receipt from current state.
+    const [saved] = await c(tx).select().from(reconciliationCommands).where(where).for("share");
     if (saved) {
       if (!saved.fingerprint.equals(fingerprint)) throw identityError(409, "IDEMPOTENCY_CONFLICT");
       return saved.result as T;
