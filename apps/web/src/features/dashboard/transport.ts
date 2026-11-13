@@ -29,6 +29,12 @@ export class DashboardFailure extends AccountFailure {
   }
 }
 
+export class DashboardPayloadFailure extends DashboardFailure {
+  constructor() {
+    super("unavailable");
+  }
+}
+
 export function fail(response: Response): never {
   const kinds: Record<number, AccountFailure["kind"]> = {
     400: "invalid",
@@ -73,8 +79,15 @@ export async function dashboardRead<K extends keyof DTO>(
       }
     }
     if (response.status !== 200) fail(response);
-    const parsed = schema(name).safeParse(await response.json());
-    if (!parsed.success) throw new DashboardFailure("unavailable");
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new DashboardPayloadFailure();
+      throw error;
+    }
+    const parsed = schema(name).safeParse(payload);
+    if (!parsed.success) throw new DashboardPayloadFailure();
     bounded.throwIfAborted();
     return { data: parsed.data, etag: response.headers.get("ETag") };
   } catch (error) {
