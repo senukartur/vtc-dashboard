@@ -459,10 +459,13 @@ for (const { mode, manual } of [
       self.data.member.roles = ["driver", "dispatcher"];
       await page.route("**/api/v1/me", (route) => route.fulfill({ json: self }));
       const computedAt = "2026-11-12T08:00:00.000Z";
-      const summaryGate = Promise.withResolvers<void>();
+      let releaseSummary: () => void = () => {};
+      const summaryGate = new Promise<void>((resolve) => {
+        releaseSummary = resolve;
+      });
       let currentMode: "stage3" | "legacy" = mode;
       await page.route("**/api/v1/me/workspace-summary?view=stage3", async (route) => {
-        await summaryGate.promise;
+        await summaryGate;
         const dispatch =
           currentMode === "stage3"
             ? {
@@ -528,7 +531,7 @@ for (const { mode, manual } of [
         ).toHaveCount(2);
         const reversal = entry.getByRole("button", { name: "Reverse merge", exact: true });
         await expect(reversal).toHaveCount(0);
-        summaryGate.resolve();
+        releaseSummary();
         if (mode === "stage3" || manual) {
           await expect(
             entry.getByText(
@@ -577,7 +580,7 @@ for (const { mode, manual } of [
           await expect.poll(() => writes).toBe(1);
         }
       } finally {
-        summaryGate.resolve();
+        releaseSummary();
       }
     },
   );
