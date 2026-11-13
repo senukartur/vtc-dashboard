@@ -265,8 +265,25 @@ test("Stage 3 review compares independently present manual and telemetry sources
           }),
         ]),
       );
+      const {
+        acceptance,
+        effectiveFacts,
+        evaluation,
+        factRevisionId,
+        qualificationCheck,
+        summary,
+      } = response.data;
+      expect(evaluation.factRevisionId).toBe(factRevisionId);
+      expect(effectiveFacts.factRevisionId).toBe(factRevisionId);
+      expect(qualificationCheck.reasonCode).toBe("qualification_history_unknown");
       if (kind === "mixed") {
-        expect(response.data.effectiveFacts.provider).toBe("manual");
+        expect(effectiveFacts.provider).toBe("manual");
+        expect(evaluation.attributionBasis).toBe("manual_confirmation");
+        expect(evaluation.reportingAt).toBe(evaluation.attributionAt);
+        expect(acceptance).toEqual({
+          mode: "unavailable",
+          blockedReasonCodes: ["cargo_unknown", "qualification_history_unknown"],
+        });
         expect(normalizedFacts.factRevisionId).not.toBe(
           response.data.effectiveFacts.factRevisionId,
         );
@@ -279,6 +296,14 @@ test("Stage 3 review compares independently present manual and telemetry sources
         expect(normalizedFacts.cargoDamagePercent).toBe(0);
       } else {
         expect(normalizedFacts.cargoDamagePercent).toBeNull();
+        expect(evaluation.factRevisionId).toBe(normalizedFacts.factRevisionId);
+        expect(evaluation.attributionAt).toBe(normalizedFacts.actualStartAt);
+        expect(evaluation.reportingAt).toBe(normalizedFacts.actualCompletedAt);
+        expect(evaluation.reportingAt).toBe(summary.reportingAt);
+        expect(acceptance).toEqual({
+          mode: "unavailable",
+          blockedReasonCodes: ["qualification_history_unknown"],
+        });
       }
       const normalized = validate.compile({
         $ref: "urn:vtc:browser:v1#/$defs/TripStage3TelemetryNormalizedFacts",
