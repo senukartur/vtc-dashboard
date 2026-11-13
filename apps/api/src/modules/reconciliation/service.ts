@@ -6,6 +6,7 @@ import {
   desc,
   reconciliationCandidateDismissals as dismissals,
   eq,
+  gt,
   inArray,
   lt,
   or,
@@ -46,6 +47,8 @@ import { type CandidatePage, createStage3Candidates } from "./stage3-candidates.
 
 type S = components["schemas"];
 type Row = typeof reconciliations.$inferSelect;
+type Candidate = typeof reconciliationCandidates.$inferSelect;
+type MatchEvidence = Awaited<ReturnType<Trips["reconciliation"]["matchingEvidence"]>>;
 function stableCandidateHash(primaryVersion: number, secondaryVersion: number, factIds: string[]) {
   return contentHash(
     canonicalJson(["dispatch-review-v1", primaryVersion, secondaryVersion, [...factIds].sort()]),
@@ -275,8 +278,8 @@ export function createReconciliation(
     previous: TripState,
     row: TripState,
   ) {
-    if (!config.dispatchReviewStage3Enabled || row.version === previous.version || row.aliasOf)
-      return;
+    // This projection only uses existing tables and keeps legacy writers synchronized.
+    if (row.version === previous.version || row.aliasOf) return;
     await advanceTripVersionPage(tx, row, previous.version, null);
   }
   async function advanceTripVersionPage(
@@ -309,65 +312,20 @@ export function createReconciliation(
       .limit(candidateBound + 1)
       .for("update");
     const batch = related.slice(0, candidateBound);
-    const rootGroup = await ports.trips.groups.membersOfRoots(tx, [row.id], "share");
-    const rootEvidence = await ports.trips.reconciliation.matchingEvidence(
-      tx,
-      rootGroup.map((member) => member.id),
-    );
-    for (const snapshot of batch) {
-      const first = snapshot.primaryTripId === row.id;
-      const counterpartId = first ? snapshot.secondaryTripId : snapshot.primaryTripId;
-      const counterpart = await ports.trips.groups.resolve(tx, counterpartId, true);
-      if (
-        counterpart.id !== counterpartId ||
-        row.ownerId !== snapshot.ownerId ||
-        counterpart.ownerId !== row.ownerId ||
-        row.game !== snapshot.game ||
-        counterpart.game !== row.game
-      )
-        continue;
-      const { factIds } = snapshot.evidence as { factIds?: string[] };
-      if (
-        !rootEvidence.complete ||
-        !factIds ||
-        rootEvidence.facts.some((fact) => !factIds.includes(fact.factRevisionId))
-      )
-        continue;
-      const otherGroup = await ports.trips.groups.membersOfRoots(tx, [counterpart.id], "share");
-      const other = await ports.trips.reconciliation.matchingEvidence(
-        tx,
-        otherGroup.map((member) => member.id),
-      );
-      const currentFacts = [...rootEvidence.facts, ...other.facts]
-        .map((fact) => fact.factRevisionId)
-        .sort();
-      if (!other.complete || canonicalJson([...factIds].sort()) !== canonicalJson(currentFacts))
-        continue;
-      // Both roots can advance before either deferred page reaches this snapshot.
-      // The complete matching evidence above proves the replacement for both current versions.
-      const primaryVersion = first ? row.version : counterpart.version;
-      const secondaryVersion = first ? counterpart.version : row.version;
-      const reasons = snapshot.reasons.filter(
-        (reason) => reason !== "confirmed_facts_require_review",
-      );
-      if (row.decision === "accepted" || counterpart.decision === "accepted")
-        reasons.push("confirmed_facts_require_review");
-      await c(tx)
-        .update(reconciliationCandidates)
-        .set({ active: false })
-        .where(eq(reconciliationCandidates.id, snapshot.id));
-      await c(tx)
-        .insert(reconciliationCandidates)
-        .values({
-          ...snapshot,
-          id: newId(),
-          primaryVersion,
-          secondaryVersion,
-          searchHash: stableCandidateHash(primaryVersion, secondaryVersion, factIds),
-          reasons: [...new Set(reasons)].sort(),
-          createdAt: at(),
-        })
-        .onDuplicateKeyUpdate({ set: { active: true } });
+    if (batch.length) {
+      const evidence = await evidenceForRoot(tx, row.id);
+      for (const snapshot of batch) {
+        const first = snapshot.primaryTripId === row.id;
+        const counterpart = await ports.trips.groups.resolve(
+          tx,
+          first ? snapshot.secondaryTripId : snapshot.primaryTripId,
+          true,
+        );
+        const resolved = first
+          ? await proveSnapshot(tx, snapshot, row, counterpart, evidence)
+          : await proveSnapshot(tx, snapshot, counterpart, row, undefined, evidence);
+        if (resolved) await replaceSnapshot(tx, snapshot, resolved);
+      }
     }
     const last = batch.at(-1);
     if (last && related.length > batch.length) {
@@ -383,6 +341,139 @@ export function createReconciliation(
         maxAttempts: 5,
       });
     }
+  }
+
+  async function evidenceForRoot(tx: TxContext, rootId: string): Promise<MatchEvidence> {
+    const group = await ports.trips.groups.membersOfRoots(tx, [rootId], "share");
+    return ports.trips.reconciliation.matchingEvidence(
+      tx,
+      group.map((member) => member.id),
+    );
+  }
+
+  async function proveSnapshot(
+    tx: TxContext,
+    snapshot: Candidate,
+    primary: TripState,
+    secondary: TripState,
+    left?: MatchEvidence,
+    right?: MatchEvidence,
+  ) {
+    if (
+      primary.id !== snapshot.primaryTripId ||
+      secondary.id !== snapshot.secondaryTripId ||
+      primary.aliasOf ||
+      secondary.aliasOf ||
+      primary.ownerId !== snapshot.ownerId ||
+      secondary.ownerId !== snapshot.ownerId ||
+      primary.game !== snapshot.game ||
+      secondary.game !== snapshot.game ||
+      (primary.version === snapshot.primaryVersion &&
+        secondary.version === snapshot.secondaryVersion)
+    )
+      return null;
+    const { factIds } = snapshot.evidence as { factIds?: string[] };
+    if (!factIds?.length) return null;
+    left ??= await evidenceForRoot(tx, primary.id);
+    right ??= await evidenceForRoot(tx, secondary.id);
+    if (!left.complete || !right.complete) return null;
+    const currentFacts = [...left.facts, ...right.facts].map((fact) => fact.factRevisionId).sort();
+    if (canonicalJson([...factIds].sort()) !== canonicalJson(currentFacts)) return null;
+    const confirmed = primary.decision === "accepted" || secondary.decision === "accepted";
+    return {
+      primaryVersion: primary.version,
+      secondaryVersion: secondary.version,
+      factIds,
+      confirmed,
+    };
+  }
+
+  async function replaceSnapshot(
+    tx: TxContext,
+    snapshot: Candidate,
+    {
+      primaryVersion,
+      secondaryVersion,
+      factIds,
+      confirmed,
+    }: NonNullable<Awaited<ReturnType<typeof proveSnapshot>>>,
+  ) {
+    const reasons = snapshot.reasons.filter(
+      (reason) => reason !== "confirmed_facts_require_review",
+    );
+    if (confirmed) reasons.push("confirmed_facts_require_review");
+    await c(tx)
+      .update(reconciliationCandidates)
+      .set({ active: false })
+      .where(eq(reconciliationCandidates.id, snapshot.id));
+    await c(tx)
+      .insert(reconciliationCandidates)
+      .values({
+        ...snapshot,
+        id: newId(),
+        primaryVersion,
+        secondaryVersion,
+        searchHash: stableCandidateHash(primaryVersion, secondaryVersion, factIds),
+        reasons: [...new Set(reasons)].sort(),
+        createdAt: at(),
+      })
+      .onDuplicateKeyUpdate({ set: { active: true } });
+  }
+
+  async function repairCandidateVersionsInTransaction(
+    tx: TxContext,
+    after?: string,
+    verify = false,
+  ) {
+    if (config.dispatchReviewStage3Enabled)
+      throw new Error("DISPATCH_REVIEW_REPAIR_REQUIRES_FLAG_OFF");
+    if (after !== undefined) applicationId(after);
+    await ports.identity.qualificationContextInTransaction(tx, []);
+    const rows = await c(tx)
+      .select()
+      .from(reconciliationCandidates)
+      .where(
+        and(
+          eq(reconciliationCandidates.active, true),
+          eq(reconciliationCandidates.ruleHash, hash),
+          after ? gt(reconciliationCandidates.id, after) : undefined,
+        ),
+      )
+      .orderBy(reconciliationCandidates.id)
+      .limit(26);
+    const batch = rows.slice(0, 25);
+    if (batch.length) {
+      await ports.identity.qualificationContextInTransaction(
+        tx,
+        batch.map(({ ownerId }) => ownerId),
+      );
+    }
+    let mismatches = 0;
+    for (const snapshot of batch) {
+      const members = await ports.trips.groups.members(
+        tx,
+        [snapshot.primaryTripId, snapshot.secondaryTripId],
+        true,
+      );
+      const primary = members.find((row) => row.id === snapshot.primaryTripId);
+      const secondary = members.find((row) => row.id === snapshot.secondaryTripId);
+      if (!primary || !secondary) continue;
+      const [candidate] = await c(tx)
+        .select()
+        .from(reconciliationCandidates)
+        .where(eq(reconciliationCandidates.id, snapshot.id))
+        .for("update");
+      if (!candidate?.active || !candidate.ruleHash.equals(hash)) continue;
+      const replacement = await proveSnapshot(tx, candidate, primary, secondary);
+      if (!replacement) continue;
+      if (verify) mismatches++;
+      else await replaceSnapshot(tx, candidate, replacement);
+    }
+    return {
+      processed: batch.length,
+      mismatches,
+      nextCursor: rows.length > batch.length ? (batch.at(-1)?.id ?? null) : null,
+    };
   }
 
   async function dismissCandidate(
@@ -562,10 +653,7 @@ export function createReconciliation(
     if (immediate) await advanceSearch(tx, state);
     else await enqueueSearch(tx, state);
   }
-  function matchPair(
-    left: Awaited<ReturnType<Trips["reconciliation"]["matchingEvidence"]>>,
-    right: Awaited<ReturnType<Trips["reconciliation"]["matchingEvidence"]>>,
-  ) {
+  function matchPair(left: MatchEvidence, right: MatchEvidence) {
     const outcomes = left.facts
       .flatMap((a) => right.facts.map((b) => matchEvidence(a, b, config.rule)))
       .filter((result) => result.outcome !== "different");
@@ -912,6 +1000,7 @@ export function createReconciliation(
     config,
     handler,
     advanceTripVersionInTransaction,
+    repairCandidateVersionsInTransaction,
     stage3DuplicateCountInTransaction: stage3.countInTransaction,
     stage3List(actor: Actor, options: CandidatePage) {
       return ports.identity.transaction(async (tx) =>

@@ -236,21 +236,38 @@ try {
       await unit
         .client(tx)
         .insert(reconciliationCandidates)
-        .values({
-          id: candidateId,
-          ownerId,
-          game: "ets2",
-          ruleHash: hash,
-          searchHash: randomBytes(32),
-          primaryTripId: tripIds[2],
-          secondaryTripId: tripIds[3],
-          primaryVersion: 1,
-          secondaryVersion: 1,
-          evidence: { factIds: [factIds[2], factIds[3]].sort() },
-          reasons: ["synthetic_duplicate"],
-          active: true,
-          createdAt: time,
-        });
+        .values([
+          {
+            id: candidateId,
+            ownerId,
+            game: "ets2",
+            ruleHash: hash,
+            searchHash: randomBytes(32),
+            primaryTripId: tripIds[2],
+            secondaryTripId: tripIds[3],
+            primaryVersion: 1,
+            secondaryVersion: 1,
+            evidence: { factIds: [factIds[2], factIds[3]].sort() },
+            reasons: ["synthetic_duplicate"],
+            active: true,
+            createdAt: time,
+          },
+          {
+            id: newId(),
+            ownerId,
+            game: "ets2",
+            ruleHash: hash,
+            searchHash: randomBytes(32),
+            primaryTripId: tripIds[0],
+            secondaryTripId: tripIds[3],
+            primaryVersion: 1,
+            secondaryVersion: 1,
+            evidence: { factIds: [factIds[0], factIds[3]].sort() },
+            reasons: ["synthetic_duplicate"],
+            active: true,
+            createdAt: time,
+          },
+        ]);
     });
     await connection.execute("UPDATE synthetic_trip_decision_guard SET refs=? WHERE id=1", [
       JSON.stringify({
@@ -318,6 +335,12 @@ try {
         step = "runtime_decision";
         const accepted = await service.decide(actor, id, commandKey, review.version, input);
         assert.equal(accepted.data.outcome, "accepted");
+        const [refreshed] = await connection.execute(
+          "SELECT primary_version FROM reconciliation_candidates WHERE active=TRUE AND primary_trip_id=? AND secondary_trip_id=?",
+          [id, refs.candidateSecondaryId],
+        );
+        assert.equal(refreshed.length, 1);
+        assert.equal(refreshed[0].primary_version, accepted.version);
         assert.deepEqual(
           await service.decide(actor, id, commandKey, review.version, input),
           accepted,

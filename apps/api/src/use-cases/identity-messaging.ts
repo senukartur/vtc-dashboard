@@ -175,16 +175,12 @@ export function composeIdentity(
                 },
               }
             : {}),
-          ...(dispatchReviewStage3Enabled
+          ...(tripDecisionsConfig
             ? {
                 adjudicationChanged: async (tx, before, after) => {
                   if (!reconciliation) throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
                   await reconciliation.advanceTripVersionInTransaction(tx, before, after);
                 },
-              }
-            : {}),
-          ...(tripDecisionsConfig
-            ? {
                 decisionProjection: (tx, id, actor) => {
                   if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
                   return tripDecisions.privateProjectionInTransaction(tx, id, actor);
