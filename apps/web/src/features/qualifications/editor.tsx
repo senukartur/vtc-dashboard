@@ -187,7 +187,7 @@ export function LevelEditor({
               command.reset();
             }}
           >
-            {t("close")}
+            {t("dismissReceipt")}
           </Button>
         )}
       </Card>

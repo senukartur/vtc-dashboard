@@ -256,7 +256,7 @@ for (const outcome of [200, 409])
         .locator("..");
       if (outcome === 409) await expect(receipt.getByRole("alert")).toBeVisible();
       else await expect(receipt.getByRole("status")).toHaveText("The server confirmed the change.");
-      await receipt.getByRole("button", { name: "Close", exact: true }).click();
+      await receipt.getByRole("button", { name: "Dismiss result", exact: true }).click();
       await expect(receipt).toHaveCount(0);
       await expect(panel.locator(`#level-name-${ids[0]}`)).toHaveCount(0);
     },
