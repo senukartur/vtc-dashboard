@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import {
   eventStage2ImageQueryPolicy,
+  isEventStage2CommandRead,
   visibleEventStage2Image,
 } from "../../apps/web/src/features/events/stage-2-model.ts";
 import {
@@ -16,6 +17,36 @@ import {
 import { stage2EventId, stage2Fixture } from "../fixtures/events-stage-2.ts";
 
 afterEach(() => vi.unstubAllGlobals());
+
+test("Stage 2 commands refresh landing lists in both locales and public cover bytes", () => {
+  const scope = "fictional-session";
+  for (const locale of ["ru", "en"] as const) {
+    const { path } = eventStage2Reads.publicList({ period: "upcoming", limit: 3, locale });
+    expect(isEventStage2CommandRead(["public-events", path, "landing-convoys"], scope)).toBe(true);
+  }
+  const { path } = eventStage2Content.publicCover(stage2EventId);
+  expect(
+    isEventStage2CommandRead(["events-stage-2", "public", "public", path, "image"], scope),
+  ).toBe(true);
+  expect(isEventStage2CommandRead(["events-stage-2", scope], scope)).toBe(true);
+  expect(isEventStage2CommandRead(["events-stage-2", "different-session"], scope)).toBe(false);
+  const upcoming = [
+    "dashboard-upcoming-event",
+    scope,
+    "events-stage-2",
+    "company.read",
+    "/me/upcoming-event?locale=en",
+    "EventStage2EnvelopeUpcoming",
+  ];
+  expect(isEventStage2CommandRead(upcoming, scope)).toBe(true);
+  expect(isEventStage2CommandRead(upcoming, "different-session")).toBe(false);
+  expect(
+    isEventStage2CommandRead(["dashboard-upcoming-event", scope, 1, "/me/upcoming-event"], scope),
+  ).toBe(false);
+  expect(
+    isEventStage2CommandRead(["public-events", "/public/events", "EnvelopeListEventPublic"], scope),
+  ).toBe(false);
+});
 
 test("staged queries include effective filters and validate the new response shape", async () => {
   const example = stage2Fixture("listEvents", "own-response");

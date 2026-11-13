@@ -1,6 +1,6 @@
 import type { Query, QueryClient } from "@tanstack/react-query";
 import type { DTO } from "./model.js";
-import { isEventStage2QueryKey } from "./stage-2-queries.js";
+import { isEventStage2QueryKey } from "./stage-2-model.js";
 import { eventStage2Reads } from "./stage-2-transport.js";
 
 export type CacheRead<T> = { data: T; etag: string | null };
