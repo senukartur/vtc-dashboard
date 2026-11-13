@@ -85,6 +85,11 @@ const ApplicationsPage = lazy(() =>
     default: module.ApplicationsPage,
   })),
 );
+const PromotionsPage = lazy(() =>
+  import("../features/qualifications/PromotionsPage.js").then((module) => ({
+    default: module.PromotionsPage,
+  })),
+);
 const MembersPage = lazy(() =>
   import("../features/admin/MembersPage.js").then((module) => ({ default: module.MembersPage })),
 );
@@ -127,6 +132,7 @@ const accountRoutes: Record<RouteId, ReactElement> = {
   reconciliation: <ReconciliationPage />,
   reviewTrip: <TripDetailPage review />,
   applications: <ApplicationsPage />,
+  promotions: <PromotionsPage />,
   members: <MembersPage />,
   catalogs: <CatalogsPage />,
   settings: <SettingsPage />,

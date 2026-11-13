@@ -1,8 +1,11 @@
 import type { TFunction } from "i18next";
-import type { WorkspaceSummary } from "./workspace-summary.js";
+import {
+  type PromotionWorkspaceSummary,
+  promotionReadyCount,
+} from "../features/qualifications/promotion-summary.js";
 
 export function navAttention(
-  summary: WorkspaceSummary | undefined,
+  summary: PromotionWorkspaceSummary | undefined,
   id: string,
   label: string,
   t: TFunction<"core">,
@@ -13,6 +16,7 @@ export function navAttention(
     events: summary?.unansweredUpcomingEvents?.count,
     dispatch: summary?.reviewQueue?.count,
     applications: summary?.newApplicationsCount,
+    promotions: promotionReadyCount(summary),
   };
   const key = Object.hasOwn(counts, id) ? (id as keyof typeof counts) : undefined;
   const count = key === undefined ? undefined : counts[key];

@@ -47,7 +47,7 @@ test("sidebar groups follow the server capability mapping for every role combina
     personal: ["overview", "myTrips"],
     company: member.company,
     review: ["dispatch", "reconciliation"],
-    management: ["applications", "members", "catalogs", "settings"],
+    management: ["applications", "promotions", "members", "catalogs", "settings"],
   };
   expect(shape(["deputy_director"])).toEqual(leadership);
   expect(shape(["director"])).toEqual(leadership);
@@ -274,7 +274,7 @@ test("More sheet groups hold exactly the visible sections that the bar leaves ou
   const leadership = {
     company,
     review: ["reconciliation"],
-    management: ["applications", "members", "catalogs", "settings"],
+    management: ["applications", "promotions", "members", "catalogs", "settings"],
   };
   expect(more(["deputy_director"])).toEqual(leadership);
   expect(more(["director"])).toEqual(leadership);

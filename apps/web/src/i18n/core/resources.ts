@@ -46,6 +46,7 @@ export const core = {
         events: "{{label}} ({{total}} awaiting your response)",
         dispatch: "{{label}} ({{total}} awaiting decision)",
         applications: "{{label}} ({{total}} awaiting review)",
+        promotions: "{{label}} (ready: {{total}})",
       },
       bar: {
         overview: "Overview",
@@ -71,6 +72,7 @@ export const core = {
         dispatch: "Dispatch",
         reconciliation: "Duplicate reconciliation",
         applications: "Applications",
+        promotions: "Promotions",
         members: "Members and roles",
         catalogs: "Game catalogs",
         settings: "Company settings",
@@ -139,6 +141,7 @@ export const core = {
         events: "{{label}} (ждут вашего ответа: {{total}})",
         dispatch: "{{label}} (ждут решения: {{total}})",
         applications: "{{label}} (на рассмотрении: {{total}})",
+        promotions: "{{label}} (готовы: {{total}})",
       },
       bar: {
         overview: "Обзор",
@@ -164,6 +167,7 @@ export const core = {
         dispatch: "Диспетчерская",
         reconciliation: "Сверка дубликатов",
         applications: "Заявки",
+        promotions: "Повышения",
         members: "Участники и роли",
         catalogs: "Каталоги игр",
         settings: "Настройки компании",

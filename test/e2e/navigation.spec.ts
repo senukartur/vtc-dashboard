@@ -152,7 +152,13 @@ async function capture(page: Page, info: TestInfo, name: string) {
 
 const company = ["Events", "Drivers", "Qualifications"];
 const review = ["Dispatch", "Duplicate reconciliation"];
-const management = ["Applications", "Members and roles", "Game catalogs", "Company settings"];
+const management = [
+  "Applications",
+  "Promotions",
+  "Members and roles",
+  "Game catalogs",
+  "Company settings",
+];
 const reporterBar = ["Overview", "My trips", "New report", "Events"];
 const reviewerBar = ["Overview", "My trips", "Review", "Events"];
 const phoneCompany = ["Drivers", "Qualifications"];
@@ -445,7 +451,13 @@ for (const { roles, groups, phoneGroups, bar, report } of [
             ).toHaveText(["Обзор", "Мои рейсы"]);
           await expect(
             navigation.getByRole("list", { name: "Управление", exact: true }).getByRole("link"),
-          ).toHaveText(["Заявки", "Участники и роли", "Каталоги игр", "Настройки компании"]);
+          ).toHaveText([
+            "Заявки",
+            "Повышения",
+            "Участники и роли",
+            "Каталоги игр",
+            "Настройки компании",
+          ]);
         });
         await capture(page, info, `navigation-${roles.join("-")}-ru`);
       }
@@ -1044,7 +1056,7 @@ test(
     await openMoreSheet(page);
     await expect(
       mainNavigation(page).getByRole("list", { name: "Управление", exact: true }).getByRole("link"),
-    ).toHaveText(["Заявки", "Участники и роли", "Каталоги игр", "Настройки компании"]);
+    ).toHaveText(["Заявки", "Повышения", "Участники и роли", "Каталоги игр", "Настройки компании"]);
     await page.keyboard.press("Escape");
     await capture(page, info, "mobile-bar-deputy-ru");
   },

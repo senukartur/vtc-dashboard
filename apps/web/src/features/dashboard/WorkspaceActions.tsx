@@ -1,12 +1,14 @@
 import { type ReactNode, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { paths } from "../../app/navigation-model.js";
 import { useSession } from "../../app/Session.js";
 import { useWorkspaceSummary } from "../../app/workspace-summary.js";
 import { formatUtc, type Locale } from "../../shared/formatting.js";
 import { Card } from "../../shared/ui/primitives.js";
 import { KeepFocusButton } from "../events/components.js";
 import { eventTime } from "../events/model.js";
+import type { PromotionWorkspaceSummary } from "../qualifications/promotion-summary.js";
 import { useBlockRetry } from "./blocks.js";
 import { type ActionKey, visibleActionSections } from "./view-model.js";
 
@@ -20,7 +22,7 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
     refetch: () => query.refetch({ cancelRefetch: false }),
   });
   const id = useId();
-  const summary = query.data;
+  const summary: PromotionWorkspaceSummary | undefined = query.data;
   const fixes = summary?.tripsNeedingFixes;
   const drafts = summary?.unfinishedManualDrafts;
   const events = summary?.unansweredUpcomingEvents;
@@ -69,6 +71,12 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
     },
     review: { destination: "/account/review" },
     applications: { destination: "/account/admin/applications?status=submitted" },
+    promotions: {
+      destination:
+        summary?.promotionsReady?.ats && !summary.promotionsReady.ets2
+          ? `${paths.promotions}?game=ats`
+          : paths.promotions,
+    },
   };
   // "Unavailable" is only a failed load; an omitted count is not mentioned at all.
   const actionable = summary ? visibleActionSections(summary, self?.capabilities ?? []) : [];
