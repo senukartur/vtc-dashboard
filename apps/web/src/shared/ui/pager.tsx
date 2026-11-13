@@ -1,4 +1,5 @@
 // The one pager for cursor lists: DataTable footers and paged lists that are not tables.
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatDecimal, type Locale } from "../formatting.js";
 import type { CursorPages } from "../paging.js";
@@ -13,8 +14,10 @@ export type PagerRange = { pageSize: number; count: number; total?: number | und
  * with a click guard instead of `disabled`, so focus stays on a button that becomes unavailable
  * at the ends or while the next page loads. Desktop shows icon buttons; below the card breakpoint
  * the buttons are full width with visible text that is part of the accessible name.
- * Without a `range` (a list outside DataTable) it renders only when another page exists, so a
- * single-page list gets no unavailable tab stops.
+ * Without a `range` (a list outside DataTable) it appears once another page exists, so a
+ * single-page list gets no unavailable tab stops. Once shown it stays mounted while a page loads
+ * (`nextCursor` is still undefined), so the focused button survives; it goes only when a loaded
+ * page (`nextCursor` null) has no previous page.
  */
 export function Pager({
   pages,
@@ -35,7 +38,13 @@ export function Pager({
     canNext = !!nextCursor && !busy;
   const summary = range && !busy ? pageSummary({ page: pages.page, ...range }) : null;
   const number = (value: number) => formatDecimal(String(value), locale);
-  if (!range && !pages.hasPrevious && !nextCursor) return null;
+  const another = pages.hasPrevious || !!nextCursor,
+    loaded = nextCursor !== undefined;
+  const [shown, setShown] = useState(another);
+  // Adjusted during render, so the pager neither flashes nor disappears for one frame.
+  if (another && !shown) setShown(true);
+  if (!another && loaded && shown) setShown(false);
+  if (!range && !another && !(shown && !loaded)) return null;
   return (
     <nav className="pager" aria-label={label ?? t("dataTable.pages")}>
       {range && (

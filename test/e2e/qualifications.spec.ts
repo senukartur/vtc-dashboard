@@ -593,10 +593,17 @@ test(
     await card.getByText("Rule version history", { exact: true }).click();
     await next("Rule version pages").click();
     await expect.poll(() => rules).toEqual(["", "synthetic-rule-next", ""]);
-    await page.waitForTimeout(250);
+    // Each restarted first page has rendered again with its own next cursor.
+    for (const name of ["Member pages", "Assignment history pages", "Rule version pages"])
+      await expect(next(name)).toBeEnabled();
+    await expect(
+      page.locator("#qualification-member option", { hasText: "Fictional Picker Member" }),
+    ).toHaveCount(1);
     // A stale cursor restarts its own list once, at the first page, and never shows an error.
     expect(await alerts()).toBe(0);
-    expect([members.length, history.length, rules.length]).toEqual([3, 3, 3]);
+    expect(members).toEqual(["", "synthetic-member-next", ""]);
+    expect(history).toEqual(["", "synthetic-history-next", ""]);
+    expect(rules).toEqual(["", "synthetic-rule-next", ""]);
 
     // SETUP_REQUIRED is not a stale cursor: the list keeps its alert and does not restart.
     code = "SETUP_REQUIRED";
@@ -607,7 +614,12 @@ test(
       .locator("..");
     await expect(staff.getByRole("alert")).toBeVisible();
     await expect(staff.getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
-    await page.waitForTimeout(250);
+    // The error rendered, so recover() declined it: the picker is still on page two.
+    await expect(
+      page
+        .getByRole("navigation", { name: "Member pages", exact: true })
+        .getByRole("button", { name: "Previous page", exact: true }),
+    ).toBeEnabled();
     expect(members).toEqual(["", "synthetic-member-next", "", "synthetic-member-next"]);
   },
 );
