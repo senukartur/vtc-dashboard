@@ -26,7 +26,7 @@ for (const name of telemetryExamples)
 test("telemetry structural boundary rejects unsupported versions and supplied ownership/acceptance", () => {
   for (const mutation of [
     { contract: { major: 2, minor: 0 } },
-    { contract: { major: 1, minor: 2 } },
+    { contract: { major: 1, minor: 3 } },
     { userId: "synthetic-owner" },
     { companyId: "synthetic-company" },
     { accepted: true },
@@ -73,6 +73,49 @@ test("telemetry versions close the audit shape and retain mode provenance constr
   }
   snapshot.extra = "fictional";
   expect(validate(fixture)).toBe(false);
+});
+
+test("telemetry v1.2 requires a closed accounting status that earlier versions forbid", () => {
+  const fixture = telemetryFixture("accounting");
+  const snapshot = fixture.snapshot as Record<string, unknown>;
+  expect(fixture.contract).toEqual({ major: 1, minor: 2 });
+  for (const distance of ["complete", "partial", "unknown"])
+    for (const fuel of ["complete", "partial", "unknown"]) {
+      snapshot.accounting = { distance, fuel };
+      expect(validate(fixture), ajv.errorsText(validate.errors)).toBe(true);
+    }
+  for (const accounting of [
+    { distance: "complete" },
+    { fuel: "partial" },
+    { distance: "complete", fuel: "partial", extra: "fictional" },
+    { distance: "whole", fuel: "partial" },
+    { distance: "complete", fuel: null },
+    { distance: true, fuel: "partial" },
+    "complete",
+    null,
+  ]) {
+    snapshot.accounting = accounting;
+    expect(validate(fixture)).toBe(false);
+  }
+  snapshot.accounting = { distance: "complete", fuel: "partial" };
+  const audit = snapshot.hardModeResult;
+  delete snapshot.hardModeResult;
+  expect(validate(fixture)).toBe(false);
+  snapshot.hardModeResult = audit;
+  delete snapshot.accounting;
+  expect(validate(fixture)).toBe(false);
+  for (const name of ["completed", "haulmp-audited"] as const) {
+    const earlier = telemetryFixture(name);
+    expect(validate(earlier), ajv.errorsText(validate.errors)).toBe(true);
+    (earlier.snapshot as Record<string, unknown>).accounting = {
+      distance: "complete",
+      fuel: "complete",
+    };
+    expect(validate(earlier)).toBe(false);
+  }
+  expect(validate({ ...telemetryFixture("accounting"), contract: { major: 1, minor: 3 } })).toBe(
+    false,
+  );
 });
 
 test("telemetry quantities preserve unavailable and measured zero as different shapes", () => {

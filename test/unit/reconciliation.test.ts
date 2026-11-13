@@ -188,6 +188,111 @@ test("only a proven open-source pair permits metric evolution while unknown valu
   ).toContain("quality_supported_conflict");
 });
 
+async function openLineage() {
+  const previous = await fact();
+  previous.outcome = "open";
+  previous.end = { utc: null, basis: "unknown", verifiedActual: false };
+  previous.wholeTripDistanceSupported = false;
+  previous.actualDistanceM = {
+    status: "unknown",
+    reasonCode: "whole_trip_distance_unknown",
+    sourceRecordId: previous.sourceRecordId,
+  };
+  previous.ruleContextComplete = true;
+  previous.trailers = {
+    complete: true,
+    items: [
+      {
+        status: "known",
+        value: { entityId: newId() },
+        sourceRecordId: previous.sourceRecordId,
+        sourceField: "synthetic.trailer",
+      },
+    ],
+  };
+  const next = structuredClone(previous);
+  next.factRevisionId = newId();
+  next.sourceRecordId = newId();
+  return {
+    previous,
+    next,
+    progression: { fromFactId: previous.factRevisionId, toFactId: next.factRevisionId },
+  };
+}
+const degradations = {
+  recording: (f: NormalizedTripEvidence) => {
+    f.recording = "partial";
+  },
+  ruleContext: (f: NormalizedTripEvidence) => {
+    f.ruleContextComplete = false;
+  },
+  trailers: (f: NormalizedTripEvidence) => {
+    f.trailers.complete = false;
+  },
+  unknownTrailer: (f: NormalizedTripEvidence) => {
+    f.trailers = {
+      complete: false,
+      items: [{ status: "unknown", reasonCode: "source_id_unknown", sourceRecordId: newId() }],
+    };
+  },
+};
+test.each([
+  { name: "recording", lost: ["recording"] },
+  { name: "rule context", lost: ["ruleContext"] },
+  { name: "a complete trailer chain", lost: ["trailers"] },
+  { name: "a known trailer", lost: ["unknownTrailer"] },
+  { name: "all three", lost: ["recording", "ruleContext", "trailers"] },
+] as { name: string; lost: (keyof typeof degradations)[] }[])(
+  "a newer revision of one source lineage may lose $name without a quality hold",
+  async ({ lost }) => {
+    const { previous, next, progression } = await openLineage();
+    for (const name of lost) degradations[name](next);
+    if (next.fuelUsedL.status === "known") next.fuelUsedL.value = "41";
+    for (const [facts, preferred] of [
+      [[previous, next], next.factRevisionId],
+      [[next, previous], previous.factRevisionId],
+    ] as const) {
+      const evolved = selectQuality(facts, preferred, progression);
+      expect(evolved.reasons).toEqual([]);
+      expect(evolved.selected?.factRevisionId).toBe(next.factRevisionId);
+    }
+    // Without the proven lineage the evolved metric conflicts and an equal-metric pair keeps
+    // the more complete older snapshot.
+    expect(selectQuality([previous, next], next.factRevisionId).reasons).toContain(
+      "quality_supported_conflict",
+    );
+    next.fuelUsedL = structuredClone(previous.fuelUsedL);
+    const independent = selectQuality([previous, next], next.factRevisionId);
+    expect(independent.reasons).toEqual([]);
+    expect(independent.selected?.factRevisionId).toBe(previous.factRevisionId);
+  },
+);
+test("source lineage tolerance never covers lost facts or changed trailer and route identities", async () => {
+  const { previous, next, progression } = await openLineage();
+  degradations.recording(next);
+  next.fuelUsedL = {
+    status: "unknown",
+    reasonCode: "unavailable",
+    sourceRecordId: next.sourceRecordId,
+  };
+  const lostFuel = selectQuality([previous, next], next.factRevisionId, progression);
+  expect(lostFuel.selected?.factRevisionId).toBe(previous.factRevisionId);
+  const changedTrailer = structuredClone(next);
+  changedTrailer.fuelUsedL = structuredClone(previous.fuelUsedL);
+  const [item] = changedTrailer.trailers.items;
+  changedTrailer.trailers.complete = true;
+  if (item?.status === "known") item.value.entityId = newId();
+  expect(
+    selectQuality([previous, changedTrailer], next.factRevisionId, progression).reasons,
+  ).toContain("quality_supported_conflict");
+  const changedOrigin = structuredClone(next);
+  changedOrigin.fuelUsedL = structuredClone(previous.fuelUsedL);
+  if (changedOrigin.origin.status === "known") changedOrigin.origin.value.entityId = newId();
+  expect(
+    selectQuality([previous, changedOrigin], next.factRevisionId, progression).reasons,
+  ).toContain("quality_supported_conflict");
+});
+
 test("correction events reject private fields and retain safe versioned references only", () => {
   const tripId = newId(),
     value = {
