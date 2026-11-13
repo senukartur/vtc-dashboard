@@ -57,6 +57,7 @@ test("staff action projections are additive and closed without extending existin
     periodId: id,
     game: "ets2",
     levelId: id,
+    levelName: "Fictional level",
     assignedAt: instant,
     endedAt: null,
   };
@@ -70,6 +71,13 @@ test("staff action projections are additive and closed without extending existin
   expect(valid("AssignmentHistory")(history)).toBe(true);
   expect(valid("AssignmentHistory")(action)).toBe(false);
   expect(valid("QualificationActionHistory")(action)).toBe(true);
+  expect(
+    valid("QualificationActionHistory")({
+      ...action,
+      purpose: "ladder_archive_transfer",
+      promotion: null,
+    }),
+  ).toBe(true);
   expect(valid("QualificationActionHistory")({ ...action, actor: null, promotion: null })).toBe(
     true,
   );
