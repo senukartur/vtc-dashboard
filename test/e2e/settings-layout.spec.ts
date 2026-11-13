@@ -591,7 +591,8 @@ test(
       releaseSelf();
     }
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(text.en.title);
-    await expect(page.getByText(names.cedar, { exact: true })).toBeVisible();
+    const workspace = page.getByRole("complementary", { name: "Workspace", exact: true });
+    await expect(workspace.getByRole("button", { name: new RegExp(names.cedar) })).toBeVisible();
     await expect(panel(page)).toHaveCount(0);
     await expect(notice(page)).toHaveCount(0);
     expect(await page.evaluate(() => history.state?.usr ?? null)).toBeNull();
