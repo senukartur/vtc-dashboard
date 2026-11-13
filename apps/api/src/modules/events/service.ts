@@ -198,6 +198,7 @@ interface Ports {
     memberIds: string[],
   ) => Promise<ReadonlyMap<string, string>>;
   notificationChanged?: (tx: TxContext, eventId: string, memberId: string | null) => Promise<void>;
+  media?: Pick<import("./media.js").EventMedia, "coverIdsInTransaction" | "discardInTransaction">;
 }
 export function createEvents(
   unit: UnitOfWork,
@@ -734,6 +735,7 @@ export function createEvents(
     revisions: readonly PublicRevision[],
     locale: EventLocale,
     privateRefs: { kind: "cargo" | "trailer"; id: string }[] = [],
+    includeCover = true,
   ) {
     if (!publishedRoutes || !routeCatalogs) throw identityError(422);
     const refs = revisions.flatMap((r) =>
@@ -743,12 +745,19 @@ export function createEvents(
     );
     const labels = await routeCatalogs.labelsInTransaction(tx, [...refs, ...privateRefs], locale);
     const fields = await publishedRoutes.publicFieldsInTransaction(tx, revisions);
+    const covers = includeCover
+      ? await ports.media?.coverIdsInTransaction(
+          tx,
+          revisions.map((r) => r.eventId),
+        )
+      : undefined;
     const items = revisions.map((r) => {
       const route = fields.get(r.id);
       if (!route) throw new Error("EVENT_ROUTE_PROJECTION_MISSING");
       const event: S["EventStage2Public"] = {
         ...legacyPublicDto(r, labels),
         ...route.public,
+        hasCover: covers?.has(r.eventId) ?? false,
         description: r.description || null,
         meetingLocation: r.meetingLocation || null,
         route: r.route || null,
@@ -946,6 +955,7 @@ export function createEvents(
     locale: EventLocale,
     actor: Actor | null,
     receipt?: Receipt,
+    includeCover = receipt === undefined,
   ): Promise<S["EventStage2Public"] | S["EventStage2Member"]> {
     const refs: { kind: "cargo" | "trailer"; id: string }[] = [];
     if (actor && r.prescribedCargoId) refs.push({ kind: "cargo", id: r.prescribedCargoId });
@@ -953,7 +963,7 @@ export function createEvents(
     const {
       items: [projection],
       labels,
-    } = await publishedEventDtos(tx, [r], locale, refs);
+    } = await publishedEventDtos(tx, [r], locale, refs, includeCover);
     if (!projection) throw new Error("EVENT_ROUTE_PROJECTION_MISSING");
     if (!actor) return projection.event;
     return {
@@ -1316,6 +1326,7 @@ export function createEvents(
           run,
           authorize: (tx, actor, organizerId) =>
             authorize(tx, actor, "events.manage", [], organizerId),
+          ...(ports.media ? { discardMedia: ports.media.discardInTransaction } : {}),
           async validate(tx, next, prior) {
             if (!next.row.game) return;
             const route = { ...next.row, game: next.row.game };
@@ -1351,12 +1362,16 @@ export function createEvents(
               null,
               "published",
             );
-            const data = await stagedProjection(locale)(
+            // The draft publication receipt stores the full response, including the current cover.
+            const data = await publishedDto(
               tx,
               await revision(tx, receipt.revisionId),
+              locale,
               actor,
               { ...receipt, responseCounts: { participating: 0, declined: 0 } },
+              true,
             );
+            if (!("event" in data)) throw new Error("EVENT_MEMBER_PROJECTION_MISSING");
             return { revisionId: receipt.revisionId, data };
           },
         })
@@ -1650,6 +1665,16 @@ export function createEvents(
           items: await Promise.all(revisions.map((r) => publicDto(tx, r, labels))),
           nextCursor,
         };
+      });
+    },
+    async listPublishedPublic(
+      locale: EventLocale,
+      options: ListOptions = {},
+    ): Promise<S["EventStage2PublicList"]> {
+      return run(async (tx) => {
+        const { revisions, nextCursor } = await listRevisions(tx, null, options);
+        const { items } = await publishedEventDtos(tx, revisions, locale);
+        return { items: items.map(({ event }) => event), nextCursor };
       });
     },
     async nearest(actor: Actor) {
