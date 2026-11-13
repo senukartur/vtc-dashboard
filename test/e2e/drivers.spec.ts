@@ -5,6 +5,8 @@ import {
   betaId,
   formerId,
   levelId,
+  levelsFixture,
+  progressFixture,
   selfId,
   topId,
   tripsFixture,
@@ -514,7 +516,7 @@ test.describe("Compact driver profile", () => {
   );
 
   test(
-    "shows unconfigured thresholds and the top level",
+    "distinguishes terminal, configured nullable minima and unconfigured promotion thresholds",
     browserCase(["@functional"]),
     async ({ page }) => {
       await mockDriverRoutes(page);
@@ -524,8 +526,37 @@ test.describe("Compact driver profile", () => {
       await expect(ets2.getByRole("heading", { level: 2 })).toHaveText("ETS2 · Driver I");
       await expect(ets2.getByText("Top level")).toBeVisible();
       await expect(ets2.getByRole("definition")).toHaveText(["12", "9,800 km"]);
-      await expect(ets2.getByText("Promotion thresholds are not configured.")).toBeVisible();
+      const warning = ets2.getByText("Promotion thresholds are not configured.");
+      await expect(warning).toHaveCount(0);
       await expect(ets2.locator(".driver-bar")).toHaveCount(0);
+
+      let configured = true;
+      await page.route("**/api/v1/qualification-levels?game=ets2*", (route) => {
+        const fixture = levelsFixture("ets2");
+        const level = fixture.data.items.find((item) => item.id === levelId("ets2", "driver_ii"));
+        if (!level) throw new Error("SYNTHETIC_LEVEL_MISSING");
+        level.promotionConfigured = configured;
+        return route.fulfill({ json: fixture });
+      });
+      await page.route(
+        `**/api/v1/members/${alphaId}/qualification-progress?game=ets2*`,
+        (route) => {
+          const fixture = progressFixture(alphaId, "ets2");
+          if (!fixture) throw new Error("SYNTHETIC_PROGRESS_MISSING");
+          fixture.data.requiredTrips = null;
+          fixture.data.requiredDistanceM = configured ? "100000000" : null;
+          return route.fulfill({ json: fixture });
+        },
+      );
+      await open(page, alphaId);
+      await expect(ets2.getByRole("definition")).toHaveText(["41", "52,300 / 100,000 km"]);
+      await expect(ets2.locator(".driver-bar")).toHaveCount(1);
+      await expect(warning).toHaveCount(0);
+
+      configured = false;
+      await page.reload();
+      await expect(ets2.getByRole("definition")).toHaveText(["41", "52,300 km"]);
+      await expect(warning).toBeVisible();
     },
   );
 
