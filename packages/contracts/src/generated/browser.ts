@@ -5334,6 +5334,11 @@ export interface components {
             /** @enum {string} */
             status: "resolved" | "unresolved";
         };
+        QualificationFreightRuleSummary: {
+            allowedAdrCategoryCount: number | null;
+            allowedTrailerTypeCount: number | null;
+            maxMassKg: string | null;
+        };
         QualificationLadder: {
             /** Format: date-time */
             asOf: string;
@@ -5356,6 +5361,7 @@ export interface components {
             configured: boolean;
             currentDriverCount: number;
             effectiveRule: components["schemas"]["QualificationRuleVersion"] | null;
+            freightRuleSummary: components["schemas"]["QualificationFreightRuleSummary"] | null;
             /** @enum {string} */
             game: "ets2" | "ats";
             /** Format: uuid */
@@ -5379,6 +5385,7 @@ export interface components {
         };
         QualificationLevel: {
             configured: boolean;
+            freightRuleSummary: components["schemas"]["QualificationFreightRuleSummary"] | null;
             /** @enum {string} */
             game: "ets2" | "ats";
             /** Format: uuid */

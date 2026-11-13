@@ -110,6 +110,25 @@ test("staff action projections are additive and closed without extending existin
   );
 });
 
+test("freight summary keeps omitted restrictions and empty allowlists distinct and exposes no row IDs", () => {
+  const validate = valid("QualificationFreightRuleSummary");
+  const unrestricted = {
+    maxMassKg: null,
+    allowedTrailerTypeCount: null,
+    allowedAdrCategoryCount: null,
+  };
+  expect(validate(unrestricted)).toBe(true);
+  expect(
+    validate({
+      ...unrestricted,
+      maxMassKg: "10000.000000000000000001",
+      allowedTrailerTypeCount: 0,
+    }),
+  ).toBe(true);
+  expect(validate({ ...unrestricted, allowedTrailerTypeCount: 1001 })).toBe(false);
+  expect(validate({ ...unrestricted, entityIds: [] })).toBe(false);
+});
+
 test("staged qualification publication accepts an optional nonempty reason and keeps preview separate", () => {
   const read = (name: string) =>
     JSON.parse(

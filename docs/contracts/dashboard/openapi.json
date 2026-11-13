@@ -16255,6 +16255,16 @@
           },
           "promotionConfigured": {
             "type": "boolean"
+          },
+          "freightRuleSummary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationFreightRuleSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -16268,7 +16278,8 @@
           "requiredDistanceM",
           "position",
           "terminal",
-          "promotionConfigured"
+          "promotionConfigured",
+          "freightRuleSummary"
         ],
         "additionalProperties": false
       },
@@ -30482,6 +30493,16 @@
                 "type": "null"
               }
             ]
+          },
+          "freightRuleSummary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationFreightRuleSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -30497,7 +30518,8 @@
           "terminal",
           "promotionConfigured",
           "currentDriverCount",
-          "effectiveRule"
+          "effectiveRule",
+          "freightRuleSummary"
         ],
         "additionalProperties": false
       },
@@ -30659,6 +30681,53 @@
         "required": [
           "targetLevelId",
           "observedDriverCount"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationFreightRuleSummary": {
+        "type": "object",
+        "properties": {
+          "maxMassKg": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowedTrailerTypeCount": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowedAdrCategoryCount": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "maxMassKg",
+          "allowedTrailerTypeCount",
+          "allowedAdrCategoryCount"
         ],
         "additionalProperties": false
       }
