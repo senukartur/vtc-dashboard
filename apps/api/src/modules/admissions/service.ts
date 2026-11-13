@@ -1,4 +1,11 @@
-import { applicationId, createAudit, newId, type TxContext, type UnitOfWork } from "@vtc/db";
+import {
+  type AuditInput,
+  applicationId,
+  createAudit,
+  newId,
+  type TxContext,
+  type UnitOfWork,
+} from "@vtc/db";
 import {
   and,
   applications,
@@ -28,6 +35,12 @@ import {
 
 type App = typeof applications.$inferSelect;
 type Invite = typeof invitations.$inferSelect;
+type AdmissionAuditChange = {
+  [Change in Extract<
+    AuditInput,
+    { subjectKind: "application" | "invitation"; details: unknown }
+  > as Change["operation"]]: Pick<Change, "operation" | "subjectKind" | "subjectId" | "details">;
+};
 type Result = { id: string; version: number; response?: unknown };
 export interface AdmissionsPorts {
   identity: Pick<
@@ -228,30 +241,23 @@ export function createAdmissions(
     companyId: string,
     actor: Actor | undefined,
     app: App,
-    operation:
-      | "application.submitted"
-      | "application.reviewed"
-      | "invitation.reissued"
-      | "invitation.redeemed"
-      | "invitation.copied",
-    subjectId = app.id,
+    change: AdmissionAuditChange[keyof AdmissionAuditChange],
   ) {
     await audit.append(tx, {
       actorKind: actor ? "user" : "system",
       actorId: actor?.userId ?? null,
-      operation,
-      subjectKind: operation.startsWith("invitation") ? "invitation" : "application",
-      subjectId,
+      ...change,
       companyId,
       occurredAt: at(),
       reason: actor ? "staff_review" : "initial_setup",
     });
-    if (operation !== "invitation.copied")
+    if (change.operation !== "invitation.copied")
       await ports.events.append(tx, {
         eventId: newId(),
         applicationId: app.id,
         version: app.version,
-        type: operation === "application.reviewed" ? "application.decided" : operation,
+        type:
+          change.operation === "application.reviewed" ? "application.decided" : change.operation,
         occurredAt: at(),
       });
   }
@@ -462,7 +468,12 @@ export function createAdmissions(
             invitationId: null,
           };
           await client(tx).insert(applications).values(row);
-          await record(tx, company.id, undefined, row, "application.submitted");
+          await record(tx, company.id, undefined, row, {
+            operation: "application.submitted",
+            subjectKind: "application",
+            subjectId: row.id,
+            details: { before: null, after: { status: row.status } },
+          });
           return receipt;
         });
       });
@@ -474,6 +485,41 @@ export function createAdmissions(
         .from(applications)
         .where(eq(applications.status, "submitted"));
       return Number(row?.count ?? 0);
+    },
+    async auditLabelsInTransaction(
+      tx: TxContext,
+      actor: Actor,
+      applicationIds: readonly string[],
+      invitationIds: readonly string[],
+    ) {
+      const appIds = [...new Set(applicationIds)];
+      const inviteIds = [...new Set(invitationIds)];
+      if (appIds.length + inviteIds.length > 100) throw new Error("AUDIT_LABEL_BOUND_EXCEEDED");
+      const appLabels = new Map<string, string>();
+      const inviteLabels = new Map<string, string>();
+      if (!appIds.length && !inviteIds.length)
+        return { applications: appLabels, invitations: inviteLabels };
+      await ports.identity.authorizeInTransaction(tx, actor, "applications.manage");
+      if (appIds.length) {
+        const rows = await client(tx)
+          .select({ id: applications.id, nickname: applications.nickname })
+          .from(applications)
+          .where(inArray(applications.id, appIds.map(applicationId)));
+        for (const row of rows) {
+          if (row.nickname.trim()) appLabels.set(row.id, row.nickname);
+        }
+      }
+      if (inviteIds.length) {
+        const rows = await client(tx)
+          .select({ id: invitations.id, nickname: applications.nickname })
+          .from(invitations)
+          .innerJoin(applications, eq(invitations.applicationId, applications.id))
+          .where(inArray(invitations.id, inviteIds.map(applicationId)));
+        for (const row of rows) {
+          if (row.nickname.trim()) inviteLabels.set(row.id, row.nickname);
+        }
+      }
+      return { applications: appLabels, invitations: inviteLabels };
     },
     async usableInvitationCountInTransaction(
       tx: TxContext,
@@ -602,11 +648,12 @@ export function createAdmissions(
             match(app.version, expected);
             if (app.status !== "submitted") throw identityError(409);
             const decisionId = newId();
+            const status = input.decision === "approve" ? "approved" : "rejected";
             let deliveryId: string | null = null;
             await client(tx)
               .update(applications)
               .set({
-                status: input.decision === "approve" ? "approved" : "rejected",
+                status,
                 version: app.version + 1,
                 ...(input.decision === "reject" ? { openEmail: null } : {}),
               })
@@ -649,7 +696,12 @@ export function createAdmissions(
               company.id,
               actor,
               { ...app, version: app.version + 1 },
-              "application.reviewed",
+              {
+                operation: "application.reviewed",
+                subjectKind: "application",
+                subjectId: app.id,
+                details: { before: { status: app.status }, after: { status } },
+              },
             );
             return {
               id,
@@ -682,7 +734,12 @@ export function createAdmissions(
         const token = crypto.open(row.id, app.id, row.ciphertext);
         if (!crypto.digest("invitation", token).equals(row.secretHash as Buffer))
           throw identityError(503);
-        await record(tx, company.id, actor, app, "invitation.copied", row.id);
+        await record(tx, company.id, actor, app, {
+          operation: "invitation.copied",
+          subjectKind: "invitation",
+          subjectId: row.id,
+          details: { before: { state: row.state }, after: { state: row.state } },
+        });
         return { invitationId: row.id, link: crypto.link(token), expiresAt: row.expiresAt };
       });
     },
@@ -758,8 +815,12 @@ export function createAdmissions(
               company.id,
               actor,
               { ...app, version: app.version + 1 },
-              "invitation.reissued",
-              replacement.id,
+              {
+                operation: "invitation.reissued",
+                subjectKind: "invitation",
+                subjectId: replacement.id,
+                details: { before: null, after: { state: replacement.state } },
+              },
             );
             return { id: replacement.id, version: 1, response: await inviteDto(tx, replacement) };
           },
@@ -814,8 +875,12 @@ export function createAdmissions(
             company.id,
             undefined,
             { ...app, version: app.version + 1 },
-            "invitation.redeemed",
-            id,
+            {
+              operation: "invitation.redeemed",
+              subjectKind: "invitation",
+              subjectId: id,
+              details: { before: { state: row.state }, after: { state: "used" } },
+            },
           );
           await ports.identity.onboardingChanged(tx, userId);
           return { id: userId, version: 1 };

@@ -2,10 +2,16 @@ import { randomBytes } from "node:crypto";
 import { newId, type TxContext } from "@vtc/db";
 import { expect, test, vi } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
+import { registerAdministrationRoutes } from "../../apps/api/src/modules/identity/admin-http.ts";
 import { capabilities, type Role } from "../../apps/api/src/modules/identity/permissions.ts";
-import { type Actor, identityError } from "../../apps/api/src/modules/identity/service.ts";
+import {
+  type Actor,
+  type Identity,
+  identityError,
+} from "../../apps/api/src/modules/identity/service.ts";
 import { pagination } from "../../apps/api/src/modules/qualifications/pagination.ts";
 import { registerWorkspaceSummaryRoutes } from "../../apps/api/src/modules/workspace-summary/http.ts";
+import type { Administration } from "../../apps/api/src/use-cases/administration.ts";
 import { createWorkspaceSummary } from "../../apps/api/src/use-cases/workspace-summary.ts";
 import { frozenAttempt } from "../../apps/web/src/features/admin/attempt.ts";
 import { administrationTranslations } from "../../apps/web/src/features/admin/translations.ts";
@@ -81,6 +87,70 @@ test("administration RU/EN resources cover the same operational states", () => {
 });
 
 const snapshot = "2026-10-18T11:12:13.123Z";
+test("audit selects a closed response schema for the requested view", async () => {
+  const { actor, identity } = workspaceFixture(["director"]);
+  const app = await createApp({ checkReadiness: async () => true });
+  const legacyRow = {
+    id: newId(),
+    action: "configuration.changed",
+    actorId: actor.userId,
+    subjectId: newId(),
+    occurredAt: snapshot,
+  };
+  const stagedRow = {
+    ...legacyRow,
+    actorNickname: "Fictional Director",
+    objectName: "Yukon Union",
+    objectType: "company",
+    details: { before: { reportingTimezone: null }, after: { reportingTimezone: "Europe/Warsaw" } },
+  };
+  const audit = vi.fn(async () => ({ items: [legacyRow], nextCursor: null }));
+  const auditStage3 = vi.fn(async () => ({ items: [stagedRow], nextCursor: null }));
+  await registerAdministrationRoutes(
+    app,
+    {
+      ...identity,
+      config: { secret: "fictional-response-test-secret", origin: "http://127.0.0.1:4173" },
+      rateLimit: async () => {},
+      authenticate: async () => actor,
+    } as unknown as Identity,
+    { audit, auditStage3 } as unknown as Administration,
+  );
+  const url = "/api/v1/admin/audit";
+  try {
+    for (const [query, data] of [
+      ["?limit=1", { items: [legacyRow], nextCursor: null }],
+      [
+        "?view=stage3&limit=1&action=configuration.changed",
+        { items: [stagedRow], nextCursor: null },
+      ],
+    ] as const) {
+      const response = await app.inject({ url: `${url}${query}` });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["content-type"]).toMatch(/^application\/json/);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json().data).toEqual(data);
+    }
+    expect(audit).toHaveBeenCalledWith(expect.anything(), { limit: 1 });
+    expect(auditStage3).toHaveBeenCalledWith(expect.anything(), {
+      view: "stage3",
+      limit: 1,
+      action: "configuration.changed",
+    });
+    auditStage3.mockResolvedValueOnce({
+      items: [{ ...stagedRow, ...{ privateValue: "fixture" } }],
+      nextCursor: null,
+    });
+    const invalid = await app.inject({ url: `${url}?view=stage3` });
+    expect(invalid.statusCode).toBe(500);
+    expect(invalid.headers["cache-control"]).toBe("no-store");
+    expect(invalid.json().error.code).toBe("INTERNAL_ERROR");
+    expect(invalid.body).not.toContain("privateValue");
+  } finally {
+    await app.close();
+  }
+});
+
 function workspaceFixture(roles: Role[]) {
   const tx = {} as TxContext;
   const actor: Actor = {
