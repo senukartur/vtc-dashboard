@@ -214,7 +214,10 @@ function ReverseMerge({
   const summaries = [a.data?.data.data, b.data?.data.data].map((v) =>
       v?.view === "private" ? v.summary : v,
     ),
-    ownTrips = summaries.filter((trip) => trip && trip.owner.id === session.self?.member.id),
+    ownTrips = summaries.filter(
+      (trip): trip is DTO["TripSummary"] =>
+        trip !== undefined && trip.owner.id === session.self?.member.id,
+    ),
     ownManual = ownTrips.some((trip) => trip.sourceKinds.includes("manual")),
     self = ownManual || (ownTrips.length > 0 && dispatchMode === "stage3"),
     waitingForMode = ownTrips.length > 0 && dispatchMode === undefined,

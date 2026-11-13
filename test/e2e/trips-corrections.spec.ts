@@ -495,6 +495,7 @@ for (const { mode, manual } of [
           view.data.summary.id = tripId;
           view.data.summary.owner = self.data.member;
           view.data.summary.version = tripId === id ? 2 : 3;
+          view.data.summary.sourceKinds = manual ? ["manual"] : ["ets2telemetry"];
           return route.fulfill({
             json: view,
             headers: { ETag: `"v${view.data.summary.version}"` },
