@@ -443,3 +443,140 @@ test(
     );
   },
 );
+
+for (const { mode, manual } of [
+  { mode: "stage3", manual: false },
+  { mode: "legacy", manual: false },
+  { mode: "legacy", manual: true },
+] as const)
+  test(
+    `own ${manual ? "manual" : "telemetry"} reconciliation is ${mode === "legacy" && !manual ? "reversible" : "read-only"} in ${mode}`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockTrips(page);
+      const self = accountFixture("en");
+      self.data.capabilities.push("trips.review");
+      self.data.member.roles = ["driver", "dispatcher"];
+      await page.route("**/api/v1/me", (route) => route.fulfill({ json: self }));
+      const computedAt = "2026-11-12T08:00:00.000Z";
+      const summaryGate = Promise.withResolvers<void>();
+      let currentMode: "stage3" | "legacy" = mode;
+      await page.route("**/api/v1/me/workspace-summary?view=stage3", async (route) => {
+        await summaryGate.promise;
+        const dispatch =
+          currentMode === "stage3"
+            ? {
+                reviewQueue: {
+                  computedAt,
+                  waitingCount: 0,
+                  oldestQueuedAt: null,
+                  oldestAgeSeconds: null,
+                  duplicateCount: 0,
+                },
+              }
+            : { legacyReviewQueue: { count: 0, oldestAgeSeconds: null } };
+        return route.fulfill({ json: envelope({ computedAt, ...dispatch }) });
+      });
+      const operationId = "4a000000-0000-4000-8000-000000000003";
+      const operation = {
+        id: operationId,
+        version: 1,
+        primaryTripId: id,
+        secondaryTripId: targetA,
+        primaryVersion: 2,
+        secondaryVersion: 3,
+        state: "applied",
+      };
+      for (const tripId of [id, targetA])
+        await page.route(`**/api/v1/trips/${tripId}`, (route) => {
+          const view = example(
+            manual ? "getTrip:extended-manual-revision" : "getTrip:private-recorded-telemetry",
+          );
+          view.data.summary.id = tripId;
+          view.data.summary.owner = self.data.member;
+          view.data.summary.version = tripId === id ? 2 : 3;
+          return route.fulfill({
+            json: view,
+            headers: { ETag: `"v${view.data.summary.version}"` },
+          });
+        });
+      await page.route(`**/api/v1/trips/${id}/reconciliations?*`, (route) =>
+        route.fulfill({ json: list([operation]) }),
+      );
+      await page.route(`**/api/v1/reconciliations/${operationId}`, (route) =>
+        route.fulfill({ json: envelope(operation), headers: { ETag: '"v1"' } }),
+      );
+      let writes = 0;
+      await page.route(`**/api/v1/reconciliations/${operationId}/reversals`, (route) => {
+        writes++;
+        return route.fulfill({ json: envelope({ ...operation, state: "reversed", version: 2 }) });
+      });
+      try {
+        await page.goto(`/account/trips/${id}`);
+        await catalogLanguage(page);
+        await page.locator("summary").filter({ hasText: "Reconciliation history" }).click();
+        const entry = page
+          .locator("details")
+          .filter({
+            has: page.locator("summary").filter({ hasText: operationId }),
+          })
+          .last();
+        await entry.locator("summary").click();
+        await expect(
+          entry.locator(".trip-row").filter({ hasText: self.data.member.nickname }),
+        ).toHaveCount(2);
+        const reversal = entry.getByRole("button", { name: "Reverse merge", exact: true });
+        await expect(reversal).toHaveCount(0);
+        summaryGate.resolve();
+        if (mode === "stage3" || manual) {
+          await expect(
+            entry.getByText(
+              manual
+                ? "You cannot review your own manual report, including merged groups."
+                : "Your current permissions do not allow this action.",
+              { exact: true },
+            ),
+          ).toBeVisible();
+          await expect(reversal).toHaveCount(0);
+          expect(writes).toBe(0);
+        } else {
+          await entry.locator("textarea").fill("Fictional separate deliveries");
+          await expect(reversal).toBeEnabled();
+          await reversal.click();
+          const dialog = page.getByRole("dialog");
+          await expect(dialog.getByRole("button", { name: "Confirm", exact: true })).toBeEnabled();
+          const refreshMode = async (next: typeof currentMode) => {
+            currentMode = next;
+            const response = page.waitForResponse(
+              (result) => new URL(result.url()).pathname === "/api/v1/me/workspace-summary",
+            );
+            await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+            await response;
+          };
+          await refreshMode("stage3");
+          await expect(dialog).toHaveCount(0);
+          await expect(reversal).toHaveCount(0);
+          expect(writes).toBe(0);
+          await refreshMode("legacy");
+          await expect(reversal).toBeEnabled();
+          await reversal.click();
+          const sent = page.waitForRequest(
+            (request) =>
+              request.method() === "POST" &&
+              new URL(request.url()).pathname.endsWith(`/${operationId}/reversals`),
+          );
+          await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
+          const request = await sent;
+          expect(request.headers()["if-match"]).toBe('"v1"');
+          expect(request.postDataJSON()).toEqual({
+            primaryVersion: 2,
+            secondaryVersion: 3,
+            reason: "Fictional separate deliveries",
+          });
+          await expect.poll(() => writes).toBe(1);
+        }
+      } finally {
+        summaryGate.resolve();
+      }
+    },
+  );

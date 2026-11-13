@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
+import { type WorkspaceSummary, useWorkspaceSummary } from "../../app/workspace-summary.js";
 import { Button, Card, Label } from "../../shared/ui/primitives.js";
 import {
   Confirm,
@@ -147,6 +148,7 @@ export function MergePair({
 }
 export function ReconciliationHistory({ tripId }: { tripId: string }) {
   const { t } = useTranslation("trips"),
+    { dispatchMode } = useWorkspaceSummary(),
     [open, setOpen] = useState(false),
     [cursor, setCursor] = useState<string | null>(null),
     [history, setHistory] = useState<string[]>([]),
@@ -172,7 +174,7 @@ export function ReconciliationHistory({ tripId }: { tripId: string }) {
             />
             {query.data && !query.data.data.data.items.length && <p>{t("empty")}</p>}
             {query.data?.data.data.items.map((r) => (
-              <ReverseMerge key={r.id} reconciliation={r} />
+              <ReverseMerge key={r.id} reconciliation={r} dispatchMode={dispatchMode} />
             ))}
             <PageNav
               next={query.data?.data.data.nextCursor}
@@ -192,7 +194,13 @@ export function ReconciliationHistory({ tripId }: { tripId: string }) {
     </Card>
   );
 }
-function ReverseMerge({ reconciliation }: { reconciliation: DTO["Reconciliation"] }) {
+function ReverseMerge({
+  reconciliation,
+  dispatchMode,
+}: {
+  reconciliation: DTO["Reconciliation"];
+  dispatchMode: WorkspaceSummary["dispatch"];
+}) {
   const { t } = useTranslation("trips"),
     session = useSession(),
     [open, setOpen] = useState(false),
@@ -206,9 +214,12 @@ function ReverseMerge({ reconciliation }: { reconciliation: DTO["Reconciliation"
   const summaries = [a.data?.data.data, b.data?.data.data].map((v) =>
       v?.view === "private" ? v.summary : v,
     ),
-    self = summaries.some(
-      (s) => s && s.owner.id === session.self?.member.id && s.sourceKinds.includes("manual"),
-    );
+    ownTrips = summaries.filter((trip) => trip && trip.owner.id === session.self?.member.id),
+    ownManual = ownTrips.some((trip) => trip.sourceKinds.includes("manual")),
+    self = ownManual || (ownTrips.length > 0 && dispatchMode === "stage3"),
+    waitingForMode = ownTrips.length > 0 && dispatchMode === undefined,
+    etag = query.data?.etag,
+    ready = !!a.data && !!b.data && !self && !waitingForMode && !!etag;
   const body = r
     ? {
         primaryVersion: r.primaryVersion,
@@ -242,8 +253,8 @@ function ReverseMerge({ reconciliation }: { reconciliation: DTO["Reconciliation"
             )}
           </div>
           <Fields values={{ primary: r.primaryVersion, secondary: r.secondaryVersion }} />
-          {self && <p>{t("selfReview")}</p>}
-          {r.state === "applied" && (
+          {r.state === "applied" && self && <p>{t(ownManual ? "selfReview" : "forbidden")}</p>}
+          {r.state === "applied" && ready && (
             <>
               <Label htmlFor={`reverse-${r.id}`}>{t("reason")}</Label>
               <textarea
@@ -255,16 +266,17 @@ function ReverseMerge({ reconciliation }: { reconciliation: DTO["Reconciliation"
               />
               <Confirm
                 label={t("reverse")}
-                guard={JSON.stringify([query.data?.etag, body])}
-                disabled={!reason.trim() || self || !a.data || !b.data || command.seconds > 0}
+                guard={JSON.stringify([etag, body])}
+                disabled={!reason.trim() || command.seconds > 0}
                 pending={command.pending}
                 failure={command.failure}
                 onConfirm={async () => {
+                  if (!ready || !body || !etag) return;
                   const result = await command.run(
                     `/reconciliations/${r.id}/reversals`,
                     body,
                     "EnvelopeReconciliation",
-                    query.data?.etag,
+                    etag,
                   );
                   if (result) setSuccess(true);
                   return result;
