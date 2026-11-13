@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { newId } from "@vtc/db";
 import { expect, test } from "vitest";
+import { structuralLevels } from "../../apps/api/src/modules/qualifications/initialization.ts";
 import { levelReceipt } from "../../apps/api/src/modules/qualifications/level-receipts.ts";
 import { pagination } from "../../apps/api/src/modules/qualifications/pagination.ts";
 import { validateQualificationsConfig } from "../../apps/api/src/modules/qualifications/service.ts";
@@ -73,7 +74,7 @@ test("qualification activation has no fallback cursor key or numeric policy defa
 
 test("a legacy level receipt preserves historical identity and strips the retired wire field", () => {
   const data = {
-    id: newId(),
+    id: structuralLevels.ets2[2],
     game: "ets2",
     code: "driver_ii",
     version: 3,
@@ -89,6 +90,7 @@ test("a legacy level receipt preserves historical identity and strips the retire
     version: 3,
   });
   expect(() => levelReceipt({ data, version: 3 }, newId())).toThrow();
+  expect(() => levelReceipt({ data: { ...data, game: "ats" }, version: 3 }, data.id)).toThrow();
   expect(() =>
     levelReceipt({ data: { ...data, reason: "Private" }, version: 3 }, data.id),
   ).toThrow();
