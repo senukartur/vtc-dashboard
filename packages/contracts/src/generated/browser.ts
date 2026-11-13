@@ -974,6 +974,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/qualification-levels/archived": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listArchivedQualificationLevels
+         * @description Archived choices for a historical qualification assignment in one game.
+         */
+        get: operations["listArchivedQualificationLevels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/qualification-members": {
         parameters: {
             query?: never;
@@ -3939,6 +3959,10 @@ export interface components {
             data: components["schemas"]["ListQualificationActionHistory"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeListQualificationArchivedLevel: {
+            data: components["schemas"]["ListQualificationArchivedLevel"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeListQualificationLevel: {
             data: components["schemas"]["ListQualificationLevel"];
             meta: components["schemas"]["Meta"];
@@ -4732,6 +4756,10 @@ export interface components {
             items: components["schemas"]["QualificationActionHistory"][];
             nextCursor: string | null;
         };
+        ListQualificationArchivedLevel: {
+            items: components["schemas"]["QualificationArchivedLevel"][];
+            nextCursor: string | null;
+        };
         ListQualificationLevel: {
             items: components["schemas"]["QualificationLevel"][];
             nextCursor: string | null;
@@ -5326,6 +5354,11 @@ export interface components {
             } | null;
             /** @enum {string} */
             purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion" | "ladder_archive_transfer";
+        };
+        QualificationArchivedLevel: {
+            game: components["schemas"]["Game"];
+            id: components["schemas"]["Id"];
+            name: string;
         };
         /** @description Historical qualification rules evaluated for the reviewed fact. Unresolved history has a reason code and no rules. */
         QualificationCheck: {
@@ -8191,6 +8224,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeQualificationLevel"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listArchivedQualificationLevels: {
+        parameters: {
+            query: {
+                cursor?: components["parameters"]["Cursor"];
+                game: components["schemas"]["Game"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bounded archived level choices for the selected game. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListQualificationArchivedLevel"];
                 };
             };
             default: components["responses"]["Error"];

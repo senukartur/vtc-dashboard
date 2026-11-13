@@ -5903,6 +5903,73 @@
       ],
       "additionalProperties": false
     },
+    "QualificationArchivedLevel": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "id",
+        "game",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "ListQualificationArchivedLevel": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/QualificationArchivedLevel"
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeListQualificationArchivedLevel": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ListQualificationArchivedLevel"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
     "ListQualificationRuleVersion": {
       "type": "object",
       "properties": {

@@ -5982,6 +5982,56 @@
         ]
       }
     },
+    "/api/v1/admin/qualification-levels/archived": {
+      "get": {
+        "operationId": "listArchivedQualificationLevels",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "listArchivedQualificationLevels",
+        "description": "Archived choices for a historical qualification assignment in one game.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-113",
+        "x-capability": "qualifications.manage",
+        "x-guards": [],
+        "responses": {
+          "200": {
+            "description": "Bounded archived level choices for the selected game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeListQualificationArchivedLevel"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "game",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Game"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/qualification-levels/{levelId}/rule-versions": {
       "get": {
         "operationId": "listQualificationRuleVersions",
@@ -18943,6 +18993,73 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ListQualificationLevel"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationArchivedLevel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "id",
+          "game",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "ListQualificationArchivedLevel": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/QualificationArchivedLevel"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeListQualificationArchivedLevel": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ListQualificationArchivedLevel"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"

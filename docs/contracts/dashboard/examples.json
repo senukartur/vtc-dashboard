@@ -2179,6 +2179,40 @@
       }
     },
     {
+      "id": "listArchivedQualificationLevels:success",
+      "operationId": "listArchivedQualificationLevels",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "name": "Fictional archived level"
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listArchivedQualificationLevels:empty",
+      "operationId": "listArchivedQualificationLevels",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
       "id": "listQualificationRuleVersions:success",
       "operationId": "listQualificationRuleVersions",
       "status": 200,

@@ -14,6 +14,23 @@ const sample = {
     adr: { status: "unknown", adrClass: null },
   },
 };
+test("archived assignment choices expose only bounded same-game level labels", () => {
+  const parse = valid("EnvelopeListQualificationArchivedLevel");
+  const item = {
+    id: "41000000-0000-4000-8000-000000000001",
+    game: "ats",
+    name: "Fictional archived level",
+  };
+  const reply = (items: unknown[]) => ({
+    data: { items, nextCursor: null },
+    meta: { requestId: "synthetic-request" },
+  });
+  expect(parse(reply([item]))).toBe(true);
+  expect(parse(reply(Array(101).fill(item)))).toBe(false);
+  expect(parse(reply([{ ...item, game: "other" }]))).toBe(false);
+  for (const property of ["code", "position", "reason", "rules", "currentDriverCount"])
+    expect(parse(reply([{ ...item, [property]: null }]))).toBe(false);
+});
 test("preview wire facts and safe results are closed, bounded and carry no decision authority", () => {
   expect(valid("QualificationPreviewInput")(sample)).toBe(true);
   for (const field of ["ownerId", "sourcePayload", "accepted", "confirmedEvent", "assignmentId"])
