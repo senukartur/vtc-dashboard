@@ -1,7 +1,9 @@
 import { useId } from "react";
 import { useEventTimezone } from "../components.js";
-import { type DTO, eventTime, utcInput } from "../model.js";
+import { type DTO, utcInput } from "../model.js";
+import { dateTile } from "../view-model.js";
 import type { EditorDlc } from "./catalog.js";
+import { shiftMass } from "./fields.js";
 import { GalleryImage } from "./gallery.js";
 import type { EditorForm } from "./model.js";
 import { useEditorText } from "./text.js";
@@ -31,32 +33,63 @@ export function EditorPreview({
   const { text, locale } = useEditorText();
   const timezone = useEventTimezone();
   const start = utcInput(form.startsAt);
-  const date =
+  const meeting = utcInput(form.meetingAt);
+  const date = start && dateTile(start, locale, timezone);
+  const clock = new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: timezone,
+  });
+  const weekday =
     start &&
-    new Intl.DateTimeFormat(locale, {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-      timeZone: timezone,
-    }).format(new Date(start));
-  const hasRoute =
-    form.origin.cityId ||
-    form.destination.cityId ||
-    form.origin.depotId ||
-    form.destination.depotId;
+    new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: timezone }).format(
+      new Date(start),
+    );
   const platform =
     form.platform === "truckersmp" ? "TruckersMP" : form.platform === "haulmp" ? "HaulMP" : "";
+  const timing = [
+    meeting && `${text.meetingAt.toLowerCase()} ${clock.format(new Date(meeting))}`,
+    start && `${text.startsAt.toLowerCase()} ${clock.format(new Date(start))}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const meta = [timing, platform, form.server.trim()].filter(Boolean).join(" · ");
+  const route = cityNames
+    .map((name, index) =>
+      [
+        name ??
+          (form[index === 0 ? "origin" : "destination"].cityId ? text.retainedCatalog : undefined),
+        depotNames[index],
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    )
+    .filter(Boolean)
+    .join(" → ");
+  const mass = form.prescribedMassKg.trim();
+  const load = [
+    cargo ?? (form.prescribedCargoId ? text.retainedCatalog : undefined),
+    mass && `${shiftMass(mass, -3)} ${text.tonnes}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const loadSummary = [
+    load,
+    trailer ?? (form.prescribedTrailerTypeId ? text.retainedCatalog : undefined),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <aside className="event-editor-preview" aria-labelledby={id}>
       <h2 id={id}>{text.preview}</h2>
       <article className="card event-editor-preview-card">
         {coverState !== null && (
-          <div className="event-editor-preview-cover">
+          <div className="event-editor-preview-cover" data-cover={cover ? "image" : coverState}>
             {eventId && cover ? (
               <GalleryImage eventId={eventId} media={cover} />
             ) : (
-              <span>
+              <span className={coverState === "empty" ? "visually-hidden" : undefined}>
                 {
                   text[
                     coverState === "loading"
@@ -71,123 +104,35 @@ export function EditorPreview({
           </div>
         )}
         <div className="event-editor-preview-body">
-          <header className="stack">
+          {date && (
+            <time className="event-editor-date-tile" dateTime={start}>
+              <span>{date.month.replace(/\.$/, "")}</span>
+              <strong>{date.day}</strong>
+              <small>{weekday}</small>
+            </time>
+          )}
+          <div className="event-editor-preview-details">
             <div className="event-editor-inline">
+              <h3>{form.title.trim() || text.untitled}</h3>
               {form.game && <span className="event-editor-tag">{form.game.toUpperCase()}</span>}
-              {form.visibility && <span className="muted">{text[form.visibility]}</span>}
             </div>
-            {start && date ? (
-              <time dateTime={start} className="event-editor-date">
-                {date}
-              </time>
-            ) : (
-              <span className="muted">{text.noDate}</span>
-            )}
-            <h3>{form.title.trim() || text.untitled}</h3>
-            {form.description.trim() && (
-              <p className="event-editor-preview-description">{form.description.trim()}</p>
-            )}
-          </header>
-          <dl className="event-editor-facts">
-            {(["meetingAt", "startsAt", "endsAt"] as const).map((name) => {
-              const instant = utcInput(form[name]);
-              if (!instant && name === "endsAt") return null;
-              return (
-                <div key={name}>
-                  <dt>{text[name]}</dt>
-                  <dd>
-                    {instant ? (
-                      <time dateTime={instant}>{eventTime(instant, locale, timezone)}</time>
-                    ) : (
-                      text.noValue
-                    )}
-                  </dd>
-                </div>
-              );
-            })}
-            <div>
-              <dt>{text.platform}</dt>
-              <dd>{platform || text.noValue}</dd>
-            </div>
-            <div>
-              <dt>{text.server}</dt>
-              <dd>{form.server.trim() || text.noValue}</dd>
-            </div>
-          </dl>
-          <section className="event-editor-preview-section">
-            <h4>{text.route}</h4>
-            {hasRoute ? (
-              <dl className="event-editor-route-preview">
-                {(["origin", "destination"] as const).map((end, index) => (
-                  <div key={end}>
-                    <dt>{text[end]}</dt>
-                    <dd>
-                      {cityNames[index] ?? (form[end].cityId ? text.retainedCatalog : text.noValue)}
-                      {form[end].depotId && (
-                        <small>{depotNames[index] ?? text.retainedDepot}</small>
-                      )}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            ) : (
-              <p className="muted">{text.noRoute}</p>
-            )}
-            {form.distanceKm.trim() && (
-              <p>
-                {form.distanceKm.trim()} {locale === "ru" ? "км" : "km"}
-              </p>
-            )}
-          </section>
-          <section className="event-editor-preview-section">
-            <h4>{text.requiredDlcIds}</h4>
-            {dlcs.length ? (
+            <p className="muted">{meta || text.noDate}</p>
+            {route && <p>{route}</p>}
+            {dlcs.length > 0 && (
               <ul className="event-editor-preview-dlcs">
-                {dlcs.map(({ id, label, code, sources }) => (
-                  <li key={id}>
-                    <span>{label ?? text.retainedCatalog}</span>
-                    {code && <code>{code}</code>}
-                    <small className="muted">
-                      {sources
-                        .map((source) => text[source === "manual" ? "manual" : "derived"])
-                        .join(" · ")}
-                    </small>
+                {dlcs.map(({ id, label }) => (
+                  <li key={id} className="event-editor-tag">
+                    {label ?? text.retainedCatalog}
                   </li>
                 ))}
               </ul>
-            ) : (
-              <p className="muted">{text.noDlcs}</p>
             )}
-          </section>
-          <section className="event-editor-preview-section">
-            <h4>{text.load}</h4>
-            {form.prescribedCargoId ||
-            form.prescribedTrailerTypeId ||
-            form.prescribedMassKg.trim() ? (
-              <dl className="event-editor-facts">
-                {form.prescribedCargoId && (
-                  <div>
-                    <dt>{text.prescribedCargoId}</dt>
-                    <dd>{cargo ?? text.retainedCatalog}</dd>
-                  </div>
-                )}
-                {form.prescribedMassKg.trim() && (
-                  <div>
-                    <dt>{text.prescribedMassKg}</dt>
-                    <dd>{form.prescribedMassKg.trim()}</dd>
-                  </div>
-                )}
-                {form.prescribedTrailerTypeId && (
-                  <div>
-                    <dt>{text.prescribedTrailerTypeId}</dt>
-                    <dd>{trailer ?? text.retainedCatalog}</dd>
-                  </div>
-                )}
-              </dl>
-            ) : (
-              <p className="muted">{text.noLoad}</p>
+            {loadSummary && (
+              <p>
+                {text.prescribedCargoId}: {loadSummary}
+              </p>
             )}
-          </section>
+          </div>
         </div>
       </article>
     </aside>

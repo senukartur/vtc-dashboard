@@ -125,7 +125,7 @@
   background: transparent;
   color: var(--foreground);
   font-size: var(--font-small);
-  font-weight: 600;
+  font-weight: var(--button-font-weight);
   text-align: left;
   cursor: pointer;
 }

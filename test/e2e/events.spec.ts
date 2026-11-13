@@ -1287,6 +1287,38 @@ test.describe("Stage 2 draft entry", () => {
       .response as components["schemas"]["EventStage2EnvelopeDraft"];
 
   test(
+    "the new event form saves Moscow wall times and tonnes as UTC and kilograms",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+      await page.goto("/account/events/new");
+      const schedule = page.getByRole("group", { name: "When", exact: true });
+      await schedule.locator('input[type="date"]').fill("2099-10-25");
+      await schedule.locator('input[type="time"]').nth(0).fill("00:30");
+      await schedule.locator('input[type="time"]').nth(1).fill("01:00");
+      await page.getByRole("button", { name: "+ Set end time", exact: true }).click();
+      await schedule.locator('input[type="date"]').nth(1).fill("2099-10-26");
+      await schedule.locator('input[type="time"]').nth(2).fill("00:15");
+      await page.getByRole("button", { name: "+ Add load", exact: true }).click();
+      await page.getByRole("textbox", { name: "Mass (t)", exact: true }).fill("18,025");
+
+      const request = page.waitForRequest(
+        (candidate) =>
+          candidate.method() === "POST" &&
+          new URL(candidate.url()).pathname === "/api/v1/admin/events",
+      );
+      await page.getByRole("button", { name: "Save draft", exact: true }).click();
+      expect((await request).postDataJSON()).toMatchObject({
+        draft: true,
+        meetingAt: "2099-10-24T21:30:00.000Z",
+        startsAt: "2099-10-24T22:00:00.000Z",
+        endsAt: "2099-10-25T21:15:00.000Z",
+        prescribedMassKg: "18025",
+      });
+    },
+  );
+
+  test(
     "a manager opens a draft, retries its exact save and reloads without mutating media",
     browserCase(["@functional"]),
     async ({ page }) => {
@@ -1858,7 +1890,10 @@ test.describe("Stage 2 draft entry", () => {
 
         await page.goto("/account/events/new");
         await expect(
-          page.getByRole("heading", { name: "Create event", exact: true }),
+          page.getByRole("heading", {
+            name: routesEnabled ? "New event" : "Create event",
+            exact: true,
+          }),
         ).toBeVisible();
         await expect(page.getByRole("textbox", { name: "Event title" })).toBeVisible();
         await expect(

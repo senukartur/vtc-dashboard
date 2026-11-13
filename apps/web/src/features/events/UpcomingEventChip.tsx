@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { NavIcon } from "../../app/nav-icons.js";
 import { useSession } from "../../app/Session.js";
 import { useEventTimezone } from "./components.js";
 import { EventQuickResponse } from "./EventQuickResponse.js";
@@ -53,7 +54,7 @@ export function UpcomingEventChip() {
   if (!canRead) return null;
 
   return (
-    <div className="event-nearest" ref={chip} tabIndex={-1}>
+    <div className="event-nearest event-nearest-compact" ref={chip} tabIndex={-1}>
       {query.isPending || (query.started && query.isFetching) ? (
         <span role="status">{t("loading")}</span>
       ) : query.isError ? (
@@ -90,13 +91,29 @@ function NearestLink({
   const title = useRef<HTMLAnchorElement>(null);
   const view = useEventResponseView(projection);
   const { event } = projection;
+  const fullTime = eventTime(event.startsAt, locale, timezone);
+  const compactTime = new Intl.DateTimeFormat(locale, {
+    timeZone: timezone,
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "shortOffset",
+  }).format(new Date(event.startsAt));
   return (
     <>
-      <Link ref={title} to={`/account/events/${event.id}`}>
-        <strong>
-          {t("nearest")}: {event.title}
-        </strong>
-        <time dateTime={event.startsAt}>{eventTime(event.startsAt, locale, timezone)}</time>
+      <Link
+        ref={title}
+        to={`/account/events/${event.id}`}
+        className="event-nearest-link"
+        aria-label={`${t("nearest")}: ${event.title}. ${fullTime}`}
+        title={event.title}
+      >
+        <NavIcon name="myTrips" />
+        <strong>{event.title}</strong>
+        <time dateTime={event.startsAt} title={fullTime}>
+          {compactTime}
+        </time>
       </Link>
       {canRespond &&
       projection.myResponse !== null &&
