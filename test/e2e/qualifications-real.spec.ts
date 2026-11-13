@@ -50,27 +50,50 @@ test(
       for (const level of (await q.ladder(fixture.staff, game)).data.levels) {
         if (level.configured && (level.promotionConfigured || level.terminal)) continue;
         await q.publish(fixture.staff, level.id, randomUUID(), level.version, {
-          rules: [
-            { type: "max_mass", maxKg: "10000" },
-            { type: "allowed_trailer_types", entityIds: [] },
-            { type: "allowed_adr_categories", classes: [] },
-          ],
+          rules:
+            level.position === 24
+              ? []
+              : [
+                  { type: "max_mass", maxKg: "10000" },
+                  { type: "allowed_trailer_types", entityIds: [] },
+                  { type: "allowed_adr_categories", classes: [] },
+                ],
           requiredTrips: null,
           requiredDistanceM: null,
         });
       }
       const staffLevels = (await q.ladder(fixture.staff, game)).data.levels;
       expect(staffLevels.filter((level) => level.configured)).toHaveLength(25);
+      expect(staffLevels[23]?.freightRuleSummary).toEqual({
+        maxMassKg: null,
+        allowedTrailerTypeCount: null,
+        allowedAdrCategoryCount: null,
+      });
+      expect(staffLevels[24]?.freightRuleSummary).toEqual({
+        maxMassKg: "10000",
+        allowedTrailerTypeCount: 0,
+        allowedAdrCategoryCount: 0,
+      });
       await context.addCookies((await staff.storageState()).cookies);
       await resetAccountLimits();
       await page.goto("/account/qualifications?game=ats");
       await catalogLanguage(page, "en");
       const table = page.getByRole("table", { name: "Levels and effective rules" });
       await expect(table.getByRole("row")).toHaveCount(26);
-      const last = table.getByRole("row").filter({ hasText: "Fictional capacity level 25" });
-      await expect(last.getByText("10 t", { exact: true })).toBeVisible();
-      await expect(last.getByText("None allowed", { exact: true })).toHaveCount(2);
-      const selected = table.getByRole("button", {
+      const rowFor = (position: number) =>
+        table.getByRole("row").filter({
+          has: page.getByRole("rowheader", {
+            name: `Fictional capacity level ${position}`,
+            exact: true,
+          }),
+        });
+      const last = rowFor(25);
+      await expect(last.getByRole("cell", { name: "10 t", exact: true })).toBeVisible();
+      await expect(last.getByRole("cell", { name: "None allowed", exact: true })).toHaveCount(2);
+      await expect(
+        rowFor(24).getByRole("cell", { name: "No restriction", exact: true }),
+      ).toHaveCount(3);
+      const selected = last.getByRole("button", {
         name: "Fictional capacity level 25",
         exact: true,
       });
@@ -84,11 +107,19 @@ test(
       await expect(
         page.getByRole("heading", { name: "Fictional capacity level 25 · ATS" }),
       ).toBeVisible();
-      expect(
-        qualificationReads.filter(({ path }) => /\/rule-versions\//.test(path)).length,
-      ).toBeLessThanOrEqual(3);
+      const detailReads = qualificationReads.filter(({ path }) => /\/rule-versions\//.test(path));
+      const limited = qualificationReads.filter(({ status }) => status === 429).length;
+      console.log(
+        JSON.stringify({
+          event: "qualification_full_ladder_read_budget",
+          total: qualificationReads.length,
+          details: detailReads.length,
+          limited,
+        }),
+      );
+      expect(detailReads.length).toBeLessThanOrEqual(3);
       expect(qualificationReads.length).toBeLessThanOrEqual(20);
-      expect(qualificationReads.some(({ status }) => status === 429)).toBe(false);
+      expect(limited).toBe(0);
     } finally {
       for (const id of [...added].reverse()) {
         const current = await q.ladder(fixture.staff, game);
