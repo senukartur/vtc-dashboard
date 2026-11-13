@@ -172,6 +172,7 @@ interface Ports {
     organizerId?: string,
   ): Promise<{ organizer: string | null }>;
   validate(tx: TxContext, next: DraftDefinition, prior: DraftDefinition | null): Promise<void>;
+  discardMedia?(tx: TxContext, eventId: string): Promise<void>;
   publish(
     tx: TxContext,
     actor: Actor,
@@ -517,6 +518,7 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
               .update(eventDrafts)
               .set({ version, updatedAt: time, updatedBy: actor.userId, discardedAt: time })
               .where(eq(eventDrafts.eventId, id));
+            await ports.discardMedia?.(tx, id);
             await auditChange(tx, actor, id, time);
             return {
               schemaVersion: 1 as const,

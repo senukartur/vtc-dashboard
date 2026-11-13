@@ -11,6 +11,8 @@ import type { AnalyticsService } from "./modules/analytics/service.js";
 import { registerCatalogRoutes } from "./modules/catalogs/http.js";
 import type { Catalogs } from "./modules/catalogs/service.js";
 import { registerEventRoutes } from "./modules/events/http.js";
+import type { EventMedia } from "./modules/events/media.js";
+import { registerEventMediaRoutes } from "./modules/events/media-http.js";
 import type { Events } from "./modules/events/service.js";
 import { registerExternalIdentityRoutes } from "./modules/external-identities/http.js";
 import type { ExternalIdentities } from "./modules/external-identities/service.js";
@@ -71,6 +73,7 @@ export interface AppOptions {
   manualReports?: ManualReports;
   qualifications?: Qualifications;
   events?: Events;
+  eventMedia?: EventMedia;
   reconciliation?: Reconciliation;
   tripDecisions?: TripDecisions;
   analytics?: AnalyticsService;
@@ -83,6 +86,14 @@ export interface AppOptions {
 
 export async function createApp(options: AppOptions) {
   if (options.manualReports) await options.manualReports.initialize(options.webRoot);
+  const eventMedia = options.identity && options.events ? options.eventMedia : undefined;
+  if (eventMedia) {
+    const manualRoot = options.manualReports?.config.storage?.root;
+    await eventMedia.initialize(
+      ...(options.webRoot ? [options.webRoot] : []),
+      ...(manualRoot ? [manualRoot] : []),
+    );
+  }
   const app = Fastify({
     logger: false,
     bodyLimit: 64 * 1024,
@@ -236,6 +247,10 @@ export async function createApp(options: AppOptions) {
     await registerQualificationRoutes(app, options.identity, options.qualifications);
   if (options.identity && options.events)
     await registerEventRoutes(app, options.identity, options.events);
+  if (options.identity && eventMedia) {
+    const { identity } = options;
+    await app.register((scope) => registerEventMediaRoutes(scope, identity, eventMedia));
+  }
   if (options.identity && options.reconciliation)
     await app.register(async (scope) =>
       registerReconciliationRoutes(

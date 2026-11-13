@@ -3,6 +3,7 @@ import { applicationId } from "@vtc/db";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { csrfProtection } from "../identity/http.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
+import { isEventMediaRoute } from "./media-http.js";
 import type { Page } from "./pagination.js";
 import type { EventLocale } from "./published-route.js";
 import type { Events } from "./service.js";
@@ -45,10 +46,11 @@ export async function registerEventRoutes(
   const readWire = (legacy: string, staged: string) =>
     stage2 ? { anyOf: [ref(legacy), ref(staged)] } : ref(legacy);
   const owned = (p: string) =>
-    p.startsWith("/api/v1/events") ||
-    p.startsWith("/api/v1/public/events") ||
-    p.startsWith("/api/v1/admin/events") ||
-    p === "/api/v1/me/upcoming-event";
+    !isEventMediaRoute(p) &&
+    (p.startsWith("/api/v1/events") ||
+      p.startsWith("/api/v1/public/events") ||
+      p.startsWith("/api/v1/admin/events") ||
+      p === "/api/v1/me/upcoming-event");
   async function actor(request: FastifyRequest) {
     let a = actors.get(request);
     if (!a) {
@@ -116,17 +118,23 @@ export async function registerEventRoutes(
           querystring: object({
             ...page,
             period: { type: "string", enum: ["upcoming", "past"] },
-            ...(stage2 && !publicOnly ? { locale } : {}),
+            ...(stage2 || publicOnly ? { locale } : {}),
           }),
           response: {
             200: publicOnly
-              ? ref("EnvelopeListEventPublic")
+              ? readWire("EnvelopeListEventPublic", "EventStage2EnvelopePublicList")
               : readWire("EnvelopeListEventPublic", "EventStage2EnvelopeMemberList"),
           },
         },
       },
       async (r) => {
-        if (publicOnly) return envelope(r, await events.list(null, r.query));
+        if (publicOnly)
+          return envelope(
+            r,
+            stage2 && r.query.locale
+              ? await events.listPublishedPublic(r.query.locale, r.query)
+              : await events.list(null, r.query),
+          );
         const viewer = await actor(r);
         const data =
           stage2 && r.query.locale

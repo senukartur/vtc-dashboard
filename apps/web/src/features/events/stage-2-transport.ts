@@ -63,7 +63,11 @@ const readSpec = <K extends EventStage2Envelope>(
 
 export const eventStage2Reads = {
   publicList: (filter: PublishedFilter = {}) =>
-    readSpec(localPath("/public/events", filter), "EventStage2EnvelopePublicList", "public"),
+    readSpec(
+      localPath("/public/events", { ...filter, locale: filter.locale ?? "en" }),
+      "EventStage2EnvelopePublicList",
+      "public",
+    ),
   publicDetail: (id: string, locale: EventStage2Locale = "en") =>
     readSpec(localPath(`/public${event(id)}`, { locale }), "EventStage2EnvelopePublic", "public"),
   memberList: (filter: PublishedFilter = {}) =>
