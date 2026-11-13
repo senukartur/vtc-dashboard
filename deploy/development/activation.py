@@ -14,7 +14,8 @@ STAGE_GRANTS_STATE = 'state/stage-grants-installed.json'
 ACTIVATION_TARGET_HASHES = {'candidate': 'candidateHash', 'previous': 'previousHash', 'shared': 'sharedHash'}
 # Written out rather than read from the profile: a partly copied control update must still import.
 # test_activation.py keeps these equal to the profile.
-STAGE_FLAGS = {'EXTERNAL_IDENTITIES_ENABLED', 'CATALOGS_ENABLED', 'TRIPS_ENABLED', 'QUALIFICATIONS_ENABLED',
+EVENTS_DRAFTS_FLAG = 'EVENTS_DRAFTS_ENABLED'
+STAGE_FLAGS = {EVENTS_DRAFTS_FLAG, 'EXTERNAL_IDENTITIES_ENABLED', 'CATALOGS_ENABLED', 'TRIPS_ENABLED', 'QUALIFICATIONS_ENABLED',
                'TELEMETRY_ENABLED', 'MANUAL_REPORTS_ENABLED', 'EVENTS_ENABLED', 'EVENTS_ROUTE_ENABLED',
                'RECONCILIATION_ENABLED',
                'TRIP_DECISIONS_ENABLED', 'ANALYTICS_ENABLED', 'NOTIFICATIONS_ENABLED'}
@@ -172,10 +173,20 @@ def module_flags(path):
     return {flag: 'true' for flag in STAGE_FLAGS if f'{flag}=true' in lines}
 
 
-def stage_grants(o):
-    """Reviewed module supplement installed by the control update; absent on older installations."""
+def stage_grants(o, values):
+    """The reviewed supplement, with draft privileges only for the opt-in API."""
     path = o.BASE / STAGE_PROFILE
-    return json.loads(path.read_text())['grants'] if path.exists() else {}
+    if not path.exists():
+        return {}
+    profile = json.loads(path.read_text())
+    grants = profile['grants']
+    if values.get(EVENTS_DRAFTS_FLAG) == 'true':
+        o.require(values.get('EVENTS_ROUTE_ENABLED') == 'true' and profile.get('eventsDraftsGrants'),
+                  'EVENTS_DRAFTS_PROFILE_REQUIRED')
+        o.require(not (grants['runtime'].keys() & profile['eventsDraftsGrants'].keys()),
+                  'EVENTS_DRAFTS_PROFILE_INVALID')
+        grants['runtime'].update(profile['eventsDraftsGrants'])
+    return grants
 
 
 def matrix(o, values=None):
@@ -183,7 +194,7 @@ def matrix(o, values=None):
     base = json.loads((o.BASE / 'activation-grants.json').read_text())
     if values is None or not stage_enabled(values):
         return base
-    supplement = stage_grants(o)
+    supplement = stage_grants(o, values)
     o.require(supplement, 'STAGE_PROFILE_REQUIRED')
     for role, tables in supplement.items():
         for table, permissions in tables.items():
@@ -283,7 +294,7 @@ def grants(o, revision, values=None):
         # Recorded before the nontransactional DDL, so a partial install stays explained.
         # A union, because GRANT never revokes what an earlier profile installed.
         o.atomic_json(o.BASE / STAGE_GRANTS_STATE, {'revision': revision, 'privileges': sorted(
-            installed_stage_rows(o) | privilege_rows(stage_grants(o)))})
+            installed_stage_rows(o) | privilege_rows(stage_grants(o, values)))})
     o.compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf'],
               revision=revision, data=statement.encode())
     check_privileges(o, privileges(o, revision), complete=True, values=values)

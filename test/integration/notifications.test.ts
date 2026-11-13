@@ -170,7 +170,7 @@ beforeAll(async () => {
   );
   stagedEvents = createEvents(
     unit,
-    { cursorKey: key(), routeEnabled: true },
+    { cursorKey: key(), routeEnabled: true, draftsEnabled: true },
     {
       identity,
       catalogs,
@@ -204,6 +204,10 @@ beforeEach(async () => {
     "event_response_revisions",
     "event_revision_dlcs",
     "event_revision_details",
+    "event_workflow_commands",
+    "event_draft_dlcs",
+    "event_drafts",
+    "event_metadata",
     "event_revisions",
     "events",
   ])
@@ -782,6 +786,59 @@ test("typed old-producer event recovery repairs acknowledged scheduling markers 
   expect((await service.poll(owner)).items.some((r) => r.category === "event.reminder")).toBe(
     false,
   );
+});
+
+test("draft publication is one notification-eligible transition and its published seed repairs", async () => {
+  const drafts = stagedEvents.drafts;
+  if (!drafts) throw new Error("DRAFT_FIXTURE_REQUIRED");
+  const {
+    data: { id },
+  } = await drafts.create(director, newId(), { title: "Fictional notification draft" });
+  expect(await stagedNotifications.maintenance()).toBe(0);
+  expect((await stagedNotifications.poll(owner)).items).toEqual([]);
+  const { organizer: _organizer, ...fields } = eventInput();
+  await drafts.update(director, id, newId(), 1, {
+    ...fields,
+    organizerMemberId: director.userId,
+    platform: "truckersmp",
+  });
+  const publicationKey = newId();
+  const first = await drafts.publish(director, id, publicationKey, 2, "en");
+  expect(await drafts.publish(director, id, publicationKey, 2, "en")).toEqual(first);
+  const [eventsCreated] = await control.query<RowDataPacket[]>(
+    "SELECT data FROM outbox_events WHERE type='event.changed'",
+  );
+  expect(eventsCreated).toHaveLength(1);
+  expect(eventsCreated[0]?.data).toMatchObject({ eventId: id, category: "created" });
+  await control.execute("UPDATE events SET notification_material=NULL WHERE id=?", [
+    Buffer.from(id),
+  ]);
+  expect(await repairOneMaterial(stagedEvents)).toMatchObject({
+    throughVersion: 1,
+    complete: true,
+    scanned: 1,
+  });
+  expect(await repairOneMaterial(stagedEvents)).toBeNull();
+
+  const queue = createQueue(
+    unit,
+    [stagedNotifications.handler, stagedNotifications.reminderHandler],
+    [stagedNotifications.subscription],
+  );
+  await drain(queue);
+  expect((await stagedNotifications.poll(owner)).items).toEqual([]);
+  await stagedEvents.respond(owner, id, newId(), 1, { response: "participating" });
+  await drain(queue);
+  instant += 1_000;
+  await stagedNotifications.maintenance();
+  await drain(queue);
+  expect((await stagedNotifications.poll(owner)).items.map(({ category }) => category)).toEqual([
+    "event.reminder",
+  ]);
+  expect((await stagedNotifications.poll(observer)).items).toEqual([]);
+  expect(await stagedNotifications.maintenance()).toBe(0);
+  await drain(queue);
+  expect((await stagedNotifications.poll(owner)).items).toHaveLength(1);
 });
 
 test("concurrent reminder maintenance owns pending rows and two workers retain one effect", async () => {

@@ -17,21 +17,31 @@ import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
-for (const access of ["legacy", "member", "public"] as const) {
+for (const [access, draftsRollout] of [
+  ["legacy", false],
+  ["member", false],
+  ["manager", true],
+  ["public", true],
+] as const) {
   test(
-    `event fixture advertises Stage 2 only for an opted-in authenticated read (${access})`,
+    `event fixture advertises rollout only for opted-in authenticated reads (${access})`,
     browserCase(["@functional"]),
     async ({ page }) => {
       if (access === "legacy") await mockEvents(page);
-      else await mockEventsStage2(page, access);
+      else await mockEventsStage2(page, access, "en", { draftsRollout });
       await page.goto("/en");
       const result = await page.evaluate(async () => {
         const response = await fetch("/api/v1/me", { cache: "no-store" });
-        return { status: response.status, rollout: response.headers.get("X-VTC-Events-Stage2") };
+        return {
+          status: response.status,
+          stage2: response.headers.get("X-VTC-Events-Stage2"),
+          drafts: response.headers.get("X-VTC-Events-Drafts"),
+        };
       });
       expect(result).toEqual({
         status: access === "public" ? 401 : 200,
-        rollout: access === "member" ? "1" : null,
+        stage2: access === "member" || access === "manager" ? "1" : null,
+        drafts: access === "manager" ? "1" : null,
       });
     },
   );
