@@ -5981,6 +5981,12 @@
       "id": "listCatalogDepots:success",
       "operationId": "listCatalogDepots",
       "status": 200,
+      "query": {
+        "game": "ets2",
+        "cityId": "41000000-0000-4000-8000-000000000001",
+        "depotId": "41000000-0000-4000-8000-000000000021",
+        "locale": "en"
+      },
       "response": {
         "data": {
           "items": [

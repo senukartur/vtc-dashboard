@@ -7521,6 +7521,7 @@ export interface operations {
                 cityId?: string;
                 companyId?: string;
                 cursor?: components["parameters"]["Cursor"];
+                depotId?: string;
                 dlc?: "base" | string;
                 game: "ets2" | "ats";
                 /** @description Select rows with their own hidden flag. Takes precedence over includeHidden. */
