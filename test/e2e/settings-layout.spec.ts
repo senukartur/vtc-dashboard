@@ -484,11 +484,12 @@ test(
   browserCase(["@functional"]),
   async ({ page }) => {
     const state = await mockSettings(page, { pending: true });
-    const held = Promise.withResolvers<void>();
-    const started = Promise.withResolvers<void>();
+    let releaseTransfer = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseTransfer = resolve;
+    });
     await page.route("**/api/v1/admin/leadership/transfers", async (route) => {
-      started.resolve();
-      await held.promise;
+      await held;
       await route.fallback();
     });
     await page.goto("/account/admin/settings?tab=audit");
@@ -496,8 +497,11 @@ test(
     await settled(page);
     await codeInput(page).fill(correctCode);
     await panel(page).getByRole("button", { name: text.en.transferButton, exact: true }).click();
+    const transfer = page.waitForRequest(
+      (request) => new URL(request.url()).pathname === "/api/v1/admin/leadership/transfers",
+    );
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
-    await started.promise;
+    await transfer;
     try {
       await page.goBack();
       await expect(page.getByRole("tab", { name: text.en.audit })).toHaveAttribute(
@@ -506,7 +510,7 @@ test(
       );
       await expect(page.getByRole("dialog")).toHaveCount(0);
     } finally {
-      held.resolve();
+      releaseTransfer();
     }
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
     await expect(page).toHaveURL(/tab=audit$/);
