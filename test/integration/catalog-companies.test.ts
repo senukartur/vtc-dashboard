@@ -490,6 +490,59 @@ test("depot filters use default visibility and the depot's own hidden flag", asy
   expect((await catalogs.get(driver, "companies", a.id)).updatedAt).toBe(a.updatedAt);
 });
 
+test("HTTP restores a saved depot by exact game, city and ID under the current visibility policy", async () => {
+  const carrier = await company("saved_lookup_carrier");
+  const alternative = await company("saved_lookup_alternative");
+  const currentCity = await city("saved_lookup_city", "ets2", { nameRu: "Город" });
+  const otherCity = await city("saved_lookup_other_city");
+  const saved = await depot(carrier.id, currentCity.id);
+  await depot(alternative.id, currentCity.id);
+
+  const app = await createApp({ identity, catalogs, checkReadiness: async () => true });
+  const path = "/api/v1/catalogs/depots";
+  const query = { game: "ets2", cityId: currentCity.id, depotId: saved.id, locale: "ru" };
+  const url = (parameters: Record<string, string>) => `${path}?${new URLSearchParams(parameters)}`;
+  const read = (overrides: Record<string, string> = {}) =>
+    app.inject({ url: url({ ...query, ...overrides }), headers: { cookie: driverCookie } });
+  const empty = { items: [], total: 0, nextCursor: null };
+  try {
+    expect((await app.inject({ url: url(query) })).statusCode).toBe(401);
+    const found = await read();
+    expect(found.statusCode, found.body).toBe(200);
+    expect(found.json().data).toMatchObject({
+      items: [{ id: saved.id, city: { label: { label: "Город" } } }],
+      total: 1,
+      nextCursor: null,
+    });
+    for (const mismatch of [{ game: "ats" }, { cityId: otherCity.id }, { depotId: newId() }]) {
+      const missing = await read(mismatch);
+      expect(missing.statusCode).toBe(200);
+      expect(missing.json().data).toEqual(empty);
+    }
+    const { cityId: _cityId, ...withoutCity } = query;
+    const invalid = await app.inject({
+      url: url(withoutCity),
+      headers: { cookie: driverCookie },
+    });
+    expect(invalid.statusCode).toBe(422);
+
+    await catalogs.patchDepot(director, saved.id, newId(), { hidden: true });
+    expect((await read()).json().data).toEqual(empty);
+    const restored = await read({ includeHidden: "true" });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json().data).toMatchObject({
+      items: [{ id: saved.id, hidden: true }],
+      total: 1,
+      nextCursor: null,
+    });
+    expect((await read({ cityId: otherCity.id, includeHidden: "true" })).json().data).toEqual(
+      empty,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
 test("companies are listed by their canonical name in every locale, with stable ties and keyset paging", async () => {
   const alpha = await company("c_alpha", "ets2", { nameEn: "Alpha Freight" });
   await company("c_bravo", "ets2", { nameEn: "Bravo Freight" });

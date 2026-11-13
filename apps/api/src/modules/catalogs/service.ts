@@ -1335,6 +1335,7 @@ export function createCatalogs(
         game: Game;
         companyId?: string;
         cityId?: string;
+        depotId?: string;
         search?: string;
         dlc?: string;
         locale?: Locale;
@@ -1344,6 +1345,8 @@ export function createCatalogs(
     ): Promise<S["CatalogDepotList"]> {
       return run(async (tx) => {
         await authority(tx, actor, false);
+        if (query.depotId !== undefined && query.cityId === undefined) throw identityError(422);
+        const depotId = query.depotId === undefined ? undefined : applicationId(query.depotId);
         const limit = query.limit ?? 25,
           locale = query.locale ?? "en";
         if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
@@ -1363,6 +1366,7 @@ export function createCatalogs(
           ...maintenanceBinding(query),
           // Cities of one company still read by their localized name.
           ...canonicalOrderBinding(query.companyId === undefined),
+          ...(depotId === undefined ? [] : [depotId]),
         ];
         let after: [string, string] | null = null;
         if (query.cursor) {
@@ -1402,6 +1406,7 @@ export function createCatalogs(
               : [...companyMatch, ...cityMatch];
         const filter = and(
           eq(catalogCompanyCities.game, query.game),
+          depotId === undefined ? undefined : eq(catalogCompanyCities.id, depotId),
           query.hidden === "only"
             ? eq(catalogCompanyCities.hidden, true)
             : includeHidden
