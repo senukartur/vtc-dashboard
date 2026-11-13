@@ -139,8 +139,9 @@ function provenTrailers(chain: NormalizedTripEvidence["trailers"]) {
 function differing(
   previous: NormalizedTripEvidence,
   next: NormalizedTripEvidence,
-  // Within one source lineage: the most recent proven trailer chain of that source trip.
-  progression?: { proven: NormalizedTripEvidence["trailers"] | null },
+  // Within one source lineage: every distinct proven trailer chain of that source trip's lower
+  // revisions, including held ones.
+  progression?: { proven: NormalizedTripEvidence["trailers"][] },
 ): string[] {
   const reasons: string[] = [];
   if (previous.outcome !== "open" && previous.outcome !== next.outcome)
@@ -180,13 +181,17 @@ function differing(
     chain.items.map((item) => (item.status === "known" ? item.value.entityId : null));
   const after = trailerIds(next.trailers);
   if (progression) {
-    // An incomplete or unknown chain is unproven, not changed; composition is checked against
-    // the last proven chain, so an unproven revision in between cannot hide a change.
-    const before = progression.proven && trailerIds(progression.proven);
+    // An incomplete or unknown chain is unproven, not changed. Composition is checked against
+    // every proven lower chain, so neither an unproven revision in between nor a held changed
+    // chain can become the reference that hides a change; the hold stays until review.
     if (
-      before &&
-      (after.some((id, index) => id !== null && id !== before[index]) ||
-        (next.trailers.complete && after.length !== before.length))
+      progression.proven.some((chain) => {
+        const before = trailerIds(chain);
+        return (
+          after.some((id, index) => id !== null && id !== before[index]) ||
+          (next.trailers.complete && after.length !== before.length)
+        );
+      })
     )
       reasons.push("trailer_context_conflict");
   } else if (provenTrailers(previous.trailers)) {
@@ -288,8 +293,8 @@ export function createTrips(
       data: { tripId, sourceRecordId: fact.sourceRecordId, factRevisionId: fact.factRevisionId },
     });
   }
-  // Most recent complete all-known trailer chain among all of this source trip's lower revisions.
-  async function provenChain(tx: TxContext, sourceTripId: string, revision: number) {
+  // Distinct complete all-known trailer chains among all of this source trip's lower revisions.
+  async function provenChains(tx: TxContext, sourceTripId: string, revision: number) {
     const rows = await c(tx)
       .select({ id: tripFacts.id })
       .from(sourceMessages)
@@ -303,6 +308,7 @@ export function createTrips(
       )
       .orderBy(sql`CAST(${sourceMessages.revision} AS UNSIGNED) DESC`)
       .for("share");
+    const chains = new Map<string, NormalizedTripEvidence["trailers"]>();
     // Revisions per source trip are few; read them in repository-sized batches, newest first.
     for (let start = 0; start < rows.length; start += 100) {
       const batch = rows.slice(start, start + 100),
@@ -314,10 +320,14 @@ export function createTrips(
       for (const row of batch) {
         const chain = facts.get(row.id)?.evidence.trailers;
         if (!chain) throw new Error("SOURCE_FACT_MISSING");
-        if (provenTrailers(chain)) return chain;
+        if (!provenTrailers(chain)) continue;
+        const ids = canonicalJson(
+          chain.items.map((item) => (item.status === "known" ? item.value.entityId : null)),
+        );
+        if (!chains.has(ids)) chains.set(ids, chain);
       }
     }
-    return null;
+    return [...chains.values()];
   }
   async function store(
     tx: TxContext,
@@ -564,7 +574,7 @@ export function createTrips(
     if (heldTerminal && !terminal) throw new Error("SOURCE_FACT_MISSING");
     const lineage =
       existing && baseRevision !== null && baseRevision < key.revision && !terminal
-        ? { proven: await provenChain(tx, existing.id, key.revision) }
+        ? { proven: await provenChains(tx, existing.id, key.revision) }
         : undefined;
     const quality =
       previous && !supersede

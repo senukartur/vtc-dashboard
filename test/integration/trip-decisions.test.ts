@@ -4323,6 +4323,18 @@ test.each([
   }
 });
 
+// A revision held for a changed chain keeps the old current fact and is never accepted.
+async function heldChange(tripId: string, receipt: { sourceRecordId: string }) {
+  const after = await state(tripId),
+    stored = await unit.run((tx) =>
+      tripsService.sourceEvidenceInTransaction(tx, receipt.sourceRecordId),
+    );
+  expect(stored?.reasonCodes).toContain("trailer_context_conflict");
+  expect(after?.currentFactId).not.toBe(stored?.factRevisionId);
+  expect(after?.decision).not.toBe("accepted");
+  expect(await credit(tripId)).toBeUndefined();
+  return after;
+}
 test.each([
   { name: "an unknown chain then a complete one", unproven: "unknown", complete: true },
   {
@@ -4346,24 +4358,29 @@ test.each([
     const between = await receive(middle, who),
       advanced = await state(first.tripId);
     expect(advanced?.currentFactId).toBe(await factOf(between));
+    const changedChain = (p: Telemetry) => {
+      p.snapshot.trailers.complete = complete;
+      const [trailer] = p.snapshot.trailers.items;
+      if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
+    };
+    // Every revision reporting the changed chain stays held: a held one never becomes the reference.
+    for (const revision of [3, 4]) {
+      const changed = structuredClone(opened);
+      changed.eventId = newId();
+      changed.revision = revision;
+      measured(changed, 40000 + revision * 1000, 10 + revision);
+      changedChain(changed);
+      const after = await heldChange(first.tripId, await receive(changed, who));
+      expect(after?.currentFactId).toBe(advanced?.currentFactId);
+      if (revision === 3) expect(after?.reviewHold).toBe(true);
+    }
     const delivered = payload();
     delivered.source = structuredClone(opened.source);
     delivered.snapshot.start = structuredClone(opened.snapshot.start);
-    delivered.revision = 3;
-    delivered.snapshot.trailers.complete = complete;
-    const [trailer] = delivered.snapshot.trailers.items;
-    if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
-    const r = await receive(delivered, who),
-      after = await state(first.tripId),
-      stored = await unit.run((tx) =>
-        tripsService.sourceEvidenceInTransaction(tx, r.sourceRecordId),
-      );
-    expect(after).toMatchObject({
-      currentFactId: advanced?.currentFactId,
-      outcome: "open",
-      reviewHold: true,
-    });
-    expect(stored?.reasonCodes).toContain("trailer_context_conflict");
+    delivered.revision = 5;
+    changedChain(delivered);
+    const after = await heldChange(first.tripId, await receive(delivered, who));
+    expect(after).toMatchObject({ currentFactId: advanced?.currentFactId, outcome: "open" });
   },
 );
 
@@ -4392,12 +4409,23 @@ test("a changed body type is held against a proven chain older than many unprove
   changed.revision = 14;
   const [trailer] = changed.snapshot.trailers.items;
   if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
-  const r = await receive(changed, who),
-    after = await state(first.tripId),
-    stored = await unit.run((tx) => tripsService.sourceEvidenceInTransaction(tx, r.sourceRecordId));
   // Ingestion holds the revision; the open trip keeps its current fact. Assessment compares only
   // the latest and current facts, so its own hold flag is not asserted here.
-  expect(after?.currentFactId).toBe(current);
-  expect(after?.currentFactId).not.toBe(stored?.factRevisionId);
-  expect(stored?.reasonCodes).toContain("trailer_context_conflict");
+  expect((await heldChange(first.tripId, await receive(changed, who)))?.currentFactId).toBe(
+    current,
+  );
+  const again = structuredClone(changed);
+  again.eventId = newId();
+  again.revision = 15;
+  expect((await heldChange(first.tripId, await receive(again, who)))?.currentFactId).toBe(current);
+  const delivered = payload();
+  delivered.source = structuredClone(opened.source);
+  delivered.snapshot.start = structuredClone(opened.snapshot.start);
+  delivered.revision = 16;
+  const [body] = delivered.snapshot.trailers.items;
+  if (body) body.bodyType = { available: true, value: "fixture_flatbed" };
+  expect(await heldChange(first.tripId, await receive(delivered, who))).toMatchObject({
+    currentFactId: current,
+    outcome: "open",
+  });
 });
