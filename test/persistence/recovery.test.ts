@@ -2577,3 +2577,57 @@ await recoveryTest(
   },
   SCHEMA_SETUP_TIMEOUT_MS,
 );
+
+await recoveryTest(
+  "eligibility tracking migration preserves qualification state with a null checkpoint",
+  async () => {
+    const connection = await testConnection();
+    const settings = guardedSettings();
+    let folder: string | undefined;
+    const userId = "e1340000-0000-4000-8000-000000000001";
+    const assignmentId = "e1340000-0000-4000-8000-000000000002";
+    const assignedAt = "2026-01-02 00:00:00.123";
+    const eligibleSince = "2026-02-03 00:00:00.456";
+    const state = async (checkpoint: boolean) => {
+      const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT CAST(user_id AS CHAR) userId, game, CAST(assignment_id AS CHAR) assignmentId,
+          version, CAST(eligible_since AS CHAR) eligibleSince
+          ${checkpoint ? ", CAST(eligibility_evaluated_at AS CHAR) eligibilityEvaluatedAt" : ""}
+          FROM qualification_states WHERE user_id=?`,
+        [userId],
+      );
+      return rows;
+    };
+    try {
+      await reset(connection);
+      folder = await qualificationEligibilityPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 30);
+      await connection.execute(
+        "INSERT INTO identity_users (id,name,email,created_at,updated_at) VALUES (?,'Fictional member','eligibility@example.invalid',?,?)",
+        [userId, assignedAt, assignedAt],
+      );
+      await connection.execute(
+        "INSERT INTO identity_memberships (user_id,status) VALUES (?,'active')",
+        [userId],
+      );
+      await connection.execute(
+        "INSERT INTO qualification_assignments (id,user_id,game,level_id,assigned_at,purpose,reason) VALUES (?,?,'ets2','02800000-0000-4000-8000-000000000001',?,'initial','Fictional assignment')",
+        [assignmentId, userId, assignedAt],
+      );
+      await connection.execute(
+        "INSERT INTO qualification_states (user_id,game,assignment_id,version,eligible_since) VALUES (?,'ets2',?,5,?)",
+        [userId, assignmentId, eligibleSince],
+      );
+      const before = { userId, game: "ets2", assignmentId, version: 5, eligibleSince };
+      assert.deepEqual(await state(false), [before]);
+      assert.equal(await runMigrations(settings), 1);
+      assert.deepEqual(await state(true), [{ ...before, eligibilityEvaluatedAt: null }]);
+      assert.equal(await runMigrations(settings), 0);
+      assert.deepEqual(await state(true), [{ ...before, eligibilityEvaluatedAt: null }]);
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
