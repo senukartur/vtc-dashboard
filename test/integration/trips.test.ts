@@ -1419,6 +1419,27 @@ const stored = async (p: Telemetry) => {
   return { evidence, fact, children };
 };
 
+test("without source-stored assessment an open refresh keeps the strict trailer rule", async () => {
+  const { trips } = await listedTrips();
+  const opened = fixture("started");
+  opened.eventId = newId();
+  opened.source.tripId = newId();
+  opened.source.pluginSessionId = newId();
+  opened.snapshot.recordingCompleteness = "complete";
+  const first = await receive(opened, trips),
+    before = await state(first.tripId),
+    proven = await unit.run((tx) => trips.sourceEvidenceInTransaction(tx, first.sourceRecordId));
+  expect(proven?.trailers).toMatchObject({ complete: true, items: [{ status: "known" }] });
+  const next = structuredClone(opened);
+  next.eventId = newId();
+  next.revision = 2;
+  next.snapshot.trailers.complete = false;
+  await receive(next, trips);
+  const after = await state(first.tripId);
+  expect(after).toMatchObject({ currentFactId: before?.currentFactId, reviewHold: true });
+  expect(after?.reviewReasons).toContain("trailer_context_conflict");
+});
+
 test("telemetry recognizes a coupling by the first body type when the trailer id matches nothing", async () => {
   const { rows } = await listedTrips();
   const { evidence, fact, children } = await stored(
@@ -2405,6 +2426,42 @@ test("private normalized telemetry facts retain supported actual timing, zero, p
   expect(read.effectiveFacts?.actualDistanceM).toBeNull();
   expect(read.effectiveFacts?.wholeTripDistanceSupported).toBe(false);
   expect(read.summary.recording).toBe("partial");
+});
+
+test("event v1.2 distance accounting decides the stored actual distance of a partial recording", async () => {
+  for (const distance of ["complete", "partial", "unknown"] as const) {
+    const p = telemetryFixture("accounting") as unknown as Telemetry;
+    p.eventId = newId();
+    p.source.tripId = newId();
+    p.source.pluginSessionId = newId();
+    p.snapshot.accounting = { distance, fuel: "partial" };
+    const r = await receive(p),
+      view = await service.detail(owner, r.tripId),
+      stored = await unit.run((tx) => service.sourceEvidenceInTransaction(tx, r.sourceRecordId));
+    if (view.view !== "private") throw Error("EXPECTED_PRIVATE_TRIP");
+    const actual = distance === "complete" ? "123400" : null;
+    expect((await state(r.tripId))?.actualDistanceM).toBe(actual && `${actual}.000000000000000000`);
+    expect(view.summary).toMatchObject({ recording: "partial", actualDistanceM: actual });
+    expect(view.effectiveFacts).toMatchObject({
+      actualDistanceM: actual,
+      wholeTripDistanceSupported: false,
+    });
+    expect(stored?.measuredSegmentM).toMatchObject({ status: "known", value: "123400" });
+    expect(stored?.provenance).toMatchObject({ accounting: { distance, fuel: "partial" } });
+  }
+  const audited = telemetryFixture("haulmp-audited") as unknown as Telemetry;
+  audited.eventId = newId();
+  audited.source.tripId = newId();
+  audited.source.pluginSessionId = newId();
+  const legacy = await receive(audited),
+    read = await service.detail(owner, legacy.tripId);
+  if (read.view !== "private") throw Error("EXPECTED_PRIVATE_TRIP");
+  expect(read.summary.actualDistanceM).toBe("123400");
+  expect(read.effectiveFacts?.wholeTripDistanceSupported).toBe(true);
+  expect(
+    (await unit.run((tx) => service.sourceEvidenceInTransaction(tx, legacy.sourceRecordId)))
+      ?.provenance,
+  ).toMatchObject({ accounting: null });
 });
 
 test("accepted reporting activity correlates owners and includes both UTC endpoints", async () => {

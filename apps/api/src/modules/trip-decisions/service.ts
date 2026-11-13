@@ -34,7 +34,7 @@ import { selectQuality } from "../reconciliation/quality.js";
 import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import type { TripState } from "../trips/groups.js";
-import type { Trips } from "../trips/service.js";
+import { ingestionConflictCodes, type Trips } from "../trips/service.js";
 import {
   ACCEPTED_OVER_LIMITS,
   acceptance,
@@ -423,15 +423,26 @@ export function createTripDecisions(
     if (old?.supportHash.equals(s.hash)) return;
     const current = s.evidence.find((e) => e.factRevisionId === row.currentFactId);
     if (!current) throw new Error("TRIP_FACT_MISSING");
-    const selection = selectQuality(s.evidence, row.currentFactId),
+    // A source revision that ingestion held (not current, carrying its conflict codes) is never
+    // the worker's basis; its codes keep the trip in review until staff decide.
+    const holds = (f: NormalizedTripEvidence) =>
+      f.factRevisionId === row.currentFactId
+        ? []
+        : f.reasonCodes.filter((code) => ingestionConflictCodes.has(code));
+    const held = new Set(s.evidence.flatMap(holds));
+    const selection = selectQuality(
+        s.evidence.filter((f) => !holds(f).length),
+        row.currentFactId,
+      ),
       e = selection.selected ?? current;
     const workflow = [
       ...selection.reasons,
+      ...held,
       ...row.reviewReasons.filter((r) => r === "candidate_search_overflow"),
       ...(s.eventInvalid || s.event?.reviewRequired ? ["event_requires_review"] : []),
     ];
     const h = await ports.qualifications.lookupInTransaction(tx, e),
-      evaluation = classify(
+      classified = classify(
         e,
         h,
         s.event?.confirmedEvent ?? null,
@@ -440,7 +451,12 @@ export function createTripDecisions(
         prepared.manual.reports.length > 0 &&
           row.decision !== "accepted" &&
           row.decision !== "rejected",
-      );
+      ),
+      // Violations would otherwise reject automatically despite the held revision.
+      evaluation =
+        held.size && classified.decision === "rejected"
+          ? { ...classified, decision: "pending_review" as const }
+          : classified;
     if (row.decision === "accepted" || row.decision === "rejected") {
       const effective = await latest(tx, row.id),
         basis = evaluationSnapshot(e, h, s.event?.confirmedEvent ?? null, at());
@@ -448,6 +464,7 @@ export function createTripDecisions(
         effective &&
         !old?.pending &&
         !selection.reasons.length &&
+        !held.size &&
         !s.eventInvalid &&
         !s.event?.reviewRequired &&
         e.factRevisionId === row.currentFactId &&

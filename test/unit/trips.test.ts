@@ -210,6 +210,69 @@ test("partial coverage and unsupported time bases never become whole-trip distan
   });
   expect(anomaly.reasonCodes).toContain("clock_anomaly");
 });
+test("event v1.2 complete distance accounting yields actual distance without whole-trip support", async () => {
+  const accounting = () => telemetryFixture("accounting") as unknown as Telemetry;
+  const ctx = context(),
+    partial = await telemetryAdapter.normalize(accounting(), ctx);
+  expect(partial.recording).toBe("partial");
+  expect(partial.actualDistanceM).toEqual({
+    status: "known",
+    value: "123400",
+    sourceRecordId: ctx.sourceRecordId,
+    sourceField: "snapshot.observedDistance",
+  });
+  expect(partial.measuredSegmentM).toMatchObject({ status: "known", value: "123400" });
+  expect(partial.wholeTripDistanceSupported).toBe(false);
+  expect(partial.reasonCodes).toEqual(
+    expect.arrayContaining(["whole_trip_distance_unknown", "rule_context_incomplete"]),
+  );
+  expect(partial.provenance).toMatchObject({
+    contract: { major: 1, minor: 2 },
+    accounting: { distance: "complete", fuel: "partial" },
+  });
+  for (const distance of ["partial", "unknown"] as const) {
+    const p = accounting();
+    p.snapshot.accounting = { distance, fuel: "complete" };
+    const f = await telemetryAdapter.normalize(p, context());
+    expect(f.actualDistanceM).toMatchObject({
+      status: "unknown",
+      reasonCode: "whole_trip_distance_unknown",
+    });
+    expect(f.measuredSegmentM).toMatchObject({ status: "known", value: "123400" });
+    expect(f.wholeTripDistanceSupported).toBe(false);
+  }
+  const clean = (distance: "complete" | "partial") => {
+    const p = accounting();
+    p.snapshot.recordingCompleteness = "complete";
+    p.snapshot.trailers.complete = true;
+    p.snapshot.evidence.ruleContextComplete = true;
+    p.snapshot.evidence.reasons = [];
+    p.snapshot.accounting = { distance, fuel: "partial" };
+    return p;
+  };
+  const withheld = await telemetryAdapter.normalize(clean("partial"), context());
+  expect(withheld.actualDistanceM.status).toBe("unknown");
+  expect(withheld.wholeTripDistanceSupported).toBe(false);
+  const whole = await telemetryAdapter.normalize(clean("complete"), context());
+  expect(whole.actualDistanceM).toMatchObject({ status: "known", value: "123400" });
+  expect(whole.wholeTripDistanceSupported).toBe(true);
+  const anomaly = accounting();
+  anomaly.snapshot.evidence.clockAnomaly = true;
+  const unverified = await telemetryAdapter.normalize(anomaly, context());
+  expect(unverified.end.verifiedActual).toBe(false);
+  expect(unverified.actualDistanceM.status).toBe("unknown");
+  expect(unverified.measuredSegmentM.status).toBe("known");
+  const open = input("started");
+  open.contract.minor = 2;
+  open.snapshot.hardModeResult = "unknown";
+  open.snapshot.accounting = { distance: "complete", fuel: "complete" };
+  const opened = await telemetryAdapter.normalize(open, context());
+  expect(opened.actualDistanceM.status).toBe("unknown");
+  expect(opened.measuredSegmentM).toMatchObject({ status: "known", value: "0" });
+  expect((await telemetryAdapter.normalize(input(), context())).provenance).toMatchObject({
+    accounting: null,
+  });
+});
 test("valid telemetry quantities beyond storage precision remain unknown evidence without rounding", async () => {
   const p = input();
   Object.assign(p.snapshot.observedDistance, { value: 1e-19 });

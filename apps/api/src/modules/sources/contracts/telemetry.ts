@@ -17,9 +17,10 @@ import type {
 import schema from "./telemetry-v1.schema.json" with { type: "json" };
 
 type Available<T> = { available: true; value: T } | { available: false; reason: string };
+type AccountingStatus = "complete" | "partial" | "unknown";
 type Time = { utcMs: number | null; basis: ReportedTime["basis"]; eventSeq: string | null };
 export interface Telemetry {
-  contract: { major: 1; minor: 0 | 1 };
+  contract: { major: 1; minor: 0 | 1 | 2 };
   producer: unknown;
   createdUtcMs: number;
   eventId: string;
@@ -37,6 +38,8 @@ export interface Telemetry {
       ambiguous: boolean;
     };
     hardModeResult?: RecordedTelemetry["hardModeResult"];
+    // Required in v1.2 and forbidden earlier; fuel status is evidence only.
+    accounting?: { distance: AccountingStatus; fuel: AccountingStatus };
     closeReason: string | null;
     checkpointNextEventSeq: string | null;
     outcome: Outcome;
@@ -274,11 +277,20 @@ export const telemetryAdapter: TripSourceAdapter = {
       start.verifiedActual = false;
       end.verifiedActual = false;
     }
+    // v1.2 carries the client's own distance accounting; earlier minors have none.
+    const distance = p.contract.minor === 2 ? (s.accounting?.distance ?? "unknown") : null;
     const wholeTripDistanceSupported =
       s.recordingCompleteness === "complete" &&
       start.verifiedActual &&
       end.verifiedActual &&
-      s.evidence.reasons.length === 0;
+      s.evidence.reasons.length === 0 &&
+      (distance === null || distance === "complete");
+    // Complete v1.2 distance accounting makes the observed distance the actual total despite
+    // partial recording or client reasons; whole-trip support keeps the stricter rule above.
+    const actualDistanceEligible =
+      distance === null
+        ? wholeTripDistanceSupported
+        : start.verifiedActual && end.verifiedActual && distance === "complete";
     const origin = await resolve(s.job.origin.cityId, "snapshot.job.origin.cityId", "city");
     const destination = await resolve(
       s.job.destination.cityId,
@@ -344,7 +356,7 @@ export const telemetryAdapter: TripSourceAdapter = {
       destination,
       cargo,
       cargoMassKg,
-      actualDistanceM: wholeTripDistanceSupported
+      actualDistanceM: actualDistanceEligible
         ? quantity(s.observedDistance, "snapshot.observedDistance")
         : unknown("whole_trip_distance_unknown"),
       measuredSegmentM: quantity(s.observedDistance, "snapshot.observedDistance"),
@@ -394,6 +406,7 @@ export const telemetryAdapter: TripSourceAdapter = {
         anomalousDamage:
           s.cargoDamage.available && s.cargoDamage.value > 1 ? s.cargoDamage.value : null,
         unsupportedQuantities,
+        accounting: s.accounting ?? null,
       },
       wholeTripDistanceSupported,
       trailers: { complete: s.trailers.complete, items: trailers },

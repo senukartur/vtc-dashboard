@@ -1,6 +1,6 @@
-# Telemetry ingestion contract v1.0 and v1.1
+# Telemetry ingestion contract v1.0, v1.1 and v1.2
 
-**Status:** v1.0 implementation baseline adopted under the owner's conditional agreement authorization of 2026-10-17. See [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3) for the original review. [VTC-095](https://trello.com/c/RfKFS16T) adds HaulMP and event v1.1 for recorded Hard Mode. **Source baseline:** [telemetry discovery](../research/telemetry.md). **Card:** [VTC-003](https://trello.com/c/lQrxZ13N).
+**Status:** v1.0 implementation baseline adopted under the owner's conditional agreement authorization of 2026-10-17. See [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3) for the original review. [VTC-095](https://trello.com/c/RfKFS16T) adds HaulMP and event v1.1 for recorded Hard Mode. [VTC-152](https://trello.com/c/t9AMKvww) adds event v1.2 with the client's distance and fuel accounting status; the desktop counterpart is ET-113, and the field name `snapshot.accounting` is proposed until that coordination confirms it. **Source baseline:** [telemetry discovery](../research/telemetry.md). **Card:** [VTC-003](https://trello.com/c/lQrxZ13N).
 
 This contract bridges the local ETS2Telemetry recorder and this dashboard. Its HTTP version is independent of native Named Pipe protocol v1 and trip-export format v1. The [concept](../CONCEPT.MD) governs qualifications, privacy, manual reports and analytics. The [request schema](telemetry-v1.schema.json), [examples](examples/README.md) and [acceptance matrix](telemetry-v1-acceptance.md) form the versioned baseline.
 
@@ -24,7 +24,7 @@ The server authenticates an active linked member, checks token scope/revocation 
 
 | Route | Request and durable result |
 | --- | --- |
-| `GET /api/telemetry/v1/connection` | Return the exact v1.0 body with `contract`, limits and authenticated `accountId`, `companyId`, `identityEpoch`. Successful responses carry `VTC-Telemetry-Event-Versions: 1.0, 1.1` and `Cache-Control: no-store`. Ownership comes from authentication |
+| `GET /api/telemetry/v1/connection` | Return the exact v1.0 body with `contract`, limits and authenticated `accountId`, `companyId`, `identityEpoch`. Successful responses carry `VTC-Telemetry-Event-Versions: 1.0, 1.1, 1.2` and `Cache-Control: no-store`. Ownership comes from authentication |
 | `POST /api/telemetry/v1/installations` | `{contract:{major:1,minor:0},clientInstallationId:<opaque UUID>}`. Register/reuse an installation for the authenticated owner and epoch, returning `installationId`, `bindingId`, `identityEpoch`. Persist before success; retries return the same registration. A different account uses a distinct registration and cannot adopt old queued work |
 | `POST /api/telemetry/v1/events` | One schema-valid frozen lifecycle snapshot, at most 65,536 UTF-8 bytes. Returns a durable receipt or the error table below |
 
@@ -36,7 +36,7 @@ Required keys are defined by the event version. Explicit `null`/availability car
 
 | Field | Meaning |
 | --- | --- |
-| `contract` | `{major:1,minor:0}` or `{major:1,minor:1}` for events |
+| `contract` | `{major:1,minor:0}`, `{major:1,minor:1}` or `{major:1,minor:2}` for events |
 | `producer` | `{application:"ets2telemetry",version:<bounded version text>}` |
 | `eventId` | Lowercase UUID-shaped opaque ID, generated once and stored with the frozen event |
 | `revision` | Positive safe integer, strictly increasing per source trip for material snapshots; gaps allowed |
@@ -78,6 +78,7 @@ Store any valid snapshot even if a lower revision/start has not arrived. Apply a
 | Mode | `gameMode:{mode:single-player|truckersmp|haulmp|unknown,method:module-scan|process-scan|none,confidence:strong|weak|none,ambiguous:boolean}`; no module paths |
 | Job | Origin/destination each have available city/company source IDs and names; available cargo ID/name, actual mass kg, unit mass kg/count, market, special-job and cargo-loaded flags |
 | Hard Mode | `snapshot.hardModeResult` is required in v1.1 as exactly `qualified`, `not-qualified` or `unknown`. It is forbidden in v1.0, which projects an unknown audit. |
+| Accounting | `snapshot.accounting:{distance,fuel}` is required in v1.2 and forbidden in v1.0 and v1.1. Each status is exactly `complete`, `partial` or `unknown`: whether the client accounted for that metric over the whole trip, across game restarts. A client without that accounting sends `unknown`. The dashboard uses the distance status; the fuel status is retained evidence with no effect yet. |
 | Trailer | `trailers:{complete:boolean,items:[{index,id,bodyType,chainType}]}` with availability on identifiers/types; at most 10 active slots. Any mid-trip rule-relevant configuration change, missed configuration or omitted history is reflected in evidence/review, not hidden by the latest snapshot The dashboard recognizes a coupling by `items[0].bodyType` and keeps the other fields as provenance. |
 | Distances | `plannedDistance` m, `observedDistance` m, `deliveredDistance` m are separate available metrics |
 | Other outcome facts | Available fuel used L and cargo damage fraction; available expected income/revenue/penalty as exact raw monetary values, not display conversions |
@@ -103,7 +104,7 @@ The local reducer's stored times may be a checkpoint, inherited last label, rece
 
 The owner explicitly confirmed that an imported trip with unknown historical qualification (including a trip before membership) remains visible but awaits staff review before statistics/progress credit. Known historical qualification and sufficient source facts follow normal automatic rules; being old is not by itself a review requirement.
 
-Use observed odometer distance as actual driven distance only when whole-trip coverage is supported. Retain SDK delivered distance independently for corroboration; never substitute planned distance or sum the two. Incomplete observed distance is a measured segment, not necessarily the trip total. Conflicting totals require review; tolerance and real-game SDK semantics must be verified in VTC-024, not invented as company policy here. Missing exact build alone is recorded uncertainty; automatic evaluation requires the catalog/rule mappings actually used to be supported.
+Use observed odometer distance as actual driven distance only when whole-trip coverage is supported. In v1.0 and v1.1 coverage requires complete recording, verified actual start and end, and no quality reasons. In v1.2 the client's `accounting.distance:"complete"` proves coverage: with verified actual start and end and an available storable observed distance, partial recording and client quality reasons no longer veto it, while `partial` or `unknown` keeps the value a measured segment. Automatic whole-trip support is not relaxed: it keeps the v1.0/v1.1 rule and in v1.2 also needs complete distance accounting, so a partial recording with a shown actual distance still awaits staff review. Retain SDK delivered distance independently for corroboration; never substitute planned distance or sum the two. Incomplete observed distance is a measured segment, not necessarily the trip total. Conflicting totals require review; tolerance and real-game SDK semantics must be verified in VTC-024, not invented as company policy here. Missing exact build alone is recorded uncertainty; automatic evaluation requires the catalog/rule mappings actually used to be supported.
 
 Ingestion never trusts a client-provided `accepted`, qualification, RSVP or exception flag. Delivered plus complete is still not company acceptance. Unknown required facts go to review; proven qualification violations may be rejected by the dashboard, while valid sufficient evidence can be accepted. Initial backfill follows those same rules.
 
@@ -157,7 +158,7 @@ Backfill and delayed/replayed starts must not generate "driver just started" act
 
 Installation requests and control responses remain exactly v1.0. Clients use the authenticated connection response header to select the version for newly frozen events. Without a recognized advertisement, freeze v1.0. Unsupported event versions receive 422 `UNSUPPORTED_CONTRACT`. Invalid shapes at supported versions receive 400 `INVALID_PAYLOAD`. Already frozen events keep their original version, bytes and identifiers across upgrades and retries.
 
-Roll out the dashboard receiver before the ET-111 desktop projection. After v1.1 events have been frozen, preserve both decoders during a rollback or hold the exact v1.1 events until a forward fix restores support. Never downgrade an existing frozen event.
+Roll out the dashboard receiver before the desktop projection that freezes a new minor: ET-111 for v1.1 and ET-113 for v1.2. After such events have been frozen, preserve the v1.0, v1.1 and v1.2 decoders during a rollback or hold the exact frozen events until a forward fix restores support. Never downgrade an existing frozen event.
 
 VTC-022 owns canonical/source mapping; VTC-023 owns token/registration/inbox/ACK/limits with real MySQL race tests; VTC-024 owns desktop binding, automatic initial enumeration, immutable queue, source projection and real-client verification. VTC-026 owns reviewed reconciliation; VTC-029 owns company decisions; VTC-036 owns permission-filtered notifications. No external implementation or card status is changed by this document.
 

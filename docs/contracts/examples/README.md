@@ -1,12 +1,13 @@
 # Telemetry contract examples
 
-These are original, fictional records for [telemetry HTTP v1.0 and v1.1](../telemetry-v1.md). They contain no real driver, game capture, source catalog corpus, account, token or active service URL. `origin: game` exercises the production-shaped request schema in a test fixture; it does not assert that a real game produced this data. Never upload these examples to a real company endpoint.
+These are original, fictional records for [telemetry HTTP v1.0, v1.1 and v1.2](../telemetry-v1.md). They contain no real driver, game capture, source catalog corpus, account, token or active service URL. `origin: game` exercises the production-shaped request schema in a test fixture; it does not assert that a real game produced this data. Never upload these examples to a real company endpoint.
 
 | File | Purpose |
 | --- | --- |
 | `telemetry-started.json` | Complete observed opening with opaque source IDs and unknown retail build/locale |
 | `telemetry-completed.json` | Full terminal v1.0 summary; does not need the start request to arrive first |
 | `telemetry-haulmp-audited.json` | v1.1 HaulMP terminal summary with a recorded qualified Hard Mode audit |
+| `telemetry-accounting.json` | v1.2 delivery after a restart: partial recording and incomplete trailer/rule context, with complete client distance accounting and partial fuel accounting |
 | `telemetry-cancelled.json` | Actual cancellation with zero-valued facts preserved |
 | `telemetry-closed-partial.json` | Interrupted/late-attach recording with unavailable true start and incomplete observations |
 | `telemetry-backfill.json` | Initial automatic history upload; first snapshot of this terminal trip, not fabricated current activity |

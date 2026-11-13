@@ -4167,3 +4167,328 @@ test("trip reads omit a persisted wrong-game event candidate", async () => {
   });
   expect((await service.review(dispatcher, submitted.tripId)).data.trip.summary.event).toBeNull();
 });
+
+test("event v1.2 complete distance accounting shows actual distance while partial recording still awaits review", async () => {
+  const who = await member(),
+    p = payload();
+  p.contract.minor = 2;
+  p.snapshot.recordingCompleteness = "partial";
+  p.snapshot.trailers.complete = false;
+  p.snapshot.evidence.ruleContextComplete = false;
+  p.snapshot.evidence.reasons = ["game-restart"];
+  p.snapshot.hardModeResult = "unknown";
+  p.snapshot.accounting = { distance: "complete", fuel: "partial" };
+  const r = await receive(p, who),
+    row = await state(r.tripId);
+  expect(row).toMatchObject({
+    outcome: "delivered",
+    recording: "partial",
+    actualDistanceM: "123400.000000000000000000",
+    decision: "pending_review",
+  });
+  expect(row?.reviewReasons).toEqual(
+    expect.arrayContaining(["recording_not_supported", "whole_trip_distance_unknown"]),
+  );
+  expect(row?.reviewReasons).not.toContain("actual_distance_unknown");
+  expect(await credit(r.tripId)).toBeUndefined();
+  const review = await service.review(dispatcher, r.tripId);
+  expect(review.data.trip.effectiveFacts).toMatchObject({
+    actualDistanceM: "123400",
+    wholeTripDistanceSupported: false,
+  });
+});
+
+const qualityHolds = [
+  "quality_supported_conflict",
+  "quality_incomparable_snapshots",
+  "quality_cannot_replace_supported_snapshot",
+  "trailer_context_conflict",
+];
+// A game restart loses recording completeness, rule context and the proven trailer chain.
+const restarted = (p: Telemetry) => {
+  p.snapshot.recordingCompleteness = "partial";
+  p.snapshot.trailers.complete = false;
+  p.snapshot.evidence.ruleContextComplete = false;
+  p.snapshot.evidence.reasons = ["game-restart"];
+};
+const factOf = async (receipt: { sourceRecordId: string }) =>
+  (await unit.run((tx) => tripsService.sourceEvidenceInTransaction(tx, receipt.sourceRecordId)))
+    ?.factRevisionId;
+const measured = (p: Telemetry, distanceM: number, fuelL: number) => {
+  if (p.snapshot.observedDistance.available) p.snapshot.observedDistance.value = distanceM;
+  if (p.snapshot.fuelUsed.available) p.snapshot.fuelUsed.value = fuelL;
+};
+
+test("a restarted telemetry trip advances through every revision to its delivered snapshot without a quality hold", async () => {
+  const who = await member(),
+    opened = payload("started");
+  opened.snapshot.recordingCompleteness = "complete";
+  const refreshed = structuredClone(opened);
+  refreshed.eventId = newId();
+  refreshed.revision = 2;
+  measured(refreshed, 40000, 0);
+  const resumed = structuredClone(refreshed);
+  resumed.eventId = newId();
+  resumed.revision = 3;
+  restarted(resumed);
+  measured(resumed, 80000, 21.6);
+  const delivered = payload();
+  delivered.source = structuredClone(opened.source);
+  delivered.snapshot.start = structuredClone(opened.snapshot.start);
+  delivered.revision = 4;
+  restarted(delivered);
+  measured(delivered, 123400, 43.2);
+  let tripId: string | undefined;
+  for (const p of [opened, refreshed, resumed, delivered]) {
+    const r = await receive(p, who);
+    tripId ??= r.tripId;
+    expect(r.tripId).toBe(tripId);
+    expect((await state(tripId))?.currentFactId).toBe(await factOf(r));
+  }
+  const row = await state(tripId as string);
+  expect(row).toMatchObject({
+    outcome: "delivered",
+    recording: "partial",
+    actualDistanceM: null,
+    decision: "pending_review",
+  });
+  for (const code of qualityHolds) expect(row?.reviewReasons).not.toContain(code);
+  // Review comes only from the delivered snapshot's own evidence.
+  expect(row?.reviewReasons).toEqual(
+    expect.arrayContaining(["recording_not_supported", "trailer_context_unknown"]),
+  );
+  expect(
+    (await service.review(dispatcher, tripId as string)).data.trip.effectiveFacts,
+  ).toMatchObject({ factRevisionId: row?.currentFactId, actualCompletedAt: iso() });
+  expect(await credit(tripId as string)).toBeUndefined();
+});
+
+test.each([
+  {
+    name: "an incomplete chain of the same body type advances",
+    change: (p: Telemetry) => {
+      p.snapshot.trailers.complete = false;
+    },
+    held: false,
+  },
+  {
+    name: "an unknown chain advances",
+    change: (p: Telemetry) => {
+      p.snapshot.trailers = { complete: false, items: [] };
+    },
+    held: false,
+  },
+  {
+    name: "a complete chain of another body type is held",
+    change: (p: Telemetry) => {
+      const [first] = p.snapshot.trailers.items;
+      if (first) first.bodyType = { available: true, value: "fixture_flatbed" };
+    },
+    held: true,
+  },
+  {
+    name: "an incomplete chain of another known body type is held",
+    change: (p: Telemetry) => {
+      p.snapshot.trailers.complete = false;
+      const [first] = p.snapshot.trailers.items;
+      if (first) first.bodyType = { available: true, value: "fixture_flatbed" };
+    },
+    held: true,
+  },
+])("an open revision changing a proven trailer chain: $name", async ({ change, held }) => {
+  const who = await member(),
+    opened = payload("started");
+  opened.snapshot.recordingCompleteness = "complete";
+  const first = await receive(opened, who),
+    before = await state(first.tripId);
+  const next = structuredClone(opened);
+  next.eventId = newId();
+  next.revision = 2;
+  measured(next, 15000, 12.5);
+  change(next);
+  const r = await receive(next, who),
+    after = await state(first.tripId),
+    stored = await unit.run((tx) => tripsService.sourceEvidenceInTransaction(tx, r.sourceRecordId));
+  if (held) {
+    // Ingestion records the conflict on the held revision; assessment keeps it as a review reason.
+    expect(after).toMatchObject({
+      currentFactId: before?.currentFactId,
+      decision: "pending_review",
+      reviewHold: true,
+    });
+    expect(stored?.reasonCodes).toContain("trailer_context_conflict");
+    expect(after?.reviewReasons).toContain("trailer_context_conflict");
+  } else {
+    expect(after).toMatchObject({ currentFactId: stored?.factRevisionId, reviewHold: false });
+    for (const code of qualityHolds) {
+      expect(after?.reviewReasons).not.toContain(code);
+      expect(stored?.reasonCodes).not.toContain(code);
+    }
+  }
+});
+
+// A revision held by ingestion keeps the old current fact, is never the decision basis and keeps
+// its conflict as a review reason until staff decide.
+async function heldBy(code: string, tripId: string, receipt: { sourceRecordId: string }) {
+  const after = await state(tripId),
+    stored = await unit.run((tx) =>
+      tripsService.sourceEvidenceInTransaction(tx, receipt.sourceRecordId),
+    );
+  expect(stored?.reasonCodes).toContain(code);
+  expect(after?.currentFactId).not.toBe(stored?.factRevisionId);
+  expect(after).toMatchObject({ decision: "pending_review", reviewHold: true });
+  expect(after?.reviewReasons).toContain(code);
+  expect(await credit(tripId)).toBeUndefined();
+  return after;
+}
+const heldChange = (tripId: string, receipt: { sourceRecordId: string }) =>
+  heldBy("trailer_context_conflict", tripId, receipt);
+test.each([
+  { name: "an unknown chain then a complete one", unproven: "unknown", complete: true },
+  {
+    name: "an incomplete chain then another incomplete one",
+    unproven: "incomplete",
+    complete: false,
+  },
+] as const)(
+  "a changed body type is held after an unproven revision in between: $name",
+  async ({ unproven, complete }) => {
+    const who = await member(),
+      opened = payload("started");
+    opened.snapshot.recordingCompleteness = "complete";
+    const first = await receive(opened, who);
+    const middle = structuredClone(opened);
+    middle.eventId = newId();
+    middle.revision = 2;
+    measured(middle, 40000, 10);
+    if (unproven === "unknown") middle.snapshot.trailers = { complete: false, items: [] };
+    else middle.snapshot.trailers.complete = false;
+    const between = await receive(middle, who),
+      advanced = await state(first.tripId);
+    expect(advanced?.currentFactId).toBe(await factOf(between));
+    const changedChain = (p: Telemetry) => {
+      p.snapshot.trailers.complete = complete;
+      const [trailer] = p.snapshot.trailers.items;
+      if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
+    };
+    // Every revision reporting the changed chain stays held: a held one never becomes the reference.
+    for (const revision of [3, 4]) {
+      const changed = structuredClone(opened);
+      changed.eventId = newId();
+      changed.revision = revision;
+      measured(changed, 40000 + revision * 1000, 10 + revision);
+      changedChain(changed);
+      const after = await heldChange(first.tripId, await receive(changed, who));
+      expect(after?.currentFactId).toBe(advanced?.currentFactId);
+    }
+    const delivered = payload();
+    delivered.source = structuredClone(opened.source);
+    delivered.snapshot.start = structuredClone(opened.snapshot.start);
+    delivered.revision = 5;
+    changedChain(delivered);
+    const after = await heldChange(first.tripId, await receive(delivered, who));
+    expect(after).toMatchObject({ currentFactId: advanced?.currentFactId, outcome: "open" });
+  },
+);
+
+test("a changed body type is held against a proven chain older than many unproven complete revisions", async () => {
+  const who = await member(),
+    opened = payload("started");
+  opened.snapshot.recordingCompleteness = "complete";
+  const first = await receive(opened, who);
+  let latest = opened,
+    current: string | undefined;
+  // More complete chains with an unknown body type than any fixed lookup window.
+  for (let revision = 2; revision <= 13; revision++) {
+    const next = structuredClone(latest);
+    next.eventId = newId();
+    next.revision = revision;
+    measured(next, revision * 1000, revision);
+    const [trailer] = next.snapshot.trailers.items;
+    if (trailer) trailer.bodyType = { available: false, reason: "not-observed" };
+    const r = await receive(next, who);
+    current = await factOf(r);
+    expect((await state(first.tripId))?.currentFactId).toBe(current);
+    latest = next;
+  }
+  const changed = structuredClone(latest);
+  changed.eventId = newId();
+  changed.revision = 14;
+  const [trailer] = changed.snapshot.trailers.items;
+  if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
+  // Ingestion holds the revision; the open trip keeps its current fact and stays in review.
+  expect((await heldChange(first.tripId, await receive(changed, who)))?.currentFactId).toBe(
+    current,
+  );
+  const again = structuredClone(changed);
+  again.eventId = newId();
+  again.revision = 15;
+  expect((await heldChange(first.tripId, await receive(again, who)))?.currentFactId).toBe(current);
+  const delivered = payload();
+  delivered.source = structuredClone(opened.source);
+  delivered.snapshot.start = structuredClone(opened.snapshot.start);
+  delivered.revision = 16;
+  const [body] = delivered.snapshot.trailers.items;
+  if (body) body.bodyType = { available: true, value: "fixture_flatbed" };
+  expect(await heldChange(first.tripId, await receive(delivered, who))).toMatchObject({
+    currentFactId: current,
+    outcome: "open",
+  });
+});
+
+test("a held delivered superset with equal metrics after an unknown chain is never auto-accepted", async () => {
+  const who = await member(),
+    opened = payload("started");
+  opened.snapshot.recordingCompleteness = "complete";
+  measured(opened, 0, 38.5);
+  const first = await receive(opened, who);
+  const middle = structuredClone(opened);
+  middle.eventId = newId();
+  middle.revision = 2;
+  middle.snapshot.trailers = { complete: false, items: [] };
+  measured(middle, 123400, 38.5);
+  const between = await receive(middle, who);
+  expect((await state(first.tripId))?.currentFactId).toBe(await factOf(between));
+  // Every shared metric matches, so the held snapshot strictly extends the current one.
+  const delivered = payload();
+  delivered.source = structuredClone(opened.source);
+  delivered.snapshot.start = structuredClone(opened.snapshot.start);
+  delivered.revision = 3;
+  const [trailer] = delivered.snapshot.trailers.items;
+  if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
+  expect(await heldChange(first.tripId, await receive(delivered, who))).toMatchObject({
+    currentFactId: await factOf(between),
+    outcome: "open",
+  });
+});
+
+test("a later revision held by a held terminal's guards is never auto-accepted", async () => {
+  const who = await member(),
+    opened = payload("started");
+  opened.snapshot.recordingCompleteness = "complete";
+  measured(opened, 0, 38.5);
+  const first = await receive(opened, who),
+    current = await factOf(first);
+  const delivered = payload();
+  delivered.source = structuredClone(opened.source);
+  delivered.snapshot.start = structuredClone(opened.snapshot.start);
+  delivered.revision = 2;
+  const changed = structuredClone(delivered),
+    [trailer] = changed.snapshot.trailers.items;
+  if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
+  expect((await heldChange(first.tripId, await receive(changed, who)))?.currentFactId).toBe(
+    current,
+  );
+  // The correction keeps the opening chain, so only the held terminal's guards hold it.
+  const corrected = structuredClone(delivered);
+  corrected.eventId = newId();
+  corrected.revision = 3;
+  corrected.type = "trip.corrected";
+  for (const field of ["observedDistance", "deliveredDistance"] as const) {
+    const distance = corrected.snapshot[field];
+    if (distance.available) distance.value = 130000;
+  }
+  expect(
+    await heldBy("actualDistanceM_conflict", first.tripId, await receive(corrected, who)),
+  ).toMatchObject({ currentFactId: current, outcome: "open", actualDistanceM: null });
+});
