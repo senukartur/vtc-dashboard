@@ -98,7 +98,7 @@ export function parseJson(bytes: Buffer): unknown {
     return fail(400, "INVALID_PAYLOAD");
   }
 }
-const eventMinors = [0, 1];
+const eventMinors = [0, 1, 2];
 export const eventVersionAdvertisement = eventMinors.map((minor) => `1.${minor}`).join(", ");
 
 export function contract(value: unknown, supportedMinors: readonly number[] = [0]) {

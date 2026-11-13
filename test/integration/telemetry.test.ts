@@ -713,7 +713,7 @@ test("built server uses actual bytes, frozen errors and browser CSRF/Origin guar
     const connection = await http("/api/telemetry/v1/connection", undefined, auth);
     const registered = await service.connection(bearer(issued.token), "127.0.0.1");
     expect(connection.status).toBe(200);
-    expect(connection.headers["vtc-telemetry-event-versions"]).toBe("1.0, 1.1");
+    expect(connection.headers["vtc-telemetry-event-versions"]).toBe("1.0, 1.1, 1.2");
     expect(connection.headers["cache-control"]).toBe("no-store");
     expect(connection.body).toEqual({
       contract: { major: 1, minor: 0 },
@@ -777,7 +777,7 @@ test("built server uses actual bytes, frozen errors and browser CSRF/Origin guar
       (
         await http(
           "/api/telemetry/v1/events",
-          Buffer.from(JSON.stringify({ ...p, contract: { major: 1, minor: 2 } })),
+          Buffer.from(JSON.stringify({ ...p, contract: { major: 1, minor: 3 } })),
           auth,
         )
       ).status,
@@ -1164,7 +1164,7 @@ test("versioned HTTP receipts preserve every audited result and reject invalid e
       });
     const before = await counts();
     for (const [payload, statusCode, code] of [
-      [{ ...p, contract: { major: 1, minor: 2 } }, 422, "UNSUPPORTED_CONTRACT"],
+      [{ ...p, contract: { major: 1, minor: 3 } }, 422, "UNSUPPORTED_CONTRACT"],
       [{ ...p, contract: { major: 1, minor: 1 } }, 400, "INVALID_PAYLOAD"],
       [{ ...p, snapshot: { ...p.snapshot, hardModeResult: "qualified" } }, 400, "INVALID_PAYLOAD"],
       [
@@ -1222,6 +1222,105 @@ test("versioned HTTP receipts preserve every audited result and reject invalid e
     const revisionConflict = await send(changed);
     expect(revisionConflict.statusCode).toBe(409);
     expect(revisionConflict.json().error.code).toBe("IDENTITY_CONFLICT");
+    expect(JSON.parse(await counts())).toEqual(after);
+  } finally {
+    await app.close();
+  }
+});
+
+test("event v1.2 HTTP receipts echo their version, replay exactly and reject invalid accounting without writes", async () => {
+  const { createApp: builtApp } = await import(pathToFileURL(resolve("apps/api/dist/app.js")).href);
+  const { createTelemetry: builtTelemetry } = await import(
+    pathToFileURL(resolve("apps/api/dist/modules/telemetry/service.js")).href
+  );
+  const app = await builtApp({
+    identity,
+    telemetry: builtTelemetry(
+      unit,
+      config,
+      {
+        identity,
+        external: createExternalIdentities(unit, identity),
+        trips: createTrips(unit, tripConfig, { identity }, now),
+      },
+      now,
+    ),
+    checkReadiness: async () => true,
+  });
+  try {
+    const { issued, p } = await connect();
+    const send = (payload: unknown) =>
+      app.inject({
+        method: "POST",
+        url: "/api/telemetry/v1/events",
+        headers: { authorization: bearer(issued.token), "content-type": "application/json" },
+        payload: JSON.stringify(payload),
+      });
+    const current = structuredClone(p);
+    current.contract.minor = 2;
+    current.snapshot.recordingCompleteness = "partial";
+    current.snapshot.hardModeResult = "unknown";
+    current.snapshot.accounting = { distance: "complete", fuel: "partial" };
+    const { accounting, ...withoutAccounting } = current.snapshot;
+    const { hardModeResult, ...withoutAudit } = current.snapshot;
+    expect([accounting, hardModeResult]).toEqual([
+      { distance: "complete", fuel: "partial" },
+      "unknown",
+    ]);
+    const before = await counts();
+    for (const [payload, statusCode, code] of [
+      [{ ...current, contract: { major: 1, minor: 3 } }, 422, "UNSUPPORTED_CONTRACT"],
+      [{ ...current, snapshot: withoutAccounting }, 400, "INVALID_PAYLOAD"],
+      [{ ...current, snapshot: withoutAudit }, 400, "INVALID_PAYLOAD"],
+      [
+        { ...current, snapshot: { ...current.snapshot, accounting: { ...accounting, extra: 1 } } },
+        400,
+        "INVALID_PAYLOAD",
+      ],
+      [
+        {
+          ...current,
+          snapshot: { ...current.snapshot, accounting: { distance: "whole", fuel: "partial" } },
+        },
+        400,
+        "INVALID_PAYLOAD",
+      ],
+      [{ ...p, snapshot: { ...p.snapshot, accounting } }, 400, "INVALID_PAYLOAD"],
+      [
+        {
+          ...current,
+          contract: { major: 1, minor: 1 },
+        },
+        400,
+        "INVALID_PAYLOAD",
+      ],
+    ] as const) {
+      const response = await send(payload);
+      expect(response.statusCode).toBe(statusCode);
+      expect(response.json().error.code).toBe(code);
+    }
+    expect(await counts()).toBe(before);
+    instant += 10000;
+    const stored = await send(current);
+    expect(stored.statusCode).toBe(202);
+    expect(stored.json()).toEqual({
+      contract: { major: 1, minor: 2 },
+      eventId: current.eventId,
+      receiptId: expect.any(String),
+      status: "stored",
+      firstReceivedAtUtcMs: instant,
+    });
+    const replay = await send(current);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual({ ...stored.json(), status: "duplicate" });
+    const after = JSON.parse(await counts());
+    expect(Number(after.messages) - Number(JSON.parse(before).messages)).toBe(1);
+    expect(Number(after.trips) - Number(JSON.parse(before).trips)).toBe(1);
+    const changed = structuredClone(current);
+    changed.snapshot.accounting = { distance: "partial", fuel: "partial" };
+    const conflict = await send(changed);
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error.code).toBe("IDENTITY_CONFLICT");
     expect(JSON.parse(await counts())).toEqual(after);
   } finally {
     await app.close();

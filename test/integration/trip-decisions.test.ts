@@ -4167,3 +4167,33 @@ test("trip reads omit a persisted wrong-game event candidate", async () => {
   });
   expect((await service.review(dispatcher, submitted.tripId)).data.trip.summary.event).toBeNull();
 });
+
+test("event v1.2 complete distance accounting shows actual distance while partial recording still awaits review", async () => {
+  const who = await member(),
+    p = payload();
+  p.contract.minor = 2;
+  p.snapshot.recordingCompleteness = "partial";
+  p.snapshot.trailers.complete = false;
+  p.snapshot.evidence.ruleContextComplete = false;
+  p.snapshot.evidence.reasons = ["game-restart"];
+  p.snapshot.hardModeResult = "unknown";
+  p.snapshot.accounting = { distance: "complete", fuel: "partial" };
+  const r = await receive(p, who),
+    row = await state(r.tripId);
+  expect(row).toMatchObject({
+    outcome: "delivered",
+    recording: "partial",
+    actualDistanceM: "123400.000000000000000000",
+    decision: "pending_review",
+  });
+  expect(row?.reviewReasons).toEqual(
+    expect.arrayContaining(["recording_not_supported", "whole_trip_distance_unknown"]),
+  );
+  expect(row?.reviewReasons).not.toContain("actual_distance_unknown");
+  expect(await credit(r.tripId)).toBeUndefined();
+  const review = await service.review(dispatcher, r.tripId);
+  expect(review.data.trip.effectiveFacts).toMatchObject({
+    actualDistanceM: "123400",
+    wholeTripDistanceSupported: false,
+  });
+});
