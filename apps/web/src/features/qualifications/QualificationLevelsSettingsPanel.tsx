@@ -2,7 +2,7 @@
 // biome-ignore-all lint/a11y/noRedundantRoles: mobile WebKit may drop implicit table roles.
 import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { formatQuantity } from "../../shared/formatting.js";
 import { Badge, Button, Card, Input, Label } from "../../shared/ui/primitives.js";
@@ -33,7 +33,9 @@ const emptyAddDraft: AddDraft = { name: "", reason: "" };
 export function QualificationLevelsSettingsPanel() {
   const session = useSession();
   const { t, i18n } = useTranslation("qualifications");
-  const [params, setParams] = useSearchParams();
+  const { search, hash } = useLocation();
+  const navigate = useNavigate();
+  const params = new URLSearchParams(search);
   const game: Game = params.get("game") === "ats" ? "ats" : "ets2";
   if (!session.self?.capabilities.includes("qualifications.manage"))
     return <p>{t("ladderPermission")}</p>;
@@ -47,13 +49,10 @@ export function QualificationLevelsSettingsPanel() {
         aria-label={t("game")}
         value={game}
         options={games}
-        onValueChange={(value) =>
-          setParams((current) => {
-            const next = new URLSearchParams(current);
-            next.set("game", value);
-            return next;
-          })
-        }
+        onValueChange={(value) => {
+          params.set("game", value);
+          navigate({ search: params.toString(), hash });
+        }}
       />
       <LadderSettings
         key={`${session.generation}:${session.self.member.id}:${session.self.identityEpoch}:${game}`}

@@ -1,7 +1,6 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
-import { mockQualifications } from "./support/qualifications.ts";
 import {
   correctCode,
   ids,
@@ -906,8 +905,7 @@ test(
   "P11 direct qualification URL, manual tabs, game changes and Back preserve route state",
   browserCase(["@functional"]),
   async ({ page }) => {
-    await mockQualifications(page);
-    const state = await mockSettings(page, { role: "deputy", delegateQualifications: true });
+    const state = await mockSettings(page, { role: "deputy" });
     await page.goto("/account/admin/settings?tab=qualifications&game=ats&keep=synthetic#anchor");
     const qualifications = page.getByRole("tab", { name: "Qualification levels", exact: true }),
       general = page.getByRole("tab", { name: "General", exact: true }),
@@ -917,12 +915,14 @@ test(
         exact: true,
       }),
       ats = qualificationPanel.getByRole("button", { name: "ATS", exact: true });
-    await expect(
-      qualificationPanel.getByText("Fictional trainee", { exact: true }).first(),
-    ).toBeVisible();
+    const ladder = qualificationPanel.getByRole("table", { name: "Qualification ladder" });
+    await expect(ladder.getByRole("rowheader")).toContainText("Fictional ATS starter");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Company settings");
     await expect(ats).toHaveAttribute("aria-pressed", "true");
     expect(state.reads.filter((path) => path.startsWith("/admin/company-settings"))).toEqual([]);
+    expect(state.reads.filter((path) => path.includes("qualification"))).toEqual([
+      "/admin/qualification-ladders/ats",
+    ]);
     await qualifications.focus();
     await page.keyboard.press("ArrowRight");
     await expect(audit).toBeFocused();
@@ -944,6 +944,7 @@ test(
     await qualificationPanel.getByRole("button", { name: "ETS2", exact: true }).click();
     await expect(page).toHaveURL(/tab=qualifications&game=ets2&keep=synthetic#anchor$/);
     await expect(ats).toHaveAttribute("aria-pressed", "false");
+    await expect(ladder.getByRole("rowheader")).toContainText("Fictional ETS2 starter");
     await page.goto("/account/admin/settings?tab=invalid");
     await expect(general).toHaveAttribute("aria-selected", "true");
     expect(state.unexpected.filter((entry) => entry.includes(" /admin/"))).toEqual([]);

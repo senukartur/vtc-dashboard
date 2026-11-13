@@ -11,7 +11,7 @@ import {
 } from "../../shared/ui/dialog.js";
 import { Badge, Button, Card, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs.js";
-import { QualificationsPage } from "../qualifications/QualificationsPage.js";
+import { QualificationLevelsSettingsPanel } from "../qualifications/QualificationLevelsSettingsPanel.js";
 import {
   CommandFeedback,
   Confirmation,
@@ -683,7 +683,7 @@ function SettingsGeneral({
 function SettingsQualificationLevels() {
   const session = useSession();
   return session.self?.capabilities.includes("qualifications.manage") ? (
-    <QualificationsPage embedded />
+    <QualificationLevelsSettingsPanel />
   ) : (
     <SettingsRestricted />
   );
