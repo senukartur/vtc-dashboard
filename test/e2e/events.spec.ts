@@ -1,7 +1,18 @@
 import { writeFile } from "node:fs/promises";
-import type { Page, TestInfo } from "@playwright/test";
+import type { Page, Request, TestInfo } from "@playwright/test";
+import type { components } from "@vtc/contracts";
+import { stage2Fixture, stage2LegacyEventId, stage2MediaId } from "../fixtures/events-stage-2.ts";
 import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
 import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
+import {
+  coverCaption,
+  detailsPath,
+  eventPath,
+  middleCaption,
+  mockStructuredDetail,
+  nextUnreported,
+  unreported,
+} from "./support/events-detail.ts";
 import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
@@ -212,6 +223,130 @@ test(
   },
 );
 test(
+  "Stage 2 attendance requires reviewing an off-page draft against the newer roster",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    const state = await mockStructuredDetail(page, "en", "director");
+    state.member.event.meetingAt = "2020-10-25T12:00:00.000Z";
+    state.member.event.startsAt = "2020-10-25T13:00:00.000Z";
+    type Attendance = components["schemas"]["EventStage2Attendance"];
+    const fixture = stage2Fixture("getEventAttendance", "leadership")
+      .response as components["schemas"]["EventStage2EnvelopeAttendance"];
+    const first = fixture.data.items[0];
+    if (!first) throw new Error("Missing synthetic attendance row");
+    const target = {
+      ...first.member,
+      id: "e1320000-0000-4000-8000-000000000098",
+      nickname: "Fictional Attendance Driver",
+    };
+    const path = `/api/v1/admin${eventPath}/attendance`;
+    let version = 1;
+    let recorded: Attendance["items"][number]["attendance"] = "unconfirmed";
+    const writes: { etag: string | undefined; body: unknown }[] = [];
+    await page.route(
+      (url) => url.pathname === path,
+      (route) => {
+        const request = route.request();
+        if (request.method() === "PUT") {
+          const etag = request.headers()["if-match"];
+          const body = request.postDataJSON();
+          writes.push({ etag, body });
+          if (etag !== `"v${version}"`) return route.fulfill({ status: 412 });
+          recorded = body.members[0].attendance;
+          version++;
+          return route.fulfill({
+            json: envelope({ id: state.member.event.id, version }),
+            headers: { ETag: `"v${version}"` },
+          });
+        }
+        const { searchParams } = new URL(request.url());
+        if (searchParams.get("view") !== "stage2") return route.fulfill({ status: 422 });
+        const cursor = searchParams.get("cursor");
+        const nextCursor = `fictional-attendance-v${version}`;
+        if (cursor && cursor !== nextCursor) return route.fulfill({ status: 412 });
+        const data: Attendance = {
+          items: cursor
+            ? [{ ...first, member: target, attendance: recorded, tripId: null }]
+            : [first],
+          totals: {
+            total: 2,
+            attended: 1 + Number(recorded === "attended"),
+            notAttended: Number(recorded === "not_attended"),
+            unconfirmed: Number(recorded === "unconfirmed"),
+          },
+          nextCursor: cursor ? null : nextCursor,
+        };
+        return route.fulfill({
+          json: envelope(data),
+          headers: { ETag: `"v${version}"` },
+        });
+      },
+    );
+    await page.goto(detailsPath);
+    await page.getByRole("button", { name: "View responses and attendance", exact: true }).click();
+    const roster = page.getByRole("form", { name: "Actual attendance", exact: true });
+    const next = roster.getByRole("button", { name: "Next page", exact: true });
+    const record = roster.getByRole("button", { name: "Record attendance", exact: true });
+    const targetRow = roster.getByRole("group", { name: target.nickname, exact: true });
+    const decision = targetRow.getByRole("combobox");
+    const note = targetRow.getByRole("textbox", {
+      name: `Private staff note · ${target.nickname}`,
+    });
+    await next.click();
+    await decision.selectOption("attended");
+    await note.fill("Fictional draft at v1");
+    await expect(record).toBeEnabled();
+
+    recorded = "not_attended";
+    version = 2;
+    const updated = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname === path &&
+        !url.searchParams.has("cursor")
+      );
+    });
+    await roster.getByRole("button", { name: "First page", exact: true }).click();
+    const firstPage = await updated;
+    expect(new URL(firstPage.url()).searchParams.getAll("view")).toEqual(["stage2"]);
+    expect(firstPage.headers().etag).toBe('"v2"');
+    await expect(targetRow).toHaveCount(0);
+    await expect(roster.getByRole("status")).toContainText("Attendance changed");
+    await expect(record).toBeDisabled();
+    await record.press("Enter");
+
+    await next.click();
+    await expect(targetRow).toContainText("Actual attendance: Did not attend");
+    await expect(decision).toHaveValue("attended");
+    await expect(note).toHaveValue("Fictional draft at v1");
+    await note.fill("Fictional note after checking the current row");
+    await expect(record).toBeDisabled();
+    expect(writes).toEqual([]);
+    await targetRow
+      .getByRole("button", { name: "Keep this draft after review", exact: true })
+      .click();
+    await expect(record).toBeEnabled();
+    await record.click();
+    await expect(roster.getByText("Attendance recorded.", { exact: true })).toBeVisible();
+    expect(writes).toEqual([
+      {
+        etag: '"v2"',
+        body: {
+          members: [
+            {
+              memberId: target.id,
+              attendance: "attended",
+              note: "Fictional note after checking the current row",
+            },
+          ],
+        },
+      },
+    ]);
+  },
+);
+test(
   "changing own RSVP from participants page two resets to the current first page",
   browserCase(["@functional"]),
   async ({ page }) => {
@@ -264,7 +399,7 @@ test(
       .getByRole("group", { name: "Your response", exact: true })
       .getByRole("button", { name: "Participating", exact: true })
       .click();
-    await page.getByRole("button", { name: "Save response", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Save response", exact: true })).toHaveCount(0);
     await expect(page.getByText("Response saved.", { exact: true })).toBeVisible();
     await expect(
       decliners.getByRole("link", { name: "Fictional decliner 1", exact: true }),
@@ -733,3 +868,401 @@ test(
     }
   },
 );
+
+test(
+  "member opens the full gallery with the keyboard and returns focus to the thumbnail",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockStructuredDetail(page, "en", "driver");
+    await page.goto(detailsPath);
+    const gallery = page.getByRole("region", { name: "Gallery" });
+    const cover = gallery.getByRole("button", { name: `View image: ${coverCaption}` });
+    await expect(cover).toBeVisible();
+    expect(state.requests.some((url) => url.searchParams.get("size") === "full")).toBe(false);
+    await cover.focus();
+    await page.keyboard.press("Enter");
+    const viewer = page.getByRole("dialog", { name: "Image 1 of 3" });
+    await expect(viewer).toBeVisible();
+    await expect(viewer.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+    await expect(viewer.getByRole("img", { name: coverCaption })).toBeVisible();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("dialog", { name: "Image 2 of 3" })).toHaveAccessibleDescription(
+      middleCaption,
+    );
+    await expect(page.getByRole("dialog").getByRole("img", { name: middleCaption })).toBeVisible();
+    await page.keyboard.press("ArrowLeft");
+    await expect(viewer.getByRole("img", { name: coverCaption })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(cover).toBeFocused();
+    expect(
+      state.requests.some(
+        (url) => url.pathname.includes(stage2MediaId) && url.searchParams.get("size") === "full",
+      ),
+    ).toBe(true);
+  },
+);
+
+function trackGuestReads(page: Page) {
+  const requests: Request[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/api/v1/")) requests.push(request);
+  });
+  return requests;
+}
+
+function guestRequestPaths(requests: Request[]) {
+  return requests.map((request) => {
+    const { pathname, search } = new URL(request.url());
+    return `${request.method()} ${pathname}${search}`;
+  });
+}
+
+test(
+  "public detail reads one strict Stage 2 response and only the advertised cover",
+  browserCase(["@functional"]),
+  async ({ page, baseURL }) => {
+    if (!baseURL) throw new Error("The public detail test requires a base URL");
+    await page
+      .context()
+      .addCookies([{ name: "fictional_public_cookie", value: "fictional", url: baseURL }]);
+    const state = await mockStructuredDetail(page, "ru");
+    const reads = trackGuestReads(page);
+    await page.goto(eventPath);
+    await expect(page.getByRole("img", { name: "Обложка события" })).toBeVisible();
+    const organizer = page.getByRole("region", { name: "Организатор" });
+    await expect(organizer).toContainText(state.member.event.organizer);
+    await expect(organizer.getByRole("link")).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Ваш ответ" })).toHaveCount(0);
+    await expect(page.getByText("Синтетический груз", { exact: true })).toHaveCount(0);
+    expect(guestRequestPaths(reads)).toEqual([
+      `GET /api/v1/public${eventPath}?locale=ru`,
+      `GET /api/v1/public${eventPath}/cover`,
+    ]);
+    for (const request of reads) expect(await request.headerValue("cookie")).toBeNull();
+  },
+);
+
+test(
+  "public detail reads one strict legacy response at the same localized URL",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockEvents(page, false, "ru");
+    state.session = false;
+    state.event.origin = {
+      entityId: "e0350000-0000-4000-8000-000000000093",
+      label: "Фиктивная северная гавань",
+      englishFallback: false,
+      requestedLocale: "ru",
+      renderedLocale: "ru",
+      hidden: false,
+    };
+    const reads = trackGuestReads(page);
+    await page.goto(`/events/${eventId}`);
+    await expect(page.getByRole("heading", { name: state.event.title })).toBeVisible();
+    await expect(page.getByText("Фиктивная северная гавань", { exact: true })).toBeVisible();
+    const organizer = page.getByRole("region", { name: "Организатор" });
+    await expect(organizer).toContainText(state.event.organizer);
+    await expect(organizer.getByRole("link")).toHaveCount(0);
+    await expect(page.getByRole("img", { name: "Обложка события" })).toHaveCount(0);
+    await expect(page.getByText("Не нужны, хватит базовой карты")).toHaveCount(0);
+    expect(guestRequestPaths(reads)).toEqual([`GET /api/v1/public/events/${eventId}?locale=ru`]);
+  },
+);
+
+test(
+  "public detail renders a Stage 2 legacy row with organizer text and no cover",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockStructuredDetail(page, "ru");
+    const reads = trackGuestReads(page);
+    await page.goto(`/events/${stage2LegacyEventId}`);
+    await expect(page.getByText("Не нужны, хватит базовой карты", { exact: true })).toBeVisible();
+    const legacy = (
+      stage2Fixture("listPublicEvents", "structured-and-legacy")
+        .response as components["schemas"]["EventStage2EnvelopePublicList"]
+    ).data.items[1];
+    if (!legacy) throw new Error("Missing legacy row fixture");
+    const organizer = page.getByRole("region", { name: "Организатор" });
+    await expect(organizer).toContainText(legacy.organizer);
+    await expect(organizer.getByRole("link")).toHaveCount(0);
+    await expect(page.getByRole("img", { name: "Обложка события" })).toHaveCount(0);
+    expect(guestRequestPaths(reads)).toEqual([
+      `GET /api/v1/public/events/${stage2LegacyEventId}?locale=ru`,
+    ]);
+  },
+);
+
+test(
+  "dispatcher sees an empty gallery for an absent media endpoint and cannot manage the event",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockStructuredDetail(page, "en", "dispatcher");
+    state.missingMedia = true;
+    await page.goto(detailsPath);
+    const gallery = page.getByRole("region", { name: "Gallery" });
+    await expect(gallery).toContainText("No images have been added to this event.");
+    await expect(page.getByRole("button", { name: "View responses and attendance" })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole("button", { name: "Cancel event" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit event" })).toHaveCount(0);
+    expect(state.requests.some((url) => url.pathname.includes(`/admin${eventPath}`))).toBe(false);
+  },
+);
+
+test(
+  "gallery read failure can be retried without showing an empty state",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockStructuredDetail(page, "en", "driver");
+    state.mediaFailure = true;
+    await page.goto(detailsPath);
+    const gallery = page.getByRole("region", { name: "Gallery" });
+    await expect(gallery.getByRole("alert")).toBeVisible();
+    await expect(gallery.getByText("No images have been added to this event.")).toHaveCount(0);
+    state.mediaFailure = false;
+    await gallery.getByRole("button", { name: "Try again" }).click();
+    await expect(
+      gallery.getByRole("button", { name: `View image: ${coverCaption}` }),
+    ).toBeVisible();
+  },
+);
+
+for (const role of ["director", "deputy_director"] as const) {
+  test(
+    `${role} sees leadership-only attendance totals, canonical trip and nonresponders`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockStructuredDetail(page, "en", role);
+      await page.goto(detailsPath);
+      const show = page.getByRole("button", { name: "View responses and attendance" });
+      await expect(show).toBeVisible();
+      expect(state.requests.some((url) => url.pathname.includes(`/admin${eventPath}`))).toBe(false);
+      await expect(page.getByRole("button", { name: "Cancel event" })).toBeEnabled();
+      const rosterRead = page.waitForRequest(
+        (request) =>
+          request.method() === "GET" &&
+          new URL(request.url()).pathname === `/api/v1/admin${eventPath}/attendance`,
+      );
+      await show.click();
+      expect(new URL((await rosterRead).url()).searchParams.getAll("view")).toEqual(["stage2"]);
+      const attendance = page.locator(".events-attendance-totals");
+      await expect(attendance).toContainText("Total members");
+      await expect(attendance.getByText("2", { exact: true })).toBeVisible();
+      const trip = page.getByRole("link", { name: "View trip for Fictional Coordinator" });
+      await expect(trip).toHaveAttribute(
+        "href",
+        "/account/trips/e1320000-0000-4000-8000-000000000011",
+      );
+      const nonresponders = page.getByRole("region", { name: "No response yet" });
+      await expect(nonresponders.getByRole("link", { name: unreported })).toBeVisible();
+      const noTrip = page.getByRole("group", { name: unreported, exact: true });
+      await expect(noTrip.getByRole("link", { name: /^View trip/ })).toHaveCount(0);
+      await nonresponders.getByRole("button", { name: "Next page" }).click();
+      await expect(nonresponders.getByRole("link", { name: nextUnreported })).toBeVisible();
+      await expect(nonresponders.getByRole("heading")).toBeFocused();
+    },
+  );
+}
+
+test(
+  "Stage 2 leadership cancellation retains its reason across stale definition authority",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    const state = await mockStructuredDetail(page, "en", "director");
+    await page.goto(detailsPath);
+    await page.getByRole("button", { name: "Cancel event", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const reason = dialog.getByLabel("Private reason");
+    const confirm = dialog.getByRole("button", { name: "Confirm cancellation" });
+    await reason.fill("Fictional snow closure");
+    state.staleCancellation = true;
+    await confirm.click();
+    await expect(dialog.getByRole("alert")).toContainText("changed");
+    await expect(reason).toHaveValue("Fictional snow closure");
+    await confirm.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Your response" })).toContainText(
+      "Your response before the start",
+    );
+    expect(state.cancellations.map(({ body, etag, locale }) => ({ body, etag, locale }))).toEqual([
+      { body: { reason: "Fictional snow closure" }, etag: '"v1"', locale: "en" },
+      { body: { reason: "Fictional snow closure" }, etag: '"v2"', locale: "en" },
+    ]);
+    expect(state.cancellations[0]?.key).toBeTruthy();
+    expect(state.cancellations[0]?.key).not.toBe(state.cancellations[1]?.key);
+  },
+);
+
+test(
+  "a member can clear a response immediately without a reason or Save",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockEvents(page);
+    state.response = { version: 3, response: "participating", declineReason: null };
+    await page.goto(`/account/events/${eventId}`);
+    const section = page.getByRole("region", { name: "Your response" });
+    const clear = section.getByRole("button", { name: "No answer" });
+    await expect(section.getByRole("button", { name: "Participating" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await clear.click();
+    await expect(section.getByRole("status")).toHaveText("Response saved.");
+    await expect(clear).toHaveAttribute("aria-pressed", "true");
+    await expect(clear).toBeFocused();
+    await expect(section.getByLabel("Private decline reason")).toHaveCount(0);
+    await expect(section.getByRole("button", { name: "Save response" })).toHaveCount(0);
+    expect(state.commands).toEqual([
+      { method: "PUT", path: `/events/${eventId}/my-response`, body: { response: "unanswered" } },
+    ]);
+    expect(state.preconditions).toEqual(['"v3"']);
+  },
+);
+
+function trackMemberDetailReads(page: Page, path: string) {
+  const locales: (string | null)[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === `/api/v1${path}`)
+      locales.push(url.searchParams.get("locale"));
+  });
+  return locales;
+}
+
+test(
+  "member detail selects one localized Stage 2 read from the session flag",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    await mockEventsStage2(page, "member");
+    const locales = trackMemberDetailReads(page, eventPath);
+    await page.goto(detailsPath);
+    await expect(page.getByRole("heading", { name: "Fictional northern convoy" })).toBeVisible();
+    await expect(page.getByText("TruckersMP", { exact: true })).toBeVisible();
+    expect(locales).toEqual(["en"]);
+  },
+);
+
+for (const status of [404, 422, 503] as const) {
+  test(
+    `member detail stays on Stage 2 after HTTP ${status}`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+      const state = await mockEventsStage2(page, "member");
+      state.statusByRequest.set(`GET ${eventPath}`, status);
+      const locales = trackMemberDetailReads(page, eventPath);
+      await page.goto(detailsPath);
+      await expect(page.locator(".events-detail").getByRole("alert")).toBeVisible();
+      expect(locales).toEqual(["en"]);
+    },
+  );
+}
+
+test(
+  "member detail uses legacy reads and cancellation without the Stage 2 session flag",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockEvents(page, true);
+    state.extraParticipants = [
+      {
+        member: {
+          id: "e0350000-0000-4000-8000-000000000099",
+          nickname: "Fictional legacy participant",
+          roles: ["driver"],
+          formerMember: false,
+        },
+      },
+    ];
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    const reads = trackMemberDetailReads(page, `/events/${eventId}`);
+    await page.goto(`/account/events/${eventId}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.event.title);
+    expect(reads).toEqual([null]);
+    await expect(page.getByRole("region", { name: "Gallery" })).toContainText(
+      "No images have been added to this event.",
+    );
+    await expect(page.getByText("Base map is enough", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".events-counts")).toContainText("Participating: 1");
+    await expect(page.getByRole("link", { name: "Fictional legacy participant" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit event" })).toBeEnabled();
+    const roster = page.waitForRequest(
+      (request) =>
+        request.method() === "GET" &&
+        new URL(request.url()).pathname === `/api/v1/admin/events/${eventId}/attendance`,
+    );
+    await page.getByRole("button", { name: "View responses and attendance" }).click();
+    expect(new URL((await roster).url()).searchParams.has("view")).toBe(false);
+    await expect(
+      page.getByRole("combobox", { name: "Actual attendance · Fictional Yukon Member" }),
+    ).toBeVisible();
+    await expect(page.getByRole("region", { name: "No response yet" })).toHaveCount(0);
+    await expect(page.locator(".events-attendance-totals")).toHaveCount(0);
+    await page.getByRole("button", { name: "Cancel event", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Private reason").fill("Fictional cancellation on the legacy API");
+    const cancellation = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === `/api/v1/admin/events/${eventId}/cancellation`,
+    );
+    await dialog.getByRole("button", { name: "Confirm cancellation" }).click();
+    expect(new URL((await cancellation).url()).searchParams.has("locale")).toBe(false);
+    await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+    expect(state.commands.at(-1)?.path).toBe(`/admin/events/${eventId}/cancellation`);
+    expect(
+      state.requests.some(
+        (request) => request.endsWith("/media") || request.endsWith("/nonresponders"),
+      ),
+    ).toBe(false);
+  },
+);
+
+for (const status of [401, 403, 404, 422] as const) {
+  test(
+    `public detail stops after one GET for ${status === 404 ? "a missing or private event" : status}`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockEvents(page, false, "ru");
+      state.status = status;
+      state.session = false;
+      const reads = trackGuestReads(page);
+      await page.goto(`/events/${eventId}`);
+      await expect(page.locator(".events-detail").getByRole("alert")).toBeVisible();
+      expect(guestRequestPaths(reads)).toEqual([`GET /api/v1/public/events/${eventId}?locale=ru`]);
+    },
+  );
+}
+
+for (const projection of ["legacy", "Stage 2"] as const) {
+  test(
+    `public detail rejects a private field in the ${projection} response`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const data =
+        projection === "legacy"
+          ? eventFixture()
+          : (
+              stage2Fixture("getPublicEvent", "structured")
+                .response as components["schemas"]["EventStage2EnvelopePublic"]
+            ).data;
+      const path = `/api/v1/public/events/${data.id}`;
+      const reads = trackGuestReads(page);
+      await page.route(
+        (url) => url.pathname === path,
+        (route) =>
+          route.fulfill({
+            json: envelope({ ...data, organizerMemberId: "e0350000-0000-4000-8000-000000000094" }),
+          }),
+      );
+      await page.goto(`/events/${data.id}`);
+      await expect(page.locator(".events-detail").getByRole("alert")).toBeVisible();
+      await expect(page.getByRole("heading", { name: data.title })).toHaveCount(0);
+      expect(guestRequestPaths(reads)).toEqual([`GET ${path}?locale=ru`]);
+    },
+  );
+}

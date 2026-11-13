@@ -1,5 +1,8 @@
+import { eventDetailTranslations } from "./event-detail-translations.js";
+
 export const eventTranslations = {
   en: {
+    ...eventDetailTranslations.en,
     attendanceDrafts: "Unsaved attendance changes",
     reviewAttendance:
       "Attendance changed. Your drafts are listed here. Find each member in the refreshed pages, review their current attendance and keep or remove the draft before saving again.",
@@ -127,6 +130,7 @@ export const eventTranslations = {
     attendanceAfterStart: "Available after the event starts",
   },
   ru: {
+    ...eventDetailTranslations.ru,
     attendanceDrafts: "Несохранённые изменения посещения",
     reviewAttendance:
       "Посещение изменилось. Ваши черновики сохранены здесь. Найдите каждого участника на обновлённых страницах, проверьте текущее посещение и сохраните или удалите черновик перед повторной записью.",
