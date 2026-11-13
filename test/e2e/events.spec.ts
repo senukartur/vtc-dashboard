@@ -1358,6 +1358,7 @@ test.describe("Stage 2 draft entry", () => {
         "e1320000-0000-4000-8000-000000000033",
         "Fictional local harbour",
       );
+      draft.data.fields.game = "ets2";
       draft.data.fields.originCityId = originalCityId;
       await page.route("**/api/v1/catalogs/cities?*", (route) =>
         route.fulfill({ json: catalogList([localCity]) }),
