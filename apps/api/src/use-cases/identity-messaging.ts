@@ -249,10 +249,20 @@ export function composeIdentity(
             : {}),
         })
       : undefined;
+  const eventMedia =
+    eventsConfig && eventMediaConfig
+      ? createEventMedia(
+          unit,
+          { ...eventMediaConfig, draftsEnabled: eventsConfig.draftsEnabled === true },
+          eventsConfig.cursorKey,
+          identity,
+        )
+      : undefined;
   const events = eventsConfig
     ? createEvents(unit, eventsConfig, {
         identity,
         outbox,
+        ...(eventMedia ? { media: eventMedia } : {}),
         ...(notificationsConfig
           ? {
               notificationChanged: (
@@ -283,10 +293,6 @@ export function composeIdentity(
           : {}),
       })
     : undefined;
-  const eventMedia =
-    eventsConfig && eventMediaConfig
-      ? createEventMedia(unit, eventMediaConfig, eventsConfig.cursorKey, identity)
-      : undefined;
   if (tripDecisionsConfig && trips && qualifications && manualReports && events)
     tripDecisions = createTripDecisions(unit, tripDecisionsConfig, {
       identity,

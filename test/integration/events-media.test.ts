@@ -24,6 +24,7 @@ import {
   test,
 } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
+import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import {
   createEventMedia,
   type EventMedia,
@@ -44,6 +45,7 @@ import {
 import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
+import { catalogConfig } from "../fixtures/catalogs/synthetic.ts";
 import { pngBytes } from "../fixtures/manual-images.ts";
 import {
   guardedSettings,
@@ -270,6 +272,7 @@ beforeEach(async () => {
     maxPixels: 500_000,
     timeoutMs: 8000,
     separateFrom: [],
+    draftsEnabled: true,
   };
   blobs = createPrivateFilesystem(storage);
   useStorage(blobs);
@@ -530,6 +533,129 @@ test("draft images are private, discarded storage is cleaned and revoked manager
   });
   await cleanup();
   expect(await readdir(directory)).toEqual([]);
+});
+
+test("draft flag gates gallery access while publication preserves media in Events reads", async () => {
+  const route = { ...config, routeEnabled: true };
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const active = createEvents(
+    unit,
+    { ...route, draftsEnabled: true },
+    {
+      identity,
+      catalogs,
+      media,
+    },
+    now,
+  );
+  const inactiveMedia = createEventMedia(
+    unit,
+    { ...storage, draftsEnabled: false },
+    config.cursorKey,
+    identity,
+    blobs,
+    now,
+  );
+  const inactive = createEvents(unit, route, { identity, catalogs, media: inactiveMedia }, now);
+  const withoutMedia = createEvents(unit, route, { identity, catalogs }, now);
+  const draftApi = active.drafts;
+  if (!draftApi) throw new Error("EXPECTED_DRAFTS");
+  const definitionFields = definition("public");
+  const { organizer: _organizer, route: _route, ...fields } = definitionFields;
+  const saved = await draftApi.create(director.actor, newId(), {
+    ...fields,
+    organizerMemberId: director.actor.userId,
+    platform: "haulmp",
+    requiredDlcIds: [],
+  });
+  const id = saved.data.id;
+  const accepted = await upload(id, 1);
+  await runNext();
+  const mediaId = accepted.item.id;
+  await media.edit(director.actor, id, mediaId, command(3), { isCover: true });
+  const admin = { cookie: director.cookie };
+  const driver = { cookie: member.cookie };
+  const gallery = `/api/v1/events/${id}/media`;
+  const content = `${gallery}/${mediaId}/content?size=thumb`;
+  const adminGallery = `/api/v1/admin/events/${id}/media`;
+  const cover = `/api/v1/public/events/${id}/cover`;
+  const activeApp = await createApp({
+    identity,
+    events: active,
+    eventMedia: media,
+    checkReadiness: async () => true,
+  });
+  const inactiveApp = await createApp({
+    identity,
+    events: inactive,
+    eventMedia: inactiveMedia,
+    checkReadiness: async () => true,
+  });
+  const withoutMediaApp = await createApp({
+    identity,
+    events: withoutMedia,
+    checkReadiness: async () => true,
+  });
+  try {
+    expect((await activeApp.inject({ url: content, headers: admin })).statusCode).toBe(200);
+    expect((await activeApp.inject({ url: gallery, headers: driver })).statusCode).toBe(404);
+    expect((await inactiveApp.inject({ url: content, headers: admin })).statusCode).toBe(404);
+    expect((await inactiveApp.inject({ url: adminGallery, headers: admin })).statusCode).toBe(404);
+    expect((await inactiveApp.inject({ url: cover })).statusCode).toBe(404);
+    const publishKey = newId();
+    const published = await draftApi.publish(director.actor, id, publishKey, saved.version, "en");
+    expect(published.data.event).toMatchObject({ id, hasCover: true });
+
+    const disabled = await withoutMediaApp.inject({ url: `/api/v1/public/events/${id}?locale=ru` });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json().data).toMatchObject({ id, hasCover: false });
+    expect((await withoutMediaApp.inject({ url: cover })).statusCode).toBe(404);
+    expect((await withoutMediaApp.inject({ url: gallery, headers: driver })).statusCode).toBe(404);
+
+    const legacy = await activeApp.inject({ url: `/api/v1/public/events/${id}` });
+    expect(legacy.statusCode).toBe(200);
+    expect(legacy.json().data).not.toHaveProperty("hasCover");
+    for (const app of [activeApp, inactiveApp]) {
+      const detail = await app.inject({ url: `/api/v1/public/events/${id}?locale=ru` });
+      expect(detail.statusCode).toBe(200);
+      expect(detail.json().data).toMatchObject({ id, hasCover: true });
+      const list = await app.inject({ url: "/api/v1/public/events?locale=en&limit=100" });
+      expect(list.statusCode).toBe(200);
+      expect(list.json().data.items).toContainEqual(
+        expect.objectContaining({ id, hasCover: true }),
+      );
+      const memberDetail = await app.inject({
+        url: `/api/v1/events/${id}?locale=en`,
+        headers: driver,
+      });
+      expect(memberDetail.statusCode).toBe(200);
+      expect(memberDetail.json().data.event).toMatchObject({ id, hasCover: true });
+      const photos = await app.inject({ url: gallery, headers: driver });
+      expect(photos.statusCode).toBe(200);
+      expect(photos.json().data).toMatchObject({
+        version: 4,
+        items: [{ id: mediaId, isCover: true }],
+      });
+      expect((await app.inject({ url: cover })).statusCode).toBe(200);
+    }
+    await media.remove(director.actor, id, mediaId, command(4));
+    const withoutCover = await activeApp.inject({ url: `/api/v1/public/events/${id}?locale=en` });
+    expect(withoutCover.json().data).toMatchObject({ id, hasCover: false });
+    expect(await draftApi.publish(director.actor, id, publishKey, saved.version, "en")).toEqual(
+      published,
+    );
+
+    const discarded = await draftApi.create(director.actor, newId(), {
+      title: "Fictional unused draft",
+    });
+    const discardedMedia = await upload(discarded.data.id, 1);
+    await draftApi.discard(director.actor, discarded.data.id, newId(), discarded.version);
+    expect((await state(discardedMedia.item.id))?.state).toBe("deleting");
+  } finally {
+    await activeApp.close();
+    await inactiveApp.close();
+    await withoutMediaApp.close();
+  }
 });
 
 test("thumbnail retry is fenced from deletion and terminal failures expose rejected state without files", async () => {

@@ -30,7 +30,7 @@ type ImageMime = S["EventStage2Media"]["contentType"];
 type Edit = S["EventStage2MediaEditInput"];
 type EditRoute = "media_edit" | "media_delete";
 type Command = { key: string; expected: number };
-export type EventMediaConfig = BlobConfig & { separateFrom: string[] };
+export type EventMediaConfig = BlobConfig & { separateFrom: string[]; draftsEnabled?: boolean };
 const validate = createSchemaValidator();
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const validateEdit = validate.compile<Edit>(ref("EventStage2MediaEditInput"));
@@ -63,7 +63,7 @@ export function createEventMedia(
   now = () => new Date(),
 ) {
   const c = (tx: TxContext) => unit.client(tx);
-  const store = createMediaStore(unit);
+  const store = createMediaStore(unit, config.draftsEnabled === true);
   const jobs = createMediaJobs(unit, store, blobs, now);
   const run = <T>(fn: (tx: TxContext) => Promise<T>) =>
     retryTransaction(unit, fn).catch((error) => {

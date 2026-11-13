@@ -118,17 +118,23 @@ export async function registerEventRoutes(
           querystring: object({
             ...page,
             period: { type: "string", enum: ["upcoming", "past"] },
-            ...(stage2 && !publicOnly ? { locale } : {}),
+            ...(stage2 || publicOnly ? { locale } : {}),
           }),
           response: {
             200: publicOnly
-              ? ref("EnvelopeListEventPublic")
+              ? readWire("EnvelopeListEventPublic", "EventStage2EnvelopePublicList")
               : readWire("EnvelopeListEventPublic", "EventStage2EnvelopeMemberList"),
           },
         },
       },
       async (r) => {
-        if (publicOnly) return envelope(r, await events.list(null, r.query));
+        if (publicOnly)
+          return envelope(
+            r,
+            stage2 && r.query.locale
+              ? await events.listPublishedPublic(r.query.locale, r.query)
+              : await events.list(null, r.query),
+          );
         const viewer = await actor(r);
         const data =
           stage2 && r.query.locale

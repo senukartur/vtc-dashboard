@@ -46,12 +46,17 @@ export function adminItem(row: Media) {
   }
 }
 
-export function createMediaStore(unit: UnitOfWork) {
+export function createMediaStore(unit: UnitOfWork, draftsEnabled: boolean) {
   const c = (tx: TxContext) => unit.client(tx);
   // The metadata row fences publication, discard and all media writes. Take
   // it before reading the draft or published row so a draft read cannot hold
   // a gap lock on the not-yet-inserted published identity.
-  async function lifecycle(tx: TxContext, eventId: string, mode: "share" | "update") {
+  async function lifecycle(
+    tx: TxContext,
+    eventId: string,
+    mode: "share" | "update",
+    background = false,
+  ) {
     const [metadata] = await c(tx)
       .select()
       .from(eventMetadata)
@@ -65,7 +70,12 @@ export function createMediaStore(unit: UnitOfWork) {
         .for("share");
       if (event) return { kind: "published" as const, visibility: event.visibility, metadata };
     }
-    if (metadata) {
+    if (metadata && !metadata.publishedEventId) {
+      // An active draft reserves its metadata in the creation transaction.
+      // Discard fences media in the same transaction, so background work can
+      // finish or clean up existing objects without draft-table grants.
+      if (!draftsEnabled)
+        return { kind: background ? ("draft" as const) : ("missing" as const), metadata };
       const [draft] = await c(tx)
         .select({ discardedAt: eventDrafts.discardedAt })
         .from(eventDrafts)

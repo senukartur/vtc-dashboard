@@ -112,7 +112,7 @@ export function createMediaJobs(
       const ref = reference(value);
       const permitted = await run(async (tx) => {
         await queue.checkLease(tx, claim);
-        const event = await store.lifecycle(tx, ref.eventId, "update");
+        const event = await store.lifecycle(tx, ref.eventId, "update", true);
         if (event.kind !== "draft" && event.kind !== "published") return false;
         const row = await store.media(tx, ref.eventId, ref.mediaId);
         if (row?.state !== "processing" || !row.fingerprint || row.generation !== ref.generation)
@@ -147,7 +147,7 @@ export function createMediaJobs(
     async local(tx, value, claim, prepared) {
       if (prepared !== true) return;
       const ref = reference(value);
-      const event = await store.lifecycle(tx, ref.eventId, "update");
+      const event = await store.lifecycle(tx, ref.eventId, "update", true);
       if (event.kind !== "draft" && event.kind !== "published") return;
       const row = await store.media(tx, ref.eventId, ref.mediaId);
       if (
@@ -173,7 +173,7 @@ export function createMediaJobs(
 
   async function cleanupFence(tx: TxContext, value: unknown, claim: Claim) {
     const ref = reference(value);
-    await store.lifecycle(tx, ref.eventId, "update");
+    await store.lifecycle(tx, ref.eventId, "update", true);
     const row = await store.media(tx, ref.eventId, ref.mediaId);
     if (!row || protectedGeneration(row, ref.generation)) return null;
     const generation = await store.generation(tx, row.id, ref.generation);
@@ -285,7 +285,7 @@ export function createMediaJobs(
           )
         : null;
       await run(async (tx) => {
-        const event = await store.lifecycle(tx, candidate.eventId, "update");
+        const event = await store.lifecycle(tx, candidate.eventId, "update", true);
         const row = await store.media(tx, candidate.eventId, candidate.id);
         if (
           row?.state !== "processing" ||
@@ -350,7 +350,7 @@ export function createMediaJobs(
               )
             : null;
         const observed = await run(async (tx) => {
-          const event = await store.lifecycle(tx, eventId, "update");
+          const event = await store.lifecycle(tx, eventId, "update", true);
           const row = await store.media(tx, eventId, candidate.mediaId);
           const generation = await store.generation(tx, candidate.mediaId, candidate.generation);
           if (
@@ -397,7 +397,7 @@ export function createMediaJobs(
           generation: candidate.generation,
         });
         await run(async (tx) => {
-          await store.lifecycle(tx, eventId, "update");
+          await store.lifecycle(tx, eventId, "update", true);
           const row = await store.media(tx, eventId, candidate.mediaId);
           const generation = await store.generation(tx, candidate.mediaId, candidate.generation);
           if (
