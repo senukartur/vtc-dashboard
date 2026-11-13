@@ -1086,15 +1086,19 @@ test(
       const resumedUrl = `${server.origin}/account/events/new?draftId=${draft.id}`;
       const continued = draftRead();
       await draftRow.getByRole("link", { name: "Continue", exact: true }).click();
+      const basics = managerMain.getByRole("group", { name: "Basics", exact: true });
+      const title = basics.getByRole("textbox", { name: "Event title", exact: true });
+      const description = basics.getByRole("textbox", {
+        name: "Description · Optional",
+        exact: true,
+      });
       const assertSavedDraft = async (expectedDescription: string) => {
         await expect(manager).toHaveURL(resumedUrl);
         await expect(
           manager.getByRole("heading", { name: "Edit event draft", exact: true }),
         ).toBeVisible();
-        await expect(manager.getByLabel("Event title", { exact: true })).toHaveValue(draftTitle);
-        await expect(manager.getByLabel("Description", { exact: true })).toHaveValue(
-          expectedDescription,
-        );
+        await expect(title).toHaveValue(draftTitle);
+        await expect(description).toHaveValue(expectedDescription);
       };
       const continuedDraft = await continued;
       expect(continuedDraft.status()).toBe(200);
@@ -1102,7 +1106,7 @@ test(
       expect(draftEtag).toMatch(/^"v[1-9][0-9]*"$/);
       await assertSavedDraft(draftDescription);
       const revisedDescription = "Synthetic description revised in the saved draft editor.";
-      await manager.getByLabel("Description", { exact: true }).fill(revisedDescription);
+      await description.fill(revisedDescription);
       const savedRevision = manager.waitForResponse(
         (response) =>
           response.request().method() === "PATCH" && new URL(response.url()).pathname === draftPath,
