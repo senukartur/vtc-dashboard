@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountFailure } from "../../account/transport.js";
 import type { DTO } from "../model.js";
+import type { EventStage2CommandReadFilter } from "../stage-2-model.js";
 import { useEventStage2Command } from "../stage-2-queries.js";
 import type { EventStage2Command, EventStage2Envelope } from "../stage-2-transport.js";
 import { EventFailure } from "../transport.js";
@@ -8,7 +9,12 @@ import { EventFailure } from "../transport.js";
 type Receipt<K extends EventStage2Envelope> = { data: DTO[K]; etag: string };
 export type EditorStep<K extends EventStage2Envelope> = {
   request: EventStage2Command<K>;
-  commit: (receipt: Receipt<K>) => EditorStep<K> | undefined;
+  refreshReads: EventStage2CommandReadFilter;
+  commit: (
+    receipt: Receipt<K>,
+    replay: boolean,
+  ) => EditorStep<K> | undefined | Promise<EditorStep<K> | undefined>;
+  onRejected?: () => void;
 };
 
 export function eventEditorAccessLost(error: unknown) {
@@ -34,7 +40,7 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
     return () => window.clearTimeout(timer);
   }, [waitUntil]);
 
-  async function run(step: EditorStep<K>) {
+  async function run(step: EditorStep<K>, replay = false) {
     if (running.current || waitUntil > Date.now()) return;
     running.current = true;
     setPending(true);
@@ -43,8 +49,8 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
     let current: EditorStep<K> | undefined = step;
     try {
       while (current) {
-        const receipt = await transport.run(current.request);
-        current = current.commit(receipt);
+        const receipt = await transport.run(current.request, current.refreshReads);
+        current = await current.commit(receipt, replay && current === step);
       }
     } catch (error) {
       const reason = error instanceof AccountFailure ? error : new AccountFailure("uncertain");
@@ -56,12 +62,17 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
       ) {
         setRetry(current);
         if (reason.retryAfter) setWaitUntil(Date.now() + 1000 * reason.retryAfter);
-      }
+      } else current?.onRejected?.();
     } finally {
       running.current = false;
       setPending(false);
     }
   }
+
+  const discardRetry = useCallback(() => {
+    setRetry(null);
+    setWaitUntil(0);
+  }, []);
 
   return {
     pending,
@@ -70,6 +81,7 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
     coolingDown: !!waitUntil,
     run,
     clearFailure: () => setFailure(null),
-    retryRequest: () => retry && run(retry),
+    discardRetry,
+    retryRequest: () => retry && run(retry, true),
   };
 }
