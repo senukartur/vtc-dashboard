@@ -522,6 +522,12 @@ test("review copy is bilingual, inside the font subsets and never shows the mock
     expect(tripTranslations.en).toHaveProperty(`code_${code}`);
     expect(tripTranslations.ru).toHaveProperty(`code_${code}`);
   }
+  for (const [locale, dictionary] of Object.entries(tripTranslations)) {
+    const labels = reviewReasons.map((code) =>
+      dictionary[`code_${code}`].toLocaleLowerCase(locale),
+    );
+    expect(new Set(labels).size, locale).toBe(labels.length);
+  }
   // Symbols the Huninn subsets render plus the documented system fallbacks (✓, ✕, …).
   const allowed = new Set([..."←↑→↓—№∅◇●×•«»·–✓✕…"]);
   const directory = fileURLToPath(new URL("../../apps/web/src/features/review/", import.meta.url));
