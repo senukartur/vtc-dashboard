@@ -4322,3 +4322,47 @@ test.each([
     }
   }
 });
+
+test.each([
+  { name: "an unknown chain then a complete one", unproven: "unknown", complete: true },
+  {
+    name: "an incomplete chain then another incomplete one",
+    unproven: "incomplete",
+    complete: false,
+  },
+] as const)(
+  "a changed body type is held after an unproven revision in between: $name",
+  async ({ unproven, complete }) => {
+    const who = await member(),
+      opened = payload("started");
+    opened.snapshot.recordingCompleteness = "complete";
+    const first = await receive(opened, who);
+    const middle = structuredClone(opened);
+    middle.eventId = newId();
+    middle.revision = 2;
+    measured(middle, 40000, 10);
+    if (unproven === "unknown") middle.snapshot.trailers = { complete: false, items: [] };
+    else middle.snapshot.trailers.complete = false;
+    const between = await receive(middle, who),
+      advanced = await state(first.tripId);
+    expect(advanced?.currentFactId).toBe(await factOf(between));
+    const delivered = payload();
+    delivered.source = structuredClone(opened.source);
+    delivered.snapshot.start = structuredClone(opened.snapshot.start);
+    delivered.revision = 3;
+    delivered.snapshot.trailers.complete = complete;
+    const [trailer] = delivered.snapshot.trailers.items;
+    if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
+    const r = await receive(delivered, who),
+      after = await state(first.tripId),
+      stored = await unit.run((tx) =>
+        tripsService.sourceEvidenceInTransaction(tx, r.sourceRecordId),
+      );
+    expect(after).toMatchObject({
+      currentFactId: advanced?.currentFactId,
+      outcome: "open",
+      reviewHold: true,
+    });
+    expect(stored?.reasonCodes).toContain("trailer_context_conflict");
+  },
+);

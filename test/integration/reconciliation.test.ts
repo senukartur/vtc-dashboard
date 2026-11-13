@@ -674,6 +674,76 @@ test("a held source revision does not freeze the lineage: a later clean revision
   expect(fact?.reasonCodes).not.toContain("trailer_context_conflict");
 });
 
+test.each([
+  {
+    name: "a corrected delivery with other metrics",
+    later: "corrected",
+    code: "actualDistanceM_conflict",
+  },
+  { name: "a cancellation", later: "cancelled", code: "terminal_outcome_conflict" },
+  { name: "a reopened snapshot", later: "open", code: "attempted_reopen" },
+] as const)(
+  "a held terminal revision keeps its terminal guards for later revisions: $name",
+  async ({ later, code }) => {
+    const composed = productionComposition(),
+      start = payload("started"),
+      first = await receive(start, owner, composed.trips),
+      opened = await state(first.tripId);
+    const delivered = payload();
+    delivered.source = structuredClone(start.source);
+    delivered.snapshot.start = structuredClone(start.snapshot.start);
+    delivered.revision = 2;
+    delivered.snapshot.fuelUsed = {
+      available: false,
+      reason: "not-observed",
+      unit: "L",
+    } as typeof delivered.snapshot.fuelUsed;
+    const terminal = await receive(delivered, owner, composed.trips),
+      held = await state(first.tripId);
+    expect(held).toMatchObject({
+      currentFactId: opened?.currentFactId,
+      outcome: "open",
+      reviewHold: true,
+    });
+    expect(
+      (
+        await unit.run((tx) =>
+          composed.trips.sourceEvidenceInTransaction(tx, terminal.sourceRecordId),
+        )
+      )?.reasonCodes.some((reason) => reason.startsWith("quality_")),
+    ).toBe(true);
+    const next = structuredClone(later === "open" ? start : delivered);
+    next.eventId = newId();
+    next.revision = 3;
+    next.snapshot.fuelUsed = structuredClone(payload().snapshot.fuelUsed);
+    if (next.snapshot.fuelUsed.available) next.snapshot.fuelUsed.value = 41;
+    if (later === "corrected") {
+      next.type = "trip.corrected";
+      for (const field of ["observedDistance", "deliveredDistance"] as const) {
+        const distance = next.snapshot[field];
+        if (distance.available) distance.value = 130000;
+      }
+    }
+    if (later === "cancelled") {
+      next.type = "trip.cancelled";
+      next.snapshot.outcome = "cancelled";
+    }
+    const stored = await receive(next, owner, composed.trips),
+      fact = await unit.run((tx) =>
+        composed.trips.sourceEvidenceInTransaction(tx, stored.sourceRecordId),
+      ),
+      after = await state(first.tripId);
+    expect(after).toMatchObject({
+      currentFactId: opened?.currentFactId,
+      outcome: "open",
+      actualDistanceM: null,
+      reviewHold: true,
+    });
+    expect(fact?.reasonCodes).toContain(code);
+    expect(after?.reviewReasons).toContain(code);
+  },
+);
+
 test("production telemetry and manual ingestion persist an unconfigured JSON rule and replay exactly with all optional matching settings omitted", async () => {
   const composed = productionComposition({ key: config.key }),
     p = payload(),
