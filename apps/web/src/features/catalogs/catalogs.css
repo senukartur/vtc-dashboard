@@ -99,7 +99,7 @@
 .catalog-page .catalog-maintenance .button[aria-pressed="true"] {
   border-color: var(--accent);
   background: var(--surface-active);
-  font-weight: 700;
+  font-weight: var(--button-font-weight);
 }
 .catalog-page .catalog-chip-count {
   min-width: 2ch;

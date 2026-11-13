@@ -14,7 +14,7 @@ import {
   useCatalogPages,
   useCatalogQuery,
 } from "../../../shared/catalog-selectors/queries.js";
-import { Button, Input, Label, Select } from "../../../shared/ui/primitives.js";
+import { Button, Input, Label } from "../../../shared/ui/primitives.js";
 import { CompanyLogo } from "../../catalogs/CompanyLogo.js";
 import type { DTO } from "../model.js";
 import {
@@ -60,6 +60,7 @@ export function useRetainedDepot(
 export function DepotField({
   id,
   label,
+  caption,
   game,
   endpoint,
   resolved,
@@ -70,6 +71,7 @@ export function DepotField({
 }: {
   id: string;
   label: string;
+  caption?: string;
   game: EditorForm["game"];
   endpoint: EditorEndpoint;
   resolved: DTO["CatalogDepot"] | undefined;
@@ -141,6 +143,7 @@ export function DepotField({
         <DepotSelector
           id={id}
           label={label}
+          caption={caption ? `${caption} · ${text.optional.toLowerCase()}` : undefined}
           game={game}
           cityId={endpoint.cityId ?? undefined}
           value={candidate?.id ?? selected?.id ?? null}
@@ -148,6 +151,13 @@ export function DepotField({
           selectedPending={candidate?.pending}
           onChange={(companyId) => void choose(companyId)}
           describedBy={errorId}
+          selectedPrefix={
+            resolved && (
+              <span className="event-editor-depot-logo">
+                <CompanyLogo companyId={resolved.company.id} logo={resolved.company.logo} />
+              </span>
+            )
+          }
         />
       ) : (
         <>
@@ -156,14 +166,6 @@ export function DepotField({
         </>
       )}
       {game && !endpoint.cityId && <p className="muted">{text.chooseCity}</p>}
-      {resolved && (
-        <div className="event-editor-depot-logo">
-          <CompanyLogo companyId={resolved.company.id} logo={resolved.company.logo} />
-          <span>
-            {resolved.company.label.label} · <code>{resolved.company.code}</code>
-          </span>
-        </div>
-      )}
       {historical && <p className="muted">{text.hiddenDepot}</p>}
       {kept && (
         <div className="event-editor-inline">
@@ -218,17 +220,21 @@ export function DepotField({
 
 export function EditorCatalogSelector({
   label,
+  caption,
   game,
   kind,
   value,
   item,
+  required = false,
   onChange,
 }: {
   label: string;
+  caption?: string;
   game: EditorForm["game"];
   kind: "city" | "cargo" | "trailer";
   value: string | null;
   item: CatalogItem | undefined;
+  required?: boolean;
   onChange: (value: string | null) => void;
 }) {
   const { text } = useEditorText();
@@ -238,6 +244,8 @@ export function EditorCatalogSelector({
       <CatalogSelector
         key={game}
         label={label}
+        caption={caption}
+        required={required}
         game={game}
         kind={kind}
         value={value}
@@ -279,6 +287,7 @@ export function useEditorDlcs(
       label: item?.nameEn ?? saved?.name,
       code: item?.code ?? saved?.code,
       game: item?.game,
+      hidden: item?.hidden,
     };
   });
 }
@@ -300,7 +309,8 @@ export function DlcField({
 }) {
   const { text } = useEditorText();
   const [open, setOpen] = useState(false);
-  const [picked, setPicked] = useState("");
+  const trigger = useRef<HTMLButtonElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
   const [effective, setEffective] = useState("");
   const term = search.trim();
@@ -317,88 +327,147 @@ export function DlcField({
     open && !!game && settled,
   );
   const manualIds = entries.filter(({ sources }) => sources.includes("manual")).map(({ id }) => id);
-  const choices = settled
-    ? (pages.data?.pages
-        .flatMap((page) => page.data.data.items)
-        .filter((item) => item.game === game && !item.hidden && !manualIds.includes(item.id)) ?? [])
-    : [];
+  const searchText = term.toLowerCase();
+  const choices = new Map(
+    entries.map((entry) => [
+      entry.id,
+      {
+        label: entry.label ?? text.retainedCatalog,
+        code: entry.code,
+        derived: entry.sources.includes("from_city"),
+        canAdd: entry.game === game && entry.hidden === false,
+        matchesSearch:
+          [entry.label, entry.code].some((value) => value?.toLowerCase().includes(searchText)) ||
+          !term,
+      },
+    ]),
+  );
+  if (settled) {
+    for (const page of pages.data?.pages ?? []) {
+      for (const item of page.data.data.items) {
+        if (item.game === game && !item.hidden) {
+          choices.set(item.id, {
+            label: item.nameEn,
+            code: item.code,
+            derived: choices.get(item.id)?.derived ?? false,
+            canAdd: true,
+            matchesSearch: true,
+          });
+        }
+      }
+    }
+  }
+  const visibleChoices = Array.from(choices).filter(([, choice]) => choice.matchesSearch);
+
+  function close() {
+    setOpen(false);
+    setSearch("");
+    trigger.current?.focus();
+  }
+
+  useEffect(() => {
+    if (open) searchInput.current?.focus();
+  }, [open]);
+
   return (
-    <div className="stack">
+    <div className="event-editor-dlc-picker">
       <Label htmlFor={id}>{text.requiredDlcIds}</Label>
-      {entries.length > 0 && (
-        <ul className="event-editor-dlcs">
-          {entries.map((entry) => (
-            <li key={entry.id}>
-              <span>{entry.label ?? text.retainedCatalog}</span>
-              {entry.code && <code>{entry.code}</code>}
-              {entry.sources.includes("from_city") && (
-                <span className="event-editor-tag">{text.lockedDlc}</span>
-              )}
-              {entry.sources.includes("manual") && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  aria-label={[text.remove, text.manual, entry.label ?? text.requiredDlcIds].join(
-                    " · ",
+      <Button
+        ref={trigger}
+        id={id}
+        type="button"
+        variant="outline"
+        className="event-editor-dlc-trigger"
+        aria-label={text.requiredDlcIds}
+        aria-expanded={open}
+        aria-controls={open ? `${id}-choices` : undefined}
+        aria-describedby={errorId}
+        disabled={!game}
+        onClick={() => (open ? close() : setOpen(true))}
+      >
+        {entries.length ? (
+          entries.map((entry) => (
+            <span key={entry.id} className="event-editor-tag">
+              {entry.label ?? text.retainedCatalog}
+            </span>
+          ))
+        ) : (
+          <span className="muted">{text.chooseDlc}</span>
+        )}
+        <svg
+          className="catalog-chevron event-editor-chevron"
+          aria-hidden="true"
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </Button>
+      {open && (
+        <fieldset
+          className="event-editor-dlc-options"
+          id={`${id}-choices`}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              close();
+            }
+            if (event.key === "Enter" && event.target === searchInput.current)
+              event.preventDefault();
+          }}
+        >
+          <legend className="visually-hidden">{text.requiredDlcIds}</legend>
+          <Input
+            ref={searchInput}
+            aria-label={text.searchDlc}
+            placeholder={text.searchDlc}
+            type="search"
+            maxLength={128}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <div className="event-editor-dlc-list">
+            {visibleChoices.map(([id, choice]) => (
+              <label key={id} className="event-editor-dlc-option">
+                <input
+                  type="checkbox"
+                  aria-label={
+                    choice.derived
+                      ? [choice.label, choice.code, text.manual].filter(Boolean).join(" · ")
+                      : undefined
+                  }
+                  checked={manualIds.includes(id)}
+                  disabled={!choice.canAdd && !manualIds.includes(id)}
+                  onChange={(event) =>
+                    onChange(
+                      event.target.checked
+                        ? [...manualIds, id]
+                        : manualIds.filter((value) => value !== id),
+                    )
+                  }
+                />
+                <span>
+                  {choice.label}
+                  {choice.code && (
+                    <>
+                      {" "}
+                      · <code>{choice.code}</code>
+                    </>
                   )}
-                  onClick={() => onChange(manualIds.filter((value) => value !== entry.id))}
-                >
-                  {text.remove} · {text.manual}
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {open ? (
-        <>
-          <div className="event-editor-field">
-            <Label htmlFor={`${id}-search`}>{text.searchDlc}</Label>
-            <Input
-              id={`${id}-search`}
-              type="search"
-              maxLength={128}
-              value={search}
-              onKeyDown={(event) => {
-                if (
-                  event.key === "Enter" &&
-                  !event.nativeEvent.isComposing &&
-                  event.nativeEvent.keyCode !== 229
-                )
-                  event.preventDefault();
-              }}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPicked("");
-              }}
-            />
-          </div>
-          <div className="event-editor-inline">
-            <Select
-              id={id}
-              value={picked}
-              aria-describedby={errorId}
-              onChange={(event) => setPicked(event.target.value)}
-            >
-              <option value="">{text.chooseDlc}</option>
-              {choices.map(({ id, nameEn, code }) => (
-                <option value={id} key={id}>
-                  {nameEn} · {code}
-                </option>
-              ))}
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!choices.some(({ id }) => id === picked)}
-              onClick={() => {
-                onChange([...manualIds, picked]);
-                setPicked("");
-              }}
-            >
-              {text.add}
-            </Button>
+                </span>
+                {choice.derived && (
+                  <small className="muted">
+                    {text.manual} · {text.lockedDlc}
+                  </small>
+                )}
+              </label>
+            ))}
           </div>
           {(!settled || pages.isPending) && <p role="status">{text.loading}</p>}
           {settled && pages.isError && (
@@ -411,31 +480,25 @@ export function DlcField({
               </Button>
             </div>
           )}
-          {settled && pages.isSuccess && !choices.length && (
+          {settled && pages.isSuccess && visibleChoices.length === 0 && (
             <p className="muted">{text.noCatalogOptions}</p>
           )}
-          {settled && pages.hasNextPage && (
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={pages.isFetchingNextPage}
-              onClick={() => void pages.fetchNextPage()}
-            >
-              {text.more}
+          <div className="event-editor-inline">
+            {settled && pages.hasNextPage && (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={pages.isFetchingNextPage}
+                onClick={() => void pages.fetchNextPage()}
+              >
+                {text.more}
+              </Button>
+            )}
+            <Button type="button" variant="outline" onClick={close}>
+              {text.done}
             </Button>
-          )}
-        </>
-      ) : (
-        <Button
-          id={id}
-          type="button"
-          variant="outline"
-          disabled={!game}
-          aria-describedby={errorId}
-          onClick={() => setOpen(true)}
-        >
-          {text.chooseDlc}
-        </Button>
+          </div>
+        </fieldset>
       )}
     </div>
   );

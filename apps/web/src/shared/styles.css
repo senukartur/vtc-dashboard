@@ -51,6 +51,7 @@
   /* Structural only: about 1.7:1 on cards, so never an enabled control boundary. */
   --border-strong: #334155;
   --control-border: #7c8799;
+  --button-font-weight: 400;
   --accent: #2563eb;
   --accent-soft: rgba(37, 99, 235, 0.16);
   --selection-border: rgba(96, 165, 250, 0.45);
@@ -106,6 +107,10 @@ input {
 }
 :focus-visible {
   outline: 3px solid var(--focus);
+}
+button,
+input:is([type="button"], [type="reset"], [type="submit"]) {
+  font-weight: var(--button-font-weight);
 }
 button {
   min-height: var(--target-min);
@@ -495,7 +500,7 @@ input[type="checkbox"] {
   padding: 4px 12px;
   font-size: 13px;
   line-height: 1.4;
-  font-weight: 600;
+  font-weight: var(--button-font-weight);
   text-align: center;
   text-decoration: none;
 }
@@ -576,7 +581,7 @@ input[type="checkbox"] {
   background: transparent;
   color: var(--secondary);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--button-font-weight);
   line-height: 1.4;
 }
 .segmented-sm .segmented-item {
@@ -608,7 +613,7 @@ input[type="checkbox"] {
   background: transparent;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--button-font-weight);
   line-height: 1.4;
 }
 .tabs-trigger:focus-visible {
@@ -1452,7 +1457,7 @@ textarea {
   background: transparent;
   color: var(--focus);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--button-font-weight);
 }
 .more-sheet-close:hover {
   background: var(--surface-hover);
@@ -1615,7 +1620,7 @@ textarea {
     background: transparent;
     color: var(--muted);
     font-size: 11px;
-    font-weight: 500;
+    font-weight: var(--button-font-weight);
     line-height: 1.2;
     text-decoration: none;
   }
@@ -1656,7 +1661,7 @@ textarea {
   }
   .bottom-nav-item[aria-current] {
     color: var(--focus);
-    font-weight: 600;
+    font-weight: var(--button-font-weight);
   }
   .bottom-nav-item[aria-current] .bottom-nav-icon {
     background: var(--accent-soft);

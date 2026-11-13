@@ -1,6 +1,7 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
+import { stage2Fixture } from "../fixtures/events-stage-2.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { eventFixture, eventId, mockEvents } from "./support/events.ts";
 import {
@@ -13,6 +14,7 @@ import {
   mockStructuredDetail,
   organizerLabel,
 } from "./support/events-detail.ts";
+import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 type S = components["schemas"];
@@ -94,6 +96,105 @@ function read(page: Page, suffix: string, status: number) {
 async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
+
+test(
+  "the mobile event editor keeps visibility choices and the end date and time in rows",
+  browserCase(["@layout", "@viewport-mobile"]),
+  async ({ page }) => {
+    await mockEventsStage2(page, "manager", "ru", { draftsRollout: true });
+    await page.goto("/account/events/new");
+    await catalogLanguage(page, "ru");
+    const main = page.getByRole("main");
+    const members = main.getByRole("button", { name: "Только компания", exact: true });
+    const everyone = main.getByRole("button", { name: "Все, и на сайте", exact: true });
+    await expect(members).toHaveAttribute("aria-pressed", "true");
+    await page.evaluate(() => document.fonts.ready);
+    const first = await box(members);
+    const second = await box(everyone);
+    expect(first.x + first.width).toBeLessThanOrEqual(second.x);
+    expect(first.y).toBeCloseTo(second.y, 0);
+    expect(first.width).toBeCloseTo(second.width, 0);
+    expect(first.height).toBeGreaterThanOrEqual(44);
+    await everyone.tap();
+    await expect(everyone).toHaveAttribute("aria-pressed", "true");
+    await expect(members).toHaveAttribute("aria-pressed", "false");
+
+    const schedule = main.getByRole("group", { name: "Когда", exact: true });
+    await schedule.getByRole("textbox", { name: "Дата", exact: true }).fill("2099-10-25");
+    await schedule.getByRole("button", { name: "+ Указать окончание", exact: true }).click();
+    const end = schedule.getByRole("group", { name: "Окончание", exact: true });
+    const date = end.getByRole("textbox", { name: "Дата", exact: true });
+    const time = end.getByRole("textbox", { name: "Окончание", exact: true });
+    const dateBox = await box(date);
+    const timeBox = await box(time);
+    expect(dateBox.x + dateBox.width).toBeLessThanOrEqual(timeBox.x);
+    expect(dateBox.y).toBeCloseTo(timeBox.y, 0);
+    await date.fill("2099-10-26");
+    await time.fill("01:15");
+    await expect(date).toHaveValue("2099-10-26");
+    await expect(time).toHaveValue("01:15");
+    const remove = schedule.getByRole("button", { name: "Убрать окончание", exact: true });
+    await expect(remove).toHaveCSS("font-weight", "400");
+    await expect(remove).toHaveCSS("padding-inline-start", "12px");
+    await remove.click();
+    await expect(end).toHaveCount(0);
+
+    await main.getByRole("button", { name: "TruckersMP", exact: true }).click();
+    const server = main.getByRole("textbox", { name: "Сервер", exact: true });
+    expect(await server.getAttribute("list")).toBeNull();
+    await server.fill("Fictional convoy server");
+    await expect(server).toHaveValue("Fictional convoy server");
+    const dlcs = main.getByRole("button", { name: "Нужные DLC", exact: true });
+    await dlcs.click();
+    await expect(dlcs).toHaveAttribute("aria-expanded", "true");
+    await main.getByRole("button", { name: "Готово", exact: true }).click();
+    await expect(dlcs).toHaveAttribute("aria-expanded", "false");
+    await expect(dlcs).toBeFocused();
+    await noOverflow(page);
+  },
+);
+
+test(
+  "the upcoming event header keeps a long title, local start time and RSVP on one line",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+    const upcoming = stage2Fixture("getUpcomingEvent", "own-response")
+      .response as S["EventStage2EnvelopeUpcoming"];
+    if (!upcoming.data) throw new Error("Missing upcoming event fixture");
+    const title = "Fictional evening convoy along the northern route ".repeat(4).trim();
+    upcoming.data.event.title = title;
+    upcoming.data.event.startsAt = "2099-10-25T22:30:00.000Z";
+    await page.route(/\/api\/v1\/me\/upcoming-event\?/, (route) =>
+      route.fulfill({ json: upcoming }),
+    );
+    await page.goto("/account/events/new");
+    const banner = page.getByRole("banner");
+    const link = banner.getByRole("link", { name: new RegExp(title) });
+    const name = link.locator("strong");
+    const start = link.locator("time");
+    const icon = link.locator("svg");
+    const going = banner.getByRole("button", { name: "Going", exact: true });
+    await expect(name).toHaveText(title);
+    await expect(link).toHaveAccessibleName(/Europe\/Warsaw · GMT\+01:00/);
+    await expect(start).toContainText(/11:30 PM GMT\+1/i);
+    await expect(icon).toHaveAttribute("aria-hidden", "true");
+    await expect(going).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const [mark, label, date, button] = await Promise.all([
+      box(icon),
+      box(name),
+      box(start),
+      box(going),
+    ]);
+    expect(mark.x + mark.width).toBeLessThanOrEqual(label.x);
+    expect(label.x + label.width).toBeLessThanOrEqual(date.x);
+    expect(date.x + date.width).toBeLessThanOrEqual(button.x);
+    expect(date.y + date.height / 2).toBeCloseTo(button.y + button.height / 2, 0);
+    await noOverflow(page);
+  },
+);
+
 async function capture(page: Page, info: TestInfo, name: string) {
   await page.evaluate(() => document.fonts.ready);
   await noOverflow(page);
