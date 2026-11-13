@@ -9,6 +9,11 @@ import {
 
 export type DispatchTab = "queue" | "duplicates" | "resolved";
 
+// Waiting reasons are persisted by the server as trimmed, bounded printable ASCII.
+export function isReviewReasonCode(value: string | null | undefined): value is string {
+  return !!value && value === value.trim() && /^[ -~]{1,128}$/.test(value);
+}
+
 export const reviewReasons = [
   "manual_review_required",
   "missing_actual_start",
@@ -51,7 +56,7 @@ export function dispatchParams(search: URLSearchParams) {
   return {
     tab: view,
     game: game === "ets2" || game === "ats" ? game : undefined,
-    reasonCode: reason && /^[a-zA-Z0-9_.:-]{1,128}$/.test(reason) ? reason : undefined,
+    reasonCode: isReviewReasonCode(reason) ? reason : undefined,
     ownerId: validId(ownerId) ? ownerId : undefined,
     source: tripSources.find((value) => value === source),
     order: waitingOrder,

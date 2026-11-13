@@ -66,7 +66,7 @@ export function DispatchQueueTable({
             {t("dispatchDistance")}
           </th>
           <th scope="col" className="dispatch-col-reason">
-            {t("reason")}
+            {t("dispatchReason")}
           </th>
         </tr>
       </thead>

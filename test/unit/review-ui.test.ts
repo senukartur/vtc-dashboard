@@ -82,12 +82,18 @@ test("staged dispatch links preserve canonical filters and alias legacy decided 
     `?tab=resolved&game=ats&reasonCode=future_reason&ownerId=${trip}&source=manual`,
   );
   expect(
-    dispatchParams(new URLSearchParams("tab=awaiting&ownerId=nickname&reasonCode=%3Cdiv%3E")),
+    dispatchParams(new URLSearchParams("tab=awaiting&ownerId=nickname&reasonCode=%0Ainvalid")),
   ).toMatchObject({
     tab: "queue",
     ownerId: undefined,
     reasonCode: undefined,
   });
+  const uncommon = new URLSearchParams({ reasonCode: "legacy/manual: review" });
+  expect(dispatchParams(uncommon).reasonCode).toBe("legacy/manual: review");
+  expect(dispatchSearch(uncommon)).toBe("?reasonCode=legacy%2Fmanual%3A+review");
+  expect(
+    dispatchParams(new URLSearchParams({ reasonCode: "x".repeat(129) })).reasonCode,
+  ).toBeUndefined();
   expect(
     dispatchListQuery(dispatchParams(new URLSearchParams("order=desc")), "next", "en"),
   ).toMatchObject({ status: "waiting", order: "desc", cursor: "next" });

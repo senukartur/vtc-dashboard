@@ -24,6 +24,7 @@ import {
   dispatchListQuery,
   dispatchParams,
   dispatchSearch,
+  isReviewReasonCode,
   queueAge,
   reviewReasons,
 } from "./dispatch-model.js";
@@ -133,7 +134,7 @@ export function DispatchReviewPage({
       ...(rows?.flatMap((row) => row.reasonCodes) ?? []),
       params.reasonCode,
     ]),
-  ).filter((code): code is string => !!code);
+  ).filter(isReviewReasonCode);
   const number = new Intl.NumberFormat(locale);
   const filtered = !!(params.game || params.ownerId || params.reasonCode || params.source);
   return (
@@ -191,7 +192,7 @@ export function DispatchReviewPage({
             <>
               <div className="review-filter">
                 <Label htmlFor="dispatch-reason" className="visually-hidden">
-                  {t("reason")}
+                  {t("dispatchReason")}
                 </Label>
                 <Select
                   id="dispatch-reason"
