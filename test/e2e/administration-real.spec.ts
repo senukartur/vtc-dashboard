@@ -486,16 +486,12 @@ test(
         "/account/admin/settings",
         /^(Company settings|Настройки компании)$/,
       );
-      await page.getByLabel("Company reporting timezone", { exact: true }).fill("Europe/Warsaw");
-      await confirm(page, "Save reporting timezone");
-      await expect(page.getByLabel("Company reporting timezone", { exact: true })).toHaveValue(
-        "Europe/Warsaw",
-      );
       await expect(page.getByRole("heading", { name: "Trip sources", exact: true })).toBeVisible();
       // Deferred company adapters (Trucky, VTCBase) are planned and unavailable in this runtime.
       const sources = page.getByRole("region", { name: "Trip sources", exact: true });
       await expect(sources.getByText("Planned", { exact: true })).toHaveCount(2);
       await expect(sources.getByText("Unavailable", { exact: true })).toHaveCount(2);
+      await page.getByLabel("Company reporting timezone", { exact: true }).fill("Europe/Warsaw");
       await page.getByRole("button", { name: "Save reporting timezone", exact: true }).click();
       await expect(page.getByRole("dialog")).toBeVisible();
       await page.keyboard.press("Escape");
@@ -503,27 +499,50 @@ test(
       await expect(
         page.getByRole("button", { name: "Save reporting timezone", exact: true }),
       ).toBeFocused();
-      const audit = page.getByRole("region", { name: "Audit history", exact: true });
-      if (await audit.evaluate((element) => element.scrollWidth > element.clientWidth)) {
-        await audit.focus();
-        await expect(audit).toBeFocused();
-        await page.keyboard.press("Tab");
-        await page.keyboard.press("Shift+Tab");
-        await expect(audit).toBeFocused();
-        const initialLeft = await audit.evaluate((element) => element.scrollLeft);
-        await page.keyboard.press("ArrowRight");
-        await expect
-          .poll(() => audit.evaluate((element) => element.scrollLeft))
-          .toBeGreaterThan(initialLeft);
-        const right = await audit.evaluate((element) => element.scrollLeft);
-        await page.keyboard.press("ArrowLeft");
-        await expect
-          .poll(() => audit.evaluate((element) => element.scrollLeft))
-          .toBeLessThan(right);
-        expect(await audit.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe(
-          "none",
+      const { data: settings } = await adminSnapshot<"EnvelopeCompanySettings">(
+        staff,
+        "/admin/company-settings",
+      );
+      await page
+        .getByLabel("Company reporting timezone", { exact: true })
+        .fill(
+          settings.reportingTimezone === "America/Edmonton" ? "Europe/Warsaw" : "America/Edmonton",
         );
-      }
+      await confirm(page, "Save reporting timezone");
+      await expect(
+        page.getByRole("status").filter({ hasText: "The action was committed." }),
+      ).toBeVisible();
+      const auditTab = page.getByRole("tab", { name: "Audit log", exact: true });
+      await auditTab.focus();
+      await page.keyboard.press("Enter");
+      await expect(auditTab).toBeFocused();
+      await expect(auditTab).toHaveAttribute("aria-selected", "true");
+      const audit = page.getByRole("region", { name: "Audit log", exact: true });
+      await expect(audit).toBeVisible();
+      // Keep an explicit keyboard-scroll check even when the table fits the project viewport.
+      const viewport = page.viewportSize();
+      if (!viewport) throw new Error("SETTINGS_VIEWPORT_REQUIRED");
+      await page.setViewportSize({ width: 340, height: viewport.height });
+      expect(await audit.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
+        true,
+      );
+      await audit.focus();
+      await expect(audit).toBeFocused();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(audit).toBeFocused();
+      const initialLeft = await audit.evaluate((element) => element.scrollLeft);
+      await page.keyboard.press("ArrowRight");
+      await expect
+        .poll(() => audit.evaluate((element) => element.scrollLeft))
+        .toBeGreaterThan(initialLeft);
+      const right = await audit.evaluate((element) => element.scrollLeft);
+      await page.keyboard.press("ArrowLeft");
+      await expect.poll(() => audit.evaluate((element) => element.scrollLeft)).toBeLessThan(right);
+      expect(await audit.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe(
+        "none",
+      );
+      await page.setViewportSize(viewport);
       for (const locale of ["en", "ru"] as const) {
         await catalogLanguage(page, locale);
         expect(
@@ -537,6 +556,103 @@ test(
       }
     } finally {
       await staff.dispose();
+    }
+  },
+);
+
+test(
+  "real company timezone change records a named before and after and is readable by a deputy",
+  browserCase(["@real"]),
+  async ({ page }) => {
+    const staff = await staffContext();
+    const deputy = await request.newContext({ baseURL: origin });
+    const connection = await testConnection();
+    const legacyId = randomUUID(),
+      legacyActor = randomUUID(),
+      legacySubject = randomUUID();
+    try {
+      const { data: self } = await adminSnapshot<"EnvelopeSelf">(staff, "/me");
+      const { data: initial } = await adminSnapshot<"EnvelopeCompanySettings">(
+        staff,
+        "/admin/company-settings",
+      );
+      const timezone =
+        initial.reportingTimezone === "America/Edmonton" ? "Europe/Warsaw" : "America/Edmonton";
+      await connection.execute(
+        "INSERT INTO audit_entries (id,actor_kind,actor_id,operation,subject_kind,subject_id,occurred_at,reason,company_id) VALUES (?,'user',?,'configuration.changed','company',?,UTC_TIMESTAMP(3),'operator_request',?)",
+        [legacyId, legacyActor, legacySubject, initial.id],
+      );
+
+      await staffPage(
+        page,
+        staff,
+        "/account/admin/settings",
+        /^(Company settings|Настройки компании)$/,
+      );
+      await page.getByLabel("Company reporting timezone", { exact: true }).fill(timezone);
+      await confirm(page, "Save reporting timezone");
+      await expect(
+        page.getByRole("status").filter({ hasText: "The action was committed." }),
+      ).toBeVisible();
+
+      const { email, password } = await administrationMember(["driver", "deputy_director"]);
+      expect((await write(deputy, "/auth/login", { email, password })).status()).toBe(200);
+
+      async function assertAudit() {
+        const audit = page.getByRole("region", { name: "Audit log", exact: true });
+        await expect(
+          page.getByText(`Times in the company reporting timezone (${timezone}).`, { exact: true }),
+        ).toBeVisible();
+        const latest = audit
+          .getByRole("row")
+          .filter({
+            has: page.getByText(timezone, { exact: true }).and(page.locator("dd")),
+          })
+          .first();
+        await expect(latest.getByRole("cell").nth(1)).toHaveText(self.member.nickname);
+        const change = latest.getByRole("cell").nth(2);
+        await expect(change).toContainText("Configuration changed");
+        await expect(change).toContainText("Company · Yukon Union");
+        await expect(change.locator("dt")).toHaveText(["Before", "After"]);
+        await expect(change.locator("dd").first()).toContainText(
+          initial.reportingTimezone ?? "Not set",
+        );
+        await expect(change.locator("dd").last()).toHaveText(timezone);
+        const legacy = audit.getByRole("row").filter({ hasText: `ID ${legacyActor.slice(0, 8)}…` });
+        await expect(legacy).toContainText("Change details unavailable.");
+        await expect(legacy).not.toContainText(legacyActor);
+      }
+
+      await page.getByRole("tab", { name: "Audit log", exact: true }).click();
+      await page
+        .getByRole("combobox", { name: "Action", exact: true })
+        .selectOption("configuration.changed");
+      await expect(page).toHaveURL(/tab=audit&action=configuration\.changed$/);
+      await assertAudit();
+
+      await page.context().clearCookies();
+      await staffPage(
+        page,
+        deputy,
+        "/account/admin/settings?tab=audit&action=configuration.changed",
+        /^(Company settings|Настройки компании)$/,
+      );
+      await assertAudit();
+      await page.getByRole("tab", { name: "General", exact: true }).click();
+      await expect(page.getByLabel("Company reporting timezone", { exact: true })).toHaveValue(
+        timezone,
+      );
+      await expect(
+        page.getByRole("heading", { name: "Transfer leadership", exact: true }),
+      ).toHaveCount(0);
+    } finally {
+      try {
+        await connection.execute("DELETE FROM audit_entries WHERE id = ?", [legacyId]);
+      } finally {
+        await connection.end();
+        await staff.dispose();
+        await deputy.dispose();
+      }
     }
   },
 );
