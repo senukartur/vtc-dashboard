@@ -2,16 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { withReadSlot } from "../../shared/read-scheduler.js";
 import { AccountFailure } from "../account/transport.js";
+import { landingConvoysQueryName } from "../events/stage-2-model.js";
+import { type EventStage2Locale, eventStage2Reads } from "../events/stage-2-transport.js";
 import { fail, schema } from "../events/transport.js";
 
-const path = "/public/events?period=upcoming&limit=3";
 // The existing list and its staged projection share the same route.
 const envelope = z.lazy(() =>
   z.union([schema("EnvelopeListEventPublic"), schema("EventStage2EnvelopePublicList")]),
 );
 export type Convoy = z.infer<typeof envelope>["data"]["items"][number];
 
-async function readConvoys(signal: AbortSignal): Promise<Convoy[]> {
+async function readConvoys(path: string, signal: AbortSignal): Promise<Convoy[]> {
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
   try {
     return await withReadSlot(bounded, async () => {
@@ -38,14 +39,15 @@ async function readConvoys(signal: AbortSignal): Promise<Convoy[]> {
 }
 
 /** One shared public read feeds the countdown pill and the cards. */
-export function useConvoyQuery() {
+export function useConvoyQuery(locale: EventStage2Locale) {
+  const { path } = eventStage2Reads.publicList({ period: "upcoming", limit: 3, locale });
   const query = useQuery({
-    queryKey: ["public-events", path, "landing-convoys"],
+    queryKey: ["public-events", path, landingConvoysQueryName],
     meta: { private: false },
     retry: false,
     gcTime: 300000,
     staleTime: 30000,
-    queryFn: ({ signal }) => readConvoys(signal),
+    queryFn: ({ signal }) => readConvoys(path, signal),
   });
   return { ...query, data: query.isError ? undefined : query.data };
 }

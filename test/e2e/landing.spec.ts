@@ -764,7 +764,7 @@ for (const locale of ["ru", "en"] as const) {
         expect(await noOverflow(page)).toBe(true);
         expect(listRequests).toHaveLength(2);
         for (const request of listRequests) {
-          expect(request.path).toBe("?period=upcoming&limit=3");
+          expect(request.path).toBe(`?period=upcoming&limit=3&locale=${locale}`);
           expect(request.cookie).toContain("vtc_fictional_probe");
         }
         expect(apiRequests.filter((path) => path.endsWith("/cover"))).toEqual([coverPath]);

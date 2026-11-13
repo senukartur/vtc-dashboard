@@ -2,7 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure } from "../account/transport.js";
-import { eventStage2ImageQueryPolicy, visibleEventStage2Image } from "./stage-2-model.js";
+import {
+  eventStage2ImageQueryPolicy,
+  eventStage2QueryPrefix,
+  isEventStage2CommandRead,
+  visibleEventStage2Image,
+} from "./stage-2-model.js";
 import {
   type EventStage2Access,
   type EventStage2Command,
@@ -14,7 +19,6 @@ import {
   sendEventStage2,
 } from "./stage-2-transport.js";
 
-const prefix = "events-stage-2";
 type Session = ReturnType<typeof useSession>;
 
 function sessionScope(session: Session) {
@@ -54,7 +58,13 @@ function useStage2Read<T>(
   const publicRead = spec.access === "public";
   const allowed = hasAccess(session, spec.access);
   const query = useQuery({
-    queryKey: [prefix, publicRead ? "public" : sessionScope(session), spec.access, spec.path, name],
+    queryKey: [
+      eventStage2QueryPrefix,
+      publicRead ? "public" : sessionScope(session),
+      spec.access,
+      spec.path,
+      name,
+    ],
     meta: { private: !publicRead },
     enabled: enabled && allowed,
     retry: false,
@@ -115,14 +125,12 @@ export function useEventStage2Command<K extends EventStage2Envelope>() {
 
   function invalidate() {
     return client.invalidateQueries({
-      predicate: (query) =>
-        query.queryKey[0] === prefix &&
-        (query.queryKey[1] === scope || query.queryKey[1] === "public"),
+      predicate: (query) => isEventStage2CommandRead(query.queryKey, scope),
     });
   }
 
   const mutation = useMutation({
-    mutationKey: [prefix, scope, "command"],
+    mutationKey: [eventStage2QueryPrefix, scope, "command"],
     retry: false,
     gcTime: 0,
     mutationFn: async (command: EventStage2Command<K>) => {

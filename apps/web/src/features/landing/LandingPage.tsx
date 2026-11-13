@@ -10,7 +10,7 @@ import { StatsBand } from "./StatsBand.js";
 export function LandingPage() {
   const { i18n } = useTranslation(),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    query = useConvoyQuery(),
+    query = useConvoyQuery(locale),
     [paused, setPaused] = useState(false),
     refreshed = useRef(new Set<string>()),
     items = query.data,
