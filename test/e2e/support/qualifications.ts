@@ -19,6 +19,11 @@ export const levels = (game: "ets2" | "ats"): S["QualificationLevel"][] =>
     name: `Fictional ${code}`,
     ruleVersionId: ruleId,
     configured: true,
+    freightRuleSummary: {
+      maxMassKg: "10",
+      allowedTrailerTypeCount: null,
+      allowedAdrCategoryCount: null,
+    },
     requiredTrips: i === 3 ? null : 2,
     requiredDistanceM: i === 3 ? null : "100.000000000000000001",
   }));
@@ -272,6 +277,13 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
             version: state.version,
             ruleVersionId: state.unconfigured ? null : state.rulePointer,
             configured: !state.unconfigured,
+            freightRuleSummary: state.unconfigured
+              ? null
+              : {
+                  maxMassKg: state.ruleMasses[state.rulePointer] ?? "10",
+                  allowedTrailerTypeCount: null,
+                  allowedAdrCategoryCount: null,
+                },
             promotionConfigured: !state.unconfigured && !l.terminal,
             ...(state.unconfigured || state.unset
               ? { requiredTrips: null, requiredDistanceM: null }
@@ -403,6 +415,11 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
             ...levels("ets2")[0],
             version: state.version,
             ruleVersionId: state.rulePointer,
+            freightRuleSummary: {
+              maxMassKg: state.ruleMasses[state.rulePointer] ?? "10",
+              allowedTrailerTypeCount: null,
+              allowedAdrCategoryCount: null,
+            },
           }),
         );
         return route.abort("failed");
@@ -426,6 +443,11 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
           ...levels("ets2")[0],
           version: state.version,
           ruleVersionId: state.rulePointer,
+          freightRuleSummary: {
+            maxMassKg: state.ruleMasses[state.rulePointer] ?? "10",
+            allowedTrailerTypeCount: null,
+            allowedAdrCategoryCount: null,
+          },
         }),
       });
     }

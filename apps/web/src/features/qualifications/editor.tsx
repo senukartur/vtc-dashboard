@@ -52,8 +52,12 @@ export function LevelEditor({
   const [name, setName] = useState(level.name),
     [rules, setRules] = useState<DTO["Rule"][]>(current?.rules ?? []),
     [mass, setMass] = useState(current?.rules.find((r) => r.type === "max_mass")?.maxKg ?? ""),
-    [count, setCount] = useState(level.requiredTrips?.toString() ?? ""),
-    [initialDistanceM] = useState(level.requiredDistanceM),
+    [count, setCount] = useState(
+      level.promotionConfigured ? (current?.requiredTrips?.toString() ?? "") : "",
+    ),
+    [initialDistanceM] = useState(
+      level.promotionConfigured ? (current?.requiredDistanceM ?? null) : null,
+    ),
     [distanceDraft, setDistance] = useState<string>(),
     [reason, setReason] = useState(""),
     [renameReason, setRenameReason] = useState(""),

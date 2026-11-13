@@ -18,6 +18,11 @@ const level = {
   version: 2,
   ruleVersionId: other,
   configured: true,
+  freightRuleSummary: {
+    maxMassKg: "10",
+    allowedTrailerTypeCount: null,
+    allowedAdrCategoryCount: 0,
+  },
   requiredTrips: 1,
   requiredDistanceM: "100",
 };

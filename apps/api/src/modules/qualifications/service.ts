@@ -242,6 +242,24 @@ export function createQualifications(
   function promotionRule(row: Level, terminal: boolean, rule: PublishedRule | undefined) {
     return !terminal && rule?.promotionGeneration === row.promotionGeneration ? rule : undefined;
   }
+  function freightRuleSummary(
+    rule: PublishedRule | undefined,
+  ): S["QualificationFreightRuleSummary"] | null {
+    if (!rule) return null;
+    const summary: S["QualificationFreightRuleSummary"] = {
+      maxMassKg: null,
+      allowedTrailerTypeCount: null,
+      allowedAdrCategoryCount: null,
+    };
+    for (const restriction of rule.rules as S["Rule"][]) {
+      if (restriction.type === "max_mass") summary.maxMassKg = restriction.maxKg;
+      if (restriction.type === "allowed_trailer_types")
+        summary.allowedTrailerTypeCount = restriction.entityIds.length;
+      if (restriction.type === "allowed_adr_categories")
+        summary.allowedAdrCategoryCount = restriction.classes.length;
+    }
+    return summary;
+  }
   function levelDto(
     row: ActiveLevel,
     terminal: boolean,
@@ -257,6 +275,7 @@ export function createQualifications(
       terminal,
       ruleVersionId: rule?.id ?? null,
       configured: !!rule,
+      freightRuleSummary: freightRuleSummary(rule),
       promotionConfigured: !!requirements,
       requiredTrips: requirements?.requiredTrips ?? null,
       requiredDistanceM:

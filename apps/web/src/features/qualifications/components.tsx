@@ -237,9 +237,11 @@ export function ActionActor({ actor }: { actor: DTO["QualificationActionActor"] 
 export function RuleHistory({
   level,
   manage = false,
+  visible = true,
 }: {
   level: DTO["QualificationLevel"];
   manage?: boolean;
+  visible?: boolean;
 }) {
   const { t } = useTranslation("qualifications"),
     [open, setOpen] = useState(false),
@@ -247,7 +249,7 @@ export function RuleHistory({
   const query = useQualificationQuery(
     `${manage ? "/admin" : ""}/qualification-levels/${level.id}/rule-versions?limit=25${cursors.length ? `&cursor=${encodeURIComponent(cursors.at(-1) ?? "")}` : ""}`,
     manage ? "EnvelopeListQualificationRuleHistory" : "EnvelopeListQualificationRuleVersion",
-    open,
+    open && visible,
   );
   return (
     <details onToggle={(e) => setOpen(e.currentTarget.open)}>

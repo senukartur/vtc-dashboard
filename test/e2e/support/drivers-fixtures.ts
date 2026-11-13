@@ -42,6 +42,11 @@ export function levelsFixture(game: Game): DTO["EnvelopeListQualificationLevel"]
           version: 1,
           ruleVersionId: null,
           configured: true,
+          freightRuleSummary: {
+            maxMassKg: null,
+            allowedTrailerTypeCount: null,
+            allowedAdrCategoryCount: null,
+          },
           requiredTrips: null,
           requiredDistanceM: null,
         };

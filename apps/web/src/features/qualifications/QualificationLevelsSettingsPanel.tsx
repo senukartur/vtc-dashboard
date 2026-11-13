@@ -9,7 +9,6 @@ import { Badge, Button, Card, Input, Label } from "../../shared/ui/primitives.js
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { Confirm, Failure, Recovery, RulesView, State } from "./components.js";
 import { LevelEditor } from "./editor.js";
-import { type AllowlistSummary, ruleSummary } from "./model.js";
 import { useQualificationCommand, useQualificationQuery } from "./queries.js";
 import type { DTO, Game } from "./transport.js";
 import "./qualifications.css";
@@ -133,13 +132,13 @@ function LadderSettings({ game }: { game: Game }) {
         </thead>
         <tbody role="rowgroup">
           {rows.map((row, index) => {
-            const rules = row.effectiveRule ? ruleSummary(row.effectiveRule.rules) : null;
-            const allowlist = (value: AllowlistSummary) =>
-              value.kind === "none"
+            const rules = row.freightRuleSummary;
+            const allowlist = (count: number | null) =>
+              count === null
                 ? t("noRestriction")
-                : value.kind === "empty"
+                : count === 0
                   ? t("noneAllowed")
-                  : t("allowedCount", { count: value.count });
+                  : t("allowedCount", { count });
             return (
               <tr key={row.id} role="row">
                 <th scope="row" role="rowheader" className="qualification-ladder-level">
@@ -161,15 +160,15 @@ function LadderSettings({ game }: { game: Game }) {
                 <LadderCell label={t("colMass")}>
                   {!rules
                     ? t("unset")
-                    : rules.mass.kind === "none"
+                    : rules.maxMassKg === null
                       ? t("noRestriction")
-                      : formatQuantity(rules.mass.maxKg, "t", locale)}
+                      : formatQuantity(rules.maxMassKg, "t", locale)}
                 </LadderCell>
                 <LadderCell label={t("colTrailers")}>
-                  {rules ? allowlist(rules.trailers) : t("unset")}
+                  {rules ? allowlist(rules.allowedTrailerTypeCount) : t("unset")}
                 </LadderCell>
                 <LadderCell label={t("colAdr")}>
-                  {rules ? allowlist(rules.adr) : t("unset")}
+                  {rules ? allowlist(rules.allowedAdrCategoryCount) : t("unset")}
                 </LadderCell>
                 <LadderCell label={t("colThreshold")}>
                   {row.terminal

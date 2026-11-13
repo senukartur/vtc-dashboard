@@ -86,7 +86,13 @@ test("a legacy level receipt preserves historical identity and strips the retire
   };
   const { code: _code, ...level } = data;
   expect(levelReceipt({ data, version: 3 }, data.id)).toEqual({
-    data: { ...level, position: 3, terminal: false, promotionConfigured: true },
+    data: {
+      ...level,
+      position: 3,
+      terminal: false,
+      promotionConfigured: true,
+      freightRuleSummary: null,
+    },
     version: 3,
   });
   expect(() => levelReceipt({ data, version: 3 }, newId())).toThrow();

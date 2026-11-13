@@ -2,7 +2,6 @@ import type { components } from "@vtc/contracts";
 import { describe, expect, test } from "vitest";
 import {
   defaultLevelId,
-  ruleSummary,
   sortLevels,
   thresholdSummary,
   unconfiguredCount,
@@ -11,12 +10,6 @@ import { qualificationTranslations } from "../../apps/web/src/features/qualifica
 import { formatQuantity } from "../../apps/web/src/shared/formatting.ts";
 
 type Level = components["schemas"]["QualificationLevel"];
-type Rule = components["schemas"]["Rule"];
-const ids = [
-  "e3400000-0000-4000-8000-000000000001",
-  "e3400000-0000-4000-8000-000000000002",
-  "e3400000-0000-4000-8000-000000000003",
-];
 const positions = { trainee: 1, driver_iii: 2, driver_ii: 3, driver_i: 4 };
 const level = (code: keyof typeof positions, overrides: Partial<Level> = {}): Level => ({
   id: `e3400000-0000-4000-8000-0000000000${String(positions[code] + 9)}`,
@@ -28,6 +21,11 @@ const level = (code: keyof typeof positions, overrides: Partial<Level> = {}): Le
   name: `Fictional ${code}`,
   ruleVersionId: "e3300000-0000-4000-8000-000000000001",
   configured: true,
+  freightRuleSummary: {
+    maxMassKg: "10",
+    allowedTrailerTypeCount: null,
+    allowedAdrCategoryCount: null,
+  },
   requiredTrips: 2,
   requiredDistanceM: "100",
   ...overrides,
@@ -55,34 +53,6 @@ describe("qualification levels model", () => {
         level("driver_i", { ruleVersionId: null, configured: false }),
       ]),
     ).toBe(2);
-  });
-
-  test("summarizes omitted, valued, empty and counted restrictions", () => {
-    expect(ruleSummary([])).toEqual({
-      mass: { kind: "none" },
-      trailers: { kind: "none" },
-      adr: { kind: "none" },
-    });
-    expect(
-      ruleSummary([
-        { type: "max_mass", maxKg: "10" },
-        { type: "allowed_trailer_types", entityIds: [] },
-        { type: "allowed_adr_categories", classes: ["1", "2", "3"] },
-      ]),
-    ).toEqual({
-      mass: { kind: "value", maxKg: "10" },
-      trailers: { kind: "empty" },
-      adr: { kind: "count", count: 3 },
-    });
-  });
-
-  test("ignores unregistered rule types instead of guessing a restriction", () => {
-    const unknown = { type: "max_axles", value: 3 } as unknown as Rule;
-    expect(ruleSummary([unknown, { type: "allowed_trailer_types", entityIds: ids }])).toEqual({
-      mass: { kind: "none" },
-      trailers: { kind: "count", count: 3 },
-      adr: { kind: "none" },
-    });
   });
 
   test("keeps disabled minimums null and treats Driver I as terminal", () => {

@@ -1038,6 +1038,40 @@ test("staff ladder HTTP routes enforce current authority, closed input and stron
   }
 });
 
+test("one current freight summary preserves exact mass, omitted restrictions and explicit empty allowlists", async () => {
+  const [first, second, third] = (await service.levels(director, "ets2")).items;
+  if (!first || !second || !third) throw new Error("SYNTHETIC_LEVEL_MISSING");
+  const summary = {
+    maxMassKg: "10000.000000000000000001",
+    allowedTrailerTypeCount: null,
+    allowedAdrCategoryCount: 0,
+  };
+  await service.publish(director, first.id, newId(), first.version, {
+    rules: [
+      { type: "max_mass", maxKg: summary.maxMassKg },
+      { type: "allowed_adr_categories", classes: [] },
+    ],
+    requiredTrips: null,
+    requiredDistanceM: null,
+  });
+  await service.publish(director, second.id, newId(), second.version, {
+    rules: [],
+    requiredTrips: null,
+    requiredDistanceM: null,
+  });
+  const published = (await service.levels(owner, "ets2")).items;
+  expect(published[0]?.freightRuleSummary).toEqual(summary);
+  expect(published[1]?.freightRuleSummary).toEqual({
+    maxMassKg: null,
+    allowedTrailerTypeCount: null,
+    allowedAdrCategoryCount: null,
+  });
+  expect(published[2]?.freightRuleSummary).toBeNull();
+  const staff = (await ladderService.ladder(director, "ets2")).data;
+  expect(staff.levels[0]?.freightRuleSummary).toEqual(summary);
+  expect(staff.levels[0]?.effectiveRule?.rules).toHaveLength(2);
+});
+
 test("a former top uses immutable freight rules and needs a new promotion publication generation", async () => {
   const originalTop = structuralLevels.ets2[3];
   await publish("ets2", 3, null, null);

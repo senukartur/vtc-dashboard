@@ -269,7 +269,11 @@ export function useQualificationCommand(
           );
         onRefresh?.();
         // A replayed receipt is historical: reload current pointers instead of caching its old level.
-        if (change) await refresh(change, replay ? undefined : level);
+        if (change)
+          await refresh(
+            change,
+            replay || (level?.configured && level.freightRuleSummary === null) ? undefined : level,
+          );
         // Only Trainee completion can change roles, and only the current member owns this session.
         // change comes from the frozen request, so uncertain replay survives refreshed eligibility.
         if (

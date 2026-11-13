@@ -198,6 +198,7 @@ test(
         },
       });
       expect(result.data).not.toHaveProperty("code");
+      expect(result.data.freightRuleSummary).toBeNull();
     }
     expect((await service.rules(director, first)).items).toHaveLength(1);
     expect((await service.ladder(director, "ets2")).data.levels[1]?.name).toBe(

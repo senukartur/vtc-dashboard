@@ -4,7 +4,7 @@ import { formatQuantity, type Locale } from "../../shared/formatting.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
 import { RuleHistory, RulesView, State } from "./components.js";
 import { LevelEditor } from "./editor.js";
-import { type AllowlistSummary, type RuleSummary, ruleSummary, thresholdSummary } from "./model.js";
+import { thresholdSummary } from "./model.js";
 import { useQualificationQuery } from "./queries.js";
 import type { DTO } from "./transport.js";
 
@@ -12,12 +12,11 @@ type Level = DTO["QualificationLevel"];
 
 export const levelPanelId = (id: string) => `qualification-level-${id}`;
 
-/** The table and the panels read the exact same immutable detail query, so no GET is added. */
-function useRuleDetail(level: Level) {
+function useRuleDetail(level: Level, enabled: boolean) {
   return useQualificationQuery(
     `/qualification-levels/${level.id}/rule-versions/${level.ruleVersionId}`,
     "EnvelopeQualificationRuleVersion",
-    !!level.ruleVersionId,
+    enabled && !!level.ruleVersionId,
   );
 }
 
@@ -82,32 +81,28 @@ function LevelRow({
 }) {
   const { t } = useTranslation("qualifications"),
     locale = useLocale(),
-    rules = useRuleDetail(level),
     configured = !!level.ruleVersionId,
-    summary = rules.data ? ruleSummary(rules.data.data.data.rules) : null,
+    summary = level.freightRuleSummary,
     threshold = thresholdSummary(level),
     distance =
       threshold.kind === "value" && threshold.distanceM !== null
         ? formatQuantity(threshold.distanceM, "km", locale)
         : null;
   const unset = <span className="qualification-muted">{t("unset")}</span>;
-  // A disabled query also reports pending, so unconfigured levels are handled before loading.
-  const ruleCell = (render: (value: RuleSummary) => string) =>
+  const ruleCell = (render: (value: NonNullable<Level["freightRuleSummary"]>) => string) =>
     !configured ? (
       unset
     ) : summary ? (
       render(summary)
     ) : (
-      <span className="qualification-muted">
-        {t(rules.isError ? "cellUnavailable" : "cellLoading")}
-      </span>
+      <span className="qualification-muted">{t("cellUnavailable")}</span>
     );
-  const allowlist = (value: AllowlistSummary) =>
-    value.kind === "none"
+  const allowlist = (count: number | null) =>
+    count === null
       ? t("noRestriction")
-      : value.kind === "empty"
+      : count === 0
         ? t("noneAllowed")
-        : t("allowedCount", { count: value.count });
+        : t("allowedCount", { count });
   const label = (key: string) => (
     <span className="qualification-cell-label" aria-hidden="true">
       {t(key)}
@@ -132,18 +127,18 @@ function LevelRow({
       <td role="cell">
         {label("colMass")}
         {ruleCell((value) =>
-          value.mass.kind === "none"
+          value.maxMassKg === null
             ? t("noRestriction")
-            : formatQuantity(value.mass.maxKg, "t", locale),
+            : formatQuantity(value.maxMassKg, "t", locale),
         )}
       </td>
       <td role="cell">
         {label("colTrailers")}
-        {ruleCell((value) => allowlist(value.trailers))}
+        {ruleCell((value) => allowlist(value.allowedTrailerTypeCount))}
       </td>
       <td role="cell">
         {label("colAdr")}
-        {ruleCell((value) => allowlist(value.adr))}
+        {ruleCell((value) => allowlist(value.allowedAdrCategoryCount))}
       </td>
       <td role="cell">
         {label("colThreshold")}
@@ -181,8 +176,8 @@ function LevelRow({
 }
 
 /**
- * One level's detail and editor. Every panel stays mounted and only the selected one is shown, so
- * open drafts, rule history and their queries survive row switching.
+ * Keep opened panels mounted so their drafts survive row switching. Only selected panels load
+ * rules and open rule histories.
  */
 export function LevelPanel({
   level,
@@ -198,7 +193,7 @@ export function LevelPanel({
   onEditingChange: (id: string, open: boolean) => void;
 }) {
   const { t } = useTranslation("qualifications"),
-    rules = useRuleDetail(level),
+    rules = useRuleDetail(level, selected),
     headingId = `${levelPanelId(level.id)}-heading`;
   // The heading, rules list and editor stay direct children: e2e journeys scope to them.
   return (
@@ -225,7 +220,12 @@ export function LevelPanel({
       ) : (
         <p>{t("noRules")}</p>
       )}
-      <RuleHistory key={`${level.id}:${level.version}`} level={level} manage={manage} />
+      <RuleHistory
+        key={`${level.id}:${level.version}`}
+        level={level}
+        manage={manage}
+        visible={selected}
+      />
       {manage && (
         <>
           <Button

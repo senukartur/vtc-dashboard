@@ -25,6 +25,7 @@ export function levelReceipt(raw: Record<string, unknown>, levelId: string) {
       "position",
       "terminal",
       "promotionConfigured",
+      ...(Object.hasOwn(data, "freightRuleSummary") ? ["freightRuleSummary"] : []),
     ]);
     if (
       stored.id !== levelId ||
@@ -32,7 +33,10 @@ export function levelReceipt(raw: Record<string, unknown>, levelId: string) {
       (stored.game !== "ets2" && stored.game !== "ats")
     )
       throw new Error("INVALID_QUALIFICATION_RECEIPT");
-    return { data: stored as LevelDto, version };
+    return {
+      data: { freightRuleSummary: null, ...stored } as LevelDto,
+      version,
+    };
   }
 
   const {
@@ -92,6 +96,7 @@ export function levelReceipt(raw: Record<string, unknown>, levelId: string) {
       name,
       ruleVersionId,
       configured,
+      freightRuleSummary: null,
       promotionConfigured: configured && !terminal,
       requiredTrips: terminal ? null : requiredTrips,
       requiredDistanceM: terminal ? null : requiredDistanceM,

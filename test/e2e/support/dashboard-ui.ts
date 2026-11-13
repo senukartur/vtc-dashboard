@@ -274,6 +274,7 @@ export function makeQualificationLevelsFixture(game: "ets2" | "ats") {
           version: 1,
           ruleVersionId: null,
           configured: false,
+          freightRuleSummary: null,
           requiredTrips: null,
           requiredDistanceM: null,
         },
