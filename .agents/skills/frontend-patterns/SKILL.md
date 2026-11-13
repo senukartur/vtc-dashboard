@@ -24,6 +24,7 @@ Read the relevant card, [architecture](../../../docs/architecture/README.md), [b
 - Pass cancellation signals to transport, debounce search when appropriate, and discard obsolete requests. Cancel timers/subscriptions on cleanup.
 - Invalidate affected lists/details/totals after a successful command. Show server-confirmed results for report decisions, promotions, reconciliation and leadership transfer; speculative UI must not claim those decisions succeeded.
 - Use contract-defined pagination. Do not fetch every trip or catalog entry into the browser to filter it. Display labels are localized presentation; selection values remain canonical IDs.
+- Every cabinet table uses the shared `DataTable`; `<table>` and the `Table` primitive stay inside `shared/ui/`. Every paged server list uses the shared `Pager` with `useCursorPages`, `recover()` for rejected cursors and `keepPreviousPage` placeholder data. Pickers and the notification feed are excluded. See [ui-foundation.md](../../../docs/development/ui-foundation.md#data-tables-and-cursor-pages).
 
 ## Forms and content states
 
