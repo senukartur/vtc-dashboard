@@ -25,6 +25,9 @@ const game = (name: string) => mysqlEnum(name, ["ets2", "ats"]);
 const provider = (name: string) => mysqlEnum(name, ["ets2telemetry", "manual"]);
 const basis = (name: string) =>
   mysqlEnum(name, ["event", "checkpoint", "last-known", "receipt", "unknown", "staff-resolution"]);
+const reviewReasonCode = customType<{ data: string; driverData: string }>({
+  dataType: () => "varchar(128) CHARACTER SET ascii COLLATE ascii_bin",
+});
 const medium = customType<{ data: string; driverData: string }>({ dataType: () => "mediumtext" });
 
 export const trips = mysqlTable(
@@ -58,6 +61,7 @@ export const trips = mysqlTable(
     actualDistanceM: decimalColumn("actual_distance_m"),
     reviewReasons: json("review_reasons").$type<string[]>().notNull(),
     reviewHold: boolean("review_hold").notNull().default(false),
+    queuedAt: utcColumn("queued_at"),
     createdAt: utcColumn("created_at").notNull(),
   },
   (t) => [
@@ -72,7 +76,22 @@ export const trips = mysqlTable(
     index("trip_game_page").on(t.game, t.decision, t.createdAt, t.id),
     index("trip_analytics_reporting").on(t.decision, t.reportingAt, t.game, t.ownerId),
     index("trip_review_queue").on(t.reviewHold, t.aliasOf, t.createdAt, t.id),
+    index("trip_review_queued_at").on(t.reviewHold, t.aliasOf, t.queuedAt, t.id),
     check("trip_version_positive", sql`${t.version} > 0`),
+  ],
+);
+
+export const tripReviewReasons = mysqlTable(
+  "trip_review_reasons",
+  {
+    tripId: idColumn("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "restrict" }),
+    code: reviewReasonCode("code").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tripId, t.code] }),
+    index("trip_review_reason_filter").on(t.code, t.tripId),
   ],
 );
 

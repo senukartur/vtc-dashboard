@@ -6,18 +6,28 @@ import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.
 interface Content {
   content: Record<string, { schema: object }>;
 }
-interface Operation {
-  operationId: string;
+type OperationExtension = "x-stage-2-operation" | "x-stage-3-operation";
+interface Parameter {
+  in: string;
+  name: string;
+  required?: boolean;
+  schema: object;
+}
+interface WireOperation {
+  parameters?: (Parameter | { $ref: string })[];
   responses: Record<string, Content | { $ref: string }>;
   requestBody?: Content;
-  "x-stage-2-operation"?: Omit<Operation, "operationId" | "x-stage-2-operation">;
 }
+type Operation = WireOperation & { operationId: string; "x-contract-stage"?: string } & Partial<
+    Record<OperationExtension, WireOperation>
+  >;
 interface Fixture {
   id: string;
   operationId: string;
   status: number;
-  operationExtension?: "x-stage-2-operation";
+  operationExtension?: OperationExtension;
   request?: unknown;
+  query?: unknown;
   response: unknown;
 }
 
@@ -26,7 +36,7 @@ test("the runtime schema engine accepts every reviewed structural browser fixtur
     await readFile(new URL("../../docs/contracts/dashboard/openapi.json", import.meta.url), "utf8"),
   ) as {
     paths: Record<string, Record<string, Operation>>;
-    components: { responses: Record<string, Content> };
+    components: { parameters: Record<string, Parameter>; responses: Record<string, Content> };
   };
   const fixtures = JSON.parse(
     await readFile(
@@ -61,6 +71,30 @@ test("the runtime schema engine accepts every reviewed structural browser fixtur
     const json = response.content["application/json"];
     assert.ok(json, fixture.id);
     check(json.schema, fixture.response, fixture.id);
+    if (
+      "query" in fixture &&
+      (fixture.operationExtension === "x-stage-3-operation" ||
+        activeOperation?.["x-contract-stage"] === "VTC-139 Step 1")
+    ) {
+      const query = (operation.parameters ?? []).flatMap((parameter) => {
+        const resolved =
+          "$ref" in parameter
+            ? spec.components.parameters[parameter.$ref.split("/").at(-1) ?? ""]
+            : parameter;
+        assert.ok(resolved, fixture.id);
+        return resolved.in === "query" ? [resolved] : [];
+      });
+      check(
+        {
+          type: "object",
+          properties: Object.fromEntries(query.map(({ name, schema }) => [name, schema])),
+          required: query.filter(({ required }) => required).map(({ name }) => name),
+          additionalProperties: false,
+        },
+        fixture.query,
+        `${fixture.id} query`,
+      );
+    }
     if ("request" in fixture) {
       assert.ok(operation.requestBody, fixture.id);
       const media = Object.values(operation.requestBody.content)[0];

@@ -49,6 +49,11 @@ import { previewRules, validateDraftRules } from "./preview.js";
 type S = components["schemas"];
 type Assignment = typeof qualificationAssignments.$inferSelect;
 type Level = typeof qualificationLevels.$inferSelect;
+export function nextLevel(code: Level["code"]): Level["code"] | null {
+  const position = levelCodes.indexOf(code);
+  return position < 0 ? null : (levelCodes[position + 1] ?? null);
+}
+
 export interface QualificationsConfig {
   cursorKey: string;
 }
@@ -365,7 +370,7 @@ export function createQualifications(
       requiredDistanceM: rule?.requiredDistanceM == null ? null : decimal(rule.requiredDistanceM),
     };
     const eligible =
-      selected.code !== "driver_i" &&
+      nextLevel(selected.code) !== null &&
       !!rule &&
       evaluateQualificationProgress(requirements, totals).eligibleForPromotion;
     const data: S["ProgressPublic"] = {
@@ -459,6 +464,7 @@ export function createQualifications(
   }
   return {
     config,
+    nextLevel,
     prepareInTransaction: prepare,
     async notificationAssignmentInTransaction(tx: TxContext, id: string) {
       const [row] = await c(tx)
@@ -498,7 +504,7 @@ export function createQualifications(
           if (!selected) throw new Error("NOTIFICATION_QUALIFICATION_LEVEL_MISSING");
           const rule = await ruleAt(tx, row.levelId, instant);
           eligible =
-            selected.code !== "driver_i" &&
+            nextLevel(selected.code) !== null &&
             !!rule &&
             evaluateQualificationProgress(
               rule,
@@ -1182,11 +1188,7 @@ export function createQualifications(
             if (!assignment) throw identityError(409);
             const source = await level(tx, assignment.levelId),
               target = await level(tx, input.targetLevelId);
-            if (
-              source.code === "driver_i" ||
-              target.game !== input.game ||
-              levelCodes.indexOf(target.code) !== levelCodes.indexOf(source.code) + 1
-            )
+            if (target.game !== input.game || target.code !== nextLevel(source.code))
               throw identityError(409);
             // One confirmation instant selects the immutable rule used by evaluation and proof.
             const confirmedAt = at(),

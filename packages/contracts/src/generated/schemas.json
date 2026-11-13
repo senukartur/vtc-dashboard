@@ -13400,6 +13400,3926 @@
         "meta"
       ],
       "additionalProperties": false
+    },
+    "TripStage3ReviewReasonCode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "TripStage3ReviewSummary": {
+      "type": "object",
+      "properties": {
+        "computedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "waitingCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "oldestQueuedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "oldestAgeSeconds": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duplicateCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "computedAt",
+        "waitingCount",
+        "oldestQueuedAt",
+        "oldestAgeSeconds",
+        "duplicateCount"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3ReviewSummaryEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/TripStage3ReviewSummary"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3ReviewQueueTrip": {
+      "type": "object",
+      "properties": {
+        "view": {
+          "const": "summary"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "owner": {
+          "$ref": "#/$defs/MemberSummary"
+        },
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "open",
+            "delivered",
+            "cancelled",
+            "none"
+          ]
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "unassessed",
+            "pending_review",
+            "accepted",
+            "rejected"
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cargo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actualDistanceM": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reportingAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceKinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "ets2telemetry",
+              "manual"
+            ]
+          }
+        },
+        "recording": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "unknown"
+          ]
+        },
+        "reportingBasis": {
+          "type": "string",
+          "enum": [
+            "actual_completion",
+            "manual_confirmation",
+            "unknown"
+          ],
+          "description": "Derived by the server from the persisted effective fact and reporting timestamp, never the collection of source kinds."
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "Stable canonical trip number when assigned."
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "UTC canonical trip creation instant."
+        },
+        "submittedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "UTC submission instant of the current manual revision, or null when there is no current manual revision."
+        },
+        "event": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/Id"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "id",
+                "title"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Associated visible event, or null if none is visible. Only in authorized author/reviewer projections. Omit entirely in company scope."
+        },
+        "gameMode": {
+          "type": "string",
+          "enum": [
+            "single-player",
+            "truckersmp",
+            "haulmp",
+            "unknown"
+          ],
+          "description": "Only in authorized author/reviewer projections. Omit entirely in company scope."
+        }
+      },
+      "required": [
+        "view",
+        "id",
+        "version",
+        "owner",
+        "game",
+        "outcome",
+        "decision",
+        "origin",
+        "destination",
+        "cargo",
+        "actualDistanceM",
+        "reportingAt",
+        "sourceKinds",
+        "number",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3WaitingReviewItem": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "const": "waiting"
+        },
+        "trip": {
+          "$ref": "#/$defs/TripStage3ReviewQueueTrip"
+        },
+        "queuedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "reasonCodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TripStage3ReviewReasonCode"
+          },
+          "uniqueItems": true
+        },
+        "manualRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TripReviewRevision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "trip",
+        "queuedAt",
+        "reasonCodes",
+        "manualRevision"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3ResolvedReviewItem": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "const": "resolved"
+        },
+        "trip": {
+          "$ref": "#/$defs/TripStage3ReviewQueueTrip"
+        },
+        "decidedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "rejected"
+          ]
+        },
+        "reasonCodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TripStage3ReviewReasonCode"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "state",
+        "trip",
+        "decidedAt",
+        "outcome",
+        "reasonCodes"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3ReviewItem": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TripStage3WaitingReviewItem"
+        },
+        {
+          "$ref": "#/$defs/TripStage3ResolvedReviewItem"
+        }
+      ]
+    },
+    "TripStage3ReviewList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TripStage3ReviewItem"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3ReviewListEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/TripStage3ReviewList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3ManualReview": {
+      "type": "object",
+      "properties": {
+        "manualRevision": {
+          "$ref": "#/$defs/ManualRevisionRead"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          }
+        }
+      },
+      "required": [
+        "manualRevision",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3TelemetryNormalizedFacts": {
+      "type": "object",
+      "properties": {
+        "factRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "provider": {
+          "type": "string",
+          "const": "ets2telemetry"
+        },
+        "actualStartAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actualCompletedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actualDistanceM": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plannedDistanceM": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cargoMassKg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EffectiveCatalogPin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EffectiveCatalogPin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cargo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EffectiveCatalogPin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trailers": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EffectiveCatalogPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "maxItems": 10
+        },
+        "trailersComplete": {
+          "type": "boolean"
+        },
+        "wholeTripDistanceSupported": {
+          "type": "boolean"
+        },
+        "ruleContextComplete": {
+          "type": "boolean"
+        },
+        "recordedTelemetry": {
+          "description": "Recorded classifications for this telemetry source fact.",
+          "type": "object",
+          "properties": {
+            "jobType": {
+              "type": "string",
+              "enum": [
+                "quick-job",
+                "freight-market",
+                "cargo-market",
+                "world-of-trucks",
+                "unknown"
+              ]
+            },
+            "gameMode": {
+              "type": "string",
+              "enum": [
+                "single-player",
+                "truckersmp",
+                "haulmp",
+                "unknown"
+              ]
+            },
+            "hardModeResult": {
+              "type": "string",
+              "enum": [
+                "qualified",
+                "not-qualified",
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "jobType",
+            "gameMode",
+            "hardModeResult"
+          ],
+          "additionalProperties": false
+        },
+        "sourceRecordId": {
+          "$ref": "#/$defs/Id",
+          "description": "Internal source evidence record ID for this normalized fact revision."
+        },
+        "cargoDamagePercent": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Percentage from normalized telemetry damage fraction. Null when the value is unavailable or invalid."
+        }
+      },
+      "required": [
+        "factRevisionId",
+        "provider",
+        "actualStartAt",
+        "actualCompletedAt",
+        "actualDistanceM",
+        "plannedDistanceM",
+        "cargoMassKg",
+        "origin",
+        "destination",
+        "cargo",
+        "trailers",
+        "trailersComplete",
+        "wholeTripDistanceSupported",
+        "ruleContextComplete",
+        "sourceRecordId",
+        "cargoDamagePercent"
+      ],
+      "additionalProperties": false,
+      "description": "Comparable normalized fields from the selected telemetry source fact revision. Null denotes an unavailable value. This source provides no normalized depots or companies."
+    },
+    "TripStage3TelemetryReview": {
+      "type": "object",
+      "properties": {
+        "normalizedFacts": {
+          "$ref": "#/$defs/TripStage3TelemetryNormalizedFacts"
+        },
+        "facts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SafeSourceFact"
+          },
+          "description": "Safe per-field provenance for the selected telemetry source fact revision."
+        }
+      },
+      "required": [
+        "normalizedFacts",
+        "facts"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3Review": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/TripStage3ReviewQueueTrip"
+        },
+        "factRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "evaluation": {
+          "$ref": "#/$defs/EvaluationSnapshot"
+        },
+        "qualificationCheck": {
+          "$ref": "#/$defs/QualificationCheck"
+        },
+        "acceptance": {
+          "$ref": "#/$defs/ReviewAcceptance"
+        },
+        "canDecide": {
+          "type": "boolean"
+        },
+        "blockedReasonCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Decision"
+          }
+        },
+        "pendingProposalId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewReasonCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "effectiveFacts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EffectiveTripFacts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "type": "object",
+          "properties": {
+            "manual": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TripStage3ManualReview"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "telemetry": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TripStage3TelemetryReview"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "manual",
+            "telemetry"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "summary",
+        "factRevisionId",
+        "evaluation",
+        "qualificationCheck",
+        "acceptance",
+        "canDecide",
+        "blockedReasonCodes",
+        "decisions",
+        "pendingProposalId",
+        "reviewReasonCodes",
+        "effectiveFacts",
+        "sources"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3ReviewEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/TripStage3Review"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3AcceptInput": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "type": "string",
+          "const": "accept"
+        },
+        "reviewedRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "factRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "proposalId": {
+          "type": "null"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "Omitted or whitespace-only means no staff reason."
+        },
+        "confirmOverLimits": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "decision",
+        "reviewedRevisionId",
+        "factRevisionId",
+        "proposalId"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3ReturnInput": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "type": "string",
+          "const": "reject"
+        },
+        "reviewedRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "factRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "proposalId": {
+          "type": "null"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "decision",
+        "reviewedRevisionId",
+        "factRevisionId",
+        "proposalId",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3ProposalDecisionInput": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "accept",
+            "reject"
+          ]
+        },
+        "reviewedRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "factRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "proposalId": {
+          "$ref": "#/$defs/Id"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "decision",
+        "reviewedRevisionId",
+        "factRevisionId",
+        "proposalId",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3DecisionInput": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TripStage3AcceptInput"
+        },
+        {
+          "$ref": "#/$defs/TripStage3ReturnInput"
+        },
+        {
+          "$ref": "#/$defs/TripStage3ProposalDecisionInput"
+        }
+      ]
+    },
+    "TripStage3DuplicateTrip": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "owner": {
+          "$ref": "#/$defs/MemberSummary"
+        },
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "open",
+            "delivered",
+            "cancelled",
+            "none"
+          ]
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "unassessed",
+            "pending_review",
+            "accepted",
+            "rejected"
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cargo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actualDistanceM": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reportingAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceKinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "ets2telemetry",
+              "manual"
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "number",
+        "version",
+        "owner",
+        "game",
+        "outcome",
+        "decision",
+        "origin",
+        "destination",
+        "cargo",
+        "actualDistanceM",
+        "reportingAt",
+        "sourceKinds"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3Duplicate": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "primaryTrip": {
+          "$ref": "#/$defs/TripStage3DuplicateTrip"
+        },
+        "secondaryTrip": {
+          "$ref": "#/$defs/TripStage3DuplicateTrip"
+        },
+        "reasonCodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TripStage3ReviewReasonCode"
+          },
+          "uniqueItems": true
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "dismissed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "game",
+        "primaryTrip",
+        "secondaryTrip",
+        "reasonCodes",
+        "createdAt",
+        "version",
+        "dismissed"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3DuplicateList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TripStage3Duplicate"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3DuplicateListEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/TripStage3DuplicateList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3DuplicateDismissInput": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3DuplicateUndoInput": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "TripStage3DuplicateDismissal": {
+      "type": "object",
+      "properties": {
+        "candidateId": {
+          "$ref": "#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 4294967295
+        },
+        "dismissed": {
+          "type": "boolean"
+        },
+        "dismissedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "undoneAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "candidateId",
+        "version",
+        "dismissed",
+        "dismissedAt",
+        "undoneAt"
+      ],
+      "additionalProperties": false
+    },
+    "TripStage3DuplicateDismissalEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/TripStage3DuplicateDismissal"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3LevelSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3PromotionCandidate": {
+      "type": "object",
+      "properties": {
+        "member": {
+          "$ref": "#/$defs/MemberSummary"
+        },
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "assignmentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "currentLevel": {
+          "$ref": "#/$defs/QualificationStage3LevelSummary"
+        },
+        "nextLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationStage3LevelSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acceptedTrips": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "actualDistanceM": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+          "maxLength": 64
+        },
+        "requiredTrips": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredDistanceM": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "eligibleSince": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "member",
+        "game",
+        "assignmentId",
+        "version",
+        "currentLevel",
+        "nextLevel",
+        "acceptedTrips",
+        "actualDistanceM",
+        "requiredTrips",
+        "requiredDistanceM",
+        "eligible",
+        "eligibleSince"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3PromotionCandidateList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QualificationStage3PromotionCandidate"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3PromotionCandidateListEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/QualificationStage3PromotionCandidateList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3ActionHistory": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "levelId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "assignedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "periodId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "endedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "initial",
+            "reinstatement",
+            "historical_resolution",
+            "administrative_correction",
+            "promotion"
+          ]
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationActionActor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assignmentReason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "promotion": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/Id"
+                },
+                "confirmedAt": {
+                  "$ref": "#/$defs/Timestamp"
+                },
+                "actor": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/QualificationActionActor"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "pattern": "\\S"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "confirmedAt",
+                "actor",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "levelId",
+        "game",
+        "assignedAt",
+        "periodId",
+        "endedAt",
+        "purpose",
+        "actor",
+        "assignmentReason",
+        "promotion"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3ActionHistoryList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QualificationStage3ActionHistory"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3ActionHistoryListEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/QualificationStage3ActionHistoryList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3PromotionHistory": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "promotion"
+        },
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "member": {
+          "$ref": "#/$defs/MemberSummary"
+        },
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "sourceAssignmentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "targetAssignmentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sourceLevel": {
+          "$ref": "#/$defs/QualificationStage3LevelSummary"
+        },
+        "targetLevel": {
+          "$ref": "#/$defs/QualificationStage3LevelSummary"
+        },
+        "confirmedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationActionActor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acceptedTrips": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "actualDistanceM": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+          "maxLength": 64
+        },
+        "requiredTrips": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredDistanceM": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "member",
+        "game",
+        "sourceAssignmentId",
+        "targetAssignmentId",
+        "sourceLevel",
+        "targetLevel",
+        "confirmedAt",
+        "actor",
+        "reason",
+        "acceptedTrips",
+        "actualDistanceM",
+        "requiredTrips",
+        "requiredDistanceM"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3PromotionHistoryList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QualificationStage3CompanyAction"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3PromotionHistoryListEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/QualificationStage3PromotionHistoryList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3MemberSearchList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MemberSummary"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3MemberSearchListEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/QualificationStage3MemberSearchList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceStage3Summary": {
+      "type": "object",
+      "properties": {
+        "computedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "tripsNeedingFixes": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tripId": {
+                    "$ref": "#/$defs/Id"
+                  },
+                  "latestReturnReason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "tripId",
+                  "latestReturnReason"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "count",
+            "items"
+          ],
+          "additionalProperties": false,
+          "description": "Requires trips.read_own_private and enabled Trips and Manual Reports reads, including effective rejection data. Include each owned canonical trip once when effectively rejected with an author-resubmittable current manual revision owned by the viewer. Use the latest applicable authoritative staff rejection of that revision in its canonical group. Exclude aliases as rows and ignore historical alias decisions without current effect, telemetry-only and proposal-only rejections, and pending or accepted revisions. A resubmitted pending revision leaves the list until rejected. Sort by applicable decidedAt DESC, then canonical trip ID DESC. Return the author-visible reason or null when no displayable text is available."
+        },
+        "unfinishedManualDrafts": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "draftId": {
+                    "$ref": "#/$defs/Id"
+                  },
+                  "updatedAt": {
+                    "$ref": "#/$defs/Timestamp"
+                  }
+                },
+                "required": [
+                  "draftId",
+                  "updatedAt"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "count",
+            "items"
+          ],
+          "additionalProperties": false,
+          "description": "Requires trips.submit_own and enabled Manual Reports reads. Include the caller's editing drafts, ordered by createdAt DESC, then draft ID DESC."
+        },
+        "unansweredUpcomingEvents": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "eventId": {
+                    "$ref": "#/$defs/Id"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "startsAt": {
+                    "$ref": "#/$defs/Timestamp"
+                  }
+                },
+                "required": [
+                  "eventId",
+                  "title",
+                  "startsAt"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "count",
+            "items"
+          ],
+          "additionalProperties": false,
+          "description": "Requires events.respond and enabled Events reads. Include scheduled events the caller can see and respond to with startsAt strictly after computedAt and either no RSVP or a current unanswered RSVP. Sort by startsAt ASC, then event ID ASC."
+        },
+        "reviewQueue": {
+          "$ref": "#/$defs/TripStage3ReviewSummary",
+          "description": "Requires trips.review and enabled review sources. Exclude the viewer's own trips."
+        },
+        "newApplicationsCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Requires applications.manage and enabled Admissions reads. Count submitted applications."
+        },
+        "promotionsReady": {
+          "type": "object",
+          "properties": {
+            "ets2": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "ats": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "ets2",
+            "ats"
+          ],
+          "additionalProperties": false,
+          "description": "Requires qualifications.manage and enabled qualification progress reads. Use the authorized per-game promotion-candidate population."
+        }
+      },
+      "required": [
+        "computedAt"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceStage3SummaryEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/WorkspaceStage3Summary"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3ObjectType": {
+      "type": "string",
+      "enum": [
+        "company",
+        "user",
+        "trip",
+        "catalog",
+        "application",
+        "invitation",
+        "qualification",
+        "event",
+        "duplicate_candidate",
+        "qualification_level",
+        "qualification_rule_version"
+      ]
+    },
+    "AuditStage3LegacyEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "$ref": "#/$defs/AuditStage3ObjectType"
+        },
+        "details": {
+          "type": "null"
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3CompanySettingsSnapshot": {
+      "type": "object",
+      "properties": {
+        "reportingTimezone": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9_+/-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reportingTimezone"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3CompanySettingsEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "configuration.changed"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "company"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3CompanySettingsSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3CompanySettingsSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3CompanySettingsSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3RolesSnapshot": {
+      "type": "object",
+      "properties": {
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "trainee",
+              "driver",
+              "dispatcher",
+              "deputy_director"
+            ]
+          },
+          "maxItems": 4,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "roles"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3RolesEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "roles.changed"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "user"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3RolesSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3RolesSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3RolesSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3MembershipSnapshot": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "inactive"
+          ]
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "trainee",
+                "driver"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "role"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3MembershipEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "membership.changed"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "user"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3MembershipSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3MembershipSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3MembershipSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3LeadershipSnapshot": {
+      "type": "object",
+      "properties": {
+        "director": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "director"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3LeadershipEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "leadership.transferred"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "user"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3LeadershipSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3LeadershipSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3LeadershipSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3ApplicationSnapshot": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "submitted",
+            "approved",
+            "rejected"
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3ApplicationEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "application.submitted",
+            "application.reviewed"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "application"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3ApplicationSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3ApplicationSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3ApplicationSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3InvitationSnapshot": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "used",
+            "revoked"
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3InvitationEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "invitation.reissued",
+            "invitation.copied",
+            "invitation.redeemed"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "invitation"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3InvitationSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3InvitationSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3InvitationSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3TripDecisionSnapshot": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "unassessed",
+            "pending_review",
+            "accepted",
+            "rejected"
+          ]
+        },
+        "acceptedOverLimits": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "decision",
+        "acceptedOverLimits"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3TripDecisionEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "report.reviewed",
+            "report.accepted_over_limits"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "trip"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3TripDecisionSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3TripDecisionSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3TripDecisionSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3ReconciliationSnapshot": {
+      "type": "object",
+      "properties": {
+        "reconciliationId": {
+          "$ref": "#/$defs/Id"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "applied",
+            "reversed"
+          ]
+        }
+      },
+      "required": [
+        "reconciliationId",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3ReconciliationEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "trip.reconciled"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "trip"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3ReconciliationSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3ReconciliationSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3ReconciliationSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3DuplicateSnapshot": {
+      "type": "object",
+      "properties": {
+        "dismissed": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "dismissed",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3DuplicateEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "duplicate.dismissed",
+            "duplicate.dismissal_undone"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "duplicate_candidate"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3DuplicateSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3DuplicateSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3DuplicateSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3AssignmentSnapshot": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "assignmentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "levelId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "game",
+        "assignmentId",
+        "levelId"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3AssignmentEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "qualification.assigned",
+            "qualification.promoted"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "qualification"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3AssignmentSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3AssignmentSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3AssignmentSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3LevelSnapshot": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "levelId": {
+          "$ref": "#/$defs/Id"
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "game",
+        "levelId",
+        "position",
+        "active",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3LevelEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "qualification.level_changed"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "qualification_level"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3LevelSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3LevelSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3LevelSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3RulesSnapshot": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "levelId": {
+          "$ref": "#/$defs/Id"
+        },
+        "ruleVersionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "game",
+        "levelId",
+        "ruleVersionId",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3RulesEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "qualification.rules_published"
+          ]
+        },
+        "subjectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actorNickname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectType": {
+          "type": "string",
+          "const": "qualification_rule_version"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/AuditStage3RulesSnapshot"
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AuditStage3RulesSnapshot"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "null"
+                },
+                "after": {
+                  "$ref": "#/$defs/AuditStage3RulesSnapshot"
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "action",
+        "subjectId",
+        "occurredAt",
+        "actorNickname",
+        "objectName",
+        "objectType",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3Entry": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/AuditStage3LegacyEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3CompanySettingsEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3RolesEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3MembershipEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3LeadershipEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3ApplicationEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3InvitationEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3TripDecisionEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3ReconciliationEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3DuplicateEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3AssignmentEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3LevelEntry"
+        },
+        {
+          "$ref": "#/$defs/AuditStage3RulesEntry"
+        }
+      ]
+    },
+    "AuditStage3List": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AuditStage3Entry"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "AuditStage3ListEnvelope": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/AuditStage3List"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3AssignmentHistory": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "assignment"
+        },
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "member": {
+          "$ref": "#/$defs/MemberSummary"
+        },
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "assignmentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "level": {
+          "$ref": "#/$defs/QualificationStage3LevelSummary"
+        },
+        "assignedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "endedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "initial",
+            "reinstatement",
+            "historical_resolution",
+            "administrative_correction"
+          ]
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationActionActor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "member",
+        "game",
+        "assignmentId",
+        "level",
+        "assignedAt",
+        "endedAt",
+        "purpose",
+        "actor",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationStage3CompanyAction": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/QualificationStage3PromotionHistory"
+        },
+        {
+          "$ref": "#/$defs/QualificationStage3AssignmentHistory"
+        }
+      ]
     }
   }
 }
