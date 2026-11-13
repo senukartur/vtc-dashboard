@@ -15371,6 +15371,34 @@
           "$ref": "#/$defs/TripStage3ReviewSummary",
           "description": "Requires trips.review and enabled review sources. Exclude the viewer's own trips."
         },
+        "legacyReviewQueue": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "oldestAgeSeconds": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "count",
+            "oldestAgeSeconds"
+          ],
+          "additionalProperties": false,
+          "description": "Compatibility summary when Stage 3 dispatch review is disabled and the current viewer has trips.review and an enabled legacy Trips source. Mutually exclusive with reviewQueue. Exclude the viewer's own trips."
+        },
         "newApplicationsCount": {
           "type": "integer",
           "minimum": 0,
