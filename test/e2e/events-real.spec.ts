@@ -648,7 +648,7 @@ test(
 );
 
 test(
-  "real Stage 2 cards persist quick RSVP and open the saved draft on Continue and reload",
+  "real Stage 2 cards persist RSVP and Continue opens an editable saved draft",
   browserCase(["@real"]),
   async ({ browser, page }, info) => {
     test.setTimeout(60000);
@@ -885,6 +885,29 @@ test(
       await expect(card).toContainText("Your response: Can't attend");
       expect(ownReads).toBe(0);
 
+      const header = member.locator(".event-nearest");
+      await expect(header.getByRole("link", { name: new RegExp(title) })).toBeVisible();
+      const headerGoing = header.getByRole("button", { name: "Going", exact: true });
+      await card.getByRole("link", { name: title, exact: true }).click();
+      await expect(memberMain.getByRole("heading", { name: title, exact: true })).toBeVisible();
+      const detailResponse = memberMain.getByRole("group", { name: "Your response", exact: true });
+      const reset = responseWritten();
+      await detailResponse.getByRole("button", { name: "No answer", exact: true }).click();
+      const resetResult = await reset;
+      expect(resetResult.status()).toBe(200);
+      expect(resetResult.request().headers()["if-match"]).toBe(declineResult.headers().etag);
+      const resetEtag = resetResult.headers().etag;
+      expect(resetEtag).toMatch(/^"v[1-9][0-9]*"$/);
+      await expect(memberMain.getByText("Response saved.", { exact: true })).toBeVisible();
+      const detailOwnReads = ownReads;
+      const fromHeader = responseWritten();
+      await headerGoing.click();
+      const headerResult = await fromHeader;
+      expect(headerResult.status()).toBe(200);
+      expect(headerResult.request().headers()["if-match"]).toBe(resetEtag);
+      await expect(headerGoing).toHaveAttribute("aria-pressed", "true");
+      expect(ownReads).toBe(detailOwnReads);
+
       await manager.goto("/account/events");
       await catalogLanguage(manager);
       await manager.getByRole("button", { name: "Drafts", exact: true }).click();
@@ -899,22 +922,44 @@ test(
       const resumedUrl = `${server.origin}/account/events/new?draftId=${draft.id}`;
       const continued = draftRead();
       await draftRow.getByRole("link", { name: "Continue", exact: true }).click();
-      const reloaded = async () => {
+      const assertSavedDraft = async (expectedDescription: string) => {
         await expect(manager).toHaveURL(resumedUrl);
         await expect(
           manager.getByRole("heading", { name: "Edit event draft", exact: true }),
         ).toBeVisible();
         await expect(manager.getByLabel("Event title", { exact: true })).toHaveValue(draftTitle);
         await expect(manager.getByLabel("Description", { exact: true })).toHaveValue(
-          draftDescription,
+          expectedDescription,
         );
       };
-      expect((await continued).status()).toBe(200);
-      await reloaded();
+      const continuedDraft = await continued;
+      expect(continuedDraft.status()).toBe(200);
+      const draftEtag = continuedDraft.headers().etag;
+      expect(draftEtag).toMatch(/^"v[1-9][0-9]*"$/);
+      await assertSavedDraft(draftDescription);
+      const revisedDescription = "Synthetic description revised in the saved draft editor.";
+      await manager.getByLabel("Description", { exact: true }).fill(revisedDescription);
+      const savedRevision = manager.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" && new URL(response.url()).pathname === draftPath,
+      );
+      await manager.getByRole("button", { name: "Save draft", exact: true }).click();
+      const patched = await savedRevision;
+      expect(patched.status()).toBe(200);
+      expect(patched.request().headers()["if-match"]).toBe(draftEtag);
+      const patchedEtag = patched.headers().etag;
+      expect(patchedEtag).toMatch(/^"v[1-9][0-9]*"$/);
+      expect(patchedEtag).not.toBe(draftEtag);
+      const revisedDraft = ((await patched.json()) as DTO["EventStage2EnvelopeDraft"]).data;
+      expect(revisedDraft.id).toBe(draft.id);
+      expect(revisedDraft.fields.description).toBe(revisedDescription);
+      await expect(manager.getByText("Draft saved.", { exact: true })).toBeVisible();
       const reopened = draftRead();
       await manager.reload();
-      expect((await reopened).status()).toBe(200);
-      await reloaded();
+      const reopenedDraft = await reopened;
+      expect(reopenedDraft.status()).toBe(200);
+      expect(reopenedDraft.headers().etag).toBe(patchedEtag);
+      await assertSavedDraft(revisedDescription);
       expect(blocked).toBe(0);
     } finally {
       try {

@@ -12,7 +12,6 @@ import { useSession } from "./Session.js";
 import { UserMenu } from "./UserMenu.js";
 import { NearestEvent } from "../features/events/components.js";
 import { UpcomingEventChip } from "../features/events/UpcomingEventChip.js";
-import { isEventStage2Enabled } from "../features/events/event-stage-2-mode.js";
 import "../features/events/events.css";
 import { publicContent } from "../features/landing/content.js";
 import { LandingFooter } from "../features/landing/LandingFooter.js";
@@ -200,7 +199,7 @@ export function AppLayout({
                 <Breadcrumb />
                 <div className="topbar-actions">
                   {session.state === "authenticated" &&
-                    (isEventStage2Enabled(session) ? (
+                    (session.eventsStage2Enabled ? (
                       <UpcomingEventChip />
                     ) : (
                       <NearestEvent variant="chip" />

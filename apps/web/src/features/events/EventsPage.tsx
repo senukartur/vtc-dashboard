@@ -9,7 +9,6 @@ import { publicContent, publicPath } from "../landing/content.js";
 import { EventState, KeepFocusButton, useEventTimezone } from "./components.js";
 import { EventEditor } from "./EventEditor.js";
 import { DraftEventEditor, useDraftText } from "./editor/draft.js";
-import { isEventStage2Enabled } from "./event-stage-2-mode.js";
 import { MemberEventsPage } from "./MemberEventsPage.js";
 import { type DTO, periodFrom } from "./model.js";
 import { useEventQuery } from "./queries.js";
@@ -19,7 +18,7 @@ import "./events-workspace.css";
 
 export function EventsPage({ publicView = false }: { publicView?: boolean }) {
   const session = useSession();
-  if (!publicView && isEventStage2Enabled(session)) return <MemberEventsPage />;
+  if (!publicView && session.eventsStage2Enabled) return <MemberEventsPage />;
   return <LegacyEventsPage publicView={publicView} />;
 }
 

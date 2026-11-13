@@ -5,7 +5,6 @@ import { refreshWorkspaceSummary } from "../../app/workspace-summary.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
 import { refreshStage2EventResponse } from "./event-projection-cache.js";
-import { isEventStage2Enabled } from "./event-stage-2-mode.js";
 import { type Attempt, commandAttempt, type DTO } from "./model.js";
 import { eventStage2SessionScope } from "./stage-2-queries.js";
 import { eventRead, fail, schema } from "./transport.js";
@@ -154,7 +153,7 @@ export function useEventCommand(
     if (
       target &&
       responseChange &&
-      isEventStage2Enabled(session) &&
+      session.eventsStage2Enabled &&
       (!options?.quickResponse || !result || replay)
     ) {
       await refreshStage2EventResponse(client, eventStage2SessionScope(session), target);

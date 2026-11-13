@@ -9,7 +9,6 @@ import { EventDraftList } from "./EventDraftList.js";
 import { EventListCard } from "./EventListCard.js";
 import { eventListCopy } from "./event-list-copy.js";
 import { useEventListLocale } from "./event-list-queries.js";
-import { isEventDraftsEnabled } from "./event-stage-2-mode.js";
 import { periodFrom } from "./model.js";
 import { useEventStage2Query } from "./stage-2-queries.js";
 import { type EventStage2Locale, eventStage2Reads } from "./stage-2-transport.js";
@@ -34,7 +33,7 @@ export function MemberEventsPage() {
   const heading = useRef<HTMLHeadingElement>(null);
   const canRead = self?.capabilities.includes("company.read") === true;
   const canManage = self?.capabilities.includes("events.manage") === true;
-  const canBrowseDrafts = canManage && isEventDraftsEnabled(session);
+  const canBrowseDrafts = canManage && session.eventsDraftsEnabled;
   const canRespond = self?.capabilities.includes("events.respond") === true;
   const requestedPeriod = search.get("period");
   const publishedPeriod = periodFrom(requestedPeriod);

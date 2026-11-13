@@ -11,7 +11,10 @@ import { useEventCommand } from "./queries.js";
 import { eventStage2SessionScope } from "./stage-2-queries.js";
 import { eventPhase, type ResponseValue } from "./view-model.js";
 
-export type ResponseProjection = Pick<DTO["EventStage2Upcoming"], "event" | "myResponse">;
+export type ResponseProjection = Pick<
+  DTO["EventStage2Upcoming"],
+  "event" | "myResponse" | "myResponseVersion"
+>;
 type QuickResponse = "participating" | "declined";
 type Intent = { version: number; response: QuickResponse; countBefore: number | undefined };
 type Counts = DTO["EventResponseCounts"];
@@ -21,8 +24,7 @@ export function useEventResponseScope() {
 }
 
 function responseVersion(projection: ResponseProjection) {
-  // The generated VTC-126 wire version is absent on the Stage 2 foundation base.
-  const value = "myResponseVersion" in projection ? projection.myResponseVersion : null;
+  const value = projection.myResponseVersion;
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 

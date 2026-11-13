@@ -92,7 +92,6 @@ test(
       .response as DTO["EventStage2EnvelopeMemberList"];
     const row = list.data.items[0];
     if (!nearest.data || !row) throw new Error("Missing Stage 2 projections");
-    test.skip(!("myResponseVersion" in nearest.data), "Requires the VTC-126 generated contract");
     let response: DTO["Rsvp"]["response"] = "unanswered";
     let version = 7;
     let responseCounts = { participating: 1, declined: 0 };
@@ -246,7 +245,6 @@ test(
   async ({ page }) => {
     const nearest = upcomingProjection();
     if (!nearest.data) throw new Error("Missing Stage 2 projection");
-    test.skip(!("myResponseVersion" in nearest.data), "Requires the VTC-126 generated contract");
     const event = { ...eventFixture(), id: stage2EventId };
     const dashboard = await mockStage2Dashboard(page);
     dashboard.response = { response: "unanswered", declineReason: null, version: 7 };
@@ -338,7 +336,6 @@ test(
       .response as DTO["EventStage2EnvelopeMemberList"];
     const row = list.data.items[0];
     if (!nearest.data || !row) throw new Error("Missing Stage 2 projections");
-    test.skip(!("myResponseVersion" in nearest.data), "Requires the VTC-126 generated contract");
 
     await mockEventsStage2(page, "member");
     let response: DTO["Rsvp"]["response"] = "unanswered";

@@ -17,16 +17,12 @@ const memberList = /\/api\/v1\/events(?:\?|$)/;
 const draftList = /\/api\/v1\/admin\/events\?/;
 const discardPath = `/api/v1/admin/events/${stage2DraftId}`;
 
-async function mockDraftRollout(
-  page: Page,
-  access: "member" | "manager" = "manager",
-  draftsEnabled = () => true,
-) {
-  const events = await mockEventsStage2(page, access);
+async function mockDraftRollout(page: Page, draftsEnabled: () => boolean) {
+  await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
   await page.route("**/api/v1/me", (route) => {
     if (route.request().method() !== "GET") return route.fallback();
     const self = accountFixture("en");
-    if (access === "manager") self.data.capabilities.push("events.manage");
+    self.data.capabilities.push("events.manage");
     self.data.preferences.displayTimezone = "Europe/Warsaw";
     return route.fulfill({
       json: self,
@@ -37,7 +33,6 @@ async function mockDraftRollout(
       },
     });
   });
-  return events;
 }
 
 function projection() {
@@ -51,8 +46,9 @@ function legacyRow() {
   const legacy = list.data.items.find(({ id }) => id === stage2LegacyEventId);
   if (!legacy) throw new Error("Missing legacy event fixture");
   return {
-    ...projection().data.items[0],
     event: legacy,
+    organizerMemberId: null,
+    visibility: "public" as const,
     myResponse: null,
     myResponseVersion: null,
     responseCounts: { participating: 0, declined: 0 },
@@ -79,11 +75,7 @@ for (const locale of ["en", "ru"] as const) {
       const first = data.data.items[0];
       const legacy = legacyRow();
       if (!first) throw new Error("Missing member event fixture");
-      data.data.items.push({
-        ...first,
-        ...legacy,
-        ...("myResponseVersion" in first ? {} : { myResponseVersion: undefined }),
-      });
+      data.data.items.push(legacy);
       const reads = recordReads(page);
       await page.route(memberList, async (route) => {
         const url = new URL(route.request().url());
@@ -278,7 +270,7 @@ for (const access of ["member", "manager"] as const) {
       : "a manager without the draft rollout opens Upcoming from a draft bookmark",
     browserCase(["@functional"]),
     async ({ page }) => {
-      if (access === "member") await mockDraftRollout(page, access);
+      if (access === "member") await mockEventsStage2(page, access, "en", { draftsRollout: true });
       else await mockEventsStage2(page, access);
       const reads = recordReads(page);
       await page.goto("/account/events?period=drafts&cursor=fictional-draft-cursor");
@@ -310,7 +302,7 @@ test(
   browserCase(["@functional"]),
   async ({ page }) => {
     let draftsEnabled = true;
-    await mockDraftRollout(page, "manager", () => draftsEnabled);
+    await mockDraftRollout(page, () => draftsEnabled);
     const stale = stage2Fixture("listAdminEvents", "drafts")
       .response as DTO["EventStage2EnvelopeAdminList"];
     const fresh = structuredClone(stale);
@@ -408,7 +400,7 @@ test(
   "a manager confirms discarding an incomplete draft and retries the exact attempt",
   browserCase(["@functional"]),
   async ({ page }, info) => {
-    await mockDraftRollout(page);
+    await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
     const reads = recordReads(page);
     const drafts = stage2Fixture("listAdminEvents", "drafts")
       .response as DTO["EventStage2EnvelopeAdminList"];
@@ -471,7 +463,7 @@ test(
   "a stale draft discard refreshes authority and requires a new confirmation",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const mock = await mockDraftRollout(page);
+    const mock = await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
     const drafts = stage2Fixture("listAdminEvents", "drafts")
       .response as DTO["EventStage2EnvelopeAdminList"];
     const entry = drafts.data.items[0];

@@ -6,7 +6,6 @@ import type { Locale } from "../../shared/formatting.js";
 import { Button, Card, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { useUpcomingEventCard } from "../events/event-list-queries.js";
-import { isEventStage2Enabled } from "../events/event-stage-2-mode.js";
 import { RecentTripsWidget, UpcomingEventWidget } from "./blocks.js";
 import {
   ActualDistanceChart,
@@ -108,7 +107,7 @@ function DashboardContent() {
   // keeps its own enabled observer of the nearest event.
   const ets2ProgressQuery = useMyQualificationProgress("ets2", { enabled: anchored });
   const atsProgressQuery = useMyQualificationProgress("ats", { enabled: anchored });
-  const stage2 = isEventStage2Enabled(session);
+  const stage2 = session.eventsStage2Enabled;
   const upcomingEventQuery = useUpcomingEvent({ enabled: anchored && !stage2 });
   const stage2UpcomingQuery = useUpcomingEventCard(anchored && stage2);
   // The queue card shares the workspace summary with the menu badges and the dispatch header.
