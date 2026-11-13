@@ -82,7 +82,7 @@ export function useEditorGallery(
   const cover = ready.find(({ isCover }) => isCover) ?? null;
   const busy = preparing || writes.pending;
   const conflict = failureKind === "conflict";
-  const locked = busy || !!writes.retry || conflict || terminal;
+  const locked = busy || !!writes.retry || conflict || terminal || (!!eventId && !snapshot);
   const captions = captionEdits?.eventId === eventId ? captionEdits.values : undefined;
 
   useEffect(() => {
@@ -138,7 +138,7 @@ export function useEditorGallery(
           },
         ));
       if (controller.signal.aborted) return;
-      if (!result) throw new AccountFailure("conflict");
+      if (!result) throw new AccountFailure("unavailable");
       const afterSave = eventScreenshotError(file, result.gallery.items.length, maxBytes);
       if (afterSave) {
         setCommitted(result);
@@ -238,7 +238,13 @@ export function useEditorGallery(
     lastUploadState: items.find(({ id }) => id === lastUpload)?.state,
     status,
     error,
-    accessError: terminalRead ? query.error : terminalWrite ? error : null,
+    authorizationError:
+      [query.error, error].find(
+        (failure) =>
+          failure instanceof AccountFailure &&
+          (failure.kind === "unauthorized" || failure.kind === "forbidden"),
+      ) ?? null,
+    unavailable: failureKind === "unavailable",
     conflict: conflict && !terminal,
     refreshing: query.isFetching,
     refusedUpload: operation === "upload" && failureKind === "invalid",
@@ -458,8 +464,8 @@ export function EditorGallery({
       {gallery.loading && <p role="status">{text.galleryLoading}</p>}
       {gallery.readError && (
         <div className="event-editor-inline">
-          {gallery.accessError ? (
-            <EventFailureView error={gallery.accessError} />
+          {gallery.authorizationError ? (
+            <EventFailureView error={gallery.authorizationError} />
           ) : (
             <p role="alert" className="field-error">
               {text.galleryUnavailable}
@@ -570,8 +576,14 @@ export function EditorGallery({
         <p className="field-error" role="alert">
           {text.galleryUploadInvalid}
         </p>
-      ) : !gallery.accessError ? (
-        <EventFailureView error={gallery.error} />
+      ) : !gallery.readError ? (
+        gallery.unavailable ? (
+          <p role="alert" className="field-error">
+            {text.galleryUnavailable}
+          </p>
+        ) : (
+          <EventFailureView error={gallery.error} />
+        )
       ) : null}
       {gallery.retry && (
         <Button
