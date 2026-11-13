@@ -1,11 +1,14 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import type { components } from "@vtc/contracts";
+import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { catalogTrailers } from "@vtc/db/catalogs-schema";
 import { eq, membership, roles } from "@vtc/db/identity-schema";
 import {
+  initialQualifications,
   qualificationAssignments,
+  qualificationLadderHistory,
+  qualificationLevels,
   qualificationPromotions,
   qualificationRules,
   qualificationStates,
@@ -63,7 +66,8 @@ let control: Connection,
   unit: UnitOfWork,
   identity: Identity,
   tripService: Trips,
-  service: Qualifications;
+  service: Qualifications,
+  ladderService: Qualifications;
 let maximumPublicationWork: Promise<void> | undefined;
 let director: Actor,
   owner: Actor,
@@ -332,6 +336,12 @@ beforeAll(async () => {
     now,
   );
   service = createQualifications(unit, config, { identity, trips: tripService }, now);
+  ladderService = createQualifications(
+    unit,
+    { ...config, ladderEditsEnabled: true },
+    { identity, trips: tripService },
+    now,
+  );
 }, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
   for (const table of [
@@ -353,7 +363,12 @@ beforeEach(async () => {
     "outbox_events",
   ])
     await control.query(`DELETE FROM ${table}`);
-  await control.query("UPDATE qualification_levels SET version=1");
+  await control.query("DELETE FROM qualification_ladder_history");
+  await control.query("DELETE FROM qualification_levels WHERE code IS NULL");
+  await control.query("UPDATE qualification_levels SET active_position=NULL");
+  await control.query(
+    "UPDATE qualification_levels SET name=ELT(code,'Trainee','Driver III','Driver II','Driver I'), version=1, active_position=code+0, ladder_revision=1, promotion_generation=1",
+  );
   instant = Date.parse("2026-10-20T12:00:00.000Z");
   const a = await member(),
     b = await member(["deputy_director", "dispatcher"]),
@@ -467,6 +482,7 @@ test("staff action and publisher projections retain exact persisted attribution 
           "game",
           "id",
           "levelId",
+          "levelName",
           "periodId",
           "promotion",
           "purpose",
@@ -502,6 +518,7 @@ test("staff action and publisher projections retain exact persisted attribution 
           "game",
           "id",
           "levelId",
+          "levelName",
           "periodId",
         ]);
     }
@@ -766,12 +783,8 @@ test("one hundred distinct recorded actors use one facade batch and leave the lo
 
 test("structural levels have no launch defaults; a trips-only rule enables promotion after the required count", async () => {
   const levels = await service.levels(owner, "ets2");
-  expect(levels.items.map((v) => v.code)).toEqual([
-    "trainee",
-    "driver_iii",
-    "driver_ii",
-    "driver_i",
-  ]);
+  expect(levels.items.map((v) => v.id)).toEqual(structuralLevels.ets2);
+  expect(levels.items.map((v) => v.position)).toEqual([1, 2, 3, 4]);
   expect(
     levels.items.every(
       (v) => !v.configured && v.requiredTrips === null && v.requiredDistanceM === null,
@@ -798,6 +811,385 @@ test("structural levels have no launch defaults; a trips-only rule enables promo
     acceptedTrips: 1,
     actualDistanceM: "100.000000000000000000",
   });
+});
+
+test("structural changes are gated, scoped by game and revision, and replay without writing twice", async () => {
+  const first = await ladderService.ladder(director, "ets2");
+  const ats = await ladderService.ladder(director, "ats");
+  const cursor = (await service.levels(owner, "ets2", { limit: 1 })).nextCursor;
+  const key = newId();
+  const change = {
+    type: "add",
+    input: { position: 2, name: "  Fictional middle  ", reason: "  Fictional rationale  " },
+  } as const;
+  await expect(
+    service.changeLadder(director, "ets2", key, first.version, change),
+  ).rejects.toMatchObject({ statusCode: 503 });
+  await expect(
+    ladderService.changeLadder(observer, "ets2", key, first.version, change),
+  ).rejects.toMatchObject({ statusCode: 403 });
+  expect((await service.ladder(director, "ets2")).data.ladderEditsEnabled).toBe(false);
+  const receipt = await ladderService.changeLadder(director, "ets2", key, first.version, change);
+  expect(receipt).toEqual({
+    data: { game: "ets2", revision: first.version + 1 },
+    version: first.version + 1,
+  });
+  expect(await ladderService.changeLadder(director, "ets2", key, first.version, change)).toEqual(
+    receipt,
+  );
+  await expect(
+    ladderService.changeLadder(director, "ets2", key, first.version, {
+      ...change,
+      input: { ...change.input, name: "Fictional changed replay" },
+    }),
+  ).rejects.toMatchObject({ statusCode: 409, publicCode: "IDEMPOTENCY_CONFLICT" });
+  await expect(
+    ladderService.changeLadder(director, "ets2", newId(), first.version, change),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  await expect(service.levels(owner, "ets2", { cursor: cursor ?? "" })).rejects.toMatchObject({
+    statusCode: 409,
+  });
+  const after = await ladderService.ladder(director, "ets2");
+  expect(after.data.levels.map((row) => row.position)).toEqual([1, 2, 3, 4, 5]);
+  expect(after.data.levels[1]).toMatchObject({
+    name: "Fictional middle",
+    currentDriverCount: 0,
+    effectiveRule: null,
+    terminal: false,
+  });
+  expect(after.data.levels[0]?.currentDriverCount).toBeGreaterThan(0);
+  expect((await ladderService.ladder(director, "ats")).data.levels).toEqual(ats.data.levels);
+  const [reason] = await unit.run((tx) =>
+    unit.client(tx).select().from(qualificationLadderHistory),
+  );
+  expect(reason).toMatchObject({ reason: "Fictional rationale" });
+  if (!reason) throw new Error("SYNTHETIC_AUDIT_MISSING");
+  const [auditRows] = await control.execute<RowDataPacket[]>(
+    "SELECT details FROM audit_entries WHERE id=?",
+    [reason.auditId],
+  );
+  expect(auditRows[0]?.details).toMatchObject({
+    before: null,
+    after: { active: true, position: 2, game: "ets2", levelId: after.data.levels[1]?.id },
+  });
+  expect(JSON.stringify(auditRows)).not.toContain("Fictional rationale");
+});
+
+test("reordered successors invalidate promotion commands after reversal and the current first completes only Trainee", async () => {
+  await publish("ets2", 0, null, null);
+  await publish("ets2", 1, null, null);
+  const original = (await ladderService.ladder(director, "ets2")).data;
+  const [first, second, third, fourth] = structuralLevels.ets2;
+  const stale = await progress();
+  const order = (revision: number, levelIds: string[]) =>
+    ladderService.changeLadder(director, "ets2", newId(), revision, {
+      type: "reorder",
+      input: { levelIds },
+    });
+  await order(original.revision, [second, first, third, fourth]);
+  const newcomer = await member(["trainee", "dispatcher"]);
+  const other = await member(["dispatcher"]);
+  expect((await progress("ets2", newcomer.actor)).data.assignment.levelId).toBe(second);
+  expect((await progress("ats", newcomer.actor)).data.assignment.levelId).toBe(
+    structuralLevels.ats[0],
+  );
+  await expect(
+    service.promote(director, owner.userId, newId(), stale.version, {
+      game: "ets2",
+      assignmentId: stale.data.assignment.id,
+      targetLevelId: second,
+      reason: "Fictional stale review",
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  for (const target of [newcomer.actor, other.actor]) {
+    const current = await progress("ets2", target);
+    const promoted = await service.promote(director, target.userId, newId(), current.version, {
+      game: "ets2",
+      assignmentId: current.data.assignment.id,
+      targetLevelId: first,
+      reason: "Fictional current review",
+    });
+    expect(promoted.data).toMatchObject({ levelId: first });
+  }
+  const roleRows = async (userId: string) =>
+    unit.run(async (tx) =>
+      (
+        await unit
+          .client(tx)
+          .select({ role: roles.role })
+          .from(roles)
+          .where(eq(roles.userId, userId))
+      )
+        .map((row) => row.role)
+        .sort(),
+    );
+  expect(await roleRows(newcomer.actor.userId)).toEqual(["dispatcher", "driver"]);
+  expect(await roleRows(other.actor.userId)).toEqual(["dispatcher"]);
+  await order(original.revision + 1, [...structuralLevels.ets2]);
+  await expect(
+    service.promote(director, owner.userId, newId(), stale.version, {
+      game: "ets2",
+      assignmentId: stale.data.assignment.id,
+      targetLevelId: second,
+      reason: "Fictional review before both changes",
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  expect(await roleRows(owner.userId)).toEqual(["trainee"]);
+});
+
+test("the active cap is serialized across concurrent adds and a one-level ladder cannot be archived", async () => {
+  let current = await ladderService.ladder(director, "ats");
+  const add = (name: string) =>
+    ladderService.changeLadder(director, "ats", newId(), current.version, {
+      type: "add",
+      input: { name, position: current.data.levels.length + 1 },
+    });
+  while (current.data.levels.length < 24) {
+    await add(`Fictional level ${current.data.levels.length + 1}`);
+    current = await ladderService.ladder(director, "ats");
+  }
+  const concurrent = await Promise.allSettled([
+    add("Fictional last slot A"),
+    add("Fictional last slot B"),
+  ]);
+  expect(concurrent.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  expect(concurrent.find((result) => result.status === "rejected")).toMatchObject({
+    reason: { statusCode: 409 },
+  });
+  current = await ladderService.ladder(director, "ats");
+  expect(current.data.levels).toHaveLength(25);
+  await expect(add("Fictional over cap")).rejects.toMatchObject({ statusCode: 409 });
+  let reduced = await ladderService.ladder(director, "ets2");
+  while (reduced.data.levels.length > 1) {
+    const source = reduced.data.levels.at(-1),
+      target = reduced.data.levels[0];
+    if (!source || !target) throw new Error("SYNTHETIC_LEVEL_MISSING");
+    await ladderService.changeLadder(director, "ets2", newId(), reduced.version, {
+      type: "archive",
+      levelId: source.id,
+      input: { targetLevelId: target.id, observedDriverCount: source.currentDriverCount },
+    });
+    reduced = await ladderService.ladder(director, "ets2");
+  }
+  const only = reduced.data.levels[0];
+  if (!only) throw new Error("SYNTHETIC_LEVEL_MISSING");
+  expect(only).toMatchObject({ position: 1, terminal: true });
+  await expect(
+    ladderService.changeLadder(director, "ets2", newId(), reduced.version, {
+      type: "archive",
+      levelId: only.id,
+      input: { targetLevelId: only.id, observedDriverCount: only.currentDriverCount },
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+});
+
+test("staff ladder HTTP routes enforce current authority, closed input and strong structural ETags", async () => {
+  const app = await createApp({
+    identity,
+    qualifications: ladderService,
+    checkReadiness: async () => true,
+  });
+  const root = "/api/v1/admin/qualification-ladders/ets2";
+  try {
+    expect((await app.inject({ url: root })).statusCode).toBe(401);
+    expect((await app.inject({ url: root, headers: { cookie: ownerCookie } })).statusCode).toBe(
+      403,
+    );
+    const snapshot = await app.inject({ url: root, headers: { cookie: deputyCookie } });
+    expect(snapshot.statusCode).toBe(200);
+    expect(snapshot.headers.etag).toBe('"v1"');
+    expect(snapshot.json().data).toMatchObject({
+      game: "ets2",
+      revision: 1,
+      asOf: iso(),
+      ladderEditsEnabled: true,
+    });
+    const { token } = (
+      await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie: deputyCookie } })
+    ).json().data;
+    const headers = {
+      cookie: deputyCookie,
+      origin,
+      "x-csrf-token": token,
+      "idempotency-key": newId(),
+    };
+    const add = (input: unknown, extra: Record<string, string> = {}) =>
+      app.inject({
+        url: `${root}/levels`,
+        method: "POST",
+        headers: { ...headers, ...extra },
+        payload: input as object,
+      });
+    const input = { name: "Fictional HTTP level", position: 2 };
+    expect((await add(input)).statusCode).toBe(428);
+    expect((await add({ ...input, code: "trainee" }, { "if-match": '"v1"' })).statusCode).toBe(422);
+    const committed = await add(input, { "if-match": '"v1"' });
+    expect(committed.statusCode).toBe(201);
+    expect(committed.headers.etag).toBe('"v2"');
+    expect(committed.json().data).toEqual({ game: "ets2", revision: 2 });
+    const replay = await add(input, { "if-match": '"v1"' });
+    expect(replay.json().data).toEqual(committed.json().data);
+    expect(replay.headers.etag).toBe(committed.headers.etag);
+    expect((await add(input, { "if-match": '"v1"', "idempotency-key": newId() })).statusCode).toBe(
+      409,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test("a former top uses immutable freight rules and needs a new promotion publication generation", async () => {
+  const originalTop = structuralLevels.ets2[3];
+  await publish("ets2", 3, null, null);
+  const scheduledAt = new Date(instant + 1000).toISOString();
+  await publish("ets2", 3, null, null, { effectiveAt: scheduledAt });
+  const start = await ladderService.ladder(director, "ets2");
+  await ladderService.changeLadder(director, "ets2", newId(), start.version, {
+    type: "add",
+    input: { name: "Fictional top", position: 5 },
+  });
+  tick(1000);
+  const { data } = await ladderService.ladder(director, "ets2");
+  const formerTop = data.levels.find((row) => row.id === originalTop);
+  expect(formerTop).toMatchObject({
+    configured: true,
+    terminal: false,
+    promotionConfigured: false,
+    effectiveRule: { effectiveAt: scheduledAt },
+  });
+  expect(formerTop?.requiredTrips).toBeNull();
+  const top = data.levels.at(-1);
+  if (!formerTop || !top) throw new Error("SYNTHETIC_LEVEL_MISSING");
+  await expect(
+    ladderService.publish(director, top.id, newId(), top.version, {
+      rules: [],
+      requiredTrips: 1,
+      requiredDistanceM: null,
+    }),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  tick(1);
+  const publication = await ladderService.publish(
+    director,
+    formerTop.id,
+    newId(),
+    formerTop.version,
+    {
+      rules: [],
+      requiredTrips: null,
+      requiredDistanceM: null,
+    },
+  );
+  expect(publication.data).toMatchObject({ configured: true, promotionConfigured: true });
+  expect((await ladderService.rules(director, formerTop.id)).items).toHaveLength(3);
+});
+
+test("archive rechecks count and target, transfers at one instant, and preserves archived evidence and credit", async () => {
+  await publish();
+  tick();
+  const f = await fixture();
+  await replace([f.change]);
+  const old = await progress();
+  const ats = await progress("ats");
+  const initial = await ladderService.ladder(director, "ets2");
+  const [source, target] = initial.data.levels;
+  if (!source || !target) throw new Error("SYNTHETIC_LEVEL_MISSING");
+  const archive = (
+    count: number,
+    targetLevelId = target.id,
+    key = newId(),
+    engine = ladderService,
+  ) =>
+    engine.changeLadder(director, "ets2", key, initial.version, {
+      type: "archive",
+      levelId: source.id,
+      input: { targetLevelId, observedDriverCount: count, reason: "Fictional transfer" },
+    });
+  await expect(archive(source.currentDriverCount + 1)).rejects.toMatchObject({ statusCode: 409 });
+  await expect(archive(source.currentDriverCount, structuralLevels.ats[0])).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  const failing = createQualifications(
+    unit,
+    { ...config, ladderEditsEnabled: true },
+    {
+      identity,
+      trips: tripService,
+      events: {
+        append: async (tx, event) => {
+          await createOutbox(unit).append(tx, event);
+          if (event.type === "qualification.assigned") throw new Error("SYNTHETIC_ARCHIVE_FAILURE");
+        },
+      },
+    },
+    now,
+  );
+  tick();
+  const archivedAt = iso();
+  await expect(archive(source.currentDriverCount, target.id, newId(), failing)).rejects.toThrow(
+    "SYNTHETIC_ARCHIVE_FAILURE",
+  );
+  expect(await ladderService.ladder(director, "ets2")).toEqual({
+    ...initial,
+    data: { ...initial.data, asOf: archivedAt },
+  });
+  expect((await progress()).data.assignment.id).toBe(old.data.assignment.id);
+  const key = newId();
+  const committed = await archive(source.currentDriverCount, target.id, key);
+  expect(await archive(source.currentDriverCount, target.id, key)).toEqual(committed);
+  const moved = await progress();
+  expect(moved).toMatchObject({
+    version: old.version + 1,
+    data: {
+      assignment: { levelId: target.id, assignedAt: archivedAt },
+      acceptedTrips: 0,
+      actualDistanceM: "0",
+      eligibleForConfirmation: false,
+    },
+  });
+  expect(moved.data.assignment.id).not.toBe(old.data.assignment.id);
+  expect((await progress("ats")).data.assignment).toEqual(ats.data.assignment);
+  const rows = await ladderService.actionHistory(director, owner.userId, "ets2");
+  expect(rows.data.items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: old.data.assignment.id,
+        levelId: source.id,
+        levelName: source.name,
+        endedAt: archivedAt,
+      }),
+      expect.objectContaining({
+        id: moved.data.assignment.id,
+        purpose: "ladder_archive_transfer",
+        promotion: null,
+      }),
+    ]),
+  );
+  expect((await ladderService.rules(director, source.id)).items[0]?.id).toBe(source.ruleVersionId);
+  expect(await unit.run((tx) => ladderService.lookupInTransaction(tx, f.evidence))).toMatchObject({
+    status: "resolved",
+    assignmentId: old.data.assignment.id,
+    levelId: source.id,
+  });
+  expect(
+    (await ladderService.ladder(director, "ets2")).data.levels.map((row) => row.id),
+  ).not.toContain(source.id);
+  const joined = await member();
+  expect((await progress("ets2", joined.actor)).data.assignment.levelId).toBe(target.id);
+  const evidenceRows = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select()
+      .from(initialQualifications)
+      .where(eq(initialQualifications.userId, joined.actor.userId)),
+  );
+  expect(evidenceRows.find((row) => row.game === "ets2")).toMatchObject({
+    levelId: target.id,
+    level: null,
+  });
+  const [archived] = await unit.run((tx) =>
+    unit.client(tx).select().from(qualificationLevels).where(eq(qualificationLevels.id, source.id)),
+  );
+  expect(archived?.activePosition).toBeNull();
 });
 test("distance-only progress and notification agree just below and at 20 km; corrections use the nullable proof", async () => {
   await publish("ets2", 0, null, "20000");
@@ -1789,8 +2181,8 @@ test("configuration audit traces changed level separately from actor and publica
   const levelId = structuralLevels.ets2[0];
   const readAudit = () =>
     control.execute<RowDataPacket[]>(
-      "SELECT CAST(id AS CHAR) id,CAST(subject_id AS CHAR) subjectId,subject_kind subjectKind,CAST(actor_id AS CHAR) actorId FROM audit_entries WHERE subject_kind='qualification' AND subject_id=?",
-      [levelId],
+      "SELECT CAST(id AS CHAR) id,CAST(subject_id AS CHAR) subjectId,subject_kind subjectKind,CAST(actor_id AS CHAR) actorId,details FROM audit_entries WHERE subject_kind='qualification_level' AND subject_id=? OR subject_kind='qualification_rule_version' AND details->>'$.after.levelId'=?",
+      [levelId, levelId],
     );
   const [baseline] = await readAudit();
   const priorIds = new Set(baseline.map((row) => row.id)),
@@ -1801,14 +2193,20 @@ test("configuration audit traces changed level separately from actor and publica
   expect(audit).toHaveLength(priorCount + 2);
   const inserted = audit.filter((row) => !priorIds.has(row.id));
   expect(inserted).toHaveLength(2);
-  expect(
-    inserted.every(
-      (row) =>
-        row.subjectKind === "qualification" &&
-        row.subjectId === levelId &&
-        row.actorId === director.userId,
-    ),
-  ).toBe(true);
+  expect(inserted).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        subjectKind: "qualification_level",
+        subjectId: levelId,
+        actorId: director.userId,
+      }),
+      expect.objectContaining({
+        subjectKind: "qualification_rule_version",
+        actorId: director.userId,
+      }),
+    ]),
+  );
+  expect(inserted.every((row) => row.details.after.levelId === levelId)).toBe(true);
   const real = createOutbox(unit),
     failing = createQualifications(
       unit,
@@ -1834,11 +2232,8 @@ test("configuration audit traces changed level separately from actor and publica
       reason: "Fictional private configuration rationale",
     }),
   ).rejects.toThrow("SYNTHETIC_AFTER_RULE_EVENT");
-  const [after] = await control.execute<RowDataPacket[]>(
-    "SELECT COUNT(*) n FROM audit_entries WHERE subject_kind='qualification' AND subject_id=?",
-    [levelId],
-  );
-  expect(Number(after[0]?.n)).toBe(priorCount + 2);
+  const [after] = await readAudit();
+  expect(after).toHaveLength(priorCount + 2);
   expect((await service.levels(director, "ets2")).items[0]?.version).toBe(3);
   expect((await service.rules(director, levelId)).items).toHaveLength(1);
 });
@@ -1858,7 +2253,7 @@ test("promotion uses one confirmation instant and immutable rule when a stricter
     unit,
     config,
     { identity, trips: tripService },
-    () => new Date(++calls <= 3 ? instant : boundary),
+    () => new Date(++calls === 1 ? instant : boundary),
   );
   const result = await crossing.promote(director, owner.userId, newId(), initial.version, {
     game: "ets2",
@@ -1866,7 +2261,7 @@ test("promotion uses one confirmation instant and immutable rule when a stricter
     targetLevelId: structuralLevels.ets2[1],
     reason: "Fictional clock-boundary confirmation",
   });
-  expect(calls).toBeGreaterThan(3);
+  expect(calls).toBe(1);
   const [proof] = await unit.run((tx) => unit.client(tx).select().from(qualificationPromotions));
   if (!proof) throw new Error("SYNTHETIC_PROMOTION_PROOF_MISSING");
   expect(proof).toMatchObject({
@@ -2230,8 +2625,8 @@ test("trailer allowlists reject hidden rows on new selections, keep them unchang
     tick();
     return q.publish(director, levelId, newId(), level.version, {
       rules,
-      requiredTrips: 1,
-      requiredDistanceM: "1",
+      requiredTrips: null,
+      requiredDistanceM: null,
       reason: "Fictional allowlist",
     });
   };

@@ -172,10 +172,20 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
   let qualifications: QualificationsConfig | undefined;
   if (![undefined, "true", "false"].includes(input.QUALIFICATIONS_ENABLED))
     throw new Error("Invalid environment fields: QUALIFICATIONS_ENABLED");
+  if (
+    ![undefined, "true", "false"].includes(input.QUALIFICATION_LADDER_EDITS_ENABLED) ||
+    (input.QUALIFICATION_LADDER_EDITS_ENABLED === "true" && input.QUALIFICATIONS_ENABLED !== "true")
+  )
+    throw new Error(
+      "Invalid environment fields: QUALIFICATION_LADDER_EDITS_ENABLED, QUALIFICATIONS_ENABLED",
+    );
   if (input.QUALIFICATIONS_ENABLED === "true") {
     try {
       if (!identity || !trips) throw new Error();
-      qualifications = { cursorKey: input.QUALIFICATIONS_CURSOR_KEY ?? "" };
+      qualifications = {
+        cursorKey: input.QUALIFICATIONS_CURSOR_KEY ?? "",
+        ...(input.QUALIFICATION_LADDER_EDITS_ENABLED === "true" && { ladderEditsEnabled: true }),
+      };
       validateQualificationsConfig(qualifications);
       if (
         [

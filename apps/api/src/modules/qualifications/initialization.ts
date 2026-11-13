@@ -16,6 +16,7 @@ import {
 import type { createOutbox } from "../../platform/outbox/events.js";
 import { type Actor, identityError } from "../identity/service.js";
 import { createAssignmentWriter } from "./assignment-writer.js";
+import { activeLevels } from "./ladder.js";
 export type Game = "ets2" | "ats";
 export const structuralLevels = {
   ets2: [
@@ -37,20 +38,12 @@ export function createQualificationInitialization(
 ) {
   return {
     async administrationLevels(tx: TxContext) {
-      const rows = await unit
-        .client(tx)
-        .select({
-          id: qualificationLevels.id,
-          game: qualificationLevels.game,
-          code: qualificationLevels.code,
-          name: qualificationLevels.name,
-        })
-        .from(qualificationLevels)
-        .orderBy(qualificationLevels.game, qualificationLevels.id)
-        .limit(9)
-        .for("share");
-      if (rows.length !== 8) throw identityError(503);
-      return rows;
+      return (await activeLevels(unit, tx)).map(({ id, game, name, activePosition }) => ({
+        id,
+        game,
+        name,
+        position: activePosition,
+      }));
     },
     async administrationProjection(tx: TxContext, ids: string[]) {
       if (ids.length > 100) throw new Error("QUALIFICATION_PROJECTION_BOUND_EXCEEDED");
@@ -82,14 +75,8 @@ export function createQualificationInitialization(
       );
     },
     async administrationReadiness(tx: TxContext, instant: string) {
-      const levels = await unit
-        .client(tx)
-        .select()
-        .from(qualificationLevels)
-        .orderBy(qualificationLevels.id)
-        .limit(9)
-        .for("share");
-      if (levels.length !== 8) return false;
+      const levels = await activeLevels(unit, tx);
+      const topPositions = new Map(levels.map((row) => [row.game, row.activePosition]));
       for (const level of levels) {
         const [rule] = await unit
           .client(tx)
@@ -104,7 +91,12 @@ export function createQualificationInitialization(
           .orderBy(desc(qualificationRules.effectiveAt))
           .limit(1)
           .for("share");
-        if (!rule) return false;
+        if (
+          !rule ||
+          (level.activePosition !== topPositions.get(level.game) &&
+            rule.promotionGeneration !== level.promotionGeneration)
+        )
+          return false;
       }
       return true;
     },
@@ -137,7 +129,8 @@ export function createQualificationInitialization(
           .from(qualificationLevels)
           .where(eq(qualificationLevels.id, input.levelId))
           .for("share");
-        if (!level || level.game !== input.game) throw identityError(422);
+        if (!level || level.game !== input.game || level.activePosition === null)
+          throw identityError(422);
         const [open] = await c
           .select({ id: qualificationAssignments.id })
           .from(qualificationAssignments)
@@ -173,19 +166,30 @@ export function createQualificationInitialization(
       )
         throw new Error("INVALID_INITIAL_GAMES");
       for (const game of [...input.games].sort()) {
+        const [first] = await unit
+          .client(tx)
+          .select({ id: qualificationLevels.id, legacyCode: qualificationLevels.code })
+          .from(qualificationLevels)
+          .where(and(eq(qualificationLevels.game, game), eq(qualificationLevels.activePosition, 1)))
+          .for("share");
+        if (!first) throw new Error("QUALIFICATION_INITIAL_LEVEL_MISSING");
         const id = newId();
-        await unit.client(tx).insert(initialQualifications).values({
-          id,
-          userId: input.userId,
-          game,
-          level: "trainee",
-          assignedAt: input.assignedAt,
-        });
+        await unit
+          .client(tx)
+          .insert(initialQualifications)
+          .values({
+            id,
+            userId: input.userId,
+            game,
+            levelId: first.id,
+            level: first.legacyCode === "trainee" ? "trainee" : null,
+            assignedAt: input.assignedAt,
+          });
         await unit.client(tx).insert(qualificationAssignments).values({
           id,
           userId: input.userId,
           game,
-          levelId: structuralLevels[game][0],
+          levelId: first.id,
           assignedAt: input.assignedAt,
           purpose: "initial",
           actorId: null,
@@ -222,7 +226,7 @@ export function createQualificationInitialization(
         await unit
           .client(tx)
           .update(qualificationStates)
-          .set({ assignmentId: null, version: state.version + 1 })
+          .set({ assignmentId: null, eligibleSince: null, version: state.version + 1 })
           .where(and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, game)));
       }
     },

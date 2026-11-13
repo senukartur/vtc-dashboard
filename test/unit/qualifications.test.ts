@@ -1,11 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { newId } from "@vtc/db";
 import { expect, test } from "vitest";
+import { levelReceipt } from "../../apps/api/src/modules/qualifications/level-receipts.ts";
 import { pagination } from "../../apps/api/src/modules/qualifications/pagination.ts";
-import {
-  nextLevel,
-  validateQualificationsConfig,
-} from "../../apps/api/src/modules/qualifications/service.ts";
+import { validateQualificationsConfig } from "../../apps/api/src/modules/qualifications/service.ts";
 import { qualificationEvent } from "../../apps/api/src/platform/outbox/events.ts";
 
 const actor = {
@@ -73,10 +71,25 @@ test("qualification activation has no fallback cursor key or numeric policy defa
   ).not.toThrow();
 });
 
-test("the qualifications facade follows the fixed level order within the caller's selected game", () => {
-  expect(nextLevel("trainee")).toBe("driver_iii");
-  expect(nextLevel("driver_iii")).toBe("driver_ii");
-  expect(nextLevel("driver_ii")).toBe("driver_i");
-  expect(nextLevel("driver_i")).toBeNull();
-  expect(nextLevel("unknown" as Parameters<typeof nextLevel>[0])).toBeNull();
+test("a legacy level receipt preserves historical identity and strips the retired wire field", () => {
+  const data = {
+    id: newId(),
+    game: "ets2",
+    code: "driver_ii",
+    version: 3,
+    name: "Fictional historical name",
+    ruleVersionId: newId(),
+    configured: true,
+    requiredTrips: 0,
+    requiredDistanceM: "100.25",
+  };
+  const { code: _code, ...level } = data;
+  expect(levelReceipt({ data, version: 3 }, data.id)).toEqual({
+    data: { ...level, position: 3, terminal: false, promotionConfigured: true },
+    version: 3,
+  });
+  expect(() => levelReceipt({ data, version: 3 }, newId())).toThrow();
+  expect(() =>
+    levelReceipt({ data: { ...data, reason: "Private" }, version: 3 }, data.id),
+  ).toThrow();
 });

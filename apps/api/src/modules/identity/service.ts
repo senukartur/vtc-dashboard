@@ -1978,7 +1978,7 @@ export function createIdentity(
       const member = locked.get(targetId);
       if (member?.status !== "active") throw identityError(409);
       const assigned = await memberRoles(tx, targetId, current);
-      if (!assigned.includes("trainee") && assigned.includes("driver")) return;
+      if (!assigned.includes("trainee")) return;
       await client(tx)
         .delete(roles)
         .where(and(eq(roles.userId, targetId), eq(roles.role, "trainee")));

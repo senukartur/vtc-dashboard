@@ -222,8 +222,14 @@ test("qualification activation requires identity/trips and an independent cursor
     QUALIFICATIONS_CURSOR_KEY: "b".repeat(64),
   };
   assert.deepEqual(readConfig(input).qualifications, { cursorKey: "b".repeat(64) });
+  assert.deepEqual(
+    readConfig({ ...input, QUALIFICATION_LADDER_EDITS_ENABLED: "true" }).qualifications,
+    { cursorKey: "b".repeat(64), ladderEditsEnabled: true },
+  );
   for (const changes of [
     { QUALIFICATIONS_ENABLED: "yes" },
+    { QUALIFICATION_LADDER_EDITS_ENABLED: "yes" },
+    { QUALIFICATIONS_ENABLED: "false", QUALIFICATION_LADDER_EDITS_ENABLED: "true" },
     { IDENTITY_ENABLED: "false" },
     { TRIPS_ENABLED: "false" },
     { QUALIFICATIONS_CURSOR_KEY: "" },
