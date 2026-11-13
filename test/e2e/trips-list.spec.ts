@@ -1253,3 +1253,37 @@ test(
     await expect(table(page)).toContainText("No trips yet");
   },
 );
+
+test(
+  "switching to another tab shows the loading skeleton, never the previous tab's rows",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockList(page);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/trips?*", async (route) => {
+      const scope = new URL(route.request().url()).searchParams.get("scope");
+      if (scope === "company") {
+        await gate;
+        await route.fulfill({ json: list([summary(colleague)]) }).catch(() => {});
+        return;
+      }
+      return route.fulfill({ json: list([summary(first), summary(second)]) });
+    });
+    await page.goto("/account/trips");
+    await catalogLanguage(page);
+    await expect(rowLink(page, first)).toBeVisible();
+    await page.getByRole("tab", { name: "Accepted company trips", exact: true }).click();
+    const trips = table(page);
+    await expect(trips.locator("tbody.data-table-skeleton")).toBeAttached();
+    await expect(trips).toHaveAttribute("aria-busy", "true");
+    await expect(rowLink(page, first)).toHaveCount(0);
+    await expect(page.locator(".data-table.trips-table")).not.toHaveAttribute("data-busy", "true");
+    release();
+    await expect(rowLink(page, colleague)).toBeVisible();
+    await expect(rowLink(page, first)).toHaveCount(0);
+    await expect(trips).not.toHaveAttribute("aria-busy", "true");
+  },
+);

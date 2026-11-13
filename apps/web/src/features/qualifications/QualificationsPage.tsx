@@ -240,6 +240,7 @@ function MemberQualification({
       levels.length > 0 &&
       progress.error instanceof QualificationFailure &&
       progress.error.setupRequired;
+  pages.recover(history.error);
   // Progress and the level pointer can describe different instants.
   const terminal = level?.code === "driver_i";
   const hasEffectiveRuleAtProgress =

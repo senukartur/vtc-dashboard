@@ -197,9 +197,7 @@ export function DraftList({
           })}
         </div>
       )}
-      {(list?.nextCursor || pages.hasPrevious) && (
-        <Pager pages={pages} nextCursor={list?.nextCursor} />
-      )}
+      <Pager pages={pages} nextCursor={list?.nextCursor} />
     </section>
   );
 }

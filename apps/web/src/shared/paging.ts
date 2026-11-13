@@ -107,19 +107,38 @@ export function useCursorPages(
   };
 }
 
+/** The list a request path reads: its path and query without the parameters in `vary`. */
+function listOf(path: unknown, vary: readonly string[]) {
+  if (typeof path !== "string") return null;
+  const url = new URL(path, "http://list.invalid");
+  for (const name of vary) url.searchParams.delete(name);
+  url.searchParams.sort();
+  return `${url.pathname}?${url.searchParams}`;
+}
+
 /**
- * TanStack `placeholderData`: keep the previous page while the next one loads, but only when
- * every query-key part except the request path at `pageIndex` is identical. Identity, session,
- * capability, language or schema changes therefore never reuse rows from another scope.
+ * TanStack `placeholderData`: keep the previous page while the next one loads, but only when the
+ * request path at `pathIndex` differs in nothing but the `vary` parameters (the cursor and,
+ * for sortable lists, the sort) and every other query-key part is identical. Another tab, scope
+ * or filter, and identity, session, capability, language or schema changes, never reuse rows:
+ * they show the loading skeleton instead.
  */
-export function keepPreviousPage(key: readonly unknown[], pageIndex: number) {
+export function keepPreviousPage(
+  key: readonly unknown[],
+  pathIndex: number,
+  vary: readonly string[] = ["cursor"],
+) {
+  const list = listOf(key[pathIndex], vary);
   return <T>(
     previous: T | undefined,
     previousQuery?: { queryKey: readonly unknown[] },
   ): T | undefined => {
     const other = previousQuery?.queryKey;
-    if (previous === undefined || !other || other.length !== key.length) return undefined;
-    return other.every((part, index) => index === pageIndex || Object.is(part, key[index]))
+    if (previous === undefined || !other || other.length !== key.length || list === null)
+      return undefined;
+    return other.every((part, index) =>
+      index === pathIndex ? listOf(part, vary) === list : Object.is(part, key[index]),
+    )
       ? previous
       : undefined;
   };

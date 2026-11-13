@@ -13,6 +13,8 @@ export type PagerRange = { pageSize: number; count: number; total?: number | und
  * with a click guard instead of `disabled`, so focus stays on a button that becomes unavailable
  * at the ends or while the next page loads. Desktop shows icon buttons; below the card breakpoint
  * the buttons are full width with visible text that is part of the accessible name.
+ * Without a `range` (a list outside DataTable) it renders only when another page exists, so a
+ * single-page list gets no unavailable tab stops.
  */
 export function Pager({
   pages,
@@ -33,6 +35,7 @@ export function Pager({
     canNext = !!nextCursor && !busy;
   const summary = range && !busy ? pageSummary({ page: pages.page, ...range }) : null;
   const number = (value: number) => formatDecimal(String(value), locale);
+  if (!range && !pages.hasPrevious && !nextCursor) return null;
   return (
     <nav className="pager" aria-label={label ?? t("dataTable.pages")}>
       {range && (

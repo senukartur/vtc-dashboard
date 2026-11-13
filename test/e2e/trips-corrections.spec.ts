@@ -435,9 +435,14 @@ test(
     await history.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect.poll(() => cursors.at(-1)).toBeNull();
     await expect(history.getByRole("alert")).toHaveCount(0);
+    // Back on the only page: a pager outside a table renders only when another page exists, and
+    // it would while a previous page remained.
     await expect(
-      history.getByRole("button", { name: "Previous page", exact: true }),
-    ).toBeDisabled();
+      history.getByRole("navigation", { name: "Reconciliation history pages", exact: true }),
+    ).toHaveCount(0);
+    await expect(history.getByRole("button", { name: "Previous page", exact: true })).toHaveCount(
+      0,
+    );
     await expect(history.locator("summary").filter({ hasText: secondId })).toContainText(
       "Reversed",
     );

@@ -86,13 +86,39 @@ describe("keeping the previous page", () => {
   };
   const rows = { data: ["row"] };
 
-  test("rows stay while only the request path changes", () => {
-    const keep = keepPreviousPage(key({ 6: "/api/trips?scope=mine&cursor=c2" }), 6);
-    expect(keep(rows, { queryKey: key() })).toBe(rows);
+  const path = (query: string) => key({ 6: `/api/trips?${query}` });
+  const vary = ["cursor", "order"];
+
+  test("rows stay for another page or sort of the same list", () => {
+    const next = keepPreviousPage(path("scope=mine&game=ets2&cursor=c2"), 6, vary);
+    expect(next(rows, { queryKey: path("scope=mine&game=ets2") })).toBe(rows);
+    const back = keepPreviousPage(path("scope=mine&game=ets2&cursor=c2"), 6, vary);
+    expect(back(rows, { queryKey: path("scope=mine&game=ets2&cursor=c3") })).toBe(rows);
+    // A new sort restarts the cursor; the parameter order of the path does not matter.
+    const sorted = keepPreviousPage(path("order=completion_asc&scope=mine&game=ets2"), 6, vary);
+    expect(sorted(rows, { queryKey: path("scope=mine&game=ets2&cursor=c2") })).toBe(rows);
+  });
+
+  test("another tab, scope or filter shows the loading state instead of the old rows", () => {
+    const keep = keepPreviousPage(path("scope=company&game=ets2"), 6, vary);
+    expect(keep(rows, { queryKey: path("scope=mine&game=ets2&cursor=c2") })).toBeUndefined();
+    const decided = keepPreviousPage(path("scope=review&hold=false&order=desc"), 6, vary);
+    expect(decided(rows, { queryKey: path("scope=review&hold=true&order=asc") })).toBeUndefined();
+    const filtered = keepPreviousPage(path("scope=mine&game=ats"), 6, vary);
+    expect(filtered(rows, { queryKey: path("scope=mine&game=ets2") })).toBeUndefined();
+    expect(filtered(rows, { queryKey: path("scope=mine") })).toBeUndefined();
+    const other = keepPreviousPage(key({ 6: "/api/trips/1/proposals" }), 6, vary);
+    expect(other(rows, { queryKey: key({ 6: "/api/trips/2/proposals" }) })).toBeUndefined();
+  });
+
+  test("by default only the cursor may change", () => {
+    const keep = keepPreviousPage(path("scope=mine&order=completion_asc"), 6);
+    expect(keep(rows, { queryKey: path("scope=mine&order=completion_asc&cursor=c2") })).toBe(rows);
+    expect(keep(rows, { queryKey: path("scope=mine&order=completion_desc") })).toBeUndefined();
   });
 
   test("rows are dropped for another member, session, capability, language or schema", () => {
-    const keep = keepPreviousPage(key({ 6: "/api/trips?scope=mine&cursor=c2" }), 6);
+    const keep = keepPreviousPage(path("scope=mine&cursor=c2"), 6, vary);
     for (const [index, value] of [
       [1, "member-b"],
       [2, 4],
@@ -101,7 +127,11 @@ describe("keeping the previous page", () => {
       [5, "ru"],
       [7, "ListReviewQueue"],
     ] as const)
-      expect(keep(rows, { queryKey: key({ [index]: value }) }), String(index)).toBeUndefined();
+      expect(
+        keep(rows, { queryKey: key({ [index]: value, 6: "/api/trips?scope=mine" }) }),
+        String(index),
+      ).toBeUndefined();
+    expect(keep(rows, { queryKey: path("scope=mine") })).toBe(rows);
     expect(keep(rows, { queryKey: key().slice(0, 7) })).toBeUndefined();
     expect(keep(rows)).toBeUndefined();
     expect(keep(undefined, { queryKey: key() })).toBeUndefined();

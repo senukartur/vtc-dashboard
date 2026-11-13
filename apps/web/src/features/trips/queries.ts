@@ -18,8 +18,9 @@ import {
 /** Index of the request path in the trip query key; `commandAffects` reads the same slot. */
 const pathIndex = 6;
 /**
- * `keepPage` keeps the previous page's rows (as placeholder data) while another page, sort or
- * filter of the same list loads; any identity, capability or language change drops them.
+ * `keepPage` keeps the previous page's rows (as placeholder data) while another page or sort
+ * (`cursor`, `order`) of the same list loads. Another tab, scope or filter, and any identity,
+ * capability or language change, show the loading skeleton instead.
  */
 export function useTripQuery<K extends keyof DTO>(
   path: string,
@@ -45,7 +46,9 @@ export function useTripQuery<K extends keyof DTO>(
     queryKey,
     meta: { private: true },
     enabled,
-    ...(keepPage ? { placeholderData: keepPreviousPage(queryKey, pathIndex) } : {}),
+    ...(keepPage
+      ? { placeholderData: keepPreviousPage(queryKey, pathIndex, ["cursor", "order"]) }
+      : {}),
     retry: false,
     gcTime: 0,
     staleTime: 0,
