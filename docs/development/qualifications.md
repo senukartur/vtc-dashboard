@@ -38,6 +38,10 @@ Passing Trainee in either game calls the identity-owned same-transaction role fa
 
 After a contribution replacement, confirmed proofs for affected old/new periods are re-evaluated against their **recorded** requirements. The mutable private review state is separate from immutable confirmation proof. An invalidating transition emits one versioned `promotion.review_required` safe event; another replacement while still invalid does not repeat the alert. Restored requirements clear current review state, so a subsequent invalidating transition receives a new version. The assigned qualification is retained throughout: no automatic demotion occurs. Persistent state/outbox establish the administration alert seam; inbox/polling/UI delivery remains downstream.
 
+The Qualifications service exposes `nextLevel` for a current level already resolved in the caller’s selected game. Existing progress, notification eligibility and confirmation use the same fixed succession and preserve their locks and contribution rules. A terminal level has no successor. The qualification ladder lane owns replacing the fixed order through this facade.
+
+VTC-139 adds nullable `qualification_states.eligible_since` for the current assignment. Historical onset stays unknown at migration. VTC-134 owns establishment, reset and catch-up in the same transaction as authoritative changes to eligibility. Promotion readiness still depends on the current game, assignment, effective rules and contribution totals.
+
 ## HTTP and privacy
 
 The existing VTC-028 OpenAPI routes provide levels/rule history, rename/publication, own/admin assignment history, assignments, public/own/admin progress and promotion confirmation. The VTC-029 trip review assignment route remains unmounted. Commands use current authority, same-origin session-bound CSRF, strict JSON/closed body schemas, UUID idempotency and strong `If-Match` ETags. History/progress ETags represent the member/game command state, while progress `projectionVersion` is the assignment's contribution revision. Publication/rename ETags represent the level version. Replays retain original safe command results, and stale versions conflict.

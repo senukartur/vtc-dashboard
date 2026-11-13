@@ -256,3 +256,43 @@ test("administration counters are optional and invitation counts require a separ
     valid("AdminMemberStatusCounts")({ ...restricted.data.statusCounts, inviteEmail: "private" }),
   ).toBe(false);
 });
+
+test("Stage 3 audit validates action- and object-specific closed snapshots", () => {
+  const checkEntry = valid("AuditStage3Entry");
+  const id = "e1390000-0000-4000-8000-000000000001";
+  const entry = {
+    id,
+    actorId: id,
+    actorNickname: null,
+    subjectId: id,
+    objectName: null,
+    occurredAt: "2026-01-05T12:00:00.125Z",
+    action: "roles.changed",
+    objectType: "user",
+  };
+  const after = { roles: ["dispatcher"] };
+  expect(checkEntry({ ...entry, details: null })).toBe(true);
+  expect(checkEntry({ ...entry, details: { before: null, after } })).toBe(true);
+  expect(checkEntry({ ...entry, objectType: "trip", details: { before: null, after } })).toBe(
+    false,
+  );
+  expect(
+    checkEntry({ ...entry, action: "report.reviewed", details: { before: null, after } }),
+  ).toBe(false);
+  expect(checkEntry({ ...entry, details: { before: null, after: null } })).toBe(false);
+  expect(
+    checkEntry({
+      ...entry,
+      details: { before: null, after: { ...after, reason: "Fictional private reason" } },
+    }),
+  ).toBe(false);
+  expect(
+    checkEntry({
+      ...entry,
+      details: { before: null, after: { roles: ["dispatcher", "dispatcher"] } },
+    }),
+  ).toBe(false);
+  expect(checkEntry({ ...entry, details: { before: null, after: { roles: ["invented"] } } })).toBe(
+    false,
+  );
+});
