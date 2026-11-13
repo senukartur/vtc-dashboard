@@ -49,6 +49,7 @@ for (const locale of ["en", "ru"] as const)
         await catalogLanguage(page, locale);
         await expect(rowOf(page, reviewIds.own)).toHaveCount(0);
         await expect(rowOf(page, reviewIds.late)).toBeVisible();
+        await capture(page, info, `stage-3-queue-${locale}-${width}`);
         const link = page.locator(`#trip-link-${reviewIds.late}`);
         await link.focus();
         await page.keyboard.press("Enter");
@@ -68,6 +69,7 @@ for (const locale of ["en", "ru"] as const)
         const overflows = () =>
           page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
         await expect.poll(overflows).toBe(false);
+        await capture(page, info, `stage-3-review-${locale}-${width}`);
         if (width >= 1200) {
           await expect(page).toHaveURL(new RegExp(`[?&]trip=${reviewIds.late}$`));
           await expect(panel(page).getByRole("heading", { level: 2 })).toBeFocused();
@@ -95,11 +97,12 @@ test(
     const mock = await mockReview(page, { staged: true, paged: true });
     await page.goto("/account/review");
     await expect(page.getByText("Waiting (4)", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Next page" }).click();
-    await expect.poll(() => mock.lists.at(-1)?.get("cursor")).toBeTruthy();
+    await expect(page.getByRole("button", { name: "Next page" })).toBeEnabled();
     mock.expire();
-    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect.poll(() => mock.lists.at(-1)?.has("cursor")).toBe(false);
+    await page.getByRole("button", { name: "Next page" }).click();
+    await expect
+      .poll(() => mock.lists.slice(-2).map((params) => params.has("cursor")))
+      .toEqual([true, false]);
     await page.locator(`#trip-link-${reviewIds.late}`).click();
     await expect(panel(page).getByRole("heading", { name: "Report and telemetry" })).toBeVisible();
     await page.getByRole("button", { name: "All drivers" }).click();
@@ -151,7 +154,10 @@ test(
     ).toBeDisabled();
     await decision.locator("#review-choice-accept").click();
     await expect(decision.getByRole("textbox", { name: "Note (optional)" })).toBeVisible();
-    await decision.getByRole("button", { name: "Accept", exact: true }).last().click();
+    await expect(
+      decision.getByRole("textbox", { name: "Note (optional)" }),
+    ).toHaveAccessibleDescription("Visible to the author and staff.");
+    await decision.getByRole("button", { name: "Accept trip", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect.poll(() => mock.posts.length).toBe(1);
     expect(mock.posts[0]).toMatchObject({
@@ -172,7 +178,7 @@ test(
 test(
   "Stage 3 duplicate dismissal and undo preserve the current version and old URL",
   browserCase(["@functional"]),
-  async ({ page }) => {
+  async ({ page }, info) => {
     const mock = await mockReview(page, { staged: true });
     await page.goto("/account/review/reconciliation?game=ats");
     await expect(page.getByRole("button", { name: "Duplicates (1)" })).toHaveAttribute(
@@ -184,6 +190,7 @@ test(
     await expect.poll(() => mock.duplicateLists.at(-1)?.get("game")).toBe("ets2");
     await expect(page.getByRole("link", { name: /#104$/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /#207$/ })).toBeVisible();
+    await capture(page, info, "stage-3-duplicates-en");
     await page.getByRole("button", { name: "Dismiss duplicate", exact: true }).click();
     const action = page.locator(".dispatch-duplicate-action");
     await expect(
@@ -222,7 +229,11 @@ for (const defensiveOwn of [false, true])
       await page.goto(`/account/review/${reviewIds.own}`);
       await expect.poll(() => mock.details).toEqual([detail]);
       await expect(
-        panel(page).getByText(defensiveOwn ? /cannot review your own manual report/ : /not found/i),
+        panel(page).getByText(
+          defensiveOwn
+            ? /cannot review your own manual report/
+            : "This record is unavailable or inaccessible.",
+        ),
       ).toBeVisible();
       await expect(form(page)).toHaveCount(0);
       await expect(panel(page).getByText("Reconciliation history", { exact: true })).toHaveCount(0);

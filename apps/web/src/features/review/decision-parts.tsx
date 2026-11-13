@@ -787,7 +787,7 @@ export function DecisionForm({
           }}
         />
         <small id={visibleId} className="review-muted">
-          {t("reasonVisible")}
+          {t(reasonOptional ? "dispatchNoteVisible" : "reasonVisible")}
         </small>
         {reasonInvalid && (
           <small id={blockerId} className="field-error" role="alert">
