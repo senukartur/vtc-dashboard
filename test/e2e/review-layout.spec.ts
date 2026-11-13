@@ -71,6 +71,16 @@ for (const locale of ["en", "ru"] as const)
         await expect.poll(overflows).toBe(false);
         await capture(page, info, `stage-3-review-${locale}-${width}`);
         if (width >= 1200) {
+          const driver = rowOf(page, reviewIds.over).locator(".review-driver");
+          const fits = await driver.evaluate((cell) => {
+            const range = document.createRange();
+            range.selectNodeContents(cell);
+            const bounds = cell.getBoundingClientRect();
+            return Array.from(range.getClientRects()).every(
+              (line) => line.left >= bounds.left - 0.5 && line.right <= bounds.right + 0.5,
+            );
+          });
+          expect(fits).toBe(true);
           await expect(page).toHaveURL(new RegExp(`[?&]trip=${reviewIds.late}$`));
           await expect(panel(page).getByRole("heading", { level: 2 })).toBeFocused();
           await page.keyboard.press("Escape");
@@ -108,6 +118,8 @@ test(
     await page.getByRole("button", { name: "All drivers" }).click();
     await page.getByLabel("Find a driver on this page").fill("NordWind");
     const driver = page.getByRole("combobox", { name: "Driver", exact: true });
+    await driver.focus();
+    await expect(driver).toBeFocused();
     await driver.selectOption({ label: "Fictional_NordWind" });
     const owner = mock.states.over.summary.owner.id;
     await expect.poll(() => mock.lists.at(-1)?.get("ownerId")).toBe(owner);
@@ -116,6 +128,8 @@ test(
     await expect(panel(page)).toBeVisible();
     await page.getByRole("button", { name: /^Driver: Fictional_NordWind/ }).click();
     const reasons = page.getByRole("combobox", { name: "Reason", exact: true });
+    await reasons.focus();
+    await expect(reasons).toBeFocused();
     await reasons.selectOption("rule_mass_exceeded");
     await expect.poll(() => mock.lists.at(-1)?.get("reasonCode")).toBe("rule_mass_exceeded");
     await expect(reasons).toBeFocused();
@@ -191,15 +205,15 @@ test(
     await expect(page.getByRole("link", { name: /#104$/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /#207$/ })).toBeVisible();
     await capture(page, info, "stage-3-duplicates-en");
-    await page.getByRole("button", { name: "Dismiss duplicate", exact: true }).click();
+    await page.getByRole("button", { name: "These are different trips", exact: true }).click();
     const action = page.locator(".dispatch-duplicate-action");
     await expect(
-      action.getByRole("button", { name: "Dismiss duplicate", exact: true }),
+      action.getByRole("button", { name: "These are different trips", exact: true }),
     ).toBeDisabled();
     await action
       .getByRole("textbox", { name: "Reason for dismissal" })
       .fill("  Fictional separate deliveries.  ");
-    await action.getByRole("button", { name: "Dismiss duplicate", exact: true }).click();
+    await action.getByRole("button", { name: "These are different trips", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page.getByText("Duplicate dismissed.", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Duplicates (0)" })).toBeVisible();

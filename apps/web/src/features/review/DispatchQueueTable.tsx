@@ -63,7 +63,7 @@ export function DispatchQueueTable({
             {t("game")}
           </th>
           <th scope="col" className="dispatch-col-distance">
-            {t("actualDistanceDisplay")}
+            {t("dispatchDistance")}
           </th>
           <th scope="col" className="dispatch-col-reason">
             {t("reason")}
@@ -86,7 +86,9 @@ export function DispatchQueueTable({
                     : time}
                 </time>
               </td>
-              <td className="review-driver review-break">{trip.owner.nickname}</td>
+              <td className="review-driver">
+                <span className="review-break">{trip.owner.nickname}</span>
+              </td>
               <td className="review-route">
                 <Link
                   id={`trip-link-${trip.id}`}

@@ -42,6 +42,17 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "e
     if (notification) return notification;
     const url = new URL(route.request().url());
     const path = url.pathname;
+    const reviewQueue = state.summary.reviewQueue;
+    const staged =
+      state.stagedDispatch && reviewQueue
+        ? {
+            computedAt,
+            waitingCount: reviewQueue.count,
+            oldestQueuedAt: reviewQueue.count ? computedAt : null,
+            oldestAgeSeconds: reviewQueue.oldestAgeSeconds,
+            duplicateCount: 0,
+          }
+        : undefined;
     if (path === "/api/v1/auth/csrf")
       return route.fulfill({ json: { data: { token: "NONFUNCTIONAL_FIXTURE" }, meta } });
     if (path === "/api/v1/me")
@@ -52,19 +63,8 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "e
       return route.fulfill({ json: { data: eventFixture(), meta } });
     if (path === summaryPath) {
       state.summaryReads += 1;
-      const { reviewQueue, ...sections } = state.summary;
-      const dispatch =
-        state.stagedDispatch && reviewQueue
-          ? {
-              reviewQueue: {
-                computedAt,
-                waitingCount: reviewQueue.count,
-                oldestQueuedAt: computedAt,
-                oldestAgeSeconds: reviewQueue.oldestAgeSeconds,
-                duplicateCount: 0,
-              },
-            }
-          : { legacyReviewQueue: reviewQueue };
+      const { reviewQueue: legacyReviewQueue, ...sections } = state.summary;
+      const dispatch = staged ? { reviewQueue: staged } : { legacyReviewQueue };
       const response =
         url.searchParams.get("view") !== "stage3"
           ? error(422)
@@ -75,6 +75,14 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "e
       await state.summaryGate;
       return route.fulfill(response);
     }
+    if (staged && path === "/api/v1/trips/review-summary")
+      return route.fulfill({ json: { data: staged, meta } });
+    if (
+      staged &&
+      path === "/api/v1/reconciliation-candidates" &&
+      url.searchParams.get("view") === "stage3"
+    )
+      return route.fulfill({ json: { data: { items: [], total: 0, nextCursor: null }, meta } });
     if (path === "/api/v1/me/manual-drafts")
       return route.fulfill({
         json: { data: { items: [], nextCursor: null, editingCount: 0 }, meta },
@@ -104,7 +112,7 @@ test(
     await page.goto("/account/review/reconciliation");
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     if (phone(page)) {
-      const dispatch = bottomBar(page).getByRole("link", { name: /^Dispatch/ });
+      const dispatch = bottomBar(page).getByRole("link", { name: /^Review/ });
       await expect(dispatch).toHaveAttribute("aria-current", "true");
       await inNavigation(page, async (nav) => {
         await expect(nav.getByRole("link", { name: "Reconciliation", exact: true })).toHaveCount(0);

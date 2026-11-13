@@ -715,7 +715,13 @@ export function DecisionForm({
     setSuccess(false);
   }
   const blockerText =
-    state.blocker && state.blocker !== "wait" ? t(`blocker_${state.blocker}`) : null;
+    state.blocker && state.blocker !== "wait"
+      ? t(
+          staged && state.blocker === "choice"
+            ? "dispatchChooseDecision"
+            : `blocker_${state.blocker}`,
+        )
+      : null;
   return (
     <section className="review-section review-form" aria-labelledby={headingId}>
       {title}
