@@ -329,6 +329,88 @@ test(
 );
 
 test(
+  "quick RSVP replaces an old detail read and updates its counts and roster",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const nearest = upcomingProjection();
+    const detail = stage2Fixture("getEvent", "structured")
+      .response as DTO["EventStage2EnvelopeMember"];
+    if (!nearest.data) throw new Error("Missing Stage 2 projection");
+    const dashboard = await mockStage2Dashboard(page);
+    dashboard.response = { response: "unanswered", declineReason: null, version: 7 };
+    dashboard.counts = { participating: 4, declined: 0 };
+
+    await page.route(upcomingPath, (route) =>
+      route.fulfill({
+        json: {
+          ...nearest,
+          data: {
+            ...nearest.data,
+            myResponse: dashboard.response.response,
+            myResponseVersion: dashboard.response.version,
+          },
+        },
+      }),
+    );
+    let detailReads = 0;
+    let releaseOld = () => {};
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let oldSettled = false;
+    await page.route(`**/api/v1/events/${stage2EventId}?locale=en`, async (route) => {
+      const json = {
+        ...detail,
+        data: { ...detail.data, myResponse: dashboard.response, responseCounts: dashboard.counts },
+      };
+      if (++detailReads !== 1) return route.fulfill({ json });
+      await oldGate;
+      await route.fulfill({ json }).catch(() => undefined);
+      oldSettled = true;
+    });
+    const member = accountFixture("en").data.member;
+    await page.route(`**/api/v1/events/${stage2EventId}/participants?limit=25`, (route) =>
+      route.fulfill({
+        json: {
+          data: {
+            items: dashboard.response.response === "participating" ? [{ member }] : [],
+            nextCursor: null,
+          },
+          meta: detail.meta,
+        },
+      }),
+    );
+
+    try {
+      const first = page.waitForRequest((request) => {
+        const url = new URL(request.url());
+        return url.pathname === `/api/v1/events/${stage2EventId}` && url.searchParams.has("locale");
+      });
+      await page.goto(`/account/events/${stage2EventId}`);
+      const oldRequest = await first;
+      await expect.poll(() => detailReads).toBe(1);
+      expect(oldRequest.failure()).toBeNull();
+      const header = page.locator(".event-nearest");
+      await header.getByRole("button", { name: "Going", exact: true }).click();
+      await expect(header.getByText("Response saved.", { exact: true })).toBeVisible();
+      const participants = page.getByRole("region", { name: "Participants", exact: true });
+      await expect(participants).toContainText("Participating: 5");
+      await expect(
+        participants.getByRole("link", { name: member.nickname, exact: true }),
+      ).toBeVisible();
+      await expect.poll(() => oldRequest.failure()).not.toBeNull();
+
+      releaseOld();
+      await expect.poll(() => oldSettled).toBe(true);
+      await expect(participants).toContainText("Participating: 5");
+      expect(detailReads).toBe(2);
+    } finally {
+      releaseOld();
+    }
+  },
+);
+
+test(
   "a header response replaces an in-flight first list read with current authority",
   browserCase(["@functional"]),
   async ({ page }) => {

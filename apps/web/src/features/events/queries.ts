@@ -4,7 +4,10 @@ import { useSession } from "../../app/Session.js";
 import { refreshWorkspaceSummary } from "../../app/workspace-summary.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
-import { refreshStage2EventResponse } from "./event-projection-cache.js";
+import {
+  refreshStage2EventResponse,
+  refreshStage2QuickResponseDetail,
+} from "./event-projection-cache.js";
 import { type Attempt, commandAttempt, type DTO } from "./model.js";
 import { eventStage2SessionScope } from "./stage-2-queries.js";
 import { eventRead, fail, schema } from "./transport.js";
@@ -150,13 +153,19 @@ export function useEventCommand(
       },
       { cancelRefetch: false },
     );
-    if (
-      target &&
-      responseChange &&
-      session.eventsStage2Enabled &&
-      (!options?.quickResponse || !result || replay)
-    ) {
-      await refreshStage2EventResponse(client, eventStage2SessionScope(session), target);
+    if (target && responseChange && session.eventsStage2Enabled) {
+      const scope = eventStage2SessionScope(session);
+      await Promise.all([
+        (!options?.quickResponse || !result || replay) &&
+          refreshStage2EventResponse(client, scope, target),
+        options?.quickResponse &&
+          refreshStage2QuickResponseDetail(
+            client,
+            scope,
+            target,
+            session.self?.capabilities.includes("events.manage") === true,
+          ),
+      ]);
     }
   }
   async function run<K extends keyof DTO>(

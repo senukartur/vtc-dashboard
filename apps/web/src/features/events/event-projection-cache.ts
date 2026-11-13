@@ -1,6 +1,7 @@
 import type { Query, QueryClient } from "@tanstack/react-query";
 import type { DTO } from "./model.js";
 import { isEventStage2QueryKey } from "./stage-2-queries.js";
+import { eventStage2Reads } from "./stage-2-transport.js";
 
 export type CacheRead<T> = { data: T; etag: string | null };
 type ProjectionEvent = DTO["EventStage2Public"];
@@ -61,6 +62,37 @@ export async function refreshStage2EventResponse(
   const predicate = (query: Query) => targets.has(query);
   await client.cancelQueries({ predicate });
   await client.invalidateQueries({ predicate }, { cancelRefetch: false });
+}
+
+/** Quick responses also change the open detail counts and the manager's response roster. */
+export async function refreshStage2QuickResponseDetail(
+  client: QueryClient,
+  scope: string | null,
+  id: string,
+  canManage: boolean,
+) {
+  if (!scope) return;
+  const reads = [
+    eventStage2Reads.memberDetail(id),
+    ...(canManage ? [eventStage2Reads.attendance(id), eventStage2Reads.nonresponders(id)] : []),
+  ];
+  const targets = new Set(
+    client.getQueryCache().findAll({
+      type: "active",
+      predicate: ({ queryKey }) =>
+        isEventStage2QueryKey(queryKey) &&
+        queryKey[1] === scope &&
+        reads.some(
+          ({ access, path, schema }) =>
+            queryKey.at(-3) === access &&
+            queryKey.at(-1) === schema &&
+            String(queryKey.at(-2)).split("?")[0] === path.split("?")[0],
+        ),
+    }),
+  );
+  const predicate = (query: Query) => targets.has(query);
+  await client.cancelQueries({ predicate });
+  await client.invalidateQueries({ type: "active", predicate }, { cancelRefetch: false });
 }
 
 type Lifecycle = Pick<ProjectionEvent, "id" | "version" | "status" | "startsAt">;

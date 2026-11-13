@@ -727,14 +727,16 @@ async function openEventsAs(
   expect(response.status(), "browser session status").toBe(200);
   expect(response.headers()["x-vtc-events-stage2"]).toBe(stage2 ? "1" : undefined);
   expect(response.headers()["x-vtc-events-drafts"]).toBe(drafts ? "1" : undefined);
-  const capabilities = ((await response.json()) as components["schemas"]["EnvelopeSelf"]).data
-    .capabilities;
+  const { capabilities, member } = (
+    (await response.json()) as components["schemas"]["EnvelopeSelf"]
+  ).data;
   expect(capabilities.includes("company.read")).toBe(true);
   expect(capabilities.includes(capability)).toBe(true);
   await catalogLanguage(page);
   await expect(
     page.getByRole("main").getByRole("heading", { name: "Company events", exact: true }),
   ).toBeVisible();
+  return member.id;
 }
 
 test(
@@ -875,7 +877,14 @@ test(
           url.searchParams.get("locale") === "en"
         );
       });
-      await openEventsAs(member, server.origin, "/account/events", true, false, "events.respond");
+      const memberId = await openEventsAs(
+        member,
+        server.origin,
+        "/account/events",
+        true,
+        false,
+        "events.respond",
+      );
       expect((await firstList).status()).toBe(200);
       const memberMain = member.getByRole("main");
       const card = memberMain.getByRole("listitem").filter({
@@ -933,12 +942,19 @@ test(
       expect(resetEtag).toMatch(/^"v[1-9][0-9]*"$/);
       await expect(memberMain.getByText("Response saved.", { exact: true })).toBeVisible();
       const detailOwnReads = ownReads;
+      const participants = memberMain.getByRole("region", { name: "Participants", exact: true });
+      const signedUp = participants.getByRole("region", { name: "Signed up", exact: true });
+      const selfLink = signedUp.locator(`a[href="/account/drivers/${memberId}"]`);
+      await expect(participants).toContainText("Participating: 0");
+      await expect(selfLink).toHaveCount(0);
       const fromHeader = responseWritten();
       await headerGoing.click();
       const headerResult = await fromHeader;
       expect(headerResult.status()).toBe(200);
       expect(headerResult.request().headers()["if-match"]).toBe(resetEtag);
       await expect(headerGoing).toHaveAttribute("aria-pressed", "true");
+      await expect(participants).toContainText("Participating: 1");
+      await expect(selfLink).toBeVisible();
       expect(ownReads).toBe(detailOwnReads);
 
       expect(journey.blockedRequests()).toBe(0);
