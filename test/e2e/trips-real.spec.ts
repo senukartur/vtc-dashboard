@@ -186,7 +186,9 @@ test(
       await actions.getByRole("link", { name: event.title, exact: true }).click();
       await expect(page).toHaveURL(`${origin}/account/events/${event.id}`);
       const refreshed = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === "/api/v1/me/workspace-summary",
+        (response) =>
+          new URL(response.url()).searchParams.get("view") === "stage3" &&
+          new URL(response.url()).pathname === "/api/v1/me/workspace-summary",
       );
       await page
         .getByRole("group", { name: "Your response", exact: true })
@@ -198,7 +200,8 @@ test(
       await expect(nav.getByRole("link", { name: nextEvents, exact: true })).toBeVisible();
       const refreshResponse = await refreshed;
       expect(refreshResponse.status()).toBe(200);
-      const freshSummary = (await refreshResponse.json()) as Schemas["EnvelopeWorkspaceSummary"];
+      const freshSummary =
+        (await refreshResponse.json()) as Schemas["WorkspaceStage3SummaryEnvelope"];
       expect(freshSummary.data.unansweredUpcomingEvents?.count).toBe(eventCount - 1);
       await nav.getByRole("link", { name: "Overview", exact: true }).click();
       await expect(actions.getByRole("link", { name: event.title, exact: true })).toHaveCount(0);
@@ -209,14 +212,16 @@ test(
       const staffSummaryRead = page.waitForResponse(
         (response) =>
           response.request().method() === "GET" &&
+          new URL(response.url()).searchParams.get("view") === "stage3" &&
           new URL(response.url()).pathname === "/api/v1/me/workspace-summary",
       );
       await page.goto("/account/dashboard");
       const staffSummaryResponse = await staffSummaryRead;
       expect(staffSummaryResponse.status()).toBe(200);
       const staffSummary =
-        (await staffSummaryResponse.json()) as Schemas["EnvelopeWorkspaceSummary"];
-      const overall = staffSummary.data.reviewQueue;
+        (await staffSummaryResponse.json()) as Schemas["WorkspaceStage3SummaryEnvelope"];
+      expect(staffSummary.data.reviewQueue).toBeUndefined();
+      const overall = staffSummary.data.legacyReviewQueue;
       if (!overall || overall.oldestAgeSeconds === null)
         throw new Error("SYNTHETIC_REVIEW_AGE_REQUIRED");
       expect(overall.count).toBe(before.count + 1);

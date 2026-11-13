@@ -21,12 +21,12 @@ test(
   async ({ page }) => {
     const mock = await mockReview(page);
     const computedAt = "2026-11-12T08:00:00.000Z";
-    let summary: components["schemas"]["WorkspaceSummary"] = {
+    let summary: components["schemas"]["WorkspaceStage3Summary"] = {
       computedAt,
-      reviewQueue: { count: 41, oldestAgeSeconds: 0 },
+      legacyReviewQueue: { count: 41, oldestAgeSeconds: 0 },
     };
     let reads = 0;
-    await page.route("**/api/v1/me/workspace-summary", (route) => {
+    await page.route("**/api/v1/me/workspace-summary?view=stage3", (route) => {
       reads += 1;
       return route.fulfill({ json: envelope(summary) });
     });
@@ -42,7 +42,7 @@ test(
     await expect.poll(() => mock.lists.at(-1)?.get("hold")).toBe("false");
     await expect(header.getByText("Awaiting decision overall (41)", { exact: true })).toBeVisible();
     expect(reads).toBe(1);
-    summary = { computedAt, reviewQueue: { count: 0, oldestAgeSeconds: null } };
+    summary = { computedAt, legacyReviewQueue: { count: 0, oldestAgeSeconds: null } };
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(header.getByText("Awaiting decision overall (0)", { exact: true })).toBeVisible();
     await expect(
@@ -63,11 +63,11 @@ for (const locale of ["en", "ru"] as const)
     browserCase(["@functional"]),
     async ({ page }) => {
       await mockReview(page, { locale, awaiting: "own" });
-      const summary: components["schemas"]["WorkspaceSummary"] = {
+      const summary: components["schemas"]["WorkspaceStage3Summary"] = {
         computedAt: "2026-11-12T08:00:00.000Z",
-        reviewQueue: { count: 0, oldestAgeSeconds: null },
+        legacyReviewQueue: { count: 0, oldestAgeSeconds: null },
       };
-      await page.route("**/api/v1/me/workspace-summary", (route) =>
+      await page.route("**/api/v1/me/workspace-summary?view=stage3", (route) =>
         route.fulfill({ json: envelope(summary) }),
       );
       await page.goto("/account/review");

@@ -485,6 +485,13 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
       if (!options.forbidden) self.data.capabilities.push("trips.review");
       return route.fulfill({ json: self });
     }
+    if (path === "/api/v1/me/workspace-summary" && url.searchParams.get("view") === "stage3")
+      return route.fulfill({
+        json: envelope({
+          computedAt: "2026-11-12T08:00:00.000Z",
+          ...(!options.forbidden && { legacyReviewQueue: { count: 4, oldestAgeSeconds: 7200 } }),
+        }),
+      });
     if (path === "/api/v1/trips") {
       mock.lists.push(url.searchParams);
       const hold = url.searchParams.get("hold") === "true",
