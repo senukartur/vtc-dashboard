@@ -269,10 +269,26 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
   let events: EventsConfig | undefined;
   if (![undefined, "true", "false"].includes(input.EVENTS_ENABLED))
     throw new Error("Invalid environment fields: EVENTS_ENABLED");
+  if (![undefined, "true", "false"].includes(input.EVENTS_ROUTE_ENABLED))
+    throw new Error("Invalid environment fields: EVENTS_ROUTE_ENABLED");
+  const eventRoutesEnabled = input.EVENTS_ROUTE_ENABLED === "true";
+  if (![undefined, "true", "false"].includes(input.EVENTS_DRAFTS_ENABLED))
+    throw new Error("Invalid environment fields: EVENTS_DRAFTS_ENABLED");
+  const eventDraftsEnabled = input.EVENTS_DRAFTS_ENABLED === "true";
+  if (eventDraftsEnabled && !eventRoutesEnabled)
+    throw new Error("Invalid environment fields: EVENTS_DRAFTS_ENABLED, EVENTS_ROUTE_ENABLED");
+  if (eventRoutesEnabled && (input.EVENTS_ENABLED !== "true" || !catalogs))
+    throw new Error(
+      "Invalid environment fields: EVENTS_ROUTE_ENABLED, EVENTS_ENABLED, CATALOGS_ENABLED",
+    );
   if (input.EVENTS_ENABLED === "true") {
     try {
       if (!identity) throw new Error();
-      events = { cursorKey: input.EVENTS_CURSOR_KEY ?? "" };
+      events = {
+        cursorKey: input.EVENTS_CURSOR_KEY ?? "",
+        ...(eventRoutesEnabled ? { routeEnabled: true } : {}),
+        ...(eventDraftsEnabled ? { draftsEnabled: true } : {}),
+      };
       validateEventsConfig(events);
       if (
         [

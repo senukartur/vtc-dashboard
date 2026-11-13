@@ -1154,7 +1154,7 @@ export interface paths {
         };
         /**
          * listCatalogDepots
-         * @description Company and city depots of one game. companyId lists the cities of a company (ordered by city name), cityId the companies in a city, both narrow to one depot; otherwise ordered by company name. Rows hidden by the depot, its company or its city are excluded unless includeHidden is true. Explicit hidden=only selects the depot's own hidden flag and takes precedence over includeHidden. Apply filters before paging and bind them into the cursor.
+         * @description Company and city depots of one game. companyId lists the cities of a company (ordered by city name), cityId the companies in a city, both narrow to one depot; otherwise ordered by the company's canonical name. With cityId a search matches the company name or code; with only companyId it matches the city names or code; otherwise any of them. Rows hidden by the depot, its company or its city are excluded unless includeHidden is true. Explicit hidden=only selects the depot's own hidden flag and takes precedence over includeHidden. Apply filters before paging and bind them into the cursor.
          */
         get: operations["listCatalogDepots"];
         put?: never;
@@ -1685,7 +1685,7 @@ export interface paths {
         };
         /**
          * listMyManualDrafts
-         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. Optional state=editing narrows the owner's list. Optional editingCount counts the owner's editing drafts before cursor pagination.
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. Optional state=editing narrows the owner's list. Optional editingCount counts the owner's editing drafts before cursor pagination. Optional locale chooses the label language; omission uses the account locale.
          */
         get: operations["listMyManualDrafts"];
         put?: never;
@@ -2879,9 +2879,8 @@ export interface components {
             /** @enum {string} */
             game: "ets2" | "ats";
             nameEn: string;
-            nameRu?: string | null;
         };
-        /** @description A company operating in a city. hidden is the depot's own flag; the company and city labels carry theirs. A depot is listed by default only when all three are visible. */
+        /** @description A company operating in a city. hidden is the depot's own flag; the company and city labels carry theirs. A depot is listed by default only when all three are visible. The company label is the company's canonical name. */
         CatalogDepot: {
             city: components["schemas"]["CatalogDepotCity"];
             company: components["schemas"]["CatalogDepotCompany"];
@@ -2935,7 +2934,6 @@ export interface components {
             /** @enum {string} */
             game: "ets2" | "ats";
             nameEn: string;
-            nameRu?: string | null;
             steamAppId?: number | null;
         };
         CatalogImportIssue: {
@@ -2970,7 +2968,7 @@ export interface components {
             rows: number;
             unchanged: number;
         };
-        /** @description One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes, logo (null without an uploaded image) only on companies. On the trailers list, code is the telemetry body type. */
+        /** @description One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes, logo (null without an uploaded image) only on companies. On the trailers list, code is the telemetry body type. DLC and company labels always show the canonical name. */
         CatalogItem: {
             adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
@@ -2989,6 +2987,7 @@ export interface components {
             nameEn: string;
             /** @description The city's canonical name. Present only on the cities list. */
             nameNative?: string | null;
+            /** @description Always null on the dlcs and companies lists, which use only their canonical name; a stored Russian name is kept but never returned. */
             nameRu: string | null;
             region?: components["schemas"]["CatalogLabel"] | null;
             regionId?: string | null;
@@ -3010,11 +3009,13 @@ export interface components {
             hidden?: boolean;
             nameEn?: string;
             nameNative?: string | null;
+            /** @description Rejected on the dlcs and companies lists. */
             nameRu?: string | null;
             regionId?: string | null;
             steamAppId?: number | null;
         };
         CatalogLabel: {
+            /** @description True when a requested Russian name is missing and English is shown. Always false on DLC and company labels, which use only their canonical name. */
             englishFallback: boolean;
             /** Format: uuid */
             entityId: string;
@@ -3065,20 +3066,14 @@ export interface components {
                     hidden: number;
                     /** @description Default-visible companies in this game without a logo. */
                     missingLogo?: number;
-                    /** @description Default-visible rows in this game missing a Russian name. */
-                    untranslated?: number;
                     visible: number;
                 };
                 depots: {
                     hidden: number;
-                    /** @description Default-visible depots in this game whose company or city lacks a Russian name. */
-                    untranslated?: number;
                     visible: number;
                 };
                 dlcs: {
                     hidden: number;
-                    /** @description Default-visible rows in this game missing a Russian name. */
-                    untranslated?: number;
                     visible: number;
                 };
                 regions: {
@@ -3949,15 +3944,23 @@ export interface components {
             items: components["schemas"]["EventStage2MemberListItem"][];
             nextCursor: string | null;
         };
-        /** @description Null own response indicates unavailable; unanswered is a known absence of a response. Counts exclude unanswered and contain no identities or reasons. */
+        /** @description Null own response indicates unavailable. Unanswered is a known absence of an answer. Counts exclude unanswered and contain no identities or reasons. */
         EventStage2MemberListItem: {
             event: components["schemas"]["EventStage2Public"];
             myResponse: ("unanswered" | "participating" | "declined") | null;
+            /** @description Current own RSVP version for If-Match. Starts at 1 when an eligible member has no RSVP row. Null exactly when myResponse is null. */
+            myResponseVersion: number | null;
             organizerMemberId: string | null;
             responseCounts: components["schemas"]["EventResponseCounts"];
             /** @enum {string} */
             visibility: "public" | "members";
-        };
+        } & ({
+            myResponse: null;
+            myResponseVersion: null;
+        } | {
+            myResponse: string;
+            myResponseVersion: number;
+        });
         EventStage2Nonresponders: {
             items: components["schemas"]["MemberSummary"][];
             nextCursor: string | null;
@@ -4031,7 +4034,15 @@ export interface components {
         EventStage2Upcoming: {
             event: components["schemas"]["EventStage2Public"];
             myResponse: ("unanswered" | "participating" | "declined") | null;
-        };
+            /** @description Current own RSVP version for If-Match. Starts at 1 when an eligible member has no RSVP row. Null exactly when myResponse is null. */
+            myResponseVersion: number | null;
+        } & ({
+            myResponse: null;
+            myResponseVersion: null;
+        } | {
+            myResponse: string;
+            myResponseVersion: number;
+        });
         /** @description Stable public states only: internal deleting returns retryable 503 EVIDENCE_TRANSITION on metadata/content access, never ready. Expired metadata/history remains readable; expired content returns 410 EVIDENCE_EXPIRED. No paths or object generations are exposed. */
         Evidence: {
             byteLength: number;
@@ -6219,6 +6230,8 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
             429: components["responses"]["Error"];
             503: components["responses"]["Error"];
             default: components["responses"]["Error"];
@@ -7412,7 +7425,7 @@ export interface operations {
                 logo?: "missing";
                 regionId?: string;
                 search?: string;
-                /** @description Select rows missing a Russian name. English remains required. */
+                /** @description Select rows missing a Russian name. English remains required. Not offered on the dlcs and companies lists, which use only their canonical name (422). */
                 untranslated?: true;
             };
             header?: never;
@@ -7508,6 +7521,7 @@ export interface operations {
                 cityId?: string;
                 companyId?: string;
                 cursor?: components["parameters"]["Cursor"];
+                depotId?: string;
                 dlc?: "base" | string;
                 game: "ets2" | "ats";
                 /** @description Select rows with their own hidden flag. Takes precedence over includeHidden. */
@@ -7516,8 +7530,6 @@ export interface operations {
                 limit?: components["parameters"]["Limit"];
                 locale?: "en" | "ru";
                 search?: string;
-                /** @description Select depots whose linked company or city lacks a Russian name. */
-                untranslated?: true;
             };
             header?: never;
             path?: never;
@@ -8411,6 +8423,8 @@ export interface operations {
             query?: {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
+                /** @description Optional override of the authenticated owner's saved locale for the returned catalog labels, with English fallback for each missing translation. Ordering and the cursor do not depend on it. */
+                locale?: "en" | "ru";
                 /** @description Limit the list to editing drafts. Omission preserves the existing list. */
                 state?: "editing";
             };

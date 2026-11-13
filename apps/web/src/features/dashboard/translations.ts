@@ -6,8 +6,6 @@ export const dashboardTranslations = {
       title: "Дела",
       loading: "Загрузка списка действий…",
       empty: "Нет действий, требующих вашего внимания.",
-      unavailable: "Список действий недоступен.",
-      partial: "Некоторые действия недоступны.",
       error: "Не удалось загрузить список действий.",
       fixes: "Рейсы на исправление ({{total}})",
       openTrip: "Открыть рейс",
@@ -72,9 +70,9 @@ export const dashboardTranslations = {
     },
     reviewQueue: {
       title: "Очередь проверки",
-      pendingCount: "Рейсов ожидают проверки",
+      pendingCount: "Ждут вашего решения",
       reviewLink: "Перейти к проверке",
-      noPending: "Все рейсы проверены",
+      noPending: "Нет рейсов, ожидающих вашего решения",
       error: "Не удалось загрузить очередь проверки",
     },
     leaderboard: {
@@ -154,8 +152,6 @@ export const dashboardTranslations = {
       title: "Needs attention",
       loading: "Loading actions…",
       empty: "Nothing needs your attention.",
-      unavailable: "Actions are unavailable.",
-      partial: "Some actions are unavailable.",
       error: "Could not load your actions.",
       fixes: "Trips returned for fixes ({{total}})",
       openTrip: "Open trip",
@@ -222,9 +218,9 @@ export const dashboardTranslations = {
     },
     reviewQueue: {
       title: "Review Queue",
-      pendingCount: "Trips pending review",
+      pendingCount: "Awaiting your decision",
       reviewLink: "Go to review",
-      noPending: "All trips reviewed",
+      noPending: "No trips are waiting for your decision",
       error: "Could not load the review queue",
     },
     leaderboard: {

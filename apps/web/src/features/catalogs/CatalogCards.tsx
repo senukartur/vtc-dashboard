@@ -35,7 +35,7 @@ export function CatalogCards({
           <div className="catalog-card-body">
             {list === "companies" && <CompanyLogo companyId={item.id} logo={item.logo} />}
             <div className="catalog-card-title">
-              <span>{item.display.label}</span> <RowBadges item={item} />
+              <span>{item.display.label}</span> <RowBadges list={list} item={item} />
             </div>
             <span className="catalog-card-meta">
               <code>{item.code}</code>

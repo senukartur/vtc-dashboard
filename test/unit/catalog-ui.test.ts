@@ -10,10 +10,12 @@ import {
   importColumns,
   importIssueText,
   importLinesFromDetails,
+  isTranslatable,
   logoSrc,
   parseFilters,
   templateCsv,
   templateJson,
+  translatableTabs,
 } from "../../apps/web/src/features/catalogs/model.ts";
 import { catalogTranslations } from "../../apps/web/src/features/catalogs/translations.ts";
 import {
@@ -29,10 +31,16 @@ import {
   comboboxRows,
   leaveAction,
   moveActive,
+  optionRows,
   searchTerm,
   selectorDisplay,
   typedText,
 } from "../../apps/web/src/shared/catalog-selectors/combobox.ts";
+import {
+  depotCompanyOptions,
+  depotOptionText,
+  visibleDepot,
+} from "../../apps/web/src/shared/catalog-selectors/depots.ts";
 import {
   type CatalogItem,
   catalogParams,
@@ -236,9 +244,17 @@ test("the same text is kept on a field that does not show the extra row", () => 
   expect(typedText("Ust")).toBe("Ust");
 });
 
-test("the English fallback badge follows only the display returned by the server", () => {
-  expect(fallbackBadge(item)).toBe(true);
-  expect(fallbackBadge({ ...item, display: { ...label, englishFallback: false } })).toBe(false);
+test("the English fallback badge follows the server display on translated lists only", () => {
+  expect(fallbackBadge("cities", item)).toBe(true);
+  expect(fallbackBadge("cities", { ...item, display: { ...label, englishFallback: false } })).toBe(
+    false,
+  );
+  // DLCs and companies use their canonical name: no "no translation" mark even on a stale row.
+  expect(fallbackBadge("companies", item)).toBe(false);
+  expect(fallbackBadge("dlcs", item)).toBe(false);
+  expect(translatableTabs).toEqual(["regions", "cities", "cargoes", "trailers"]);
+  for (const tab of ["dlcs", "companies", "depots"] as const)
+    expect(isTranslatable(tab)).toBe(false);
   // Hidden is carried on the row and on a referenced label without losing the name.
   expect(labelSchema.parse({ ...label, hidden: true }).label).toBe("Fictional city");
 });
@@ -335,11 +351,16 @@ test("maintenance deep links choose one supported mode and map to the exact list
       "tab=companies&logo=missing",
       { logo: "missing" },
     ],
+    // Depots, companies and DLCs have no translation, so a shared link drops the filter.
     [
       "tab=depots&logo=missing&untranslated=true&hidden=true",
-      "tab=depots&untranslated=true",
-      { untranslated: "true" },
+      "tab=depots&hidden=true",
+      { includeHidden: "true" },
     ],
+    ["tab=depots&untranslated=true", "tab=depots", {}],
+    ["tab=dlcs&untranslated=true", "tab=dlcs", {}],
+    ["tab=companies&untranslated=true", "tab=companies", {}],
+    ["tab=cargoes&untranslated=true", "tab=cargoes&untranslated=true", { untranslated: "true" }],
     ["tab=depots&logo=missing&hidden=true", "tab=depots&hidden=true", { includeHidden: "true" }],
     ["tab=companies&logo=true&hidden=1&untranslated=on", "tab=companies", {}],
   ] as const;
@@ -381,6 +402,11 @@ test("maintenance deep links choose one supported mode and map to the exact list
   expect(filterParams({ ...filters, tab: "dlcs", maintenance: "missingLogo" }).has("logo")).toBe(
     false,
   );
+  for (const tab of ["dlcs", "companies", "depots"] as const) {
+    const untranslated = { ...filters, tab, maintenance: "untranslated" } as const;
+    expect(filterParams(untranslated).has("untranslated")).toBe(false);
+    expect(catalogListParams(untranslated, "ru").untranslated).toBeUndefined();
+  }
 });
 
 test("request parameters drop empty values and keep exact IDs and search text", () => {
@@ -420,15 +446,23 @@ test("web schemas accept server shapes and reject unknown or retired fields", ()
   expect(summarySchema.parse({ game: "ats", lists }).lists.cities).toEqual(count);
   const expanded = { ...count, untranslated: 1 };
   const expandedLists = {
-    dlcs: expanded,
+    dlcs: count,
     regions: expanded,
     cities: expanded,
-    companies: { ...expanded, missingLogo: 0 },
-    depots: expanded,
+    companies: { ...count, missingLogo: 0 },
+    depots: count,
     cargoes: expanded,
     trailers: expanded,
   };
   expect(summarySchema.parse({ game: "ats", lists: expandedLists }).lists).toEqual(expandedLists);
+  // Canonical lists carry no translation and so no untranslated count.
+  for (const canonical of ["dlcs", "companies", "depots"] as const)
+    expect(
+      summarySchema.safeParse({
+        game: "ats",
+        lists: { ...expandedLists, [canonical]: { ...expandedLists[canonical], untranslated: 0 } },
+      }).success,
+    ).toBe(false);
   for (const cities of [
     { ...expanded, missingLogo: 0 },
     { ...expanded, unexpected: true },
@@ -444,7 +478,7 @@ test("web schemas accept server shapes and reject unknown or retired fields", ()
       game: "ats",
       lists: {
         ...expandedLists,
-        companies: { ...expanded, missingLogo: Number.MAX_SAFE_INTEGER + 1 },
+        companies: { ...count, missingLogo: Number.MAX_SAFE_INTEGER + 1 },
       },
     }).success,
   ).toBe(false);
@@ -689,4 +723,81 @@ test("logo and depot dry-run messages are localized for both languages", () => {
     expect(importIssueText(ru, { field, reason })).toBe(catalogTranslations.ru[key]);
   }
   expect(importChangedText(en, ["logo", "dlc_code"])).toBe("Changed fields: Logo, Source");
+});
+
+test("the shared depot picker offers each eligible company once, by name and code", () => {
+  const cityId = regionId;
+  const company = (companyId: string, name: string, code: string, hidden = false) => ({
+    id: companyId,
+    code,
+    label: {
+      entityId: companyId,
+      label: name,
+      requestedLocale: "ru" as const,
+      renderedLocale: "en" as const,
+      englishFallback: false,
+      hidden,
+    },
+    logo: null,
+  });
+  const depot = (
+    depotId: string,
+    owner: ReturnType<typeof company>,
+    extra: { hidden?: boolean; game?: "ets2" | "ats"; city?: string } = {},
+  ) => ({
+    id: depotId,
+    game: extra.game ?? "ets2",
+    hidden: extra.hidden ?? false,
+    dlcId: null,
+    dlc: null,
+    company: owner,
+    city: {
+      id: extra.city ?? cityId,
+      code: "fictional_city",
+      label: { ...label, entityId: cityId },
+    },
+  });
+  const first = company("53000000-0000-4000-8000-000000000001", "Fictional Builders", "fictbuild");
+  const namesake = company(
+    "53000000-0000-4000-8000-000000000002",
+    "Fictional Builders",
+    "fictbuild_w",
+  );
+  const hiddenCo = company("53000000-0000-4000-8000-000000000003", "Fictional Hidden", "hid", true);
+  const other = company("53000000-0000-4000-8000-000000000004", "Fictional Other", "other");
+  const depots = [
+    depot("54000000-0000-4000-8000-000000000001", first),
+    depot("54000000-0000-4000-8000-000000000002", namesake),
+    depot("54000000-0000-4000-8000-000000000003", first),
+    depot("54000000-0000-4000-8000-000000000004", hiddenCo),
+    depot("54000000-0000-4000-8000-000000000005", other, { hidden: true }),
+    depot("54000000-0000-4000-8000-000000000006", other, { game: "ats" }),
+    depot("54000000-0000-4000-8000-000000000007", other, { city: id }),
+  ];
+  expect(depots.map((row) => visibleDepot(row, "ets2", cityId))).toEqual([
+    true,
+    true,
+    true,
+    false,
+    false,
+    false,
+    false,
+  ]);
+  const options = depotCompanyOptions(depots, "ets2", cityId);
+  // Two companies of one name stay two rows, told apart by their codes.
+  expect(options).toEqual([
+    { id: first.id, label: "Fictional Builders", code: "fictbuild" },
+    { id: namesake.id, label: "Fictional Builders", code: "fictbuild_w" },
+  ]);
+  expect(options.map(depotOptionText)).toEqual([
+    "Fictional Builders · fictbuild",
+    "Fictional Builders · fictbuild_w",
+  ]);
+  expect(optionRows(options, { hasMore: true, failed: false }).map((row) => row.key)).toEqual([
+    first.id,
+    namesake.id,
+    "more",
+  ]);
+  expect(optionRows(options, { hasMore: true, failed: true }).at(-1)?.kind).toBe("refresh");
+  expect(optionRows([], { hasMore: false, failed: false })).toEqual([]);
 });

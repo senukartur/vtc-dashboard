@@ -430,8 +430,8 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
 
 export type ReviewMockOptions = {
   locale?: "en" | "ru";
-  /** Awaiting list replaced by an empty page or an HTTP failure. */
-  awaiting?: "empty" | number;
+  /** Awaiting list replaced by an empty page, only the viewer's own trip or an HTTP failure. */
+  awaiting?: "empty" | "own" | number;
   /** Status of the first decision POST (later ones succeed). */
   firstDecision?: number;
   /** Session without trips.review. */
@@ -501,6 +501,7 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
         .filter((summary) => !game || summary.game === game)
         .filter((summary) => !source || summary.sourceKinds.some((kind) => kind === source));
       if (hold && awaiting === "empty") items = [];
+      if (hold && awaiting === "own") items = items.filter(({ owner }) => owner.id === member.id);
       if (url.searchParams.get("order") === "desc") items = items.reverse();
       if (cursor !== null && (expired || cursor !== bound))
         return route.fulfill({ status: 409, json: { error: { code: "PRIVATE_SENTINEL" } } });

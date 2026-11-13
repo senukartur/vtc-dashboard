@@ -93,7 +93,8 @@ export function TripListFilters({
                 <option value="">{t("anyDecision")}</option>
                 {["unassessed", "pending_review", "accepted", "rejected"].map((decision) => (
                   <option value={decision} key={decision}>
-                    {t(decision)}
+                    {/* A returned trip can be fixed and resubmitted; the filter names it that way. */}
+                    {t(decision === "rejected" ? "decisionFilter_rejected" : decision)}
                   </option>
                 ))}
               </Select>

@@ -926,6 +926,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except BaseException:
-        print('Operation: failed; inspect private operator state', file=sys.stderr)
+    except BaseException as error:
+        if type(error) is RuntimeError and error.args == ('EVENT_ROUTE_HISTORY_REQUIRES_STAGE2',):
+            print('Activation: published event route history requires Stage 2', file=sys.stderr)
+        else:
+            print('Operation: failed; inspect private operator state', file=sys.stderr)
         sys.exit(1)

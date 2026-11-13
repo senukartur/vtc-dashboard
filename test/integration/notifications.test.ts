@@ -10,12 +10,12 @@ import {
   type UnitOfWork,
 } from "@vtc/db";
 import { applications } from "@vtc/db/admissions-schema";
+import { catalogCompanies, catalogCompanyCities } from "@vtc/db/catalogs-schema";
 import { durableJobs, outboxEvents } from "@vtc/db/platform-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { afterAll as after, beforeAll as before, beforeEach, expect, test } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
-import { catalogConfig } from "../fixtures/catalogs/synthetic.ts";
 import { createEvents, type Events } from "../../apps/api/src/modules/events/service.ts";
 import { csrfProtection } from "../../apps/api/src/modules/identity/http.ts";
 import {
@@ -58,6 +58,7 @@ import {
   type ManualEvent,
   notificationEventTypes,
 } from "../../apps/api/src/platform/outbox/events.ts";
+import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
 import {
   guardedSettings,
   reset,
@@ -74,10 +75,12 @@ let control: Connection,
   unit: UnitOfWork,
   identity: Identity,
   events: Events,
+  stagedEvents: Events,
   trips: Trips,
   qualifications: Qualifications,
   decisions: TripDecisions,
-  service: Notifications;
+  service: Notifications,
+  stagedNotifications: Notifications;
 let director: Actor,
   owner: Actor,
   observer: Actor,
@@ -165,6 +168,23 @@ beforeAll(async () => {
     { identity, trips, qualifications, events, decisions, manual },
     now,
   );
+  stagedEvents = createEvents(
+    unit,
+    { cursorKey: key(), routeEnabled: true, draftsEnabled: true },
+    {
+      identity,
+      catalogs,
+      notificationChanged: (tx, id, memberId) =>
+        invalidateEventNotifications(unit, tx, id, memberId),
+    },
+    now,
+  );
+  stagedNotifications = createNotifications(
+    unit,
+    config,
+    { identity, trips, qualifications, events: stagedEvents, decisions, manual },
+    now,
+  );
 }, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
   instant = Date.now();
@@ -182,6 +202,12 @@ beforeEach(async () => {
     "event_attendances",
     "event_attendance_revisions",
     "event_response_revisions",
+    "event_revision_dlcs",
+    "event_revision_details",
+    "event_workflow_commands",
+    "event_draft_dlcs",
+    "event_drafts",
+    "event_metadata",
     "event_revisions",
     "events",
   ])
@@ -202,10 +228,10 @@ async function drain(q = queue()) {
   }
   throw new Error("SYNTHETIC_NOTIFICATION_DRAIN_EXHAUSTED");
 }
-async function repairOneMaterial() {
+async function repairOneMaterial(eventService = events) {
   return unit.run(async (tx) => {
     await identity.notificationContextInTransaction(tx);
-    return events.repairPendingNotificationMaterialInTransaction(tx);
+    return eventService.repairPendingNotificationMaterialInTransaction(tx);
   });
 }
 function payload(
@@ -760,6 +786,59 @@ test("typed old-producer event recovery repairs acknowledged scheduling markers 
   expect((await service.poll(owner)).items.some((r) => r.category === "event.reminder")).toBe(
     false,
   );
+});
+
+test("draft publication is one notification-eligible transition and its published seed repairs", async () => {
+  const drafts = stagedEvents.drafts;
+  if (!drafts) throw new Error("DRAFT_FIXTURE_REQUIRED");
+  const {
+    data: { id },
+  } = await drafts.create(director, newId(), { title: "Fictional notification draft" });
+  expect(await stagedNotifications.maintenance()).toBe(0);
+  expect((await stagedNotifications.poll(owner)).items).toEqual([]);
+  const { organizer: _organizer, ...fields } = eventInput();
+  await drafts.update(director, id, newId(), 1, {
+    ...fields,
+    organizerMemberId: director.userId,
+    platform: "truckersmp",
+  });
+  const publicationKey = newId();
+  const first = await drafts.publish(director, id, publicationKey, 2, "en");
+  expect(await drafts.publish(director, id, publicationKey, 2, "en")).toEqual(first);
+  const [eventsCreated] = await control.query<RowDataPacket[]>(
+    "SELECT data FROM outbox_events WHERE type='event.changed'",
+  );
+  expect(eventsCreated).toHaveLength(1);
+  expect(eventsCreated[0]?.data).toMatchObject({ eventId: id, category: "created" });
+  await control.execute("UPDATE events SET notification_material=NULL WHERE id=?", [
+    Buffer.from(id),
+  ]);
+  expect(await repairOneMaterial(stagedEvents)).toMatchObject({
+    throughVersion: 1,
+    complete: true,
+    scanned: 1,
+  });
+  expect(await repairOneMaterial(stagedEvents)).toBeNull();
+
+  const queue = createQueue(
+    unit,
+    [stagedNotifications.handler, stagedNotifications.reminderHandler],
+    [stagedNotifications.subscription],
+  );
+  await drain(queue);
+  expect((await stagedNotifications.poll(owner)).items).toEqual([]);
+  await stagedEvents.respond(owner, id, newId(), 1, { response: "participating" });
+  await drain(queue);
+  instant += 1_000;
+  await stagedNotifications.maintenance();
+  await drain(queue);
+  expect((await stagedNotifications.poll(owner)).items.map(({ category }) => category)).toEqual([
+    "event.reminder",
+  ]);
+  expect((await stagedNotifications.poll(observer)).items).toEqual([]);
+  expect(await stagedNotifications.maintenance()).toBe(0);
+  await drain(queue);
+  expect((await stagedNotifications.poll(owner)).items).toHaveLength(1);
 });
 
 test("concurrent reminder maintenance owns pending rows and two workers retain one effect", async () => {
@@ -2342,4 +2421,98 @@ test("manual review notifications require the current revision or pending correc
   );
   await drain();
   expect(categories((await service.poll(owner)).items)).toHaveLength(2);
+});
+test("workers replay legacy route text and use ordered city/depot identity after activation", async () => {
+  const { id, input } = await participating();
+  const stagedQueue = createQueue(
+    unit,
+    [stagedNotifications.handler, stagedNotifications.reminderHandler],
+    [stagedNotifications.subscription],
+  );
+  const routeAlerts = async () =>
+    (await stagedNotifications.history(owner)).items.filter(
+      (item) => item.category === "event.route_changed",
+    );
+  const material = async () => {
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT notification_material material FROM events WHERE id=?",
+      [id],
+    );
+    return rows[0]?.material;
+  };
+  const legacy = { ...input, route: "Fictional changed legacy route" };
+  await events.update(director, id, newId(), 1, legacy);
+  await drain(stagedQueue);
+  expect(await routeAlerts()).toHaveLength(1);
+  await stagedEvents.update(director, id, newId(), 2, {
+    ...legacy,
+    route: "Fictional descriptive route after activation",
+  });
+  await drain(stagedQueue);
+  expect(await routeAlerts()).toHaveLength(1);
+  expect(await material()).toMatchObject({ throughVersion: 3, routeVersion: 2 });
+  const { id: catalogId } = await seedCatalog(unit, input.game, {
+    cities: ["notification_route_city"],
+  });
+  const cityId = catalogId("notification_route_city"),
+    companyId = newId(),
+    depotId = newId();
+  await unit.run(async (tx) => {
+    const c = unit.client(tx);
+    await c.insert(catalogCompanies).values({
+      id: companyId,
+      game: input.game,
+      code: Buffer.from("notification_route_company"),
+      nameEn: "Fictional Route Company",
+    });
+    await c
+      .insert(catalogCompanyCities)
+      .values({ id: depotId, game: input.game, cityId, companyId });
+  });
+  const { organizer: _organizer, ...common } = legacy;
+  const staged = {
+    ...common,
+    platform: "truckersmp" as const,
+    organizerMemberId: director.userId,
+    originCityId: cityId,
+    requiredDlcIds: [],
+  };
+  await stagedEvents.updatePublished(director, id, newId(), 3, staged, "en");
+  await drain(stagedQueue);
+  expect(await routeAlerts()).toHaveLength(2);
+  const withDepot = { ...staged, originDepotId: depotId };
+  await stagedEvents.updatePublished(director, id, newId(), 4, withDepot, "en");
+  await stagedEvents.updatePublished(
+    director,
+    id,
+    newId(),
+    5,
+    {
+      ...withDepot,
+      meetingLocation: "Fictional descriptive meeting text",
+      distanceKm: "0",
+    },
+    "en",
+  );
+  const written = await material();
+  expect(written).toMatchObject({
+    throughVersion: 6,
+    routeVersion: 5,
+    startVersion: 1,
+    statusVersion: 1,
+  });
+  await control.execute("UPDATE events SET notification_material=NULL WHERE id=?", [id]);
+  expect(await repairOneMaterial(stagedEvents)).toMatchObject({
+    eventId: id,
+    complete: true,
+    scanned: 6,
+  });
+  expect(await material()).toEqual(written);
+  await drain(stagedQueue);
+  const alerts = (await stagedNotifications.poll(owner)).items.filter(
+    (item) => item.category === "event.route_changed",
+  );
+  expect(alerts).toHaveLength(3);
+  expect(alerts.filter((item) => item.liveToastEligible)).toHaveLength(1);
+  expect((await stagedNotifications.history(observer)).items).toEqual([]);
 });

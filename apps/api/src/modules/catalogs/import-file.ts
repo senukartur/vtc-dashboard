@@ -1,6 +1,7 @@
 import {
   CATALOG_IMPORT_MAX_ROWS,
   type ImportList,
+  ignoredImportColumns,
   importColumns,
   optionalImportColumns,
 } from "./config.js";
@@ -106,12 +107,16 @@ function fromCsv(
   text: string,
   columns: readonly string[],
   optional: readonly string[],
+  ignored: readonly string[],
 ): ImportRow[] {
   const records = parseCsv(text);
   const header = records[0];
   if (!header) throw new CatalogFileError("empty");
   const names = header.cells.map((c) => c.trim());
-  if (new Set(names).size !== names.length || names.some((n) => !columns.includes(n)))
+  if (
+    new Set(names).size !== names.length ||
+    names.some((n) => !columns.includes(n) && !ignored.includes(n))
+  )
     throw new CatalogFileError("unknown_column");
   for (const column of columns)
     if (!names.includes(column) && !optional.includes(column))
@@ -121,12 +126,17 @@ function fromCsv(
     if (record.cells.length !== names.length)
       fileIssues.push({ field: "file", reason: "column_count" });
     const values: Record<string, string> = {};
-    for (const [index, name] of names.entries()) values[name] = record.cells[index] ?? "";
+    for (const [index, name] of names.entries())
+      if (!ignored.includes(name)) values[name] = record.cells[index] ?? "";
     return { line: record.line, values, fileIssues };
   });
 }
 
-function fromJson(text: string, columns: readonly string[]): ImportRow[] {
+function fromJson(
+  text: string,
+  columns: readonly string[],
+  ignored: readonly string[],
+): ImportRow[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -140,6 +150,7 @@ function fromJson(text: string, columns: readonly string[]): ImportRow[] {
     if (!entry || typeof entry !== "object" || Array.isArray(entry))
       return { line: index + 1, values, fileIssues: [{ field: "row", reason: "invalid_row" }] };
     for (const [key, value] of Object.entries(entry)) {
+      if (ignored.includes(key)) continue;
       if (!columns.includes(key)) {
         fileIssues.push({ field: key, reason: "unknown_field" });
         continue;
@@ -160,7 +171,10 @@ export function readImportFile(list: ImportList, bytes: Buffer): ImportRow[] {
   const text = decode(bytes);
   const columns = importColumns[list];
   const optional = optionalImportColumns[list] ?? [];
-  const rows = /^\s*\[/.test(text) ? fromJson(text, columns) : fromCsv(text, columns, optional);
+  const ignored = ignoredImportColumns[list] ?? [];
+  const rows = /^\s*\[/.test(text)
+    ? fromJson(text, columns, ignored)
+    : fromCsv(text, columns, optional, ignored);
   if (rows.length > CATALOG_IMPORT_MAX_ROWS) throw new CatalogFileError("too_many_rows");
   return rows;
 }

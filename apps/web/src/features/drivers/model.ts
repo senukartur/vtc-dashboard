@@ -80,10 +80,15 @@ export function driverTripFilters(
   });
 }
 
-export function tripsPath(memberId: string, params: { isSelf: boolean; game?: Game | undefined }) {
+/** The profile's recent trips, labelled in the interface language when one is given. */
+export function tripsPath(
+  memberId: string,
+  params: { isSelf: boolean; game?: Game | undefined; locale?: "en" | "ru" | undefined },
+) {
   const search = driverTripFilters(memberId, params);
   search.set("limit", String(RECENT_TRIPS_LIMIT));
   search.set("order", "completion_desc");
+  if (params.locale) search.set("locale", params.locale);
   return `/trips?${search.toString()}`;
 }
 

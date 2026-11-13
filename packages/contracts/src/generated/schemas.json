@@ -1418,7 +1418,8 @@
           ]
         },
         "englishFallback": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when a requested Russian name is missing and English is shown. Always false on DLC and company labels, which use only their canonical name."
         },
         "hidden": {
           "type": "boolean"
@@ -8849,7 +8850,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Always null on the dlcs and companies lists, which use only their canonical name; a stored Russian name is kept but never returned."
         },
         "nameNative": {
           "anyOf": [
@@ -8977,7 +8979,7 @@
         "dlc"
       ],
       "additionalProperties": false,
-      "description": "One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes, logo (null without an uploaded image) only on companies. On the trailers list, code is the telemetry body type."
+      "description": "One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes, logo (null without an uploaded image) only on companies. On the trailers list, code is the telemetry body type. DLC and company labels always show the canonical name."
     },
     "CatalogLogo": {
       "type": "object",
@@ -9059,12 +9061,6 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
-                },
-                "untranslated": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991,
-                  "description": "Default-visible rows in this game missing a Russian name."
                 }
               },
               "required": [
@@ -9138,12 +9134,6 @@
                   "minimum": 0,
                   "maximum": 9007199254740991
                 },
-                "untranslated": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991,
-                  "description": "Default-visible rows in this game missing a Russian name."
-                },
                 "missingLogo": {
                   "type": "integer",
                   "minimum": 0,
@@ -9169,12 +9159,6 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
-                },
-                "untranslated": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991,
-                  "description": "Default-visible depots in this game whose company or city lacks a Russian name."
                 }
               },
               "required": [
@@ -9276,17 +9260,6 @@
           "minLength": 1,
           "maxLength": 256,
           "pattern": "\\S"
-        },
-        "nameRu": {
-          "anyOf": [
-            {
-              "type": "string",
-              "maxLength": 256
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "steamAppId": {
           "anyOf": [
@@ -9588,17 +9561,6 @@
           "maxLength": 256,
           "pattern": "\\S"
         },
-        "nameRu": {
-          "anyOf": [
-            {
-              "type": "string",
-              "maxLength": 256
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "dlcId": {
           "anyOf": [
             {
@@ -9644,7 +9606,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Rejected on the dlcs and companies lists."
         },
         "nameNative": {
           "anyOf": [
@@ -9843,7 +9806,7 @@
         "city"
       ],
       "additionalProperties": false,
-      "description": "A company operating in a city. hidden is the depot's own flag; the company and city labels carry theirs. A depot is listed by default only when all three are visible."
+      "description": "A company operating in a city. hidden is the depot's own flag; the company and city labels carry theirs. A depot is listed by default only when all three are visible. The company label is the company's canonical name."
     },
     "CatalogDepotList": {
       "type": "object",
@@ -11987,6 +11950,19 @@
             }
           ]
         },
+        "myResponseVersion": {
+          "description": "Current own RSVP version for If-Match. Starts at 1 when an eligible member has no RSVP row. Null exactly when myResponse is null.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "responseCounts": {
           "$ref": "#/$defs/EventResponseCounts"
         }
@@ -11996,10 +11972,43 @@
         "organizerMemberId",
         "visibility",
         "myResponse",
+        "myResponseVersion",
         "responseCounts"
       ],
       "additionalProperties": false,
-      "description": "Null own response indicates unavailable; unanswered is a known absence of a response. Counts exclude unanswered and contain no identities or reasons."
+      "description": "Null own response indicates unavailable. Unanswered is a known absence of an answer. Counts exclude unanswered and contain no identities or reasons.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "null"
+            },
+            "myResponseVersion": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "string"
+            },
+            "myResponseVersion": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        }
+      ]
     },
     "EventStage2Member": {
       "type": "object",
@@ -12132,13 +12141,59 @@
               "type": "null"
             }
           ]
+        },
+        "myResponseVersion": {
+          "description": "Current own RSVP version for If-Match. Starts at 1 when an eligible member has no RSVP row. Null exactly when myResponse is null.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "event",
-        "myResponse"
+        "myResponse",
+        "myResponseVersion"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "null"
+            },
+            "myResponseVersion": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "string"
+            },
+            "myResponseVersion": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        }
+      ]
     },
     "EventStage2AdminPublished": {
       "type": "object",

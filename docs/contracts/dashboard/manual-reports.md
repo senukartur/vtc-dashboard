@@ -80,7 +80,7 @@ Reserve `ready -> deleting` with an irreversible generation tombstone and durabl
 
 ## Stage 1 drafts and reference fields (VTC-116 and VTC-117)
 
-`listMyManualDrafts` can take `state=editing` and return `editingCount` before paging. A draft can include read-only `labels` with nullable origin, destination and cargo `CatalogLabel` values. They are display data and the selections in `fields` supply identity.
+`listMyManualDrafts` can take `state=editing` and return `editingCount` before paging. A draft can include read-only `labels` with nullable origin, destination and cargo `CatalogLabel` values, in the optional `locale` (`en` or `ru`) or else the account language; the web client sends the interface language. The cursor does not depend on the locale. They are display data and the selections in `fields` supply identity.
 
 Bodyless `DELETE /me/manual-drafts/{draftId}` requires an active session, exact Origin, session CSRF, current `trips.submit_own`, `If-Match` and `Idempotency-Key`. Only the author can delete an editing draft. An authorized exact replay returns the same committed command data in `200 EnvelopeCommandResult`. The response carries the request ID of the retry. A stale ETag, submitted draft, or changed retry returns `409 VERSION_CONFLICT`, `409 STATE_CONFLICT`, or `409 IDEMPOTENCY_CONFLICT` respectively. A missing or inaccessible draft returns private 404. An omitted `If-Match` returns 428. Responses use `Cache-Control: no-store`. Deletion releases the draft's attachment references within the existing retention workflow, which governs physical file deletion.
 

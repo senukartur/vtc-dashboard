@@ -22,6 +22,7 @@ import {
   retainsError,
   rsvpView,
   untilAnchored,
+  visibleActionSections,
 } from "../../apps/web/src/features/dashboard/view-model.ts";
 import { formatQuantity } from "../../apps/web/src/shared/formatting.ts";
 import {
@@ -138,6 +139,54 @@ describe("recent company trips path", () => {
     );
     for (const path of [recentTripsPath(), recentTripsPath("ats")])
       expect(path).not.toMatch(/decision=|cursor=|hold=/);
+  });
+  it("labels the trips in the interface language when one is given", () => {
+    expect(recentTripsPath(undefined, "ru")).toBe(
+      "/trips?scope=company&limit=5&order=completion_desc&locale=ru",
+    );
+    expect(recentTripsPath("ats", "en")).toBe(
+      "/trips?scope=company&limit=5&order=completion_desc&game=ats&locale=en",
+    );
+  });
+});
+
+describe("needs attention sections", () => {
+  const all = [
+    "trips.read_own_private",
+    "trips.submit_own",
+    "events.respond",
+    "trips.review",
+    "applications.manage",
+  ];
+  const summary: components["schemas"]["WorkspaceSummary"] = {
+    computedAt: "2026-11-12T12:00:00.000Z",
+    tripsNeedingFixes: { count: 1, items: [] },
+    unfinishedManualDrafts: { count: 0, items: [] },
+    unansweredUpcomingEvents: { count: 2, items: [] },
+    reviewQueue: { count: 4, oldestAgeSeconds: 30 },
+    newApplicationsCount: 3,
+  };
+  it("lists counted sections with work, in order, for the viewer's capabilities", () => {
+    expect(visibleActionSections(summary, all)).toEqual([
+      { key: "fixes", count: 1 },
+      { key: "events", count: 2 },
+      { key: "review", count: 4 },
+      { key: "applications", count: 3 },
+    ]);
+    expect(visibleActionSections(summary, ["trips.review"])).toEqual([{ key: "review", count: 4 }]);
+  });
+  it("never treats a count the summary omits as a failure: the section is simply absent", () => {
+    // Applications module off: the director's summary has no application count at all.
+    const { newApplicationsCount: _off, ...withoutApplications } = summary;
+    expect(visibleActionSections(withoutApplications, all).map(({ key }) => key)).toEqual([
+      "fixes",
+      "events",
+      "review",
+    ]);
+    expect(visibleActionSections({ computedAt: summary.computedAt }, all)).toEqual([]);
+    expect(dashboardTranslations.ru.actions).not.toHaveProperty("partial");
+    expect(dashboardTranslations.ru.actions).not.toHaveProperty("unavailable");
+    expect(dashboardTranslations.en.actions).not.toHaveProperty("partial");
   });
 });
 

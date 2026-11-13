@@ -8,6 +8,7 @@
     "TELEMETRY_ENABLED",
     "MANUAL_REPORTS_ENABLED",
     "EVENTS_ENABLED",
+    "EVENTS_ROUTE_ENABLED",
     "RECONCILIATION_ENABLED",
     "TRIP_DECISIONS_ENABLED",
     "ANALYTICS_ENABLED",
@@ -37,10 +38,22 @@
     "ANALYTICS_CURSOR_KEY",
     "NOTIFICATIONS_CURSOR_KEY"
   ],
+  "eventsDraftsGrants": {
+    "event_draft_dlcs": ["SELECT", "INSERT", "DELETE"],
+    "event_drafts": [
+      "SELECT",
+      "INSERT",
+      "UPDATE(version,updated_by,updated_at,discarded_at,title,description,game,server,meeting_location,route,meeting_at,starts_at,ends_at,visibility,origin_city_id,destination_city_id,prescribed_cargo_id,prescribed_trailer_type_id,prescribed_mass_kg,platform,organizer_member_id,origin_depot_id,destination_depot_id,distance_km)"
+    ],
+    "event_metadata": ["SELECT", "INSERT", "UPDATE(published_event_id)"],
+    "event_workflow_commands": ["SELECT", "INSERT"]
+  },
   "grants": {
     "runtime": {
       "audit_entries": ["SELECT"],
       "external_steam_accounts": ["UPDATE(created_at)"],
+      "event_revision_details": ["SELECT", "INSERT"],
+      "event_revision_dlcs": ["SELECT", "INSERT"],
       "catalog_dlcs": ["SELECT", "INSERT", "UPDATE"],
       "catalog_regions": ["SELECT", "INSERT", "UPDATE"],
       "catalog_cities": ["SELECT", "INSERT", "UPDATE"],
@@ -104,6 +117,7 @@
       "event_attendance_revisions": ["SELECT"],
       "event_attendances": ["SELECT"],
       "event_response_revisions": ["SELECT"],
+      "event_revision_details": ["SELECT"],
       "event_responses": ["SELECT"],
       "event_revisions": ["SELECT"],
       "events": [

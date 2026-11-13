@@ -9,12 +9,12 @@ import {
   type UnitOfWork,
 } from "@vtc/db";
 import { applications } from "@vtc/db/admissions-schema";
+import { catalogCargoes } from "@vtc/db/catalogs-schema";
 import { manualEvidence } from "@vtc/db/manual-reports-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
 import { reconciliationCandidates, reconciliationSearches } from "@vtc/db/reconciliation-schema";
 import { tripDecisions, tripEventAssociations } from "@vtc/db/trip-decisions-schema";
-import { catalogCargoes } from "@vtc/db/catalogs-schema";
-import { eq, tripContributions, tripFacts, trips } from "@vtc/db/trips-schema";
+import { eq, inArray, tripContributions, tripFacts, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { expect, test, afterAll as vAfter, beforeAll as vBefore } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
@@ -188,6 +188,8 @@ beforeAll(async () => {
       identity,
       catalogs,
       tripChanged: (tx, id, generation) => service.eventChangedInTransaction(tx, id, generation),
+      attendanceTripIds: (tx, actor, eventId, game, memberIds) =>
+        service.eventAttendanceTripIdsInTransaction(tx, actor, eventId, game, memberIds),
     },
     now,
   );
@@ -1244,6 +1246,146 @@ test("representative review/proposal/event fanout plans expose the intended boun
         rows: String(plan[0]?.rows),
       }),
     );
+  }
+});
+
+test("leadership attendance links only current same-game canonical trip associations", async () => {
+  const definition: S["EventInput"] = {
+    title: "Fictional attendance trip",
+    description: "Fictional trip association",
+    game: "ets2",
+    server: "Fictional server",
+    organizer: "Fictional organizer",
+    route: "Fictional route",
+    meetingLocation: "Fictional meeting location",
+    meetingAt: iso(),
+    startsAt: new Date(instant + 3600000).toISOString(),
+    endsAt: null,
+    visibility: "members",
+    originCityId: null,
+    destinationCityId: null,
+    prescribedCargoId: null,
+    prescribedMassKg: null,
+    prescribedTrailerTypeId: null,
+  };
+  const event = await events.create(director, newId(), definition);
+  const eventId = event.data.event.id;
+  const otherEventId = (await events.create(director, newId(), definition)).data.event.id;
+  const [aliasId, selectedId, alternateId] = [newId(), newId(), newId()].sort() as [
+    string,
+    string,
+    string,
+  ];
+  const wrongGameId = newId();
+  const unlinkedId = newId();
+  const staleAliasId = newId();
+  const roots = [selectedId, alternateId, wrongGameId, unlinkedId];
+  const aliases = [aliasId, staleAliasId];
+  const trip = (id: string, ownerId = owner.userId) => ({
+    id,
+    ownerId,
+    game: "ets2" as const,
+    version: 1,
+    outcome: "delivered" as const,
+    recording: "complete" as const,
+    decision: "pending_review" as const,
+    reviewReasons: [],
+    createdAt: iso(),
+  });
+  try {
+    await unit.run(async (tx) => {
+      const db = unit.client(tx);
+      await db
+        .insert(trips)
+        .values([
+          trip(selectedId),
+          trip(alternateId),
+          { ...trip(wrongGameId), game: "ats" },
+          trip(unlinkedId, deputy.userId),
+        ]);
+      await db.insert(trips).values([
+        { ...trip(aliasId), aliasOf: selectedId },
+        { ...trip(staleAliasId, deputy.userId), aliasOf: unlinkedId },
+      ]);
+      await db
+        .insert(tripEventAssociations)
+        .values([...roots.slice(0, 3), ...aliases].map((tripId) => ({ tripId, eventId })));
+    });
+
+    const [plan] = await control.query<RowDataPacket[]>(
+      `EXPLAIN SELECT t.owner_id, MIN(a.trip_id)
+        FROM trip_event_associations a
+        INNER JOIN trips t ON t.id=a.trip_id
+        WHERE a.event_id=? AND t.alias_of IS NULL AND t.game=?
+          AND t.owner_id IN (?,?)
+        GROUP BY t.owner_id`,
+      [eventId, "ets2", owner.userId, deputy.userId],
+    );
+    const associationPlan = plan.find((row) => row.table === "a");
+    expect(String(associationPlan?.possible_keys)).toContain("trip_event_fanout");
+    console.log(
+      JSON.stringify({
+        event: "trip_decision_query_plan",
+        shape: "event_attendance_links",
+        indexes: plan.map((row) => ({ access: row.type, index: row.key, estimatedRows: row.rows })),
+      }),
+    );
+
+    const read = async (viewer: Actor) =>
+      new Map(
+        (await events.attendanceStage2(viewer, eventId, { limit: 100 })).data.items.map((row) => [
+          row.member.id,
+          row.tripId,
+        ]),
+      );
+    expect((await read(director)).get(owner.userId)).toBe(selectedId);
+    const app = await createApp({ identity, events, checkReadiness: async () => true });
+    try {
+      const attendance = await app.inject({
+        url: `/api/v1/admin/events/${eventId}/attendance?view=stage2&limit=100`,
+        headers: { cookie: directorCookie },
+        remoteAddress: "192.0.2.26",
+      });
+      expect(attendance.statusCode).toBe(200);
+      expect(attendance.json().data.items).toContainEqual(
+        expect.objectContaining({
+          member: expect.objectContaining({ id: owner.userId }),
+          tripId: selectedId,
+        }),
+      );
+    } finally {
+      await app.close();
+    }
+    const deputyView = await read(deputy);
+    expect(deputyView.get(owner.userId)).toBe(selectedId);
+    expect(deputyView.get(deputy.userId)).toBeNull();
+    await expect(read(dispatcher)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(read(owner)).rejects.toMatchObject({ statusCode: 403 });
+
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(tripEventAssociations)
+        .set({ eventId: otherEventId })
+        .where(eq(tripEventAssociations.tripId, selectedId)),
+    );
+    expect((await read(director)).get(owner.userId)).toBe(alternateId);
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .delete(tripEventAssociations)
+        .where(eq(tripEventAssociations.tripId, alternateId)),
+    );
+    expect((await read(director)).get(owner.userId)).toBeNull();
+  } finally {
+    await unit.run(async (tx) => {
+      const db = unit.client(tx);
+      await db
+        .delete(tripEventAssociations)
+        .where(inArray(tripEventAssociations.tripId, [...roots, ...aliases]));
+      await db.delete(trips).where(inArray(trips.id, aliases));
+      await db.delete(trips).where(inArray(trips.id, roots));
+    });
   }
 });
 

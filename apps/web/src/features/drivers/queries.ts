@@ -155,7 +155,11 @@ export function useMemberAcceptedTrips(
   params: { isSelf: boolean; game?: Game | undefined },
 ) {
   const { allowed, key, read } = useProfileRead();
-  const path = tripsPath(memberId, params);
+  const { i18n } = useTranslation();
+  const path = tripsPath(memberId, {
+    ...params,
+    locale: i18n.resolvedLanguage === "en" ? "en" : "ru",
+  });
   return useQuery({
     ...common,
     queryKey: key("driver-accepted-trips", memberId, path),

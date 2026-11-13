@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import activation
@@ -310,7 +311,8 @@ class ActivationTests(unittest.TestCase):
 
     def test_stage_profile_matches_the_reviewed_key_allowlist(self):
         profile = self.stage_profile()
-        self.assertEqual(set(profile['flags']), set(activation.STAGE_FLAGS))
+        self.assertEqual(set(profile['flags']) | {activation.EVENTS_DRAFTS_FLAG}, activation.STAGE_FLAGS)
+        self.assertNotIn(activation.EVENTS_DRAFTS_FLAG, profile['flags'])
         self.assertEqual(set(profile['settings']), set(activation.STAGE_SETTINGS))
         self.assertEqual(set(profile['generatedKeys']), set(activation.STAGE_KEYS))
         self.assertEqual(set(profile['grants']), {'runtime', 'jobs'})
@@ -332,6 +334,28 @@ class ActivationTests(unittest.TestCase):
         (self.base / activation.STAGE_PROFILE).unlink()
         with self.assertRaisesRegex(RuntimeError, '^STAGE_PROFILE_REQUIRED$'):
             activation.grant_sql(ops, values={'TRIPS_ENABLED': 'true'})
+
+    def test_draft_grants_are_opt_in_and_record_only_permissions_applied(self):
+        profile = self.stage_profile()
+        route = {'EVENTS_ROUTE_ENABLED': 'true'}
+        drafts = {**route, activation.EVENTS_DRAFTS_FLAG: 'true'}
+        old = activation.privilege_rows(activation.matrix(ops, route))
+        new = activation.privilege_rows(activation.matrix(ops, drafts))
+        delta = activation.privilege_rows({'runtime': profile['eventsDraftsGrants']})
+        self.assertEqual(new - old, delta)
+        self.assertTrue(delta)
+        self.assertFalse(any(row[0] != "'vtc_runtime'@'%'" for row in delta))
+        with self.assertRaisesRegex(RuntimeError, '^EVENTS_DRAFTS_PROFILE_REQUIRED$'):
+            activation.matrix(ops, {activation.EVENTS_DRAFTS_FLAG: 'true'})
+        with patch.object(activation, 'privileges', side_effect=[[], list(old)]), patch.object(ops, 'compose'):
+            activation.grants(ops, self.revision, route)
+        self.assertFalse(activation.installed_stage_rows(ops) & delta)
+        with self.assertRaisesRegex(RuntimeError, '^UNEXPECTED_EFFECTIVE_PRIVILEGES$'):
+            activation.check_privileges(ops, new, values=route)
+        with patch.object(activation, 'privileges', side_effect=[list(old), list(new)]), patch.object(ops, 'compose'):
+            activation.grants(ops, self.revision, drafts)
+        self.assertTrue(delta <= activation.installed_stage_rows(ops))
+        activation.check_privileges(ops, new, complete=True, values=route)
 
     def test_column_grants_read_back_per_column_and_rollback_keeps_module_grants(self):
         self.stage_profile()
@@ -437,6 +461,147 @@ class ActivationTests(unittest.TestCase):
         self.assertFalse(list((self.base / 'private').glob('identity-mail.previous.*.env')))
         self.invoke('rollback')
         self.assertEqual(shared.read_bytes(), original)
+
+    def route_activation_fixture(self):
+        shared = self.base / 'private/identity-mail.env'
+        candidate = self.base / 'private/activation-input.env'
+        previous = self.base / 'private/identity-mail.previous.env'
+        legacy = b'IDENTITY_ENABLED=true\nMAIL_MODE=disabled\nEVENTS_ENABLED=true\nCATALOGS_ENABLED=true\n'
+        staged = legacy + b'EVENTS_ROUTE_ENABLED=true\n'
+        for path, content in [(shared, legacy), (candidate, staged)]:
+            path.write_bytes(content)
+            path.chmod(0o600)
+        return shared, candidate, previous, legacy, staged
+
+    def mock_route_activation(self, stack, **history):
+        stack.enter_context(patch.object(activation, 'validate'))
+        fenced = stack.enter_context(patch.object(ops, 'fenced', side_effect=self.fence))
+        grants = stack.enter_context(patch.object(activation, 'grants'))
+        compose = stack.enter_context(patch.object(ops, 'compose'))
+        stack.enter_context(patch.object(ops, 'ready'))
+        stack.enter_context(patch.object(ops, 'public_ready'))
+        probe = stack.enter_context(patch.object(activation, 'has_published_route_history', **history))
+        return fenced, grants, compose, probe
+
+    def test_route_history_probe_supports_pre_0028_and_checks_fenced_history_with_a_lock(self):
+        with patch.object(ops, 'compose', return_value=b'0\n') as compose:
+            self.assertFalse(activation.has_published_route_history(ops, self.revision, self.image))
+        compose.assert_called_once()
+        self.assertIn(b'information_schema.tables', compose.call_args.kwargs['data'])
+        with patch.object(ops, 'compose', side_effect=[b'1\n', b'1\n']) as compose:
+            self.assertTrue(activation.has_published_route_history(ops, self.revision, self.image, fenced=True))
+        self.assertIn(b'START TRANSACTION;', compose.call_args.kwargs['data'])
+        self.assertIn(b'FOR SHARE); COMMIT;', compose.call_args.kwargs['data'])
+        with patch.object(ops, 'compose', return_value=b'unexpected'):
+            with self.assertRaisesRegex(RuntimeError, '^EVENT_ROUTE_HISTORY_PROBE_INVALID$'):
+                activation.has_published_route_history(ops, self.revision, self.image)
+
+    def test_route_activation_allows_legacy_rollback_before_first_marked_revision(self):
+        shared, _, previous, legacy, staged = self.route_activation_fixture()
+        with ExitStack() as stack:
+            _, grants, _, probe = self.mock_route_activation(stack, return_value=False)
+            self.invoke('apply')
+            self.assertEqual(shared.read_bytes(), staged)
+            self.invoke('rollback')
+        self.assertEqual([call.kwargs['fenced'] for call in probe.call_args_list], [False, True])
+        self.assertEqual(grants.call_count, 2)
+        self.assertEqual(shared.read_bytes(), legacy)
+        self.assertEqual(previous.read_bytes(), legacy)
+        self.assertFalse((self.base / 'state/recovery-required').exists())
+
+    def test_route_activation_refuses_known_legacy_targets_before_fencing_even_after_disabling_events(self):
+        shared, candidate, previous, legacy, staged = self.route_activation_fixture()
+        intent = self.base / 'state/activation-intent.json'
+        with ExitStack() as stack:
+            fenced, grants, _, probe = self.mock_route_activation(stack, return_value=True)
+            self.invoke('apply')
+            original_intent = intent.read_bytes()
+            with self.assertRaisesRegex(RuntimeError, '^EVENT_ROUTE_HISTORY_REQUIRES_STAGE2$'):
+                self.invoke('rollback')
+            self.assertEqual(intent.read_bytes(), original_intent)
+            self.assertEqual(shared.read_bytes(), staged)
+            self.assertEqual(previous.read_bytes(), legacy)
+            self.assertEqual(fenced.call_count, 1)
+            self.assertEqual(grants.call_count, 1)
+            disabled = legacy.replace(b'EVENTS_ENABLED=true', b'EVENTS_ENABLED=false')
+            candidate.write_bytes(disabled)
+            self.invoke('apply')
+            original_intent = intent.read_bytes()
+            candidate.write_bytes(legacy)
+            with self.assertRaisesRegex(RuntimeError, '^EVENT_ROUTE_HISTORY_REQUIRES_STAGE2$'):
+                self.invoke('apply')
+            self.assertEqual(intent.read_bytes(), original_intent)
+            self.assertEqual(shared.read_bytes(), disabled)
+            self.assertEqual(previous.read_bytes(), staged)
+        self.assertEqual([call.kwargs['fenced'] for call in probe.call_args_list], [False, False])
+        self.assertEqual(fenced.call_count, 2)
+        self.assertEqual(grants.call_count, 2)
+        self.assertFalse((self.base / 'private/maintenance/enabled').exists())
+
+    def test_route_rollback_rechecks_after_fence_and_recovers_exact_live_configuration(self):
+        shared, candidate, previous, legacy, staged = self.route_activation_fixture()
+        intent = self.base / 'state/activation-intent.json'
+        marker = self.base / 'private/maintenance/enabled'
+        def late_revision(*_args, fenced):
+            self.assertEqual(marker.exists(), fenced)
+            return fenced
+
+        with ExitStack() as stack:
+            fenced, grants, compose, probe = self.mock_route_activation(stack, side_effect=late_revision)
+            self.invoke('apply')
+            # The activation input may have been edited after the earlier successful apply.
+            candidate.write_bytes(legacy + b'TRIPS_ENABLED=true\n')
+            with self.assertRaisesRegex(RuntimeError, '^EVENT_ROUTE_HISTORY_REQUIRES_STAGE2$'):
+                self.invoke('rollback')
+            self.assertEqual(fenced.call_count, 2)
+            self.assertEqual(grants.call_count, 1)
+            self.assertEqual(compose.call_count, 1)
+            self.assertEqual(shared.read_bytes(), staged)
+            self.assertEqual(previous.read_bytes(), legacy)
+            pending = json.loads(intent.read_text())
+            self.assertTrue(pending['pending'])
+            self.assertEqual(pending['target'], 'shared')
+            self.assertEqual(pending['sharedHash'], ops.digest(shared))
+            self.assertTrue((self.base / 'state/recovery-required').exists())
+            shared.write_bytes(staged + b'TRIPS_ENABLED=true\n')
+            with self.assertRaisesRegex(RuntimeError, '^ACTIVATION_RECOVERY_OWNERSHIP_INVALID$'):
+                self.invoke('recover')
+            self.assertEqual(fenced.call_count, 2)
+            shared.write_bytes(staged)
+            self.invoke('recover')
+        self.assertEqual([call.kwargs['fenced'] for call in probe.call_args_list], [False, True])
+        self.assertEqual(shared.read_bytes(), staged)
+        self.assertEqual(previous.read_bytes(), legacy)
+        self.assertFalse(json.loads(intent.read_text())['pending'])
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.base / 'state/recovery-required').exists())
+
+    def test_route_guard_preserves_recovery_and_rollback_to_compatible_stage2_configurations(self):
+        shared, candidate, previous, legacy, staged = self.route_activation_fixture()
+        intent = self.base / 'state/activation-intent.json'
+        with ExitStack() as stack:
+            _, grants, _, probe = self.mock_route_activation(stack, return_value=True)
+            self.invoke('apply')
+            # Model a prior process that stopped after copying the legacy file, before readiness.
+            shared.write_bytes(legacy)
+            pending = json.loads(intent.read_text())
+            pending.update(pending=True, target='previous')
+            ops.atomic_json(intent, pending)
+            ops.maintenance(True)
+            ops.recovery_intent()
+            with self.assertRaisesRegex(RuntimeError, '^EVENT_ROUTE_HISTORY_REQUIRES_STAGE2$'):
+                self.invoke('recover')
+            self.assertEqual(grants.call_count, 1)
+            self.assertEqual(json.loads(intent.read_text())['target'], 'candidate')
+            self.invoke('recover')
+            self.assertEqual(shared.read_bytes(), staged)
+            candidate.write_bytes(staged + b'TRIPS_ENABLED=true\n')
+            self.invoke('apply')
+            self.assertEqual(previous.read_bytes(), staged)
+            self.invoke('rollback')
+        self.assertEqual([call.kwargs['fenced'] for call in probe.call_args_list], [True])
+        self.assertEqual(shared.read_bytes(), staged)
+        self.assertFalse((self.base / 'state/recovery-required').exists())
 
     def test_prepare_stage_retires_old_catalog_settings_from_a_live_file(self):
         self.stage_profile()

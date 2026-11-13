@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 import { stage2Fixture } from "../fixtures/events-stage-2.ts";
+
 const valid = (name: string) =>
   createSchemaValidator().compile({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const input = {
@@ -188,4 +189,38 @@ test("Stage 2 cancellation returns the structured member response without privat
       data: { ...staged.data, event: { ...staged.data.event, reason: "Fictional private reason" } },
     }),
   ).toBe(false);
+});
+
+test("Stage 2 quick response projections require a nullable own RSVP version", () => {
+  const list = stage2Fixture("listEvents", "own-response").response as {
+    data: { items: Record<string, unknown>[] };
+  };
+  const upcoming = stage2Fixture("getUpcomingEvent", "own-response").response as {
+    data: Record<string, unknown>;
+  };
+  expect(valid("EventStage2EnvelopeMemberList")(list)).toBe(true);
+  expect(valid("EventStage2EnvelopeUpcoming")(upcoming)).toBe(true);
+  expect(list.data.items[0]).toMatchObject({ myResponse: "participating", myResponseVersion: 2 });
+  expect(upcoming.data).toMatchObject({ myResponse: "participating", myResponseVersion: 2 });
+  for (const [schema, item] of [
+    ["EventStage2MemberListItem", list.data.items[0]],
+    ["EventStage2Upcoming", upcoming.data],
+  ] as const) {
+    const validate = valid(schema);
+    expect(validate({ ...item, myResponse: "unanswered", myResponseVersion: 1 })).toBe(true);
+    expect(validate({ ...item, myResponse: null, myResponseVersion: null })).toBe(true);
+    const missing = { ...item };
+    delete missing.myResponseVersion;
+    for (const invalid of [
+      missing,
+      { ...item, myResponse: null, myResponseVersion: 2 },
+      { ...item, myResponse: "participating", myResponseVersion: null },
+      { ...item, myResponseVersion: 0 },
+      { ...item, myResponseVersion: 1.5 },
+      { ...item, myResponseVersion: Number.MAX_SAFE_INTEGER + 1 },
+      { ...item, myResponseVersion: "2" },
+      { ...item, declineReason: "Fictional private reason" },
+    ])
+      expect(validate(invalid)).toBe(false);
+  }
 });
