@@ -703,11 +703,23 @@ test(
         expect(response.headers()["cache-control"]).toBe("no-store");
         expect(response.headers()["x-content-type-options"]).toBe("nosniff");
         expect((await response.request().allHeaders()).cookie).toBeUndefined();
-        const bytes = await response.body();
-        expect(bytes.subarray(0, 2).equals(Buffer.from([0xff, 0xd8]))).toBe(true);
         await expect(image).toBeVisible();
-        expect(await image.evaluate((node: HTMLImageElement) => node.naturalWidth)).toBe(width);
-        return bytes;
+        // Read the bytes backing the displayed image without another HTTP request.
+        const displayed = await image.evaluate(async (node: HTMLImageElement) => {
+          if (!node.currentSrc.startsWith("blob:")) throw new Error("COVER_BLOB_REQUIRED");
+          const blob = await fetch(node.currentSrc);
+          const buffer = await blob.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", buffer));
+          return {
+            signature: Array.from(bytes.subarray(0, 2)),
+            digest: Array.from(digest),
+            width: node.naturalWidth,
+          };
+        });
+        expect(displayed.signature).toEqual([0xff, 0xd8]);
+        expect(displayed.width).toBe(width);
+        return displayed.digest;
       }
 
       await showLanding(false, "en");
@@ -715,11 +727,11 @@ test(
       expect((await visitor.request.get(event.coverPath)).status()).toBe(404);
       const first = await event.upload(120);
       await event.select(first);
-      const firstBytes = await showCover(120, "en");
+      const firstDigest = await showCover(120, "en");
       const replacement = await event.upload(160);
       await event.select(replacement);
-      const replacementBytes = await showCover(160, "en");
-      expect(replacementBytes.equals(firstBytes)).toBe(false);
+      const replacementDigest = await showCover(160, "en");
+      expect(replacementDigest).not.toEqual(firstDigest);
       await showCover(160, "ru");
       await event.remove(replacement);
       await showLanding(false, "en");
