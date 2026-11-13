@@ -42,6 +42,7 @@ type DraftRoute = DraftResult["route"];
 type Publication = Extract<DraftResult, { route: "publish" }>;
 type PublicationCandidate = Omit<Publication, "data"> & { data: S["EventStage2Member"] };
 type ReceiptCandidate = Exclude<DraftResult, Publication> | PublicationCandidate;
+const receiptTagBytes = 16;
 
 function createDraftSchemas() {
   const validator = createSchemaValidator();
@@ -238,6 +239,20 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
   const audit = createAudit(unit);
   const page = pagination(key, now);
   const at = () => now().toISOString();
+  const receiptKey = Buffer.from(key, "hex");
+
+  function responseTag(requestTag: Buffer, result: DraftResult) {
+    try {
+      return createHmac("sha256", receiptKey)
+        .update("events/draft-command/result/v1\0")
+        .update(requestTag)
+        .update(canonicalJson(result))
+        .digest()
+        .subarray(0, receiptTagBytes);
+    } catch {
+      throw new Error("EVENT_WORKFLOW_RECEIPT_INVALID");
+    }
+  }
 
   async function auditChange(tx: TxContext, actor: Actor, id: string, time: string) {
     await audit.append(tx, {
@@ -262,10 +277,11 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
     command: () => Promise<ReceiptCandidate & { route: NoInfer<R> }>,
   ) {
     applicationId(commandKey);
-    const fingerprint = createHmac("sha256", Buffer.from(key, "hex"))
-      .update("events/draft-command/v1\0")
+    const requestTag = createHmac("sha256", receiptKey)
+      .update("events/draft-command/request/v1\0")
       .update(canonicalJson([actor.userId, route, target, commandKey, expected, value]))
-      .digest();
+      .digest()
+      .subarray(0, receiptTagBytes);
     const [saved] = await c(tx)
       .select({
         fingerprint: eventStage2Commands.fingerprint,
@@ -282,13 +298,24 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
       )
       .for("share");
     if (saved) {
-      if (saved.fingerprint.length !== fingerprint.length)
+      // The fixed 32-byte fingerprint stores two independently scoped HMAC tags.
+      if (saved.fingerprint.length !== 2 * receiptTagBytes)
         throw new Error("EVENT_WORKFLOW_RECEIPT_INVALID");
-      if (!timingSafeEqual(saved.fingerprint, fingerprint))
+      const storedRequest = saved.fingerprint.subarray(0, receiptTagBytes);
+      if (!timingSafeEqual(storedRequest, requestTag))
         throw identityError(409, "IDEMPOTENCY_CONFLICT");
-      return checkedReceipt<R>(saved.result, route, target, expected, value);
+      const result = checkedReceipt<R>(saved.result, route, target, expected, value);
+      if (
+        !timingSafeEqual(
+          saved.fingerprint.subarray(receiptTagBytes),
+          responseTag(requestTag, result),
+        )
+      )
+        throw new Error("EVENT_WORKFLOW_RECEIPT_INVALID");
+      return result;
     }
     const result = checkedReceipt<R>(await command(), route, target, expected, value);
+    const fingerprint = Buffer.concat([requestTag, responseTag(requestTag, result)]);
     await c(tx).insert(eventStage2Commands).values({
       actorId: actor.userId,
       route,

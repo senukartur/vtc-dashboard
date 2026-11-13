@@ -2685,29 +2685,96 @@ test("draft receipts recheck authority and fail closed on unsupported, private o
   });
   const first = await drafts.create(director, key, body);
   expect(first.data.id).not.toBe(eventId);
-  for (const corrupted of [
-    { schemaVersion: 2, route: "draft_create", data: first.data },
-    { schemaVersion: 1, route: "draft_update", data: first.data },
-    { schemaVersion: 1, route: "draft_create", data: { ...first.data, version: 2 } },
-    {
-      schemaVersion: 1,
-      route: "draft_create",
-      data: { ...first.data, fields: { title: "Fictional mismatched snapshot" } },
-    },
-    {
-      schemaVersion: 1,
-      route: "draft_create",
-      data: { ...first.data, private: "Fictional unsafe receipt" },
-    },
-  ]) {
-    await control.execute(
+  const second = await drafts.create(director, newId(), body);
+  expect(second.data.id).not.toBe(first.data.id);
+  expect(second.data.fields).toEqual(first.data.fields);
+  const replaceReceipt = (result: unknown) =>
+    control.execute(
       "UPDATE event_workflow_commands SET result=? WHERE actor_id=? AND route='draft_create' AND `key`=?",
-      [JSON.stringify(corrupted), Buffer.from(director.userId), Buffer.from(key)],
+      [JSON.stringify(result), Buffer.from(director.userId), Buffer.from(key)],
     );
-    await expect(drafts.create(director, key, body)).rejects.toThrow(
+  try {
+    for (const corrupted of [
+      { schemaVersion: 2, route: "draft_create", data: first.data },
+      { schemaVersion: 1, route: "draft_update", data: first.data },
+      { schemaVersion: 1, route: "draft_create", data: { ...first.data, version: 2 } },
+      {
+        schemaVersion: 1,
+        route: "draft_create",
+        data: { ...first.data, fields: { title: "Fictional mismatched snapshot" } },
+      },
+      {
+        schemaVersion: 1,
+        route: "draft_create",
+        data: { ...first.data, private: "Fictional unsafe receipt" },
+      },
+      { schemaVersion: 1, route: "draft_create", data: second.data },
+    ]) {
+      await replaceReceipt(corrupted);
+      await expect(drafts.create(director, key, body)).rejects.toThrow(
+        "EVENT_WORKFLOW_RECEIPT_INVALID",
+      );
+    }
+  } finally {
+    await replaceReceipt({ schemaVersion: 1, route: "draft_create", data: first.data });
+  }
+  await expect(drafts.create(director, key, body)).resolves.toEqual(first);
+  await expect(
+    drafts.create(director, key, { title: "Fictional changed request" }),
+  ).rejects.toMatchObject({
+    statusCode: 409,
+    publicCode: "IDEMPOTENCY_CONFLICT",
+  });
+});
+
+test("publication receipt rejects a substituted revision ID or result tag and replays after restoration", async () => {
+  const routes = draftEvents();
+  if (!routes.drafts) throw new Error("DRAFT_FIXTURE_REQUIRED");
+  const drafts = routes.drafts;
+  const {
+    data: { id },
+  } = await drafts.create(director, newId(), stagedInput());
+  const key = newId();
+  const published = await drafts.publish(director, id, key, 1, "en");
+  const scope = [Buffer.from(director.userId), Buffer.from(id), Buffer.from(key)];
+  const where = "WHERE actor_id=? AND route='publish' AND target_id=? AND `key`=?";
+  const [rows] = await control.execute<RowDataPacket[]>(
+    `SELECT fingerprint, result FROM event_workflow_commands ${where}`,
+    scope,
+  );
+  const saved = rows[0];
+  if (!saved) throw new Error("PUBLICATION_RECEIPT_FIXTURE_REQUIRED");
+  const replace = (result: unknown, fingerprint: Buffer) =>
+    control.execute(`UPDATE event_workflow_commands SET result=?,fingerprint=? ${where}`, [
+      JSON.stringify(result),
+      fingerprint,
+      ...scope,
+    ]);
+  try {
+    const other = await routes.createPublished(director, newId(), stagedInput(), "en");
+    const otherHistory = await routes.history(director, other.data.event.id);
+    const otherRevisionId = otherHistory.definitions[0]?.id;
+    expect(otherRevisionId).toBeDefined();
+    expect(otherRevisionId).not.toBe(saved.result.revisionId);
+    await replace({ ...saved.result, revisionId: otherRevisionId }, saved.fingerprint);
+    await expect(drafts.publish(director, id, key, 1, "en")).rejects.toThrow(
       "EVENT_WORKFLOW_RECEIPT_INVALID",
     );
+    const invalidTag = Buffer.from(saved.fingerprint);
+    const last = invalidTag.length - 1;
+    invalidTag[last] = (invalidTag[last] as number) ^ 1;
+    await replace(saved.result, invalidTag);
+    await expect(drafts.publish(director, id, key, 1, "en")).rejects.toThrow(
+      "EVENT_WORKFLOW_RECEIPT_INVALID",
+    );
+  } finally {
+    await replace(saved.result, saved.fingerprint);
   }
+  await expect(drafts.publish(director, id, key, 1, "en")).resolves.toEqual(published);
+  await expect(drafts.publish(director, id, key, 1, "ru")).rejects.toMatchObject({
+    statusCode: 409,
+    publicCode: "IDEMPOTENCY_CONFLICT",
+  });
 });
 
 test("draft publication rolls back its writes on failure and serializes concurrent edits and exact retries", async () => {
