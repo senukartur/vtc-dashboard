@@ -3,6 +3,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
+  dispatchListQuery,
+  dispatchParams,
+  dispatchSearch,
+  stagedDecisionInput,
+  stagedReview,
+} from "../../apps/web/src/features/review/dispatch-model.ts";
+import {
   checkRows,
   decisionBody,
   decisionState,
@@ -46,6 +53,92 @@ const ordinary = () => {
 };
 const queueEntry = () =>
   example<DTO["ListTripSummary"]>("listTrips:review-queue").items[0] as DTO["TripSummary"];
+
+test("staged dispatch links preserve canonical filters and alias legacy decided links", () => {
+  const search = new URLSearchParams({
+    tab: "decided",
+    game: "ats",
+    ownerId: trip,
+    reasonCode: "future_reason",
+    source: "manual",
+    order: "asc",
+    trip,
+    cursor: "obsolete",
+    decision: "accepted",
+  });
+  expect(dispatchListQuery(dispatchParams(search), null, "ru")).toMatchObject({
+    scope: "review",
+    view: "stage3",
+    status: "resolved",
+    game: "ats",
+    ownerId: trip,
+    reasonCode: "future_reason",
+    source: "manual",
+    order: "desc",
+    locale: "ru",
+    cursor: null,
+  });
+  expect(dispatchSearch(search)).toBe(
+    `?tab=resolved&game=ats&reasonCode=future_reason&ownerId=${trip}&source=manual`,
+  );
+  expect(
+    dispatchParams(new URLSearchParams("tab=awaiting&ownerId=nickname&reasonCode=%3Cdiv%3E")),
+  ).toMatchObject({
+    tab: "queue",
+    ownerId: undefined,
+    reasonCode: undefined,
+  });
+  expect(
+    dispatchListQuery(dispatchParams(new URLSearchParams("order=desc")), "next", "en"),
+  ).toMatchObject({ status: "waiting", order: "desc", cursor: "next" });
+});
+
+test("staged direct decisions omit a blank accept reason and preserve snapshot and over-limit confirmation", () => {
+  const review = overLimits();
+  const blank = { review, reason: "  \n ", confirmed: true };
+  expect(decisionState({ ...blank, choice: "accept", seconds: 0 }).blocker).toBe("reason");
+  expect(
+    decisionState({
+      ...blank,
+      confirmed: false,
+      choice: "accept",
+      seconds: 0,
+      optionalAcceptReason: true,
+    }).blocker,
+  ).toBe("confirm");
+  expect(
+    decisionState({
+      ...blank,
+      choice: "reject",
+      seconds: 0,
+      optionalAcceptReason: true,
+    }).blocker,
+  ).toBe("reason");
+  const accepted = stagedDecisionInput(decisionBody({ ...blank, choice: "accept" }));
+  expect(accepted).toEqual({
+    decision: "accept",
+    factRevisionId: review.factRevisionId,
+    reviewedRevisionId: review.trip.manualRevision?.id,
+    proposalId: null,
+    confirmOverLimits: true,
+  });
+  expect(schema("TripStage3AcceptInput").safeParse(accepted).success).toBe(true);
+  const returned = stagedDecisionInput(
+    decisionBody({ ...blank, choice: "reject", reason: "  Fix the cargo.  " }),
+  );
+  expect(returned).toMatchObject({ decision: "reject", reason: "Fix the cargo." });
+  expect(returned).not.toHaveProperty("confirmOverLimits");
+  expect(schema("TripStage3ReturnInput").safeParse(returned).success).toBe(true);
+});
+
+test("staged review uses the manual source revision and leaves effective facts separate", () => {
+  const detail = example<DTO["TripStage3Review"]>("getTripReview:stage-3-mixed");
+  const review = stagedReview(detail);
+  expect(review.trip.manualRevision).toEqual(detail.sources.manual?.manualRevision);
+  expect(review.trip.evidence).toEqual(detail.sources.manual?.evidence);
+  expect(review.trip.effectiveFacts).toEqual(detail.effectiveFacts);
+  expect(review.factRevisionId).toBe(detail.factRevisionId);
+});
 
 describe("queue parameters", () => {
   test("defaults, tab-specific order and invalid values", () => {

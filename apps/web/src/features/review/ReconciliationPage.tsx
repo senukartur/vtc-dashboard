@@ -99,11 +99,11 @@ export function ReconciliationPage() {
     </div>
   );
 }
-function MergePair({
+export function MergePair({
   pair,
   onMerged,
 }: {
-  pair: DTO["MergeCandidate"];
+  pair: Pick<DTO["MergeCandidate"], "primaryTripId" | "secondaryTripId">;
   onMerged: (id: string) => void;
 }) {
   const { t } = useTranslation("trips"),

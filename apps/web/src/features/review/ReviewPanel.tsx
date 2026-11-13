@@ -6,6 +6,7 @@ import { EvidenceItem } from "../manual-reports/fields.js";
 import { Confirm, Failure, Fields, PageNav, State } from "../trips/components.js";
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
 import { canonicalDecimal, type DTO, proposalResult, schema } from "../trips/transport.js";
+import type { ReviewTrip } from "./review-model.js";
 /**
  * Proposals and supported resolution of a reviewed trip, behind one disclosure below the
  * decision workspace. It opens by default while a proposal is pending.
@@ -17,7 +18,7 @@ export function ReviewCorrections({
   self,
 }: {
   tripId: string;
-  trip: DTO["TripPrivate"];
+  trip: ReviewTrip;
   etag: string | null;
   self: boolean;
 }) {
@@ -48,7 +49,7 @@ function ResolutionForm({
   etag,
 }: {
   tripId: string;
-  trip: DTO["TripPrivate"];
+  trip: ReviewTrip;
   etag: string | null;
 }) {
   const { t } = useTranslation("trips"),
