@@ -37,6 +37,7 @@ export function Form({
   seconds = 0,
   action = "continue",
   help,
+  children,
 }: {
   id: string;
   fields: AccountField[];
@@ -46,6 +47,7 @@ export function Form({
   seconds?: number;
   action?: string;
   help?: string;
+  children?: ReactNode;
 }) {
   const { t } = useTranslation("account");
   const {
@@ -170,6 +172,7 @@ export function Form({
             </div>
           );
         })}
+        {children}
       </fieldset>
       {failure && (
         <p role="alert" className="field-error">

@@ -4252,6 +4252,8 @@ export interface components {
             /** Format: email */
             email: string;
             password: string;
+            /** @description Selects a fixed 30-day session when true. Omission or false selects the fixed 24-hour session. */
+            rememberMe?: boolean;
         };
         MailDelivery: {
             attempts: number;

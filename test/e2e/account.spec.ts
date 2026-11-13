@@ -92,16 +92,36 @@ for (const locale of ["en", "ru"] as const) {
         .fill("member@example.invalid");
       const password = form.getByLabel(locale === "en" ? "Password" : "Пароль", { exact: true });
       await password.fill("NONFUNCTIONAL_FIXTURE");
+      const remember = form.getByRole("checkbox", {
+        name: locale === "en" ? "Remember me" : "Запомнить меня",
+        exact: true,
+      });
+      await expect(remember).not.toBeChecked();
       for (const value of [401, 403, 429, 503]) {
         status = value;
+        const rememberMe = value !== 401;
+        if (value === 403) {
+          await remember.focus();
+          await page.keyboard.press("Space");
+          await expect(remember).toBeChecked();
+        }
+        const loginRequest = page.waitForRequest(
+          (request) => request.url().endsWith("/api/v1/auth/login") && request.method() === "POST",
+        );
         await form
           .getByRole("button", {
             name:
               locale === "en" ? /^(Sign in|Retry this action)$/ : /^(Войти|Повторить действие)$/,
           })
           .click();
+        expect((await loginRequest).postDataJSON()).toEqual({
+          email: "member@example.invalid",
+          password: "NONFUNCTIONAL_FIXTURE",
+          rememberMe,
+        });
         await expect(form.getByRole("alert")).toBeVisible();
         await expect(password).toHaveValue("NONFUNCTIONAL_FIXTURE");
+        if (rememberMe) await expect(remember).toBeChecked();
         await expect(page.getByText("PRIVATE_SENTINEL")).toHaveCount(0);
         if (value === 429) {
           await expect(
@@ -226,6 +246,7 @@ for (const locale of ["en", "ru"] as const) {
     form: en ? "Sign in" : "Войти",
     email: en ? "Email" : "Электронная почта",
     password: en ? "Password" : "Пароль",
+    remember: en ? "Remember me" : "Запомнить меня",
     newPassword: en ? "New password" : "Новый пароль",
     confirmation: en ? "Repeat new password" : "Повторите новый пароль",
     forgot: en ? "Forgot your password?" : "Забыли пароль?",
@@ -249,6 +270,7 @@ for (const locale of ["en", "ru"] as const) {
       const password = form.getByLabel(copy.password, { exact: true });
       const forgot = form.getByRole("link", { name: copy.forgot, exact: true });
       const toggle = form.getByRole("button", { name: copy.show, exact: true });
+      const remember = form.getByRole("checkbox", { name: copy.remember, exact: true });
       const submit = form.getByRole("button", { name: copy.form, exact: true });
       await expect(forgot).toHaveAttribute("href", "/password-recovery");
       const [forgotBox, passwordBox, labelBox, toggleBox] = await Promise.all([
@@ -282,7 +304,7 @@ for (const locale of ["en", "ru"] as const) {
       near(toggleBox.height, coarse ? 40 : 32);
       expect(forgotBox.height).toBeGreaterThanOrEqual(coarse ? 40 : 24);
       await email.focus();
-      for (const next of [forgot, password, toggle, submit]) {
+      for (const next of [forgot, password, toggle, remember, submit]) {
         await page.keyboard.press("Tab");
         await expect(next).toBeFocused();
       }
