@@ -115,6 +115,61 @@ test(
 );
 
 test(
+  "Stage 2 edit dialog: digits typed into filled time segments replace them",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockEventsStage2(page, "manager");
+    const detail = stage2Fixture("getEvent", "structured")
+      .response as components["schemas"]["EventStage2EnvelopeMember"];
+    detail.data.event.startsAt = "2099-10-25T14:00:00.000Z";
+    const eventRead = `/api/v1/events/${detail.data.event.id}`;
+    await page.route(
+      (url) => url.pathname === eventRead,
+      (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({ json: detail, headers: { ETag: '"v1"' } })
+          : route.fallback(),
+    );
+    const patches = captureWrites(page, "PATCH", `/api/v1/admin/events/${detail.data.event.id}`);
+    await page.goto(detailsPath);
+    await catalogLanguage(page);
+    await page.getByRole("button", { name: "Edit event", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Edit event" });
+    const start = dateTimeField(dialog, "Start time (UTC)");
+    const hours = start.segment("hours"),
+      minutes = start.segment("minutes");
+    await expect(hours).toHaveValue("14");
+    await expect(minutes).toHaveValue("00");
+
+    await start.date.focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await expect(hours).toBeFocused();
+    await page.keyboard.type("9");
+    await expect(hours).toHaveValue("09");
+    await expect(minutes).toBeFocused();
+    await page.keyboard.type("30");
+    await expect(minutes).toHaveValue("30");
+    // Shift+Tab back into the filled hours replaces them as well.
+    await page.keyboard.press("Shift+Tab");
+    await expect(hours).toBeFocused();
+    await page.keyboard.type("1");
+    await expect(hours).toHaveValue("1");
+    await page.keyboard.type("5");
+    await expect(hours).toHaveValue("15");
+    await expect(minutes).toBeFocused();
+    await expect(minutes).toHaveValue("30");
+
+    await dialog.getByRole("button", { name: "Save changes" }).click();
+    await expect.poll(() => patches.length).toBe(1);
+    expect(patches[0]).toMatchObject({
+      meetingAt: "2099-10-25T12:00:00.000Z",
+      startsAt: "2099-10-25T15:30:00.000Z",
+    });
+  },
+);
+
+test(
   "legacy event editor keeps native required times and creates exact UTC instants",
   browserCase(["@functional"]),
   async ({ page }) => {

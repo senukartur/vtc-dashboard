@@ -10,6 +10,7 @@ import {
   composeWallClock,
   type DateLocale,
   decodeIncomplete,
+  editSegment,
   emptyTime,
   formatDateText,
   incompleteValue,
@@ -23,7 +24,6 @@ import {
   stepSegment,
   type TimeParts,
   todayIn,
-  typeDigits,
 } from "./date-time.js";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "./popover.js";
 import { Button } from "./primitives.js";
@@ -201,20 +201,17 @@ export function DateTimeField({
     setOpen(false);
     update({ ...display, date: formatDateText(iso, locale) });
   }
-  function typeInto(segment: Segment, index: number, raw: string) {
+  function typeInto(segment: Segment, index: number, raw: string, inputType: string | undefined) {
     const before = display[segment];
-    const digits = raw.replace(/\D/g, "");
-    if (digits === before) return;
-    let text: string;
-    let complete = false;
-    if (raw.length < before.length) text = digits.slice(0, segmentSpec[segment].length);
-    else {
-      const continues = digits.startsWith(before) && before.length < segmentSpec[segment].length;
-      ({ text, complete } = continues
-        ? typeDigits(before, digits.slice(before.length), segment)
-        : typeDigits("", digits, segment));
-    }
-    update({ ...display, [segment]: text });
+    // A rejected non-digit leaves the digits as they were.
+    if (raw.replace(/\D/g, "") === before) return;
+    // Only real deletions and undo keep the browser's text. A digit typed over the selection
+    // that focus places on a filled segment replaces it, so it starts the segment again.
+    const literal = inputType
+      ? inputType.startsWith("delete") || inputType.startsWith("history")
+      : raw.length < before.length;
+    const { text, complete } = editSegment(before, raw, literal, segment);
+    if (text !== before) update({ ...display, [segment]: text });
     if (complete) focusSegment(index + 1);
   }
   function segmentKey(segment: Segment, index: number, event: KeyboardEvent<HTMLInputElement>) {
@@ -394,7 +391,14 @@ export function DateTimeField({
                   aria-invalid={invalidAttr}
                   aria-describedby={describe(zoneId)}
                   onFocus={(event) => event.currentTarget.select()}
-                  onChange={(event) => typeInto(segment, index, event.target.value)}
+                  onChange={(event) =>
+                    typeInto(
+                      segment,
+                      index,
+                      event.target.value,
+                      (event.nativeEvent as Partial<InputEvent>).inputType,
+                    )
+                  }
                   onKeyDown={(event) => segmentKey(segment, index, event)}
                   onBlur={() => {
                     const padded = clampSegment(text, segment);

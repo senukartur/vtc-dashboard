@@ -183,6 +183,28 @@ export function typeDigits(
   return state;
 }
 
+/**
+ * Applies a browser edit of a segment. `literal` edits (deletion, undo) keep the remaining digits
+ * as they are. Typing continues an unfinished `before`; any other insertion, including typing over
+ * a selected filled segment, starts again as if the segment were empty.
+ */
+export function editSegment(
+  before: string,
+  raw: string,
+  literal: boolean,
+  segment: Segment,
+): { text: string; complete: boolean } {
+  const digits = raw.replace(/\D/g, "");
+  if (literal) return { text: digits.slice(0, segmentSpec[segment].length), complete: false };
+  const continues =
+    before.length < segmentSpec[segment].length &&
+    digits.length > before.length &&
+    digits.startsWith(before);
+  return continues
+    ? typeDigits(before, digits.slice(before.length), segment)
+    : typeDigits("", digits, segment);
+}
+
 /** Arrow-key step with wrap-around; an empty segment starts at 0 (up) or the maximum (down). */
 export function stepSegment(text: string, delta: 1 | -1, segment: Segment): string {
   const { max, length } = segmentSpec[segment];

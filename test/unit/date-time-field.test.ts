@@ -6,10 +6,11 @@ import {
   clampSegment,
   composeWallClock,
   decodeIncomplete,
+  editSegment,
   emptyTime,
   formatDateText,
-  inDateRange,
   incompleteValue,
+  inDateRange,
   parseDateText,
   segmentsFor,
   splitWallClock,
@@ -92,6 +93,20 @@ describe("24-hour time segments", () => {
     expect(clampSegment("12", "milliseconds")).toBe("012");
     expect(clampSegment("1", "hours")).toBe("01");
     expect(clampSegment("", "hours")).toBe("");
+  });
+  test("typing over a selected filled segment replaces it; only deletions keep the text", () => {
+    // Focus selects "14"; the browser value is then just the typed digit.
+    expect(editSegment("14", "9", false, "hours")).toEqual({ text: "09", complete: true });
+    expect(editSegment("00", "3", false, "minutes")).toEqual({ text: "3", complete: false });
+    expect(editSegment("3", "30", false, "minutes")).toEqual({ text: "30", complete: true });
+    expect(editSegment("14", "1", false, "hours")).toEqual({ text: "1", complete: false });
+    expect(editSegment("500", "7", false, "milliseconds")).toEqual({ text: "7", complete: false });
+    // An unfinished segment continues; a caret after a finished one starts again.
+    expect(editSegment("1", "18", false, "hours")).toEqual({ text: "18", complete: true });
+    expect(editSegment("14", "145", false, "hours")).toEqual({ text: "05", complete: true });
+    // Real deletions keep the remaining digits without advancing.
+    expect(editSegment("14", "1", true, "hours")).toEqual({ text: "1", complete: false });
+    expect(editSegment("14", "", true, "hours")).toEqual({ text: "", complete: false });
   });
   test("arrow steps wrap without AM/PM", () => {
     expect(stepSegment("23", 1, "hours")).toBe("00");
