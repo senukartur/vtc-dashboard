@@ -87,6 +87,8 @@ export type Outcome = number | "abort" | { status: 429; retryAfter: number };
 export type SettingsOptions = {
   role?: "director" | "deputy" | "driver";
   emailVerified?: boolean;
+  omitCapabilities?: string[];
+  delegateQualifications?: boolean;
   reportingTimezone?: string | null;
   missingSetup?: string[];
   /** Starts with a usable code for Volga Ray. */
@@ -109,6 +111,12 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     role: options.role ?? "director",
     emailVerified: options.emailVerified ?? true,
     transferred: false,
+    transferResponseGate: null as Promise<void> | null,
+    selfReadsAfterTransfer: 0,
+    selfStatusAfterTransfer: 200,
+    selfReplacementAfterTransfer: null as S["MemberSummary"] | null,
+    selfResponseGateAfterTransfer: null as Promise<void> | null,
+    auditDeniedAfterTransfer: 0,
     settings: {
       id: ids.company,
       version: 1,
@@ -124,6 +132,9 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     sourcesStatus: 200,
     auditStatus: 200,
     auditEmpty: false,
+    auditTotal: undefined as number | undefined,
+    auditPageSize: 25,
+    auditCursorStatus: 200,
     membersStatus: 200,
     membersEmpty: false,
     challengeStatus: 200,
@@ -147,8 +158,15 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     const roles = state.transferred ? sessionRoles.driver : sessionRoles[state.role];
     value.data.member.roles = roles;
     value.data.emailVerified = state.emailVerified;
-    value.data.capabilities = capabilities(roles);
+    value.data.capabilities = capabilities(roles).filter(
+      (capability) => !options.omitCapabilities?.includes(capability),
+    );
     value.data.preferences.displayTimezone = options.displayTimezone ?? "Europe/Berlin";
+    const replacement = state.transferred && state.selfReplacementAfterTransfer;
+    if (replacement) {
+      value.data.member = replacement;
+      value.data.capabilities = capabilities(replacement.roles);
+    }
     return value;
   };
   await page.route("**/api/v1/**", async (route: Route) => {
@@ -158,7 +176,16 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       url = new URL(request.url()),
       path = url.pathname.replace("/api/v1", ""),
       method = request.method();
-    if (path === "/me") return route.fulfill({ json: self(), headers: { ETag: '"me-1"' } });
+    if (options.delegateQualifications && path.includes("qualification")) return route.fallback();
+    if (path === "/me") {
+      if (state.transferred) {
+        state.selfReadsAfterTransfer++;
+        await state.selfResponseGateAfterTransfer;
+        if (state.selfStatusAfterTransfer !== 200)
+          return route.fulfill(failure(state.selfStatusAfterTransfer));
+      }
+      return route.fulfill({ json: self(), headers: { ETag: '"me-1"' } });
+    }
     if (path === "/auth/csrf")
       return route.fulfill({ json: envelope({ token: "NONFUNCTIONAL_FIXTURE" }) });
     if (method === "GET") state.reads.push(`${path}${url.search}`);
@@ -208,22 +235,92 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       });
     }
     if (method === "GET" && path === "/admin/audit") {
+      if (state.transferred) {
+        state.auditDeniedAfterTransfer++;
+        return route.fulfill(failure(403));
+      }
       if (state.auditStatus !== 200) return route.fulfill(failure(state.auditStatus));
-      const entries: S["AuditEntry"][] = [
-        ["configuration.changed", ids.self, ids.company, "2026-10-31T16:02:00.000Z"],
-        ["membership.changed", ids.volga, ids.kestrel, "2026-10-30T08:05:00.000Z"],
-        ["application.reviewed", ids.self, ids.cedar, "2026-10-28T12:10:00.000Z"],
-        ["catalog.published", null, ids.company, "2026-10-02T17:30:00.000Z"],
-        ["synthetic.unregistered", ids.volga, ids.cedar, "2026-09-01T16:00:00.000Z"],
-      ].map(([action, actorId, subjectId, occurredAt], index) => ({
-        id: `d6500000-0000-4000-8000-00000000000${index + 1}`,
-        action: action as string,
-        actorId: actorId as string | null,
-        subjectId: subjectId as string,
-        occurredAt: occurredAt as string,
-      }));
+      const view = url.searchParams.get("view"),
+        action = url.searchParams.get("action"),
+        cursor = url.searchParams.get("cursor"),
+        limit = url.searchParams.get("limit");
+      if (view !== "stage3" || limit !== "25") return route.fulfill(failure(422));
+      if (cursor && cursor !== "synthetic+second/page=") return route.fulfill(failure(409));
+      if (cursor && state.auditCursorStatus !== 200)
+        return route.fulfill(failure(state.auditCursorStatus));
+      const base = {
+        actorId: ids.self,
+        actorNickname: "Fictional Director",
+        subjectId: ids.company,
+      };
+      const entries: S["AuditStage3Entry"][] = [
+        {
+          ...base,
+          id: "d6500000-0000-4000-8000-000000000001",
+          action: "configuration.changed",
+          objectType: "company",
+          objectName: "Yukon Union",
+          occurredAt: "2026-10-31T16:02:00.000Z",
+          details: {
+            before: { reportingTimezone: null },
+            after: { reportingTimezone: "America/Edmonton" },
+          },
+        },
+        {
+          ...base,
+          id: "d6500000-0000-4000-8000-000000000002",
+          action: "membership.changed",
+          objectType: "user",
+          objectName: names.cedar,
+          subjectId: ids.cedar,
+          occurredAt: "2026-10-30T08:05:00.000Z",
+          details: {
+            before: { status: "active", role: "trainee" },
+            after: { status: "active", role: "driver" },
+          },
+        },
+        {
+          ...base,
+          id: "d6500000-0000-4000-8000-000000000003",
+          action: "configuration.changed",
+          actorNickname: null,
+          objectType: "company",
+          objectName: null,
+          occurredAt: "2026-10-28T12:10:00.000Z",
+          details: null,
+        },
+        {
+          ...base,
+          id: "d6500000-0000-4000-8000-000000000004",
+          action: "catalog.published",
+          actorId: null,
+          actorNickname: null,
+          objectType: "catalog",
+          objectName: "Fictional catalog",
+          occurredAt: "2026-10-02T17:30:00.000Z",
+          details: null,
+        },
+        {
+          ...base,
+          id: "d6500000-0000-4000-8000-000000000005",
+          action: "synthetic.unregistered",
+          objectType: "application",
+          objectName: null,
+          occurredAt: "2026-09-01T16:00:00.000Z",
+          details: null,
+        },
+      ];
+      const filtered = state.auditEmpty
+        ? []
+        : entries.filter((row) => !action || row.action === action);
+      const offset = cursor ? state.auditPageSize : 0;
       return route.fulfill({
-        json: envelope({ items: state.auditEmpty ? [] : entries, nextCursor: null }),
+        json: envelope({
+          items: filtered.slice(offset, offset + state.auditPageSize),
+          nextCursor:
+            offset + state.auditPageSize < filtered.length ? "synthetic+second/page=" : null,
+          ...(state.auditTotal === undefined ? {} : { total: state.auditTotal }),
+        }),
       });
     }
     if (method === "GET" && path === "/admin/members") {
@@ -282,6 +379,7 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       }
       state.pending = null;
       state.transferred = true;
+      await state.transferResponseGate;
       return route.fulfill({ json: envelope({ id: ids.company, version: 2 }) });
     }
     state.unexpected.push(`${method} ${path}`);

@@ -1,4 +1,4 @@
-/* Compact company settings and leadership transfer (VTC-065). Page selectors are scoped to
+/* Company settings and leadership transfer. Page selectors are scoped to
    .settings-page; portaled dialogs are reached through .dialog-content:has(.settings-dialog), and
    the post-transfer notice (rendered outside the restricted page) through .settings-transferred.
    The shared tables break anywhere; text here wraps only between words, and only
@@ -10,11 +10,12 @@
 .settings-page .settings-heading .page-heading {
   padding-bottom: 0;
 }
-.settings-page .card {
+.settings-page .settings-layout .card,
+.settings-page :is(.settings-audit, .settings-restricted) {
   gap: 10px;
   padding: 12px 14px;
 }
-.settings-page .muted {
+.settings-page :is(.settings-layout, .settings-audit) .muted {
   font-size: var(--font-small);
   line-height: 1.5;
 }
@@ -25,6 +26,15 @@
 }
 .settings-page .settings-break {
   overflow-wrap: anywhere;
+}
+
+.settings-page .tabs-list {
+  flex-wrap: wrap;
+}
+.settings-page .tabs-trigger {
+  flex-shrink: 1;
+  padding-inline: 8px;
+  text-align: start;
 }
 
 /* Main column and the leadership panel: side by side when both fit, the panel below otherwise. */
@@ -175,20 +185,31 @@
   gap: 4px;
 }
 
-/* Audit: fixed columns so IDs wrap inside the scroll region instead of widening it. */
+/* Audit: give the change the most room, with a keyboard-scrollable table on small screens. */
+.settings-page .settings-audit-filter {
+  display: flex;
+  flex: 0 1 21rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.settings-page .settings-audit-filter .select {
+  flex: 1 1 13rem;
+  min-width: 0;
+}
+.settings-page .settings-audit-results:focus-visible {
+  outline-offset: 3px;
+}
 .settings-page .settings-audit-table {
   min-width: 36rem;
   table-layout: fixed;
 }
 .settings-page .settings-audit-table th:nth-child(1) {
-  width: 22%;
+  width: 21%;
 }
-.settings-page .settings-audit-table th:nth-child(2),
-.settings-page .settings-audit-table th:nth-child(4) {
-  width: 24%;
-}
-.settings-page .settings-audit-table th:nth-child(3) {
-  width: 30%;
+.settings-page .settings-audit-table th:nth-child(2) {
+  width: 25%;
 }
 .settings-page .settings-audit-table :is(th, td) {
   padding: 6px 8px;
@@ -201,6 +222,57 @@
   color: var(--muted);
   font-size: var(--font-small);
   font-weight: 600;
+}
+
+/* Keep both sides of a change readable independently of color or the arrow. */
+.settings-page .settings-audit-change {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0 0;
+}
+.settings-page .settings-audit-change > div {
+  display: grid;
+  flex: 1 1 8rem;
+  gap: 2px;
+  min-width: 0;
+}
+.settings-page .settings-audit-arrow {
+  padding-inline-start: 0.5rem;
+  color: var(--muted);
+}
+.settings-page .settings-audit-change dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.settings-page .settings-audit-change dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.settings-page .settings-audit-table td,
+.settings-page .settings-audit-table :is(strong, p) {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .settings-page .settings-audit-table {
+    min-width: 20rem;
+  }
+  .settings-page .settings-audit-table th:nth-child(1) {
+    width: 23%;
+  }
+  .settings-page .settings-audit-table th:nth-child(2) {
+    width: 24%;
+  }
+  .settings-page .settings-audit-table :is(th, td) {
+    padding-inline: 4px;
+  }
+  .settings-page .settings-audit-change > div {
+    flex-basis: 100%;
+  }
+  .settings-page .settings-audit-arrow {
+    display: none;
+  }
 }
 
 /* Leadership panel. */
@@ -312,7 +384,7 @@
   border-color: var(--destructive);
   background: var(--rejected-surface);
   color: var(--destructive);
-  font-weight: 700;
+  font-weight: var(--button-font-weight);
 }
 .dialog-content:has(.settings-dialog) .settings-danger-solid:hover:not(:disabled) {
   background: var(--surface-active);

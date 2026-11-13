@@ -14,11 +14,15 @@ import { decimal } from "../sources/contracts/canonical.js";
 import type { Fact, NormalizedTripEvidence, TripEntity } from "../sources/contracts/evidence.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
+import { queueClock, syncReviewReasons } from "./review-queue.js";
 
 type S = components["schemas"];
 export function createTripAdjudication(
   unit: UnitOfWork,
   catalogs?: Pick<Catalogs, "selectionsInTransaction">,
+  now = () => new Date(),
+  stage3Enabled = false,
+  changed?: (tx: TxContext, before: TripState, after: TripState) => Promise<void>,
 ) {
   const c = (tx: TxContext) => unit.client(tx),
     facts = createFactRepository(unit),
@@ -65,11 +69,13 @@ export function createTripAdjudication(
     ) {
       if (row.version >= 2147483647 || row.adjudicationVersion >= 2147483647)
         throw identityError(409);
-      const version = row.version + 1;
+      const version = row.version + 1,
+        at = now().toISOString();
       await c(tx)
         .update(trips)
         .set({
           ...patch,
+          ...queueClock(row, patch, at),
           version,
           adjudicationVersion: row.adjudicationVersion + (independent ? 1 : 0),
           ...(e
@@ -85,6 +91,7 @@ export function createTripAdjudication(
             : {}),
         })
         .where(eq(trips.id, row.id));
+      if (stage3Enabled) await syncReviewReasons(c(tx), { ...row, ...patch });
       if (row.currentFactId || e)
         await c(tx)
           .insert(tripHistory)
@@ -95,9 +102,11 @@ export function createTripAdjudication(
             factId: e?.factRevisionId ?? (row.currentFactId as string),
             outcome: e?.outcome ?? row.outcome,
             reasons: patch.reviewReasons ?? row.reviewReasons,
-            createdAt: new Date().toISOString(),
+            createdAt: at,
           });
-      return groups.resolve(tx, row.id, true);
+      const after = await groups.resolve(tx, row.id, true);
+      await changed?.(tx, row, after);
+      return after;
     },
     async derive(
       tx: TxContext,

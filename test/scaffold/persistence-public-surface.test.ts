@@ -16,7 +16,8 @@ test("public database surface exposes bounded audit reads and append without its
     const audit = database.createAudit(unit);
     assert.equal(typeof audit.append, "function");
     assert.equal(typeof audit.list, "function");
-    assert.deepEqual(Object.keys(audit).sort(), ["append", "list"]);
+    assert.equal(typeof audit.listStage3, "function");
+    assert.deepEqual(Object.keys(audit).sort(), ["append", "list", "listStage3"]);
   } finally {
     await unit.close();
   }

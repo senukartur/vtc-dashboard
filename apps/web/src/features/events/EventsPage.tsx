@@ -9,6 +9,7 @@ import { publicContent, publicPath } from "../landing/content.js";
 import { EventState, KeepFocusButton, useEventTimezone } from "./components.js";
 import { EventEditor, Stage2EventEditor } from "./EventEditor.js";
 import { useDraftText } from "./editor/draft.js";
+import { useEditorText } from "./editor/text.js";
 import { MemberEventsPage } from "./MemberEventsPage.js";
 import { type DTO, periodFrom } from "./model.js";
 import { useEventQuery } from "./queries.js";
@@ -163,6 +164,7 @@ export function CreateEventPage() {
   const { t } = useTranslation("events"),
     session = useSession(),
     draftText = useDraftText(),
+    { text: editorText } = useEditorText(),
     navigate = useNavigate(),
     [search] = useSearchParams();
   const close = () => navigate("/account/events");
@@ -199,25 +201,19 @@ export function CreateEventPage() {
       </div>
     );
   }
+  if (manager && session.eventsStage2Enabled) {
+    return (
+      <div className="event-page event-create-page stack">
+        <h1>{editorText.newHeading}</h1>
+        <Stage2EventEditor source={{ kind: "new" }} onCancel={close} onPublished={openPublished} />
+      </div>
+    );
+  }
   return (
     <div className="event-page stack">
       <Link to="/account/events">{t("back")}</Link>
       <h1>{t("create")}</h1>
-      <Card>
-        {manager ? (
-          session.eventsStage2Enabled ? (
-            <Stage2EventEditor
-              source={{ kind: "new" }}
-              onCancel={close}
-              onPublished={openPublished}
-            />
-          ) : (
-            <EventEditor />
-          )
-        ) : (
-          <p>{t("forbidden")}</p>
-        )}
-      </Card>
+      <Card>{manager ? <EventEditor /> : <p>{t("forbidden")}</p>}</Card>
     </div>
   );
 }

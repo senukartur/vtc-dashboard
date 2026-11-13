@@ -1951,7 +1951,7 @@ test("ambiguous COMMIT is returned once and durable receipt replay resolves comm
   expect(replayed.data.outcome).toBe("accepted");
   expect(await credit(r.tripId)).toEqual(before);
 });
-function composedModules(admissions?: AdmissionsConfig) {
+function composedModules(admissions?: AdmissionsConfig, stage3 = false) {
   return composeIdentity(
     unit,
     { secret: key(), origin, production: false },
@@ -1966,6 +1966,10 @@ function composedModules(admissions?: AdmissionsConfig) {
     { cursorKey: key() },
     { key: key() },
     { key: key() },
+    undefined,
+    undefined,
+    undefined,
+    stage3,
   );
 }
 
@@ -2887,6 +2891,21 @@ test("production candidate reads revalidate assessment-only versions without mut
   expect(assessedManual?.version).toBeGreaterThan(
     submitted.tripId === stored.primaryTripId ? stored.primaryVersion : stored.secondaryVersion,
   );
+  const refreshed = (await recon.list(director, { limit: 100 })).items.find(
+    (c) =>
+      [c.primaryTripId, c.secondaryTripId].includes(source.tripId) &&
+      [c.primaryTripId, c.secondaryTripId].includes(submitted.tripId),
+  );
+  if (!refreshed) throw Error("SYNTHETIC_CANDIDATE_MISSING");
+  expect(refreshed.id).not.toBe(stored.id);
+  // Simulate an older producer so Legacy still proves its read-only exact evidence fallback.
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(trips)
+      .set({ version: (assessedManual?.version ?? 0) + 1 })
+      .where(eq(trips.id, submitted.tripId)),
+  );
   const current = await state(source.tripId),
     beforeCredit = await credit(source.tripId);
   expect(current?.decision).toBe("accepted");
@@ -2894,7 +2913,7 @@ test("production candidate reads revalidate assessment-only versions without mut
     unit.client(tx).select().from(reconciliationSearches),
   );
   const candidate = (await recon.list(director, { limit: 100 })).items.find(
-    (c) => c.id === stored.id,
+    (c) => c.id === refreshed.id,
   );
   expect(candidate).toMatchObject({ confidence: "review_required" });
   expect(candidate?.reasonCodes).toContain("manual_actual_time_unknown");
@@ -2909,7 +2928,7 @@ test("production candidate reads revalidate assessment-only versions without mut
   expect(await state(source.tripId)).toEqual(current);
   expect(await credit(source.tripId)).toEqual(beforeCredit);
   const visible = async () =>
-    (await recon.list(director, { limit: 100 })).items.some((c) => c.id === stored.id);
+    (await recon.list(director, { limit: 100 })).items.some((c) => c.id === refreshed.id);
   const foreign = await member();
   await unit.run((tx) =>
     unit
@@ -2939,7 +2958,7 @@ test("production candidate reads revalidate assessment-only versions without mut
     { identity, trips: target, qualifications: composed.qualifications },
   );
   expect(
-    (await mismatch.list(director, { limit: 100 })).items.some((c) => c.id === stored.id),
+    (await mismatch.list(director, { limit: 100 })).items.some((c) => c.id === refreshed.id),
   ).toBe(false);
   const incomplete = createReconciliation(unit, recon.config, {
     identity,
@@ -2953,7 +2972,7 @@ test("production candidate reads revalidate assessment-only versions without mut
     qualifications: composed.qualifications,
   });
   expect(
-    (await incomplete.list(director, { limit: 100 })).items.some((c) => c.id === stored.id),
+    (await incomplete.list(director, { limit: 100 })).items.some((c) => c.id === refreshed.id),
   ).toBe(false);
   const priorPointer = current?.currentFactId;
   await unit.run((tx) =>
@@ -2988,6 +3007,136 @@ test("production candidate reads revalidate assessment-only versions without mut
   expect(await visible()).toBe(false);
   expect(await credit(source.tripId)).toEqual(beforeCredit);
 });
+
+test("Dispatch restores exact duplicate snapshots across off-mode staff decisions and a paged historical repair", async () => {
+  const off = composedModules();
+  if (
+    !off.trips ||
+    !off.manualReports ||
+    !off.tripDecisions ||
+    !off.reconciliation ||
+    !off.qualifications
+  )
+    throw Error("SYNTHETIC_COMPOSITION_MISSING");
+  const who = await member();
+  const decision = off.tripDecisions;
+  const legacy = off.reconciliation;
+  const staged = createReconciliation(
+    unit,
+    { ...legacy.config, dispatchReviewStage3Enabled: true },
+    {
+      identity,
+      trips: off.trips,
+      manual: off.manualReports,
+      qualifications: off.qualifications,
+    },
+    now,
+  );
+  const source = await retryTransaction(
+    unit,
+    (tx) =>
+      off.trips?.storeInTransaction(tx, "ets2telemetry", payload(), {
+        ownerUserId: who.userId,
+        connection: { state: "unknown", referenceId: null },
+      }) ?? Promise.reject(Error("SYNTHETIC_COMPOSITION_MISSING")),
+  );
+  const submitted = await report(who, off.manualReports);
+  const id = submitted.tripId;
+  const pair = (snapshot: S["TripStage3Duplicate"]) =>
+    [snapshot.primaryTrip.id, snapshot.secondaryTrip.id].includes(source.tripId) &&
+    [snapshot.primaryTrip.id, snapshot.secondaryTrip.id].includes(id);
+  const find = async (status?: "dismissed") =>
+    (await staged.stage3List(director, { limit: 100, ...(status && { status }) })).items.find(pair);
+  const first = await find();
+  if (!first) throw Error("SYNTHETIC_CANDIDATE_MISSING");
+  const key = newId();
+  const dismissedInput = { reason: "Fictional previously dismissed record" };
+  const earlier = await staged.dismissCandidate(director, first.id, key, 1, dismissedInput);
+  expect((await find("dismissed"))?.id).toBe(first.id);
+
+  const reviewed = await decision.review(dispatcher, id);
+  await decision.decide(dispatcher, id, newId(), reviewed.version, {
+    decision: "accept",
+    proposalId: null,
+    reason: "Fictional legacy staff decision",
+    factRevisionId: reviewed.data.factRevisionId,
+    reviewedRevisionId: submitted.currentRevision.id,
+  });
+  const next = await find();
+  if (!next) throw Error("SYNTHETIC_CANDIDATE_MISSING");
+  expect(next.id).not.toBe(first.id);
+  expect(next).toMatchObject({ dismissed: false, version: 1 });
+  expect(await find("dismissed")).toBeUndefined();
+  await expect(staged.dismissCandidate(director, first.id, newId(), 2, null)).rejects.toMatchObject(
+    { statusCode: 409, publicCode: "VERSION_CONFLICT" },
+  );
+  expect(await staged.dismissCandidate(director, first.id, key, 1, dismissedInput)).toEqual(
+    earlier,
+  );
+
+  // Simulate pre-activation producers advancing both trip versions without the new callback.
+  await control.execute("UPDATE trips SET version=version+1 WHERE id IN (?,?)", [
+    id,
+    source.tripId,
+  ]);
+  expect(await find()).toBeUndefined();
+  const scan = async (verify: boolean) => {
+    let cursor: string | undefined,
+      processed = 0,
+      mismatches = 0;
+    do {
+      const result = await unit.run((tx) =>
+        legacy.repairCandidateVersionsInTransaction(tx, cursor, verify),
+      );
+      expect(result.processed).toBeLessThanOrEqual(25);
+      processed += result.processed;
+      mismatches += result.mismatches;
+      cursor = result.nextCursor ?? undefined;
+    } while (cursor);
+    expect(processed).toBeGreaterThan(25);
+    return mismatches;
+  };
+  const [rows] = await control.execute<RowDataPacket[]>(
+    "SELECT owner_id, game, rule_hash, primary_trip_id, secondary_trip_id, primary_version, secondary_version FROM reconciliation_candidates WHERE id=?",
+    [next.id],
+  );
+  const selected = rows[0];
+  if (!selected) throw Error("SYNTHETIC_CANDIDATE_MISSING");
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .insert(reconciliationCandidates)
+      .values(
+        Array.from({ length: 26 }, () => ({
+          id: newId(),
+          ownerId: next.primaryTrip.owner.id,
+          game: next.game,
+          ruleHash: selected.rule_hash,
+          primaryTripId: next.primaryTrip.id,
+          secondaryTripId: next.secondaryTrip.id,
+          primaryVersion: selected.primary_version,
+          secondaryVersion: selected.secondary_version,
+          searchHash: randomBytes(32),
+          evidence: { factIds: [newId()] },
+          reasons: [],
+          active: true,
+          createdAt: iso(),
+        })),
+      ),
+  );
+  expect(await scan(true)).toBeGreaterThan(0);
+  expect(await find()).toBeUndefined();
+  await scan(false);
+  const recovered = await find();
+  expect(recovered?.id).toBeDefined();
+  expect(recovered?.id).not.toBe(next.id);
+  expect(recovered).toMatchObject({ dismissed: false, version: 1 });
+  expect(recovered?.primaryTrip.version).toBe(next.primaryTrip.version + 1);
+  expect(recovered?.secondaryTrip.version).toBe(next.secondaryTrip.version + 1);
+  expect(await scan(true)).toBe(0);
+  await scan(false);
+  expect((await find())?.id).toBe(recovered?.id);
+}, 60000);
 
 async function queueEntry(actor: Actor, id: string, options: Omit<ListOptions, "cursor"> = {}) {
   let cursor: string | undefined;
@@ -4119,6 +4268,364 @@ test("production workspace HTTP composes real sources with current role, ownersh
     await app.close();
   }
 });
+
+test("Stage 3 Dispatch selectors share authorized counts, exact filters, ordered decisions and direct reason semantics", async () => {
+  const on = composedModules(undefined, true);
+  const off = composedModules();
+  if (!on.trips || !on.manualReports || !on.tripDecisions || !off.tripDecisions)
+    throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+  const author = await member(),
+    viewer = await member(["driver", "dispatcher"]);
+  const login = await on.identity.login(`${viewer.userId}@example.invalid`, password);
+  const viewerHeaders = { cookie: login.cookies.map((v) => v.split(";", 1)[0]).join("; ") };
+  const actor = await on.identity.authenticate(new Headers(viewerHeaders));
+  const offLogin = await off.identity.login(`${viewer.userId}@example.invalid`, password);
+  const offHeaders = { cookie: offLogin.cookies.map((v) => v.split(";", 1)[0]).join("; ") };
+  const app = await createApp({ ...on, checkReadiness: async () => true });
+  const offApp = await createApp({ ...off, checkReadiness: async () => true });
+  const waitingUrl = `/api/v1/trips?scope=review&view=stage3&ownerId=${author.userId}`;
+  const get = async (url: string) => {
+    const response = await app.inject({ url, headers: viewerHeaders });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    return response.json().data;
+  };
+  try {
+    const first = await report(author, on.manualReports);
+    const second = await report(author, on.manualReports);
+    await report(actor, on.manualReports);
+    const waiting: S["TripStage3ReviewList"] = await get(`${waitingUrl}&limit=1&source=manual`);
+    expect(waiting.total).toBe(2);
+    expect(waiting.items[0]?.state).toBe("waiting");
+    expect(waiting.nextCursor).not.toBeNull();
+    const after: S["TripStage3ReviewList"] = await get(
+      `${waitingUrl}&limit=1&source=manual&cursor=${waiting.nextCursor}`,
+    );
+    expect([waiting.items[0]?.trip.id, after.items[0]?.trip.id].sort()).toEqual(
+      [first.tripId, second.tripId].sort(),
+    );
+    const code = (waiting.items[0]?.reasonCodes ?? [])[0];
+    if (!code) throw new Error("SYNTHETIC_REVIEW_REASON_MISSING");
+    expect((await get(`${waitingUrl}&reasonCode=${code}`)).total).toBe(2);
+    for (const wrong of [`${code} `, code.toUpperCase(), "код", ` ${code}`])
+      expect((await get(`${waitingUrl}&reasonCode=${encodeURIComponent(wrong)}`)).total).toBe(0);
+    expect(
+      (
+        await app.inject({
+          url: `${waitingUrl}&limit=1&source=ets2telemetry&cursor=${waiting.nextCursor}`,
+          headers: viewerHeaders,
+        })
+      ).statusCode,
+    ).toBe(409);
+
+    const queue = await get("/api/v1/trips/review-summary");
+    const workspace: S["WorkspaceStage3Summary"] = await get(
+      "/api/v1/me/workspace-summary?view=stage3",
+    );
+    expect(workspace.reviewQueue).toMatchObject({
+      waitingCount: queue.waitingCount,
+      duplicateCount: queue.duplicateCount,
+    });
+    expect(workspace.reviewQueue?.computedAt).toBe(workspace.computedAt);
+    expect(workspace).not.toHaveProperty("legacyReviewQueue");
+    const legacy = await offApp.inject({
+      url: "/api/v1/me/workspace-summary?view=stage3",
+      headers: offHeaders,
+    });
+    expect(legacy.statusCode).toBe(200);
+    expect(legacy.json().data).toHaveProperty("legacyReviewQueue");
+    expect(legacy.json().data).not.toHaveProperty("reviewQueue");
+    expect((await offApp.inject({ url: waitingUrl, headers: offHeaders })).statusCode).toBe(422);
+    expect(
+      (await offApp.inject({ url: "/api/v1/trips/review-summary", headers: offHeaders }))
+        .statusCode,
+    ).not.toBe(200);
+
+    const request = async (id: string, value: Record<string, unknown>, commandKey = newId()) => {
+      const reviewed = await app.inject({
+        url: `/api/v1/trips/${id}/review?view=stage3`,
+        headers: viewerHeaders,
+      });
+      expect(reviewed.statusCode).toBe(200);
+      const data = reviewed.json().data as S["TripStage3Review"];
+      expect(data.sources.manual?.manualRevision.id).toBeDefined();
+      expect(data.sources.telemetry).toBeNull();
+      return app.inject({
+        method: "POST",
+        url: `/api/v1/trips/${id}/decisions?view=stage3`,
+        headers: {
+          ...viewerHeaders,
+          origin,
+          "x-csrf-token": csrfProtection(on.identity.config).issue(viewerHeaders, actor).token,
+          "content-type": "application/json",
+          "if-match": String(reviewed.headers.etag),
+          "idempotency-key": commandKey,
+        },
+        payload: {
+          factRevisionId: data.factRevisionId,
+          reviewedRevisionId: data.sources.manual?.manualRevision.id,
+          proposalId: null,
+          ...value,
+        },
+      });
+    };
+    for (const body of [
+      { decision: "accept", reason: null },
+      { decision: "reject", reason: "  " },
+    ])
+      expect((await request(first.tripId, body)).statusCode).toBe(422);
+    const accepted = await request(first.tripId, { decision: "accept" });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json().data).toMatchObject({ outcome: "accepted", reason: null });
+    const returned = await request(second.tripId, {
+      decision: "reject",
+      reason: "Fictional return feedback",
+    });
+    expect(returned.statusCode).toBe(200);
+    const resolved: S["TripStage3ReviewList"] = await get(`${waitingUrl}&status=resolved`);
+    expect(resolved.total).toBe(2);
+    expect(
+      resolved.items.map((item) => (item.state === "resolved" ? item.outcome : null)).sort(),
+    ).toEqual(["accepted", "rejected"]);
+    expect((await get(waitingUrl)).total).toBe(0);
+    expect(
+      (await app.inject({ url: `${waitingUrl}&status=resolved&order=asc`, headers: viewerHeaders }))
+        .statusCode,
+    ).toBe(422);
+    const legacyRead = await get(`/api/v1/trips/${first.tripId}/review`);
+    expect(legacyRead).toHaveProperty("trip");
+    expect(legacyRead).not.toHaveProperty("sources");
+  } finally {
+    await app.close();
+    await offApp.close();
+  }
+});
+
+test("Stage 3 review keeps both independent sources and gates retained manual results against historical telemetry", async () => {
+  const on = composedModules(undefined, true);
+  if (!on.trips || !on.manualReports || !on.tripDecisions)
+    throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+  const author = await member();
+  const submitted = await report(author, on.manualReports);
+  const checked = await on.tripDecisions.reviewStage3(dispatcher, submitted.tripId);
+  const accepted = await on.tripDecisions.decide(
+    dispatcher,
+    submitted.tripId,
+    newId(),
+    checked.version,
+    {
+      decision: "accept",
+      proposalId: null,
+      factRevisionId: checked.data.factRevisionId,
+      reviewedRevisionId: submitted.currentRevision.id,
+      reason: "  ",
+    },
+    true,
+  );
+  expect(accepted.data.reason).toBeNull();
+  const telemetry = overweight();
+  const damage = { available: true, value: 0.25, unit: "fraction" } as const;
+  telemetry.snapshot.cargoDamage = damage;
+  const incoming = await retryTransaction(
+    unit,
+    (tx) =>
+      on.trips?.storeInTransaction(tx, "ets2telemetry", telemetry, {
+        ownerUserId: author.userId,
+        connection: { state: "unknown", referenceId: null },
+        canonical: { tripId: submitted.tripId, expectedVersion: accepted.version },
+      }) ?? Promise.reject(new Error("SYNTHETIC_TRIPS_MISSING")),
+  );
+  expect(incoming.tripId).toBe(submitted.tripId);
+  const detail = await on.tripDecisions.reviewStage3(dispatcher, submitted.tripId);
+  expect(detail.data.summary.decision).toBe("accepted");
+  expect(detail.data.effectiveFacts?.provider).toBe("manual");
+  expect(detail.data.sources.manual?.manualRevision.id).toBe(submitted.currentRevision.id);
+  expect(detail.data.sources.telemetry?.normalizedFacts).toMatchObject({
+    provider: "ets2telemetry",
+    sourceRecordId: incoming.sourceRecordId,
+    cargoDamagePercent: 25,
+  });
+  expect(detail.data.sources.telemetry?.normalizedFacts.factRevisionId).not.toBe(
+    detail.data.effectiveFacts?.factRevisionId,
+  );
+  expect(
+    detail.data.sources.telemetry?.facts.every(
+      (fact) => fact.evidenceRecordId === incoming.sourceRecordId,
+    ),
+  ).toBe(true);
+  expect(detail.data.acceptance).toMatchObject({
+    mode: "unavailable",
+    blockedReasonCodes: expect.arrayContaining(["telemetry_source_present"]),
+  });
+  const retainedCredit = await credit(submitted.tripId);
+  expect(retainedCredit?.factId).toBe(accepted.data.basis.factRevisionId);
+
+  const id = submitted.tripId;
+  const proposal = await on.tripDecisions.propose(dispatcher, id, newId(), detail.version, {
+    reason: "Fictional supported manual distance change",
+    evidenceIds: submitted.currentRevision.fields.evidenceIds,
+    actualDistanceM: "125000",
+  });
+  const saved = await on.tripDecisions.getProposal(dispatcher, id, proposal.data.id);
+  const [before, auditBefore] = await Promise.all([state(id), audits(id)]);
+  const login = await on.identity.login(`${dispatcher.userId}@example.invalid`, password);
+  const cookie = login.cookies.map((entry) => entry.split(";", 1)[0]).join("; ");
+  const headers = {
+    cookie,
+    origin,
+    "content-type": "application/json",
+    "x-csrf-token": csrfProtection(on.identity.config).issue(
+      { cookie },
+      await on.identity.authenticate(new Headers({ cookie })),
+    ).token,
+    "if-match": `"v${saved.version}"`,
+  };
+
+  const app = await createApp({ ...on, checkReadiness: async () => true });
+  try {
+    const direct = {
+      decision: "accept",
+      proposalId: null,
+      factRevisionId: detail.data.factRevisionId,
+      reviewedRevisionId: submitted.currentRevision.id,
+      reason: "Fictional review",
+    };
+    for (const [url, body, code, match] of [
+      [`/api/v1/trips/${id}/decisions?view=stage3`, direct, "STATE_CONFLICT", headers["if-match"]],
+      [`/api/v1/trips/${id}/decisions`, direct, "STATE_CONFLICT", headers["if-match"]],
+      [
+        `/api/v1/trips/${id}/proposals/${saved.data.id}/decisions`,
+        {
+          decision: "approve",
+          reviewedRevisionId: saved.data.revisionId,
+          reason: "Fictional staff review",
+        },
+        "VERSION_CONFLICT",
+        `"v${saved.version - 1}"`,
+      ],
+      [
+        `/api/v1/trips/${id}/proposals/${saved.data.id}/decisions`,
+        { decision: "approve", reviewedRevisionId: newId(), reason: "Fictional staff review" },
+        "VERSION_CONFLICT",
+        headers["if-match"],
+      ],
+      [
+        `/api/v1/trips/${id}/proposals/${saved.data.id}/decisions`,
+        {
+          decision: "approve",
+          reviewedRevisionId: saved.data.revisionId,
+          reason: "Fictional staff review",
+        },
+        "STATE_CONFLICT",
+        headers["if-match"],
+      ],
+    ] as const) {
+      const response = await app.inject({
+        method: "POST",
+        url,
+        headers: { ...headers, "if-match": match, "idempotency-key": newId() },
+        payload: body,
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error.code, url).toBe(code);
+    }
+  } finally {
+    await app.close();
+  }
+  expect(await state(id)).toEqual(before);
+  expect(await credit(id)).toEqual(retainedCredit);
+  expect(await audits(id)).toEqual(auditBefore);
+  expect((await on.tripDecisions.getProposal(dispatcher, id, saved.data.id)).data.state).toBe(
+    "pending",
+  );
+  const finalDetail = await on.tripDecisions.reviewStage3(dispatcher, id);
+  expect(finalDetail.data.decisions.map((decision) => decision.id)).toEqual([accepted.data.id]);
+});
+test("Disabled queue tracks exact transitions and paged repair restores proven historical re-entry and stale reason rows", async () => {
+  const author = await member();
+  const submitted = await report(author);
+  const firstClock = (await state(submitted.tripId))?.queuedAt;
+  expect(firstClock).toBe(submitted.currentRevision.submittedAt);
+  const returned = await decide(submitted.tripId, "reject");
+  expect((await state(submitted.tripId))?.queuedAt).toBeNull();
+  instant += 2000;
+  const fields = submitted.currentRevision.fields;
+  if (!("origin" in fields)) throw new Error("SYNTHETIC_MANUAL_V2_REQUIRED");
+  const resumed = await manual.reviseReport(author, submitted.id, newId(), submitted.version, {
+    fields: { ...fields, ...manualReferenceDates, actualDistanceM: "124000" },
+    expectedTripVersion: returned.version,
+  });
+  expect((await state(submitted.tripId))?.queuedAt).toBe(resumed.currentRevision.submittedAt);
+  instant += 2000;
+  await manual.reviseReport(author, submitted.id, newId(), resumed.version, {
+    fields: { ...fields, ...manualReferenceDates, actualDistanceM: "125000" },
+    expectedTripVersion: resumed.tripVersion,
+  });
+  expect((await state(submitted.tripId))?.queuedAt).toBe(resumed.currentRevision.submittedAt);
+  await control.query("UPDATE trips SET queued_at=created_at WHERE id=?", [submitted.tripId]);
+  await control.query("INSERT INTO trip_review_reasons (trip_id,code) VALUES (?,?)", [
+    submitted.tripId,
+    "fictional_obsolete_reason",
+  ]);
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .insert(trips)
+      .values(
+        Array.from({ length: 26 }, () => ({
+          id: newId(),
+          ownerId: author.userId,
+          game: "ats" as const,
+          version: 1,
+          outcome: "none" as const,
+          recording: "unknown" as const,
+          decision: "unassessed" as const,
+          assessmentPending: false,
+          reviewReasons: [],
+          createdAt: iso(),
+        })),
+      ),
+  );
+  await control.execute("DELETE FROM qualification_states WHERE user_id=? AND game='ats'", [
+    author.userId,
+  ]);
+  const states = async () => {
+    const [rows] = await control.execute<RowDataPacket[]>(
+      "SELECT game,version FROM qualification_states WHERE user_id=? ORDER BY game",
+      [author.userId],
+    );
+    return rows;
+  };
+  const qualificationsBefore = await states();
+  expect(qualificationsBefore.some(({ game }) => game === "ats")).toBe(false);
+  const scan = async (verify: boolean) => {
+    let cursor: string | undefined,
+      mismatches = 0;
+    do {
+      const result = await unit.run((tx) =>
+        service.repairReviewQueueInTransaction(tx, cursor, verify),
+      );
+      expect(result.processed).toBeLessThanOrEqual(25);
+      mismatches += result.mismatches;
+      cursor = result.nextCursor ?? undefined;
+    } while (cursor);
+    return mismatches;
+  };
+  expect(await scan(true)).toBeGreaterThan(0);
+  expect(await states()).toEqual(qualificationsBefore);
+  expect((await state(submitted.tripId))?.queuedAt).toBe(firstClock);
+  await scan(false);
+  await scan(false);
+  expect(await scan(true)).toBe(0);
+  expect(await states()).toEqual(qualificationsBefore);
+  const [codes] = await control.query<RowDataPacket[]>(
+    "SELECT code FROM trip_review_reasons WHERE trip_id=? ORDER BY code",
+    [submitted.tripId],
+  );
+  const nowHeld = await state(submitted.tripId);
+  expect(nowHeld?.queuedAt).toBe(resumed.currentRevision.submittedAt);
+  expect(codes.map((row) => row.code)).toEqual(nowHeld?.reviewReasons);
+}, 60000);
 
 test("trip reads omit a persisted wrong-game event candidate", async () => {
   const who = await member();

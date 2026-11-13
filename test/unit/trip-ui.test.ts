@@ -38,7 +38,7 @@ test("generated trip runtime envelopes accept reviewed fixtures and reject priva
   };
   for (const fixture of cases) {
     const name = operations[fixture.operationId];
-    if (name && fixture.status === 200)
+    if (name && fixture.status === 200 && !fixture.operationExtension)
       expect(schema(name).safeParse(fixture.response).success, fixture.id).toBe(true);
   }
   const summary = cases.find((f: { id: string }) => f.id === "getTrip:success").response;

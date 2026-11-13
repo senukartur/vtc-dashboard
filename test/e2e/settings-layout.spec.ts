@@ -1,6 +1,7 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
+import { mockQualifications } from "./support/qualifications.ts";
 import {
   correctCode,
   ids,
@@ -21,6 +22,8 @@ const text = {
     change: "Change successor",
     successor: "Active successor",
     sources: "Trip sources",
+    audit: "Audit log",
+    auditTab: "Audit log",
   },
   ru: {
     title: "Настройки компании",
@@ -32,6 +35,8 @@ const text = {
     change: "Сменить преемника",
     successor: "Активный преемник",
     sources: "Источники рейсов",
+    audit: "Журнал аудита",
+    auditTab: "Журнал",
   },
 } as const;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -61,7 +66,6 @@ async function open(page: Page, options: SettingsOptions = {}, locale: "en" | "r
 async function settled(page: Page, director = true) {
   await expect(page.locator(".settings-readiness")).toBeVisible();
   await expect(page.locator(".settings-source").first()).toBeVisible();
-  await expect(page.locator(".settings-audit-table tbody tr").first()).toBeVisible();
   if (director) await expect(page.locator(".settings-steps")).toBeVisible();
   await expect(page.getByRole("status")).toHaveCount(0);
 }
@@ -134,7 +138,10 @@ for (const locale of ["en", "ru"] as const)
       expect(await brokenWords(page.locator(".settings-page"))).toEqual([]);
       await capture(page, info, `settings-successor-${locale}`);
       await expect(page.locator("body")).not.toContainText(slogan);
-      // The company name, public page and Discord are not settings here.
+      await expect(
+        main(page).getByRole("heading", { name: /Company name|Название компании/ }),
+      ).toBeVisible();
+      await expect(main(page).getByText("Yukon Union", { exact: true })).toBeVisible();
       await expect(page.getByLabel(/company name|название компании|discord/i)).toHaveCount(0);
       // Only the planned admin routes are read; shell reads are outside this check.
       expect(state.unexpected.filter((entry) => entry.includes(" /admin/"))).toEqual([]);
@@ -184,7 +191,6 @@ test(
     await expect(page.getByRole("heading", { name: text.en.transfer })).toHaveCount(0);
     await expect(page.locator(".settings-leadership")).toHaveCount(0);
     await expect(page.getByRole("region", { name: text.en.sources, exact: true })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Audit history", exact: true })).toBeVisible();
     expect(
       state.reads.filter(
         (path) => path.startsWith("/admin/leadership") || path.startsWith("/admin/members"),
@@ -193,6 +199,8 @@ test(
     // Without the panel the main column takes the full width.
     const layout = await box(page.locator(".settings-layout"));
     expect((await box(main(page))).width).toBeGreaterThanOrEqual(layout.width - 1);
+    await page.getByRole("tab", { name: text.en.audit, exact: true }).click();
+    await expect(page.getByRole("region", { name: text.en.audit, exact: true })).toBeVisible();
   },
 );
 
@@ -297,6 +305,11 @@ test(
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
     await page.keyboard.press("Escape");
+    await page.getByRole("tab", { name: text.en.audit, exact: true }).click();
+    await page.getByRole("tab", { name: "General", exact: true }).click();
+    await expect(page.getByLabel("Company reporting timezone", { exact: true })).toHaveValue(
+      "Europe/Warsaw",
+    );
     await page
       .locator(".settings-reporting")
       .getByRole("button", { name: "Refresh", exact: true })
@@ -458,11 +471,184 @@ test(
       }),
     ]);
     await expect(page.getByLabel(text.en.code)).toHaveCount(0);
-    // The notice is shown once: it is no longer in history, so a reload does not repeat it.
+    // The receipt is held in memory and a reload does not repeat it.
     expect(await page.evaluate(() => history.state?.usr ?? null)).toBeNull();
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
     await expect(page.locator(".settings-transferred")).toHaveCount(0);
+  },
+);
+
+test(
+  "P11 browser Back keeps an in-flight transfer and shows its confirmed outcome",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockSettings(page, { pending: true });
+    let releaseTransfer = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseTransfer = resolve;
+    });
+    await page.route("**/api/v1/admin/leadership/transfers", async (route) => {
+      await held;
+      await route.fallback();
+    });
+    await page.goto("/account/admin/settings?tab=audit");
+    await page.getByRole("tab", { name: "General", exact: true }).click();
+    await settled(page);
+    await codeInput(page).fill(correctCode);
+    await panel(page).getByRole("button", { name: text.en.transferButton, exact: true }).click();
+    const transfer = page.waitForRequest(
+      (request) => new URL(request.url()).pathname === "/api/v1/admin/leadership/transfers",
+    );
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await transfer;
+    try {
+      await page.goBack();
+      await expect(page.getByRole("tab", { name: text.en.audit })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(page.getByRole("tab", { name: text.en.audit })).toBeFocused();
+    } finally {
+      releaseTransfer();
+    }
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
+    await expect(page).toHaveURL(/tab=audit$/);
+    await expect(notice(page)).toContainText(names.volga);
+    await expect(notice(page)).toBeFocused();
+    expect(state.commands).toHaveLength(1);
+  },
+);
+
+test(
+  "P11 an authorized transfer receipt survives the resulting loss of settings access",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockSettings(page, { pending: true });
+    let releaseResponse = () => {};
+    state.transferResponseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    const auditUrl = "/account/admin/settings?tab=audit&keep=synthetic#anchor";
+    await page.goto(auditUrl);
+    await expect(page.getByRole("region", { name: "Audit log", exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: "General", exact: true }).click();
+    await settled(page);
+    await codeInput(page).fill(correctCode);
+    await panel(page).getByRole("button", { name: text.en.transferButton, exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    try {
+      await expect.poll(() => state.transferred).toBe(true);
+      expect(state.commands).toHaveLength(1);
+      await page.goBack();
+      await expect(page).toHaveURL(auditUrl);
+      await expect.poll(() => state.auditDeniedAfterTransfer).toBeGreaterThan(0);
+      await expect.poll(() => state.selfReadsAfterTransfer).toBeGreaterThan(0);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(codeInput(page)).toHaveCount(0);
+      await expect(notice(page)).toHaveCount(0);
+    } finally {
+      releaseResponse();
+    }
+
+    await expect(notice(page)).toContainText(names.volga);
+    await expect(notice(page)).toBeFocused();
+    await expect(page).toHaveURL(auditUrl);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
+    await expect.poll(() => page.evaluate(() => history.state?.usr ?? null)).toBeNull();
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
+    await expect(notice(page)).toHaveCount(0);
+    expect(state.commands).toHaveLength(1);
+  },
+);
+
+test(
+  "P11 the transfer notice survives a temporary session read failure",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await open(page, { pending: true });
+    await settled(page);
+    state.selfStatusAfterTransfer = 503;
+    await codeInput(page).fill(correctCode);
+    await panel(page).getByRole("button", { name: text.en.transferButton, exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Session check unavailable");
+    await expect(notice(page)).toHaveCount(0);
+    await expect(codeInput(page)).toHaveCount(0);
+    expect(state.commands).toHaveLength(1);
+
+    state.selfStatusAfterTransfer = 200;
+    await page.getByRole("button", { name: "Check again", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
+    await expect(notice(page)).toContainText(names.volga);
+    await expect(notice(page)).toBeFocused();
+    await expect(page).toHaveURL("/account/admin/settings");
+    expect(state.commands).toHaveLength(1);
+  },
+);
+
+test(
+  "P11 a different account never sees the completed transfer notice",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await open(page, { pending: true });
+    await settled(page);
+    state.selfReplacementAfterTransfer = {
+      id: ids.cedar,
+      nickname: names.cedar,
+      formerMember: false,
+      roles: ["driver", "deputy_director"],
+    };
+    let releaseSelf = () => {};
+    state.selfResponseGateAfterTransfer = new Promise<void>((resolve) => {
+      releaseSelf = resolve;
+    });
+    await codeInput(page).fill(correctCode);
+    await panel(page).getByRole("button", { name: text.en.transferButton, exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    try {
+      await expect.poll(() => state.selfReadsAfterTransfer).toBeGreaterThan(0);
+      await expect(notice(page)).toHaveCount(0);
+    } finally {
+      releaseSelf();
+    }
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(text.en.title);
+    const workspace = page.getByRole("complementary", { name: "Workspace", exact: true });
+    await expect(workspace.getByRole("button", { name: new RegExp(names.cedar) })).toBeVisible();
+    await expect(panel(page)).toHaveCount(0);
+    await expect(notice(page)).toHaveCount(0);
+    expect(await page.evaluate(() => history.state?.usr ?? null)).toBeNull();
+    expect(state.commands).toHaveLength(1);
+  },
+);
+
+test(
+  "P11 a cancelled review can reopen and an uncertain transfer retries the frozen request",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await open(page, { pending: true });
+    await settled(page);
+    await codeInput(page).fill(correctCode);
+    const trigger = panel(page).getByRole("button", { name: text.en.transferButton, exact: true });
+    const dialog = page.getByRole("dialog");
+    const confirm = dialog.getByRole("button", { name: "Confirm", exact: true });
+    await trigger.click();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(trigger).toBeFocused();
+    expect(state.commands).toEqual([]);
+    state.outcomes.push(503);
+    await trigger.click();
+    await confirm.click();
+    await expect(dialog).toContainText("The result is uncertain.");
+    await confirm.click();
+    await expect(notice(page)).toContainText(names.volga);
+    expect(state.commands).toHaveLength(2);
+    expect(state.commands[1]?.key).toBe(state.commands[0]?.key);
+    expect(state.commands[1]?.body).toBe(state.commands[0]?.body);
   },
 );
 
@@ -544,32 +730,31 @@ test(
     state.auditStatus = 503;
     state.challengeStatus = 503;
     await page.goto("/account/admin/settings");
-    await expect(page.getByRole("alert")).toHaveCount(4);
+    await expect(page.getByRole("alert")).toHaveCount(3);
     await expect(page.getByText(sentinel)).toHaveCount(0);
     await expect(page.locator(".settings-readiness")).toHaveCount(0);
     await expect(page.locator(".settings-steps")).toHaveCount(0);
     await capture(page, info, "settings-errors");
     state.settingsStatus = 200;
     state.sourcesStatus = 200;
-    state.auditStatus = 200;
-    state.auditEmpty = true;
     state.challengeStatus = 200;
-    for (const scope of [
-      ".settings-reporting",
-      ".settings-sources",
-      ".settings-audit",
-      ".settings-leadership",
-    ])
+    for (const scope of [".settings-reporting", ".settings-sources", ".settings-leadership"])
       await page.locator(scope).getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByRole("alert")).toHaveCount(0);
     await expect(page.locator(".settings-readiness")).toBeVisible();
-    await expect(
-      page
-        .locator(".settings-audit")
-        .getByText("There are no records in this view.", { exact: true }),
-    ).toBeVisible();
-    await expect(page.getByRole("region", { name: "Audit history" })).toHaveCount(0);
     await expect(page.locator(".settings-steps")).toBeVisible();
+    await page.getByRole("tab", { name: text.en.audit, exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("This information is unavailable.");
+    await expect(page.getByText(sentinel)).toHaveCount(0);
+    state.auditStatus = 200;
+    state.auditEmpty = true;
+    state.auditTotal = 0;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(
+      page.getByText("There are no records in this view.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Total entries: 0", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: text.en.audit })).toHaveCount(0);
   },
 );
 
@@ -661,8 +846,6 @@ test(
     const order = [
       page.getByLabel("Company reporting timezone", { exact: true }),
       page.getByRole("button", { name: "Save reporting timezone", exact: true }),
-      page.getByRole("link", { name: "Open qualification configuration and history", exact: true }),
-      page.getByRole("region", { name: "Audit history", exact: true }),
       codeInput(page),
       panel(page).getByRole("button", { name: text.en.resend, exact: true }),
       panel(page).getByRole("button", { name: text.en.change, exact: true }),
@@ -678,5 +861,202 @@ test(
       .locator(":scope > *")
       .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().top));
     expect(tops).toEqual([...tops].sort((a, b) => a - b));
+  },
+);
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `P11 ${locale} audit columns, names and changes fit the account shell`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mockSettings(page, {
+        reportingTimezone: "America/Edmonton",
+        displayTimezone: "Asia/Tokyo",
+      });
+      await page.goto("/account/admin/settings?tab=audit");
+      if (locale === "ru") await catalogLanguage(page, locale);
+      const region = page.getByRole("region", { name: text[locale].audit, exact: true });
+      await expect(region.getByRole("row")).toHaveCount(6);
+      expect(await region.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+        true,
+      );
+      await expect(
+        page.getByRole("tab", { name: text[locale].auditTab, exact: true }),
+      ).toHaveAttribute("aria-selected", "true");
+      await expect(region.getByRole("columnheader")).toHaveText(
+        locale === "en" ? ["When", "Who", "What changed"] : ["Когда", "Кто", "Что изменилось"],
+      );
+      await expect(region.getByRole("row").nth(1)).toContainText("Fictional Director");
+      await expect(region.getByRole("row").nth(1)).toContainText("Yukon Union");
+      await expect(region.getByRole("row").nth(1)).toContainText("10:02");
+      await expect(region.getByRole("row").nth(1)).toContainText(
+        locale === "en" ? "Not set" : "Не задано",
+      );
+      await expect(page.getByText(/America\/Edmonton/).first()).toBeVisible();
+      await expect(page.getByText(/Asia\/Tokyo/)).toHaveCount(0);
+      await expect(page.getByText("synthetic.unregistered")).toHaveCount(0);
+      await expect(region).toContainText(
+        locale === "en" ? "Unrecognized action" : "Неизвестное действие",
+      );
+      await capture(page, info, `settings-audit-${locale}`);
+    },
+  );
+
+test(
+  "P11 direct qualification URL, manual tabs, game changes and Back preserve route state",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockQualifications(page);
+    const state = await mockSettings(page, { role: "deputy", delegateQualifications: true });
+    await page.goto("/account/admin/settings?tab=qualifications&game=ats&keep=synthetic#anchor");
+    const qualifications = page.getByRole("tab", { name: "Qualification levels", exact: true }),
+      general = page.getByRole("tab", { name: "General", exact: true }),
+      audit = page.getByRole("tab", { name: text.en.audit, exact: true }),
+      qualificationPanel = page.getByRole("tabpanel", {
+        name: "Qualification levels",
+        exact: true,
+      }),
+      ats = qualificationPanel.getByRole("button", { name: "ATS", exact: true });
+    await expect(
+      qualificationPanel.getByText("Fictional trainee", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Company settings");
+    await expect(ats).toHaveAttribute("aria-pressed", "true");
+    expect(state.reads.filter((path) => path.startsWith("/admin/company-settings"))).toEqual([]);
+    await qualifications.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(audit).toBeFocused();
+    await expect(qualifications).toHaveAttribute("aria-selected", "true");
+    await page.keyboard.press("Home");
+    await expect(general).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(audit).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(audit).toHaveAttribute("aria-selected", "true");
+    await expect(audit).toBeFocused();
+    await expect(page.getByRole("tabpanel", { name: text.en.audit })).toBeVisible();
+    await expect(
+      page.getByText("Times in UTC because the company reporting timezone is unavailable."),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/tab=audit&game=ats&keep=synthetic#anchor$/);
+    await page.goBack();
+    await expect(qualifications).toHaveAttribute("aria-selected", "true");
+    await qualificationPanel.getByRole("button", { name: "ETS2", exact: true }).click();
+    await expect(page).toHaveURL(/tab=qualifications&game=ets2&keep=synthetic#anchor$/);
+    await expect(ats).toHaveAttribute("aria-pressed", "false");
+    await page.goto("/account/admin/settings?tab=invalid");
+    await expect(general).toHaveAttribute("aria-selected", "true");
+    expect(state.unexpected.filter((entry) => entry.includes(" /admin/"))).toEqual([]);
+  },
+);
+
+test(
+  "P11 history moves focus from a hidden panel to its newly selected tab",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await open(page, { role: "deputy", reportingTimezone: "America/Edmonton" });
+    const general = page.getByRole("tab", { name: "General", exact: true });
+    const audit = page.getByRole("tab", { name: text.en.audit, exact: true });
+    await audit.click();
+    const filter = page.getByRole("combobox", { name: "Action", exact: true });
+    await filter.focus();
+    await expect(filter).toBeFocused();
+    await page.goBack();
+    await expect(general).toBeFocused();
+    await expect(general).toHaveAttribute("aria-selected", "true");
+
+    // A still-visible tab keeps focus while history selects another one.
+    await page.goForward();
+    await expect(audit).toHaveAttribute("aria-selected", "true");
+    await expect(general).toBeFocused();
+    await page.goBack();
+    const timezone = page.getByLabel("Company reporting timezone", { exact: true });
+    await timezone.focus();
+    await expect(timezone).toBeFocused();
+    await page.goForward();
+    await expect(audit).toBeFocused();
+  },
+);
+
+test(
+  "P11 exact action filter, opaque next and previous cursors, and stale-page recovery",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockSettings(page, { role: "deputy" });
+    state.auditPageSize = 1;
+    state.auditTotal = 2;
+    await page.goto(
+      "/account/admin/settings?tab=audit&action=configuration.changed&keep=synthetic#anchor",
+    );
+    const audit = page.getByRole("region", { name: text.en.audit, exact: true }),
+      filter = page.getByRole("combobox", { name: "Action", exact: true }),
+      next = page.getByRole("button", { name: "Next page", exact: true }),
+      previous = page.getByRole("button", { name: "Previous page", exact: true });
+    await expect(filter).toHaveValue("configuration.changed");
+    await expect(audit).toContainText("Fictional Director");
+    await expect(page.getByText("Entries 1–1 of 2", { exact: true })).toBeVisible();
+    state.auditTotal = undefined;
+    await next.click();
+    await expect(audit).toContainText("Change details unavailable.");
+    await expect(audit).toContainText("ID c6500000…");
+    await expect(audit).not.toContainText(ids.company);
+    await expect(page.getByText("Entries 2–2", { exact: true })).toBeVisible();
+    expect(state.reads).toContain(
+      "/admin/audit?view=stage3&limit=25&action=configuration.changed&cursor=synthetic%2Bsecond%2Fpage%3D",
+    );
+    await previous.click();
+    await expect(audit).toContainText("Fictional Director");
+    state.auditCursorStatus = 503;
+    await next.click();
+    await expect(page.getByRole("alert")).toContainText("This information is unavailable.");
+    await expect(audit).toHaveCount(0);
+    await previous.click();
+    await expect(audit).toContainText("Fictional Director");
+    state.auditCursorStatus = 409;
+    await next.click();
+    await expect(page.getByRole("alert")).toContainText("This page has expired.");
+    await expect(audit).toHaveCount(0);
+    await expect(previous).toHaveCount(0);
+    await page.getByRole("button", { name: "First page", exact: true }).click();
+    await expect(audit).toContainText("Fictional Director");
+    await filter.selectOption("membership.changed");
+    await expect(page).toHaveURL(/tab=audit&action=membership.changed&keep=synthetic#anchor$/);
+    await expect(audit).toContainText(names.cedar);
+    await expect(audit).toContainText("Active · Trainee");
+    await expect(audit).toContainText("Active · Driver");
+    await expect(next).toHaveCount(0);
+    await expect(previous).toHaveCount(0);
+    expect(state.reads).toContain("/admin/audit?view=stage3&limit=25&action=membership.changed");
+    state.auditStatus = 403;
+    await filter.selectOption("roles.changed");
+    await expect(page.getByRole("alert")).toHaveText(
+      "Your current account cannot open this section.",
+    );
+    await expect(audit).toHaveCount(0);
+    await expect(page.getByText(sentinel)).toHaveCount(0);
+  },
+);
+
+test(
+  "P11 partial permissions do not start restricted reads",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockSettings(page, {
+      omitCapabilities: ["connections.manage", "members.manage", "qualifications.manage"],
+    });
+    await page.goto("/account/admin/settings?tab=audit");
+    await expect(page.getByRole("heading", { name: "Access restricted" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Company settings");
+    expect(state.reads.filter((path) => path.startsWith("/admin/"))).toEqual([]);
+    await page.getByRole("tab", { name: "Qualification levels", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Access restricted" })).toBeVisible();
+    await page.getByRole("tab", { name: "General", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Trip sources", exact: true })).toBeVisible();
+    await expect(page.getByLabel("Company reporting timezone", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: text.en.transfer, exact: true })).toHaveCount(0);
+    expect(state.reads.filter((path) => path.startsWith("/admin/"))).toEqual([
+      "/admin/company-settings",
+    ]);
+    expect(state.reads.filter((path) => path.includes("qualification"))).toEqual([]);
   },
 );

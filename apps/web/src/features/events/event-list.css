@@ -113,11 +113,6 @@
 .event-discard-confirm {
   color: var(--destructive);
 }
-.event-nearest:has(.event-response-summary) {
-  flex-wrap: wrap;
-  gap: 0 8px;
-}
-
 .events-page .events-row.event-list-card:has(.event-quick-response) {
   grid-template-areas:
     "date details cover"
@@ -154,10 +149,40 @@
   min-height: 4rem;
   resize: vertical;
 }
-.event-nearest:has(.event-quick-response) {
+.event-nearest.event-nearest-compact:has(.event-nearest-link) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 8px;
-  flex-wrap: wrap;
+  max-width: min(42rem, 100%);
   border-radius: var(--radius-control);
+}
+.event-nearest .event-nearest-link {
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+.event-nearest-link strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.event-nearest-link > :is(svg, time) {
+  flex: none;
+}
+.event-nearest-compact .event-quick-response {
+  display: contents;
+}
+.event-nearest-compact .event-quick-response > :not(.event-quick-choices) {
+  grid-column: 1 / -1;
+}
+.event-nearest-compact .event-response-summary {
+  max-width: 9rem;
+}
+@media (max-width: 767.98px) {
+  .event-nearest-compact .event-response-summary {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
 }
 @container events (min-width: 40rem) {
   .events-page .events-row.event-list-card:has(.event-quick-response) {

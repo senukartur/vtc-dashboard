@@ -19,6 +19,7 @@ import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
+import { queueClock, syncReviewReasons } from "./review-queue.js";
 import { ingestionConflictCodes } from "./service.js";
 export interface GroupSnapshot {
   before: TripState[];
@@ -80,7 +81,7 @@ function withoutHeld(all: readonly NormalizedTripEvidence[], current: readonly (
     held: [...new Set(all.flatMap((f) => heldCodes(f, current)))],
   };
 }
-export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
+export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stage3Enabled = false) {
   const c = (tx: TxContext) => unit.client(tx),
     groups = createTripGroups(unit),
     facts = createFactRepository(unit);
@@ -131,12 +132,19 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
   }
   async function write(tx: TxContext, row: TripState, patch: Partial<TripState>) {
     if (row.version >= 2147483647) throw identityError(409);
+    const at = now().toISOString();
     await c(tx)
       .update(trips)
-      .set({ ...patch, version: row.version + 1, assessmentPending: true })
+      .set({
+        ...patch,
+        ...queueClock(row, patch, at),
+        version: row.version + 1,
+        assessmentPending: true,
+      })
       .where(eq(trips.id, row.id));
     const [after] = await c(tx).select().from(trips).where(eq(trips.id, row.id)).for("update");
     if (!after) throw new Error("TRIP_GROUP_WRITE_MISSING");
+    if (stage3Enabled) await syncReviewReasons(c(tx), after);
     if (after.currentFactId)
       await c(tx).insert(tripHistory).values({
         id: newId(),
@@ -145,7 +153,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
         factId: after.currentFactId,
         outcome: after.outcome,
         reasons: after.reviewReasons,
-        createdAt: now().toISOString(),
+        createdAt: at,
       });
     return after;
   }
@@ -354,8 +362,13 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
                     ]),
                   ].sort(),
                 };
-          await c(tx).update(trips).set(patch).where(eq(trips.id, root.id));
-          Object.assign(root, patch);
+          const clock = queueClock(root, patch, now().toISOString());
+          await c(tx)
+            .update(trips)
+            .set({ ...patch, ...clock })
+            .where(eq(trips.id, root.id));
+          Object.assign(root, patch, clock);
+          if (stage3Enabled) await syncReviewReasons(c(tx), root);
           await c(tx)
             .update(tripHistory)
             .set({
@@ -373,16 +386,18 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
       // Diagnostic state changes neither the fact/version epoch nor adjudication/credit.
       const reasons = row.reviewReasons.filter((r) => r !== "candidate_search_overflow");
       if (pending) reasons.push("candidate_search_overflow");
+      const reviewReasons = [...new Set(reasons)].sort();
       await c(tx)
         .update(trips)
         .set({
-          reviewReasons: [...new Set(reasons)].sort(),
+          reviewReasons,
           assessmentPending:
             row.reviewReasons.includes("candidate_search_overflow") !== pending
               ? true
               : row.assessmentPending,
         })
         .where(eq(trips.id, row.id));
+      if (stage3Enabled) await syncReviewReasons(c(tx), { ...row, reviewReasons });
     },
     async searchEpoch(tx: TxContext, ownerId: string, game: "ets2" | "ats") {
       const [rows] = await c(tx)
