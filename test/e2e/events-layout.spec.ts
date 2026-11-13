@@ -3,6 +3,16 @@ import type { components } from "@vtc/contracts";
 import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { eventFixture, eventId, mockEvents } from "./support/events.ts";
+import {
+  coverCaption,
+  detailsPath,
+  eventPath,
+  galleryLabel,
+  lastCaption,
+  middleCaption,
+  mockStructuredDetail,
+  organizerLabel,
+} from "./support/events-detail.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 type S = components["schemas"];
@@ -396,8 +406,13 @@ test(
   async ({ page }, info) => {
     const state = await openDetail(page, "en", () => {}, true);
     await settledDetail(page);
-    await page.getByRole("button", { name: "View responses and attendance", exact: true }).click();
-    const roster = workspace(page).locator(".events-roster");
+    await page
+      .getByRole("button", { name: "View responses and attendance", exact: true })
+      .press("Enter");
+    const roster = page.getByRole("form", { name: "Actual attendance", exact: true });
+    const heading = roster.getByRole("heading", { name: "Actual attendance", exact: true });
+    await expect(heading).toBeFocused();
+    await expect(heading).toBeInViewport();
     await expect(roster.locator(".event-attendance-row")).toHaveCount(1);
     await expect(roster).toContainText("✕ Can't attend");
     await expect(roster).toContainText("Fictional private RSVP reason");
@@ -546,7 +561,7 @@ test(
       .getByRole("group", { name: text.en.response, exact: true })
       .getByRole("button", { name: text.en.participating, exact: true })
       .click();
-    await page.getByRole("button", { name: text.en.save, exact: true }).click();
+    await expect(page.getByRole("button", { name: text.en.save, exact: true })).toHaveCount(0);
     await settled;
     const retry = decliners.getByRole("button", { name: "Try again", exact: true });
     await expect(retry).toBeVisible();
@@ -640,7 +655,9 @@ test(
     await page.goto(`/events/${eventId}`);
     await catalogLanguage(page, "ru");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.event.title);
-    await expect(workspace(page).locator(".events-facts")).toBeVisible();
+    await expect(
+      workspace(page).getByRole("heading", { name: "Маршрут", exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole("region", { name: text.ru.participants })).toHaveCount(0);
     await expect(page.getByRole("group", { name: text.ru.response })).toHaveCount(0);
     expect(state.requests.filter((r) => privateReads.test(r))).toEqual([]);
@@ -677,3 +694,108 @@ test(
     await capture(page, info, "events-closed-at-start");
   },
 );
+
+for (const locale of ["en", "ru"] as const) {
+  test(
+    `Stage 2 ${locale} event detail shows the structured route, load and gallery`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await page.addInitScript((language) => localStorage.setItem("vtc.locale", language), locale);
+      const state = await mockStructuredDetail(page, locale, "driver");
+      await page.goto(detailsPath);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.member.event.title);
+      const gallery = page.getByRole("region", { name: galleryLabel[locale] });
+      await expect(gallery.locator("figcaption")).toHaveText([
+        coverCaption,
+        middleCaption,
+        lastCaption,
+      ]);
+      await expect(gallery.locator("img")).toHaveCount(3);
+      const route = page.locator(".events-route-stops");
+      await expect(
+        route.getByText(locale === "ru" ? "Синтетическая гавань" : "Fictional Harbour", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(route.getByText("Fictional Plateau Depot")).toBeVisible();
+      await route.scrollIntoViewIfNeeded();
+      await expect(route.locator(".company-logo img")).toHaveCount(1);
+      await expect(route.locator(".company-logo img")).toBeVisible();
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await expect(page.getByText("TruckersMP", { exact: true })).toBeVisible();
+      await expect(page.getByText("Fictional Simulation", { exact: true })).toBeVisible();
+      await expect(
+        page.getByText(locale === "ru" ? "0 км" : "0 km", { exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("Fictional Northern Roads")).toBeVisible();
+      await expect(
+        page.getByText(locale === "ru" ? "Синтетический груз" : "Fictional Cargo"),
+      ).toBeVisible();
+      await expect(
+        page.getByText(locale === "ru" ? "Синтетический прицеп" : "Fictional Trailer"),
+      ).toBeVisible();
+      const organizer = page.getByRole("region", { name: organizerLabel[locale] });
+      await expect(organizer.getByRole("link")).toHaveAttribute(
+        "href",
+        `/account/drivers/${state.member.organizerMemberId}`,
+      );
+      await expect(page.locator(".events-counts")).toContainText(
+        locale === "en" ? "Participating: 2" : "Участвуют: 2",
+      );
+      await expect(page.locator(".events-counts")).toContainText(
+        locale === "en" ? "Can't attend: 1" : "Не смогут: 1",
+      );
+      expect(state.requests.some((url) => url.pathname.endsWith("/response-counts"))).toBe(false);
+      const depotReads = state.requests
+        .filter((url) => url.pathname === "/api/v1/catalogs/depots")
+        .map((url) => Object.fromEntries(url.searchParams));
+      const { origin, destination, originDepot, destinationDepot, game } = state.member.event;
+      expect(depotReads).toHaveLength(2);
+      expect(depotReads).toEqual(
+        expect.arrayContaining([
+          {
+            game,
+            cityId: origin?.entityId,
+            depotId: originDepot?.id,
+            includeHidden: "true",
+            locale,
+          },
+          {
+            game,
+            cityId: destination?.entityId,
+            depotId: destinationDepot?.id,
+            includeHidden: "true",
+            locale,
+          },
+        ]),
+      );
+      expect(
+        state.requests.some(
+          (url) => url.pathname.endsWith(eventPath) && url.searchParams.get("locale") === locale,
+        ),
+      ).toBe(true);
+      expect(state.requests.some((url) => url.pathname.includes(`/admin${eventPath}`))).toBe(false);
+      const main = await page.locator(".events-main").boundingBox();
+      const rail = await page.locator(".events-side").boundingBox();
+      const response = await page.locator(".events-response").boundingBox();
+      if (!main || !rail || !response) throw new Error("Detail layout did not render");
+      if (info.project.name === "desktop-chromium") {
+        expect(rail.x).toBeGreaterThanOrEqual(main.x + main.width);
+        expect(response.x).toBe(rail.x);
+        expect(rail.y).toBeGreaterThanOrEqual(response.y + response.height);
+      } else {
+        expect(main.y).toBeGreaterThanOrEqual(response.y + response.height);
+        expect(rail.y).toBeGreaterThanOrEqual(main.y + main.height);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      await page.evaluate(() => document.fonts.ready);
+      await page.screenshot({
+        path: info.outputPath(`stage-2-detail-${locale}.png`),
+        fullPage: true,
+        animations: "disabled",
+      });
+    },
+  );
+}

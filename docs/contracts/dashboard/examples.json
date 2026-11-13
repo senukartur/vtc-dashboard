@@ -8155,6 +8155,9 @@
       "operationId": "listPublicEvents",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "locale": "en"
+      },
       "response": {
         "data": {
           "items": [

@@ -1,26 +1,52 @@
 import { writeFile } from "node:fs/promises";
-import type { Page, TestInfo } from "@playwright/test";
+import type { Page, Request, TestInfo } from "@playwright/test";
+import type { components } from "@vtc/contracts";
+import {
+  stage2DraftId,
+  stage2Fixture,
+  stage2LegacyEventId,
+  stage2MediaId,
+} from "../fixtures/events-stage-2.ts";
 import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
-import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
+import {
+  coverCaption,
+  detailsPath,
+  eventPath,
+  middleCaption,
+  mockStructuredDetail,
+  nextUnreported,
+  unreported,
+} from "./support/events-detail.ts";
+import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
-for (const access of ["legacy", "member", "public"] as const) {
+for (const [access, draftsRollout] of [
+  ["legacy", false],
+  ["member", false],
+  ["manager", true],
+  ["public", true],
+] as const) {
   test(
-    `event fixture advertises Stage 2 only for an opted-in authenticated read (${access})`,
+    `event fixture advertises rollout only for opted-in authenticated reads (${access})`,
     browserCase(["@functional"]),
     async ({ page }) => {
       if (access === "legacy") await mockEvents(page);
-      else await mockEventsStage2(page, access);
+      else await mockEventsStage2(page, access, "en", { draftsRollout });
       await page.goto("/en");
       const result = await page.evaluate(async () => {
         const response = await fetch("/api/v1/me", { cache: "no-store" });
-        return { status: response.status, rollout: response.headers.get("X-VTC-Events-Stage2") };
+        return {
+          status: response.status,
+          stage2: response.headers.get("X-VTC-Events-Stage2"),
+          drafts: response.headers.get("X-VTC-Events-Drafts"),
+        };
       });
       expect(result).toEqual({
         status: access === "public" ? 401 : 200,
-        rollout: access === "member" ? "1" : null,
+        stage2: access === "member" || access === "manager" ? "1" : null,
+        drafts: access === "manager" ? "1" : null,
       });
     },
   );
@@ -202,6 +228,130 @@ test(
   },
 );
 test(
+  "Stage 2 attendance requires reviewing an off-page draft against the newer roster",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    const state = await mockStructuredDetail(page, "en", "director");
+    state.member.event.meetingAt = "2020-10-25T12:00:00.000Z";
+    state.member.event.startsAt = "2020-10-25T13:00:00.000Z";
+    type Attendance = components["schemas"]["EventStage2Attendance"];
+    const fixture = stage2Fixture("getEventAttendance", "leadership")
+      .response as components["schemas"]["EventStage2EnvelopeAttendance"];
+    const first = fixture.data.items[0];
+    if (!first) throw new Error("Missing synthetic attendance row");
+    const target = {
+      ...first.member,
+      id: "e1320000-0000-4000-8000-000000000098",
+      nickname: "Fictional Attendance Driver",
+    };
+    const path = `/api/v1/admin${eventPath}/attendance`;
+    let version = 1;
+    let recorded: Attendance["items"][number]["attendance"] = "unconfirmed";
+    const writes: { etag: string | undefined; body: unknown }[] = [];
+    await page.route(
+      (url) => url.pathname === path,
+      (route) => {
+        const request = route.request();
+        if (request.method() === "PUT") {
+          const etag = request.headers()["if-match"];
+          const body = request.postDataJSON();
+          writes.push({ etag, body });
+          if (etag !== `"v${version}"`) return route.fulfill({ status: 412 });
+          recorded = body.members[0].attendance;
+          version++;
+          return route.fulfill({
+            json: envelope({ id: state.member.event.id, version }),
+            headers: { ETag: `"v${version}"` },
+          });
+        }
+        const { searchParams } = new URL(request.url());
+        if (searchParams.get("view") !== "stage2") return route.fulfill({ status: 422 });
+        const cursor = searchParams.get("cursor");
+        const nextCursor = `fictional-attendance-v${version}`;
+        if (cursor && cursor !== nextCursor) return route.fulfill({ status: 412 });
+        const data: Attendance = {
+          items: cursor
+            ? [{ ...first, member: target, attendance: recorded, tripId: null }]
+            : [first],
+          totals: {
+            total: 2,
+            attended: 1 + Number(recorded === "attended"),
+            notAttended: Number(recorded === "not_attended"),
+            unconfirmed: Number(recorded === "unconfirmed"),
+          },
+          nextCursor: cursor ? null : nextCursor,
+        };
+        return route.fulfill({
+          json: envelope(data),
+          headers: { ETag: `"v${version}"` },
+        });
+      },
+    );
+    await page.goto(detailsPath);
+    await page.getByRole("button", { name: "View responses and attendance", exact: true }).click();
+    const roster = page.getByRole("form", { name: "Actual attendance", exact: true });
+    const next = roster.getByRole("button", { name: "Next page", exact: true });
+    const record = roster.getByRole("button", { name: "Record attendance", exact: true });
+    const targetRow = roster.getByRole("group", { name: target.nickname, exact: true });
+    const decision = targetRow.getByRole("combobox");
+    const note = targetRow.getByRole("textbox", {
+      name: `Private staff note · ${target.nickname}`,
+    });
+    await next.click();
+    await decision.selectOption("attended");
+    await note.fill("Fictional draft at v1");
+    await expect(record).toBeEnabled();
+
+    recorded = "not_attended";
+    version = 2;
+    const updated = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname === path &&
+        !url.searchParams.has("cursor")
+      );
+    });
+    await roster.getByRole("button", { name: "First page", exact: true }).click();
+    const firstPage = await updated;
+    expect(new URL(firstPage.url()).searchParams.getAll("view")).toEqual(["stage2"]);
+    expect(firstPage.headers().etag).toBe('"v2"');
+    await expect(targetRow).toHaveCount(0);
+    await expect(roster.getByRole("status")).toContainText("Attendance changed");
+    await expect(record).toBeDisabled();
+    await record.press("Enter");
+
+    await next.click();
+    await expect(targetRow).toContainText("Actual attendance: Did not attend");
+    await expect(decision).toHaveValue("attended");
+    await expect(note).toHaveValue("Fictional draft at v1");
+    await note.fill("Fictional note after checking the current row");
+    await expect(record).toBeDisabled();
+    expect(writes).toEqual([]);
+    await targetRow
+      .getByRole("button", { name: "Keep this draft after review", exact: true })
+      .click();
+    await expect(record).toBeEnabled();
+    await record.click();
+    await expect(roster.getByText("Attendance recorded.", { exact: true })).toBeVisible();
+    expect(writes).toEqual([
+      {
+        etag: '"v2"',
+        body: {
+          members: [
+            {
+              memberId: target.id,
+              attendance: "attended",
+              note: "Fictional note after checking the current row",
+            },
+          ],
+        },
+      },
+    ]);
+  },
+);
+test(
   "changing own RSVP from participants page two resets to the current first page",
   browserCase(["@functional"]),
   async ({ page }) => {
@@ -254,7 +404,7 @@ test(
       .getByRole("group", { name: "Your response", exact: true })
       .getByRole("button", { name: "Participating", exact: true })
       .click();
-    await page.getByRole("button", { name: "Save response", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Save response", exact: true })).toHaveCount(0);
     await expect(page.getByText("Response saved.", { exact: true })).toBeVisible();
     await expect(
       decliners.getByRole("link", { name: "Fictional decliner 1", exact: true }),
@@ -723,3 +873,651 @@ test(
     }
   },
 );
+
+test(
+  "member opens the full gallery with the keyboard and returns focus to the thumbnail",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockStructuredDetail(page, "en", "driver");
+    await page.goto(detailsPath);
+    const gallery = page.getByRole("region", { name: "Gallery" });
+    const cover = gallery.getByRole("button", { name: `View image: ${coverCaption}` });
+    await expect(cover).toBeVisible();
+    expect(state.requests.some((url) => url.searchParams.get("size") === "full")).toBe(false);
+    await cover.focus();
+    await page.keyboard.press("Enter");
+    const viewer = page.getByRole("dialog", { name: "Image 1 of 3" });
+    await expect(viewer).toBeVisible();
+    await expect(viewer.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+    await expect(viewer.getByRole("img", { name: coverCaption })).toBeVisible();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("dialog", { name: "Image 2 of 3" })).toHaveAccessibleDescription(
+      middleCaption,
+    );
+    await expect(page.getByRole("dialog").getByRole("img", { name: middleCaption })).toBeVisible();
+    await page.keyboard.press("ArrowLeft");
+    await expect(viewer.getByRole("img", { name: coverCaption })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(cover).toBeFocused();
+    expect(
+      state.requests.some(
+        (url) => url.pathname.includes(stage2MediaId) && url.searchParams.get("size") === "full",
+      ),
+    ).toBe(true);
+  },
+);
+
+function trackGuestReads(page: Page) {
+  const requests: Request[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/api/v1/")) requests.push(request);
+  });
+  return requests;
+}
+
+function guestRequestPaths(requests: Request[]) {
+  return requests.map((request) => {
+    const { pathname, search } = new URL(request.url());
+    return `${request.method()} ${pathname}${search}`;
+  });
+}
+
+test(
+  "public detail reads one strict Stage 2 response and only the advertised cover",
+  browserCase(["@functional"]),
+  async ({ page, baseURL }) => {
+    if (!baseURL) throw new Error("The public detail test requires a base URL");
+    await page
+      .context()
+      .addCookies([{ name: "fictional_public_cookie", value: "fictional", url: baseURL }]);
+    const state = await mockStructuredDetail(page, "ru");
+    const reads = trackGuestReads(page);
+    await page.goto(eventPath);
+    await expect(page.getByRole("img", { name: "Обложка события" })).toBeVisible();
+    const organizer = page.getByRole("region", { name: "Организатор" });
+    await expect(organizer).toContainText(state.member.event.organizer);
+    await expect(organizer.getByRole("link")).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Ваш ответ" })).toHaveCount(0);
+    await expect(page.getByText("Синтетический груз", { exact: true })).toHaveCount(0);
+    expect(guestRequestPaths(reads)).toEqual([
+      `GET /api/v1/public${eventPath}?locale=ru`,
+      `GET /api/v1/public${eventPath}/cover`,
+    ]);
+    for (const request of reads) expect(await request.headerValue("cookie")).toBeNull();
+  },
+);
+
+test(
+  "public detail reads one strict legacy response at the same localized URL",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockEvents(page, false, "ru");
+    state.session = false;
+    state.event.origin = {
+      entityId: "e0350000-0000-4000-8000-000000000093",
+      label: "Фиктивная северная гавань",
+      englishFallback: false,
+      requestedLocale: "ru",
+      renderedLocale: "ru",
+      hidden: false,
+    };
+    const reads = trackGuestReads(page);
+    await page.goto(`/events/${eventId}`);
+    await expect(page.getByRole("heading", { name: state.event.title })).toBeVisible();
+    await expect(page.getByText("Фиктивная северная гавань", { exact: true })).toBeVisible();
+    const organizer = page.getByRole("region", { name: "Организатор" });
+    await expect(organizer).toContainText(state.event.organizer);
+    await expect(organizer.getByRole("link")).toHaveCount(0);
+    await expect(page.getByRole("img", { name: "Обложка события" })).toHaveCount(0);
+    await expect(page.getByText("Не нужны, хватит базовой карты")).toHaveCount(0);
+    expect(guestRequestPaths(reads)).toEqual([`GET /api/v1/public/events/${eventId}?locale=ru`]);
+  },
+);
+
+test(
+  "public detail renders a Stage 2 legacy row with organizer text and no cover",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockStructuredDetail(page, "ru");
+    const reads = trackGuestReads(page);
+    await page.goto(`/events/${stage2LegacyEventId}`);
+    await expect(page.getByText("Не нужны, хватит базовой карты", { exact: true })).toBeVisible();
+    const legacy = (
+      stage2Fixture("listPublicEvents", "structured-and-legacy")
+        .response as components["schemas"]["EventStage2EnvelopePublicList"]
+    ).data.items[1];
+    if (!legacy) throw new Error("Missing legacy row fixture");
+    const organizer = page.getByRole("region", { name: "Организатор" });
+    await expect(organizer).toContainText(legacy.organizer);
+    await expect(organizer.getByRole("link")).toHaveCount(0);
+    await expect(page.getByRole("img", { name: "Обложка события" })).toHaveCount(0);
+    expect(guestRequestPaths(reads)).toEqual([
+      `GET /api/v1/public/events/${stage2LegacyEventId}?locale=ru`,
+    ]);
+  },
+);
+
+test(
+  "dispatcher sees an empty gallery for an absent media endpoint and cannot manage the event",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockStructuredDetail(page, "en", "dispatcher");
+    state.missingMedia = true;
+    await page.goto(detailsPath);
+    const gallery = page.getByRole("region", { name: "Gallery" });
+    await expect(gallery).toContainText("No images have been added to this event.");
+    await expect(page.getByRole("button", { name: "View responses and attendance" })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole("button", { name: "Cancel event" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit event" })).toHaveCount(0);
+    expect(state.requests.some((url) => url.pathname.includes(`/admin${eventPath}`))).toBe(false);
+  },
+);
+
+test(
+  "gallery read failure can be retried without showing an empty state",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockStructuredDetail(page, "en", "driver");
+    state.mediaFailure = true;
+    await page.goto(detailsPath);
+    const gallery = page.getByRole("region", { name: "Gallery" });
+    await expect(gallery.getByRole("alert")).toBeVisible();
+    await expect(gallery.getByText("No images have been added to this event.")).toHaveCount(0);
+    state.mediaFailure = false;
+    await gallery.getByRole("button", { name: "Try again" }).click();
+    await expect(
+      gallery.getByRole("button", { name: `View image: ${coverCaption}` }),
+    ).toBeVisible();
+  },
+);
+
+for (const role of ["director", "deputy_director"] as const) {
+  test(
+    `${role} sees leadership-only attendance totals, canonical trip and nonresponders`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockStructuredDetail(page, "en", role);
+      await page.goto(detailsPath);
+      const show = page.getByRole("button", { name: "View responses and attendance" });
+      await expect(show).toBeVisible();
+      expect(state.requests.some((url) => url.pathname.includes(`/admin${eventPath}`))).toBe(false);
+      await expect(page.getByRole("button", { name: "Cancel event" })).toBeEnabled();
+      const rosterRead = page.waitForRequest(
+        (request) =>
+          request.method() === "GET" &&
+          new URL(request.url()).pathname === `/api/v1/admin${eventPath}/attendance`,
+      );
+      await show.click();
+      expect(new URL((await rosterRead).url()).searchParams.getAll("view")).toEqual(["stage2"]);
+      const attendance = page.locator(".events-attendance-totals");
+      await expect(attendance).toContainText("Total members");
+      await expect(attendance.getByText("2", { exact: true })).toBeVisible();
+      const trip = page.getByRole("link", { name: "View trip for Fictional Coordinator" });
+      await expect(trip).toHaveAttribute(
+        "href",
+        "/account/trips/e1320000-0000-4000-8000-000000000011",
+      );
+      const nonresponders = page.getByRole("region", { name: "No response yet" });
+      await expect(nonresponders.getByRole("link", { name: unreported })).toBeVisible();
+      const noTrip = page.getByRole("group", { name: unreported, exact: true });
+      await expect(noTrip.getByRole("link", { name: /^View trip/ })).toHaveCount(0);
+      await nonresponders.getByRole("button", { name: "Next page" }).click();
+      await expect(nonresponders.getByRole("link", { name: nextUnreported })).toBeVisible();
+      await expect(nonresponders.getByRole("heading")).toBeFocused();
+    },
+  );
+}
+
+test(
+  "Stage 2 leadership cancellation retains its reason across stale definition authority",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    const state = await mockStructuredDetail(page, "en", "director");
+    await page.goto(detailsPath);
+    await page.getByRole("button", { name: "Cancel event", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const reason = dialog.getByLabel("Private reason");
+    const confirm = dialog.getByRole("button", { name: "Confirm cancellation" });
+    await reason.fill("Fictional snow closure");
+    state.staleCancellation = true;
+    await confirm.click();
+    await expect(dialog.getByRole("alert")).toContainText("changed");
+    await expect(reason).toHaveValue("Fictional snow closure");
+    await confirm.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Your response" })).toContainText(
+      "Your response before the start",
+    );
+    expect(state.cancellations.map(({ body, etag, locale }) => ({ body, etag, locale }))).toEqual([
+      { body: { reason: "Fictional snow closure" }, etag: '"v1"', locale: "en" },
+      { body: { reason: "Fictional snow closure" }, etag: '"v2"', locale: "en" },
+    ]);
+    expect(state.cancellations[0]?.key).toBeTruthy();
+    expect(state.cancellations[0]?.key).not.toBe(state.cancellations[1]?.key);
+  },
+);
+
+test(
+  "a member can clear a response immediately without a reason or Save",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockEvents(page);
+    state.response = { version: 3, response: "participating", declineReason: null };
+    await page.goto(`/account/events/${eventId}`);
+    const section = page.getByRole("region", { name: "Your response" });
+    const clear = section.getByRole("button", { name: "No answer" });
+    await expect(section.getByRole("button", { name: "Participating" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await clear.click();
+    await expect(section.getByRole("status")).toHaveText("Response saved.");
+    await expect(clear).toHaveAttribute("aria-pressed", "true");
+    await expect(clear).toBeFocused();
+    await expect(section.getByLabel("Private decline reason")).toHaveCount(0);
+    await expect(section.getByRole("button", { name: "Save response" })).toHaveCount(0);
+    expect(state.commands).toEqual([
+      { method: "PUT", path: `/events/${eventId}/my-response`, body: { response: "unanswered" } },
+    ]);
+    expect(state.preconditions).toEqual(['"v3"']);
+  },
+);
+
+function trackMemberDetailReads(page: Page, path: string) {
+  const locales: (string | null)[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === `/api/v1${path}`)
+      locales.push(url.searchParams.get("locale"));
+  });
+  return locales;
+}
+
+test(
+  "member detail selects one localized Stage 2 read from the session flag",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    await mockEventsStage2(page, "member");
+    const locales = trackMemberDetailReads(page, eventPath);
+    await page.goto(detailsPath);
+    await expect(page.getByRole("heading", { name: "Fictional northern convoy" })).toBeVisible();
+    await expect(page.getByText("TruckersMP", { exact: true })).toBeVisible();
+    expect(locales).toEqual(["en"]);
+  },
+);
+
+for (const status of [404, 422, 503] as const) {
+  test(
+    `member detail stays on Stage 2 after HTTP ${status}`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+      const state = await mockEventsStage2(page, "member");
+      state.statusByRequest.set(`GET ${eventPath}`, status);
+      const locales = trackMemberDetailReads(page, eventPath);
+      await page.goto(detailsPath);
+      await expect(page.locator(".events-detail").getByRole("alert")).toBeVisible();
+      expect(locales).toEqual(["en"]);
+    },
+  );
+}
+
+test(
+  "member detail uses legacy reads and cancellation without the Stage 2 session flag",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockEvents(page, true);
+    state.extraParticipants = [
+      {
+        member: {
+          id: "e0350000-0000-4000-8000-000000000099",
+          nickname: "Fictional legacy participant",
+          roles: ["driver"],
+          formerMember: false,
+        },
+      },
+    ];
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    const reads = trackMemberDetailReads(page, `/events/${eventId}`);
+    await page.goto(`/account/events/${eventId}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.event.title);
+    expect(reads).toEqual([null]);
+    await expect(page.getByRole("region", { name: "Gallery" })).toContainText(
+      "No images have been added to this event.",
+    );
+    await expect(page.getByText("Base map is enough", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".events-counts")).toContainText("Participating: 1");
+    await expect(page.getByRole("link", { name: "Fictional legacy participant" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit event" })).toBeEnabled();
+    const roster = page.waitForRequest(
+      (request) =>
+        request.method() === "GET" &&
+        new URL(request.url()).pathname === `/api/v1/admin/events/${eventId}/attendance`,
+    );
+    await page.getByRole("button", { name: "View responses and attendance" }).click();
+    expect(new URL((await roster).url()).searchParams.has("view")).toBe(false);
+    await expect(
+      page.getByRole("combobox", { name: "Actual attendance · Fictional Yukon Member" }),
+    ).toBeVisible();
+    await expect(page.getByRole("region", { name: "No response yet" })).toHaveCount(0);
+    await expect(page.locator(".events-attendance-totals")).toHaveCount(0);
+    await page.getByRole("button", { name: "Cancel event", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Private reason").fill("Fictional cancellation on the legacy API");
+    const cancellation = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === `/api/v1/admin/events/${eventId}/cancellation`,
+    );
+    await dialog.getByRole("button", { name: "Confirm cancellation" }).click();
+    expect(new URL((await cancellation).url()).searchParams.has("locale")).toBe(false);
+    await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+    expect(state.commands.at(-1)?.path).toBe(`/admin/events/${eventId}/cancellation`);
+    expect(
+      state.requests.some(
+        (request) => request.endsWith("/media") || request.endsWith("/nonresponders"),
+      ),
+    ).toBe(false);
+  },
+);
+
+for (const status of [401, 403, 404, 422] as const) {
+  test(
+    `public detail stops after one GET for ${status === 404 ? "a missing or private event" : status}`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockEvents(page, false, "ru");
+      state.status = status;
+      state.session = false;
+      const reads = trackGuestReads(page);
+      await page.goto(`/events/${eventId}`);
+      await expect(page.locator(".events-detail").getByRole("alert")).toBeVisible();
+      expect(guestRequestPaths(reads)).toEqual([`GET /api/v1/public/events/${eventId}?locale=ru`]);
+    },
+  );
+}
+
+for (const projection of ["legacy", "Stage 2"] as const) {
+  test(
+    `public detail rejects a private field in the ${projection} response`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const data =
+        projection === "legacy"
+          ? eventFixture()
+          : (
+              stage2Fixture("getPublicEvent", "structured")
+                .response as components["schemas"]["EventStage2EnvelopePublic"]
+            ).data;
+      const path = `/api/v1/public/events/${data.id}`;
+      const reads = trackGuestReads(page);
+      await page.route(
+        (url) => url.pathname === path,
+        (route) =>
+          route.fulfill({
+            json: envelope({ ...data, organizerMemberId: "e0350000-0000-4000-8000-000000000094" }),
+          }),
+      );
+      await page.goto(`/events/${data.id}`);
+      await expect(page.locator(".events-detail").getByRole("alert")).toBeVisible();
+      await expect(page.getByRole("heading", { name: data.title })).toHaveCount(0);
+      expect(guestRequestPaths(reads)).toEqual([`GET ${path}?locale=ru`]);
+    },
+  );
+}
+
+test.describe("Stage 2 draft entry", () => {
+  const url = `/account/events/new?draftId=${stage2DraftId}`;
+  const path = `/api/v1/admin/events/drafts/${stage2DraftId}`;
+  const fixture = () =>
+    stage2Fixture("getEventDraft", "read")
+      .response as components["schemas"]["EventStage2EnvelopeDraft"];
+
+  test(
+    "a manager opens a draft directly, saves it and reloads without requesting media",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+      const draft = fixture();
+      const retained = {
+        originCityId: "e1320000-0000-4000-8000-000000000002",
+        originDepotId: "e1320000-0000-4000-8000-000000000004",
+        organizerMemberId: "e1320000-0000-4000-8000-000000000006",
+        prescribedMassKg: "0",
+        requiredDlcIds: ["e1320000-0000-4000-8000-000000000008"],
+      };
+      draft.data.fields = { ...draft.data.fields, ...retained };
+      const expected = { ...draft.data.fields, title: "Fictional draft revision" };
+      const requests: string[] = [];
+      const writes: { body: unknown; etag: string | undefined; key: string | undefined }[] = [];
+      page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+      let loseReceipt = true;
+      await page.route(`**${path}`, async (route) => {
+        const request = route.request();
+        if (request.method() === "PATCH") {
+          const body = request.postDataJSON();
+          const etag = request.headers()["if-match"];
+          const key = request.headers()["idempotency-key"];
+          writes.push({ body, etag, key });
+          if (loseReceipt) {
+            loseReceipt = false;
+            draft.data.fields = body;
+            draft.data.version += 1;
+            return route.abort("failed");
+          }
+        }
+        return route.fulfill({ json: draft, headers: { ETag: `"v${draft.data.version}"` } });
+      });
+      await page.goto(url);
+      const title = page.getByRole("textbox", { name: "Event title" });
+      await expect(title).toHaveValue(draft.data.fields.title ?? "");
+      await title.fill("Fictional draft revision");
+      await page.getByRole("button", { name: "Save draft" }).click();
+      await expect(title).toHaveValue("Fictional draft revision");
+      await page.getByRole("button", { name: "Retry the same request" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Draft saved." })).toBeVisible();
+      expect(writes).toEqual([
+        { body: expected, etag: '"v1"', key: expect.stringMatching(/^[a-f0-9-]{36}$/) },
+        { body: expected, etag: '"v1"', key: writes[0]?.key },
+      ]);
+      await page.reload();
+      await expect(title).toHaveValue("Fictional draft revision");
+      expect(requests.filter((request) => request.endsWith("/media"))).toEqual([]);
+    },
+  );
+
+  test(
+    "conflicting draft saves require explicit review before using a newer ETag",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+      const draft = fixture();
+      const attempts: { etag: string | undefined; body: typeof draft.data.fields }[] = [];
+      await page.route(`**${path}`, async (route) => {
+        const request = route.request();
+        if (request.method() === "PATCH") {
+          const etag = request.headers()["if-match"];
+          const body = request.postDataJSON();
+          attempts.push({ etag, body });
+          if (attempts.length === 1) {
+            draft.data.version = 2;
+            draft.data.fields.title = "Fictional concurrent title";
+            draft.data.fields.description = "Fictional concurrent description";
+            draft.data.fields.distanceKm = "12.5";
+            return route.fulfill({ status: 412 });
+          }
+          draft.data.version = 3;
+          draft.data.fields = body;
+        }
+        return route.fulfill({ json: draft, headers: { ETag: `"v${draft.data.version}"` } });
+      });
+      await page.goto(url);
+      const title = page.getByRole("textbox", { name: "Event title" });
+      await title.fill("Fictional local edit");
+      await page.getByRole("textbox", { name: "Description" }).fill("Fictional local description");
+      const save = page.getByRole("button", { name: "Save draft" });
+      await save.click();
+      await expect(
+        page.getByRole("alert").filter({ hasText: "The saved draft changed." }),
+      ).toBeVisible();
+      await expect(title).toHaveValue("Fictional local edit");
+      await expect(save).toBeDisabled();
+      await page.getByRole("button", { name: "Check latest draft" }).click();
+      await expect(page.getByText("Latest saved title", { exact: true })).toBeVisible();
+      await expect(page.getByText("Fictional concurrent title", { exact: true })).toBeVisible();
+      await expect(page.getByText("Latest saved description", { exact: true })).toBeVisible();
+      await expect(
+        page.getByText("Fictional concurrent description", { exact: true }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Keep my edits" }).click();
+      await save.click();
+      await expect(page.getByRole("status").filter({ hasText: "Draft saved." })).toBeVisible();
+      expect(attempts.map(({ etag }) => etag)).toEqual(['"v1"', '"v2"']);
+      expect(attempts[1]?.body).toMatchObject({
+        title: "Fictional local edit",
+        description: "Fictional local description",
+        distanceKm: "12.5",
+      });
+    },
+  );
+
+  for (const terminalRead of [false, true]) {
+    test(
+      terminalRead
+        ? "a terminal draft read closes an opened editor"
+        : "a terminal draft write closes an opened editor",
+      browserCase(["@functional"]),
+      async ({ page }) => {
+        await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+        const draft = fixture();
+        let writes = 0;
+        let terminalReads = 0;
+        await page.route(`**${path}`, async (route) => {
+          if (route.request().method() === "PATCH") {
+            writes += 1;
+            return route.fulfill({ status: terminalRead ? 412 : 404 });
+          }
+          if (terminalRead && writes) {
+            terminalReads += 1;
+            return route.fulfill({ status: 404 });
+          }
+          return route.fulfill({ json: draft, headers: { ETag: '"v1"' } });
+        });
+        await page.goto(url);
+        const title = page.getByRole("textbox", { name: "Event title" });
+        await title.fill("Fictional inaccessible draft");
+        await page.getByRole("button", { name: "Save draft" }).click();
+        await expect(
+          page
+            .getByRole("alert")
+            .filter({ hasText: "This event is unavailable or you do not have access." }),
+        ).toBeVisible();
+        await expect(title).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Retry the same request" })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Check latest draft" })).toHaveCount(0);
+        expect(writes).toBe(1);
+        expect(terminalReads).toBe(terminalRead ? 1 : 0);
+      },
+    );
+  }
+
+  test(
+    "malformed or repeated draft IDs cannot open a draft or start creation",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const mock = await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+      for (const invalid of [
+        "?draftId=",
+        "?draftId=bad",
+        `?draftId=${stage2DraftId}&draftId=${stage2DraftId}`,
+      ]) {
+        await page.goto(`/account/events/new${invalid}`);
+        await expect(
+          page.getByRole("alert").filter({ hasText: "This draft link is invalid." }),
+        ).toBeVisible();
+        await expect(page.getByRole("textbox", { name: "Event title" })).toHaveCount(0);
+      }
+      expect(mock.requests.filter(({ route }) => route.includes("/admin/events"))).toEqual([]);
+    },
+  );
+
+  for (const routesEnabled of [false, true]) {
+    test(
+      routesEnabled
+        ? "a manager sees legacy creation when routes are on and drafts are off"
+        : "a manager sees legacy creation when routes and drafts are off",
+      browserCase(["@functional"]),
+      async ({ page }) => {
+        if (routesEnabled) await mockEventsStage2(page);
+        else await mockEvents(page, true);
+        const draftTraffic: string[] = [];
+        page.on("request", (request) => {
+          const path = new URL(request.url()).pathname;
+          if (
+            path.startsWith("/api/v1/admin/events/drafts/") ||
+            (path === "/api/v1/admin/events" && request.method() === "POST")
+          ) {
+            draftTraffic.push(request.method());
+          }
+        });
+        const [session] = await Promise.all([
+          page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/me"),
+          page.goto(url),
+        ]);
+        expect(session.status()).toBe(200);
+        expect(await session.headerValue("x-vtc-events-stage2")).toBe(routesEnabled ? "1" : null);
+        expect(await session.headerValue("x-vtc-events-drafts")).toBeNull();
+        await expect(
+          page.getByRole("alert").filter({ hasText: "Event drafts are unavailable." }),
+        ).toBeVisible();
+        await expect(page.getByRole("textbox", { name: "Event title" })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Save draft" })).toHaveCount(0);
+        expect(draftTraffic).toEqual([]);
+
+        await page.goto("/account/events/new");
+        await expect(
+          page.getByRole("heading", { name: "Create event", exact: true }),
+        ).toBeVisible();
+        await expect(page.getByRole("textbox", { name: "Event title" })).toBeVisible();
+        expect(draftTraffic).toEqual([]);
+      },
+    );
+  }
+
+  test(
+    "a member without event management cannot request a draft",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const mock = await mockEventsStage2(page, "member", "en", { draftsRollout: true });
+      await page.goto(url);
+      await expect(
+        page.getByRole("alert").filter({ hasText: "You no longer have access to this action." }),
+      ).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "Event title" })).toHaveCount(0);
+      expect(mock.requests.filter(({ route }) => route.includes("/admin/events"))).toEqual([]);
+    },
+  );
+
+  test(
+    "an unavailable draft stays on the protected draft entry",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const mock = await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+      mock.statusByRequest.set(`GET /admin/events/drafts/${stage2DraftId}`, 404);
+      await page.goto(url);
+      await expect(
+        page
+          .getByRole("alert")
+          .filter({ hasText: "This event is unavailable or you do not have access." }),
+      ).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "Event title" })).toHaveCount(0);
+      expect(mock.requests.filter(({ route }) => route === "POST /admin/events")).toEqual([]);
+    },
+  );
+});

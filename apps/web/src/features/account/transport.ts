@@ -1,6 +1,6 @@
-import { withReadSlot } from "../../shared/read-scheduler.js";
 import type { components } from "@vtc/contracts";
 import { z } from "zod";
+import { withReadSlot } from "../../shared/read-scheduler.js";
 import { csrfEnvelope, receiptEnvelope } from "../admissions/schema.js";
 import { retryDelay } from "../admissions/transport.js";
 export type DTO = components["schemas"];
@@ -178,6 +178,7 @@ export async function readSelf(signal: AbortSignal) {
     data,
     etag,
     eventsStage2Enabled: headers.get("X-VTC-Events-Stage2") === "1",
+    eventsDraftsEnabled: headers.get("X-VTC-Events-Drafts") === "1",
   };
 }
 export const readPending = (signal: AbortSignal) =>

@@ -147,6 +147,9 @@ For the agreed initial restriction types, the prescribed-load exception covers o
 
 ## Event responses, reminders, and privacy
 
+- The director and deputies can save incomplete event drafts, return to edit them, and discard or publish them. Publication validates the full definition and retains the event ID and attached gallery.
+- Drafts are visible only to event managers and have no RSVP, attendance, event-trip eligibility or notifications. These workflows become available after publication according to the event's visibility and timing.
+
 - Members may change their participation response until the event starts. A decline requires a reason.
 - After the event starts, the director records actual attendance separately from the member's prior response. The previously agreed director confirmation is used for event-trip participation.
 - Send an in-app reminder one hour before the event starts to members whose response is Participating. Notifications are delivered while the website is open; Web Push remains deferred.
@@ -157,6 +160,8 @@ For the agreed initial restriction types, the prescribed-load exception covers o
 Response and actual attendance are distinct facts. Participation is voluntary in the MVP: members may leave an event unanswered, and the system imposes no automatic penalty for declining or not attending. The director can view responses and actual attendance, subject to the confirmed privacy rules.
 
 Notify signed-up participants inside the website when the start time or route changes or the event is cancelled. A time change reschedules the one-hour reminder; cancellation removes scheduled reminders. Keep the participation response when an event changes, and allow members to change it until the revised start time.
+
+Only the director and deputies manage event screenshots. Each event holds at most ten ready or processing PNG/JPEG screenshots. Managers can caption, reorder, remove and select one ready screenshot as the cover. Current company members may view ready screenshots for published events. Draft images are restricted to managers. Anonymous visitors can view only the current cover thumbnail of a public published event. Galleries stay with published or cancelled events. A duplicate starts with an empty gallery, and discarding a draft revokes image access and schedules storage cleanup.
 
 ## Membership application fields
 

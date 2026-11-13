@@ -2,12 +2,12 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { createAppQueryClient } from "../src/app/session-cache.ts";
 import { SessionProvider, useSession } from "../src/app/Session.tsx";
+import { createAppQueryClient } from "../src/app/session-cache.ts";
 
 function SessionProbe() {
-  const { state, eventsStage2Enabled } = useSession();
-  return createElement("output", null, `${state}:${eventsStage2Enabled}`);
+  const { state, eventsStage2Enabled, eventsDraftsEnabled } = useSession();
+  return createElement("output", null, `${state}:${eventsStage2Enabled}:${eventsDraftsEnabled}`);
 }
 
 export async function renderSessionProbe(load) {

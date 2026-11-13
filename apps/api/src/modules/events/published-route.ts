@@ -1,5 +1,12 @@
 import type { components } from "@vtc/contracts";
-import { applicationId, decimal38_18, type TxContext, type UnitOfWork } from "@vtc/db";
+import {
+  applicationId,
+  decimal38_18,
+  type TxContext,
+  type UnitOfWork,
+  utcDateTime,
+  utcIso,
+} from "@vtc/db";
 import { eventRevisionDetails, eventRevisionDlcs, inArray } from "@vtc/db/events-schema";
 import { closed } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
@@ -58,6 +65,16 @@ export const legacyTextFields = ["description", "route", "meetingLocation"] as c
 
 export function eventText(value: unknown, max: number): asserts value is string {
   if (typeof value !== "string" || !value.trim() || value.length > max) throw identityError(422);
+}
+
+export function eventDate(value: string) {
+  try {
+    const normalized = utcIso(utcDateTime(value));
+    if (normalized !== value) throw new Error("NONCANONICAL_EVENT_TIME");
+    return normalized;
+  } catch {
+    throw identityError(422);
+  }
 }
 
 export function publishedRouteInput(raw: S["EventStage2Input"]) {
@@ -144,7 +161,6 @@ export function createPublishedRoutes(unit: UnitOfWork, catalogs: RouteCatalogs)
     for (const { revisionId, dlcId } of rows) routes.get(revisionId)?.requiredDlcIds.push(dlcId);
     return routes;
   }
-
   function publicFields(value: Cities, details: RouteDetails | undefined, facts: CatalogFacts) {
     const { depots, dlcs, cityDlcs } = facts;
     const originDepot = details?.originDepotId ? depots.get(details.originDepotId) : undefined;
@@ -190,8 +206,8 @@ export function createPublishedRoutes(unit: UnitOfWork, catalogs: RouteCatalogs)
     async validate(
       tx: TxContext,
       value: Cities & Pick<S["EventInput"], "game">,
-      details: RouteDetails,
-      previous: RouteDetails | null,
+      details: Depots & Pick<RouteDetails, "requiredDlcIds">,
+      previous: (Depots & Pick<RouteDetails, "requiredDlcIds">) | null,
     ) {
       const { depots, dlcs } = await catalogs.eventRouteCatalogInTransaction(tx, value.game, {
         cities: [],

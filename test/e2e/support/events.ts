@@ -1,7 +1,7 @@
-import { inertNotifications } from "./notifications.ts";
 import { expect, type Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture, fixtureId } from "../../../apps/web/src/features/account/fixtures.ts";
+import { inertNotifications } from "./notifications.ts";
 
 type S = components["schemas"];
 export async function selectPastReportEvent(page: Page, eventId: string) {
@@ -62,7 +62,7 @@ export async function mockEvents(
   page: Page,
   staff = false,
   locale: "en" | "ru" = "en",
-  options: { stage2Rollout?: boolean } = {},
+  options: { stage2Rollout?: boolean; draftsRollout?: boolean } = {},
 ) {
   const state = {
     event: eventFixture(),
@@ -125,6 +125,9 @@ export async function mockEvents(
           ...(options.stage2Rollout && method === "GET" && p === "/me" && status === 200
             ? { "X-VTC-Events-Stage2": "1" }
             : {}),
+          ...(options.draftsRollout && method === "GET" && p === "/me" && status === 200
+            ? { "X-VTC-Events-Drafts": "1" }
+            : {}),
         },
       });
     if (p === "/auth/csrf") return reply({ token: "synthetic-nonfunctional-csrf" });
@@ -167,7 +170,7 @@ export async function mockEvents(
         const status = state.failNext;
         state.failNext = 0;
         if (status === 412) {
-          state.definitionVersion++;
+          state.event.version = ++state.definitionVersion;
           state.response.version++;
           state.attendanceVersion++;
         }
@@ -202,8 +205,10 @@ export async function mockEvents(
           state.attendanceVersion,
         );
       }
-      if (p.endsWith("/cancellation")) state.event.status = "cancelled";
-      else {
+      if (p.endsWith("/cancellation")) {
+        state.event.status = "cancelled";
+        state.event.version = ++state.definitionVersion;
+      } else {
         const input = body as S["EventInput"];
         state.event = {
           ...state.event,

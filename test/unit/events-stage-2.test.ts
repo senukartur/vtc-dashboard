@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import {
   eventStage2ImageQueryPolicy,
+  isEventStage2CommandRead,
   visibleEventStage2Image,
 } from "../../apps/web/src/features/events/stage-2-model.ts";
 import {
@@ -16,6 +17,36 @@ import {
 import { stage2EventId, stage2Fixture } from "../fixtures/events-stage-2.ts";
 
 afterEach(() => vi.unstubAllGlobals());
+
+test("Stage 2 commands refresh landing lists in both locales and public cover bytes", () => {
+  const scope = "fictional-session";
+  for (const locale of ["ru", "en"] as const) {
+    const { path } = eventStage2Reads.publicList({ period: "upcoming", limit: 3, locale });
+    expect(isEventStage2CommandRead(["public-events", path, "landing-convoys"], scope)).toBe(true);
+  }
+  const { path } = eventStage2Content.publicCover(stage2EventId);
+  expect(
+    isEventStage2CommandRead(["events-stage-2", "public", "public", path, "image"], scope),
+  ).toBe(true);
+  expect(isEventStage2CommandRead(["events-stage-2", scope], scope)).toBe(true);
+  expect(isEventStage2CommandRead(["events-stage-2", "different-session"], scope)).toBe(false);
+  const upcoming = [
+    "dashboard-upcoming-event",
+    scope,
+    "events-stage-2",
+    "company.read",
+    "/me/upcoming-event?locale=en",
+    "EventStage2EnvelopeUpcoming",
+  ];
+  expect(isEventStage2CommandRead(upcoming, scope)).toBe(true);
+  expect(isEventStage2CommandRead(upcoming, "different-session")).toBe(false);
+  expect(
+    isEventStage2CommandRead(["dashboard-upcoming-event", scope, 1, "/me/upcoming-event"], scope),
+  ).toBe(false);
+  expect(
+    isEventStage2CommandRead(["public-events", "/public/events", "EnvelopeListEventPublic"], scope),
+  ).toBe(false);
+});
 
 test("staged queries include effective filters and validate the new response shape", async () => {
   const example = stage2Fixture("listEvents", "own-response");
@@ -42,6 +73,22 @@ test("staged queries include effective filters and validate the new response sha
     expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
   );
   await expect(readEventStage2(spec, signal)).rejects.toMatchObject({ kind: "unavailable" });
+});
+
+test("staged public list defaults to English and reads a populated Stage 2 response", async () => {
+  const example = stage2Fixture("listPublicEvents", "structured-and-legacy");
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(example.response));
+  vi.stubGlobal("fetch", fetch);
+  const signal = new AbortController().signal;
+
+  await expect(readEventStage2(eventStage2Reads.publicList(), signal)).resolves.toMatchObject({
+    data: example.response,
+  });
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/v1/public/events?locale=en",
+    expect.objectContaining({ credentials: "omit", cache: "no-store" }),
+  );
+  expect(eventStage2Reads.publicList({ locale: "ru" }).path).toBe("/public/events?locale=ru");
 });
 
 test("browser transport preserves own RSVP versions for member list and upcoming reads", async () => {
@@ -349,6 +396,20 @@ test("published route activation requires Events and Catalogs and keeps baseline
     { EVENTS_ROUTE_ENABLED: "yes" },
   ])
     expect(() => readConfig({ ...enabled, ...fields })).toThrow("EVENTS_ROUTE_ENABLED");
+  expect(readConfig({ ...enabled, EVENTS_DRAFTS_ENABLED: "false" }).events).toEqual(
+    readConfig(enabled).events,
+  );
+  expect(readConfig({ ...enabled, EVENTS_DRAFTS_ENABLED: "true" }).events).toEqual({
+    cursorKey: base.EVENTS_CURSOR_KEY,
+    routeEnabled: true,
+    draftsEnabled: true,
+  });
+  expect(() => readConfig({ ...base, EVENTS_DRAFTS_ENABLED: "true" })).toThrow(
+    "EVENTS_DRAFTS_ENABLED",
+  );
+  expect(() => readConfig({ ...enabled, EVENTS_DRAFTS_ENABLED: "1" })).toThrow(
+    "EVENTS_DRAFTS_ENABLED",
+  );
   type Grants = { runtime: Record<string, string[]>; jobs: Record<string, string[]> };
   const activation = new URL("../../deploy/development/", import.meta.url);
   const baseline = JSON.parse(
@@ -357,8 +418,22 @@ test("published route activation requires Events and Catalogs and keeps baseline
   const stage = JSON.parse(await readFile(new URL("stage-features.json", activation), "utf8")) as {
     flags: string[];
     grants: Grants;
+    eventsDraftsGrants: Record<string, string[]>;
   };
   expect(stage.flags).toContain("EVENTS_ROUTE_ENABLED");
+  expect(stage.flags).not.toContain("EVENTS_DRAFTS_ENABLED");
+  expect(Object.keys(stage.eventsDraftsGrants).sort()).toEqual([
+    "event_draft_dlcs",
+    "event_drafts",
+    "event_metadata",
+    "event_workflow_commands",
+  ]);
+  for (const table of Object.keys(stage.eventsDraftsGrants)) {
+    expect(baseline.runtime[table]).toBeUndefined();
+    expect(baseline.jobs[table]).toBeUndefined();
+    expect(stage.grants.runtime[table]).toBeUndefined();
+    expect(stage.grants.jobs[table]).toBeUndefined();
+  }
   for (const table of ["event_revision_details", "event_revision_dlcs"]) {
     expect(baseline.runtime[table]).toBeUndefined();
     expect(baseline.jobs[table]).toBeUndefined();

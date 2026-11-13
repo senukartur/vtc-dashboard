@@ -2,11 +2,14 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
+import { uuid } from "../../shared/catalog-selectors/contracts.js";
 import { Badge, Button, Card } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { publicContent, publicPath } from "../landing/content.js";
 import { EventState, KeepFocusButton, useEventTimezone } from "./components.js";
 import { EventEditor } from "./EventEditor.js";
+import { DraftEventEditor, useDraftText } from "./editor/draft.js";
+import { MemberEventsPage } from "./MemberEventsPage.js";
 import { type DTO, periodFrom } from "./model.js";
 import { useEventQuery } from "./queries.js";
 import { compactTime, dateTile, timezoneLabel } from "./view-model.js";
@@ -14,11 +17,18 @@ import "./events.css";
 import "./events-workspace.css";
 
 export function EventsPage({ publicView = false }: { publicView?: boolean }) {
+  const session = useSession();
+  if (!publicView && session.eventsStage2Enabled) return <MemberEventsPage />;
+  return <LegacyEventsPage publicView={publicView} />;
+}
+
+function LegacyEventsPage({ publicView }: { publicView: boolean }) {
   const { t, i18n } = useTranslation("events"),
     session = useSession(),
     [search, setSearch] = useSearchParams(),
-    period = periodFrom(search.get("period")),
-    cursor = search.get("cursor"),
+    requestedPeriod = search.get("period"),
+    period = periodFrom(requestedPeriod),
+    cursor = !publicView && requestedPeriod === "drafts" ? null : search.get("cursor"),
     allowed = publicView || !!session.self?.capabilities.includes("company.read"),
     timezone = useEventTimezone(publicView),
     [now] = useState(Date.now),
@@ -151,7 +161,35 @@ function EventRow({
 }
 export function CreateEventPage() {
   const { t } = useTranslation("events"),
-    session = useSession();
+    session = useSession(),
+    draftText = useDraftText(),
+    [search] = useSearchParams();
+  const draftIds = search.getAll("draftId");
+  if (draftIds.length) {
+    const id = draftIds.length === 1 ? draftIds[0] : undefined;
+    const valid = id && id === id.toLowerCase() && uuid.safeParse(id).success;
+    return (
+      <div className="event-page stack">
+        <Link to="/account/events">{t("back")}</Link>
+        <h1>{draftText.heading}</h1>
+        <Card>
+          {!valid ? (
+            <p role="alert" className="field-error">
+              {draftText.invalidId}
+            </p>
+          ) : session.state === "checking" ? (
+            <p role="status">{t("loading")}</p>
+          ) : session.eventsDraftsEnabled ? (
+            <DraftEventEditor id={id} />
+          ) : (
+            <p role="alert" className="field-error">
+              {draftText.unavailable}
+            </p>
+          )}
+        </Card>
+      </div>
+    );
+  }
   return (
     <div className="event-page stack">
       <Link to="/account/events">{t("back")}</Link>

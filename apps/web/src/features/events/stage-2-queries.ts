@@ -2,7 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure } from "../account/transport.js";
-import { eventStage2ImageQueryPolicy, visibleEventStage2Image } from "./stage-2-model.js";
+import {
+  eventStage2ImageQueryPolicy,
+  eventStage2QueryPrefix,
+  eventUpcomingQueryPrefix,
+  isEventStage2CommandRead,
+  visibleEventStage2Image,
+} from "./stage-2-model.js";
 import {
   type EventStage2Access,
   type EventStage2Command,
@@ -14,10 +20,9 @@ import {
   sendEventStage2,
 } from "./stage-2-transport.js";
 
-const prefix = "events-stage-2";
 type Session = ReturnType<typeof useSession>;
 
-function sessionScope(session: Session) {
+export function eventStage2SessionScope(session: Session) {
   const self = session.self;
   return self
     ? JSON.stringify([self.member.id, session.generation, self.identityEpoch, self.capabilities])
@@ -53,8 +58,12 @@ function useStage2Read<T>(
   const client = useQueryClient();
   const publicRead = spec.access === "public";
   const allowed = hasAccess(session, spec.access);
+  const scope = publicRead ? "public" : eventStage2SessionScope(session);
   const query = useQuery({
-    queryKey: [prefix, publicRead ? "public" : sessionScope(session), spec.access, spec.path, name],
+    queryKey:
+      name === "EventStage2EnvelopeUpcoming"
+        ? [eventUpcomingQueryPrefix, scope, eventStage2QueryPrefix, spec.access, spec.path, name]
+        : [eventStage2QueryPrefix, scope, spec.access, spec.path, name],
     meta: { private: !publicRead },
     enabled: enabled && allowed,
     retry: false,
@@ -110,19 +119,17 @@ export function useEventStage2Image(spec: EventStage2Content, enabled = true) {
 export function useEventStage2Command<K extends EventStage2Envelope>() {
   const session = useSession();
   const client = useQueryClient();
-  const scope = sessionScope(session);
+  const scope = eventStage2SessionScope(session);
   const inFlight = useRef<AbortController | null>(null);
 
   function invalidate() {
     return client.invalidateQueries({
-      predicate: (query) =>
-        query.queryKey[0] === prefix &&
-        (query.queryKey[1] === scope || query.queryKey[1] === "public"),
+      predicate: (query) => isEventStage2CommandRead(query.queryKey, scope),
     });
   }
 
   const mutation = useMutation({
-    mutationKey: [prefix, scope, "command"],
+    mutationKey: [eventStage2QueryPrefix, scope, "command"],
     retry: false,
     gcTime: 0,
     mutationFn: async (command: EventStage2Command<K>) => {
