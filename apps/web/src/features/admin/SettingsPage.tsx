@@ -24,6 +24,7 @@ import { SettingsAudit } from "./SettingsAudit.js";
 import {
   type TransferConfirmation,
   useSettingsTransferConfirmation,
+  useSettingsTransferNotice,
 } from "./SettingsLeadershipReceiptProvider.js";
 import {
   countdown,
@@ -785,29 +786,10 @@ function Settings() {
     </div>
   );
 }
-function transferredTo(state: unknown): string | null {
-  if (!state || typeof state !== "object" || !("leadershipTransferredTo" in state)) return null;
-  const value = state.leadershipTransferredTo;
-  return typeof value === "string" && value ? value : null;
-}
 export function SettingsPage() {
   const { t } = useTranslation("administration"),
-    location = useLocation(),
-    navigate = useNavigate(),
-    incoming = transferredTo(location.state),
-    [nickname, setNickname] = useState(incoming),
+    { nickname, dismiss } = useSettingsTransferNotice(),
     notice = useRef<HTMLParagraphElement>(null);
-  if (incoming && incoming !== nickname) setNickname(incoming);
-  // The transfer ends this member's access, so the notice arrives through router state and
-  // survives the session remount. It is shown once: the state is cleared from history so a reload
-  // or Back does not repeat it.
-  useEffect(() => {
-    if (!incoming) return;
-    navigate(
-      { pathname: location.pathname, search: location.search, hash: location.hash },
-      { replace: true, state: null },
-    );
-  }, [incoming, navigate, location.pathname, location.search, location.hash]);
   useEffect(() => {
     if (nickname) notice.current?.focus();
   }, [nickname]);
@@ -819,7 +801,7 @@ export function SettingsPage() {
             <span aria-hidden="true">✓ </span>
             {t("settingsUi.transferred", { nickname })}
           </p>
-          <Button variant="outline" onClick={() => setNickname(null)}>
+          <Button variant="outline" onClick={dismiss}>
             {t("settingsUi.dismiss")}
           </Button>
         </div>

@@ -471,7 +471,7 @@ test(
       }),
     ]);
     await expect(page.getByLabel(text.en.code)).toHaveCount(0);
-    // The notice is shown once: it is no longer in history, so a reload does not repeat it.
+    // The receipt is held in memory and a reload does not repeat it.
     expect(await page.evaluate(() => history.state?.usr ?? null)).toBeNull();
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
@@ -561,6 +561,40 @@ test(
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
     await expect(notice(page)).toHaveCount(0);
+    expect(state.commands).toHaveLength(1);
+  },
+);
+
+test(
+  "P11 a different account never sees the completed transfer notice",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await open(page, { pending: true });
+    await settled(page);
+    state.selfReplacementAfterTransfer = {
+      id: ids.cedar,
+      nickname: names.cedar,
+      formerMember: false,
+      roles: ["driver", "deputy_director"],
+    };
+    let releaseSelf = () => {};
+    state.selfResponseGateAfterTransfer = new Promise<void>((resolve) => {
+      releaseSelf = resolve;
+    });
+    await codeInput(page).fill(correctCode);
+    await panel(page).getByRole("button", { name: text.en.transferButton, exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    try {
+      await expect.poll(() => state.selfReadsAfterTransfer).toBeGreaterThan(0);
+      await expect(notice(page)).toHaveCount(0);
+    } finally {
+      releaseSelf();
+    }
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(text.en.title);
+    await expect(page.getByText(names.cedar, { exact: true })).toBeVisible();
+    await expect(panel(page)).toHaveCount(0);
+    await expect(notice(page)).toHaveCount(0);
+    expect(await page.evaluate(() => history.state?.usr ?? null)).toBeNull();
     expect(state.commands).toHaveLength(1);
   },
 );

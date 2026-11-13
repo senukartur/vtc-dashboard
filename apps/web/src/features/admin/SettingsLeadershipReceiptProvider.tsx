@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useLocation, useMatch, useNavigate } from "react-router-dom";
+import { useMatch } from "react-router-dom";
 import { paths } from "../../app/navigation-model.js";
 import { useSession } from "../../app/Session.js";
 import { useSignOut } from "../account/sign-out.js";
@@ -22,10 +22,23 @@ type OwnedConfirmation = {
   scope: string;
   value: TransferConfirmation;
 };
+type TransferNotice = {
+  nickname: string;
+  identity: string;
+  generation: number;
+};
 const ConfirmationContext = createContext<TransferConfirmation | null>(null);
+const NoticeContext = createContext<{ nickname: string | null; dismiss: () => void }>({
+  nickname: null,
+  dismiss: () => {},
+});
 
 export function useSettingsTransferConfirmation() {
   return useContext(ConfirmationContext);
+}
+
+export function useSettingsTransferNotice() {
+  return useContext(NoticeContext);
 }
 
 /** The shell resets notification state when capabilities change, including after a transfer. */
@@ -34,15 +47,31 @@ export function SettingsLeadershipReceiptProvider({ children }: { children: Reac
   const onSettings = useMatch(paths.settings);
   const signOut = useSignOut();
   const [owned, setOwned] = useState<OwnedConfirmation | null>(null);
-  const account = session.self;
-  const scope =
-    onSettings && account && session.state === "authenticated" && !signOut.active
-      ? JSON.stringify([account.member.id, account.identityEpoch, session.generation])
-      : null;
+  const [notice, setNotice] = useState<TransferNotice | null>(null);
+  const { self: account, state, generation } = session;
+  const identity = account ? JSON.stringify([account.member.id, account.identityEpoch]) : null;
+  const inWorkspace = !!onSettings && !signOut.active;
+  const scope = inWorkspace && identity ? JSON.stringify([identity, generation]) : null;
+  // Keep the notice only through the one intentional session refresh triggered by success.
+  const noticeMatches =
+    notice &&
+    inWorkspace &&
+    (generation === notice.generation || generation === notice.generation + 1) &&
+    (state === "checking" || (state === "authenticated" && identity === notice.identity));
+  if (notice && !noticeMatches) setNotice(null);
+  const nickname = noticeMatches && state === "authenticated" ? notice.nickname : null;
   return (
     <ConfirmationContext value={owned?.scope === scope ? owned.value : null}>
-      {scope && <SettingsTransferOwner key={scope} scope={scope} publish={setOwned} />}
-      {children}
+      {scope && identity && (
+        <SettingsTransferOwner
+          key={scope}
+          scope={scope}
+          identity={identity}
+          publish={setOwned}
+          announce={setNotice}
+        />
+      )}
+      <NoticeContext value={{ nickname, dismiss: () => setNotice(null) }}>{children}</NoticeContext>
     </ConfirmationContext>
   );
 }
@@ -50,22 +79,24 @@ export function SettingsLeadershipReceiptProvider({ children }: { children: Reac
 // Publishing the current command updates the context, independent of the command owner.
 const SettingsTransferOwner = memo(function SettingsTransferOwner({
   scope,
+  identity,
   publish,
+  announce,
 }: {
   scope: string;
+  identity: string;
   publish: (value: OwnedConfirmation | null) => void;
+  announce: (notice: TransferNotice) => void;
 }) {
   const session = useSession();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const currentLocation = useRef<typeof location | null>(null);
+  const active = useRef(false);
   const command = useWorkspaceCommand();
   useLayoutEffect(() => {
-    currentLocation.current = location;
+    active.current = true;
     return () => {
-      currentLocation.current = null;
+      active.current = false;
     };
-  }, [location]);
+  }, []);
 
   const capabilities = session.self?.capabilities;
   const canTransfer =
@@ -88,12 +119,8 @@ const SettingsTransferOwner = memo(function SettingsTransferOwner({
       "POST",
       false,
     );
-    if (!result || !currentLocation.current) return false;
-    const { pathname, search, hash } = currentLocation.current;
-    navigate(
-      { pathname, search, hash },
-      { replace: true, state: { leadershipTransferredTo: nickname } },
-    );
+    if (!result || !active.current) return false;
+    announce({ nickname, identity, generation: session.generation });
     session.changed();
     return true;
   }

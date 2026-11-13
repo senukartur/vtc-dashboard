@@ -113,6 +113,8 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     transferred: false,
     transferResponseGate: null as Promise<void> | null,
     selfReadsAfterTransfer: 0,
+    selfReplacementAfterTransfer: null as S["MemberSummary"] | null,
+    selfResponseGateAfterTransfer: null as Promise<void> | null,
     auditDeniedAfterTransfer: 0,
     settings: {
       id: ids.company,
@@ -159,6 +161,11 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       (capability) => !options.omitCapabilities?.includes(capability),
     );
     value.data.preferences.displayTimezone = options.displayTimezone ?? "Europe/Berlin";
+    const replacement = state.transferred && state.selfReplacementAfterTransfer;
+    if (replacement) {
+      value.data.member = replacement;
+      value.data.capabilities = capabilities(replacement.roles);
+    }
     return value;
   };
   await page.route("**/api/v1/**", async (route: Route) => {
@@ -170,7 +177,10 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       method = request.method();
     if (options.delegateQualifications && path.includes("qualification")) return route.fallback();
     if (path === "/me") {
-      if (state.transferred) state.selfReadsAfterTransfer++;
+      if (state.transferred) {
+        state.selfReadsAfterTransfer++;
+        await state.selfResponseGateAfterTransfer;
+      }
       return route.fulfill({ json: self(), headers: { ETag: '"me-1"' } });
     }
     if (path === "/auth/csrf")
