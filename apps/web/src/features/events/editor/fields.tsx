@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { DateTimeField } from "../../../shared/ui/date-time-field.js";
 import { Button, Input, Label, Select } from "../../../shared/ui/primitives.js";
 import { useMemberProfile, useMembersList } from "../../drivers/queries.js";
 import type { DTO } from "../model.js";
@@ -198,15 +199,15 @@ export function TimeFields({
                   {text[name]} (UTC)
                   {name === "endsAt" && <span className="muted"> · {text.optional}</span>}
                 </Label>
-                <Input
+                <DateTimeField
                   id={id}
-                  type="datetime-local"
-                  step="0.001"
+                  fieldName={text[name]}
                   value={form[name]}
+                  timeZone="UTC"
                   aria-required={name !== "endsAt"}
-                  aria-invalid={!!errorId}
+                  invalid={!!errorId}
                   aria-describedby={errorId ? `${helpId} ${errorId}` : helpId}
-                  onChange={(event) => onChange(name, event.target.value)}
+                  onChange={(value) => onChange(name, value)}
                 />
               </>
             )}

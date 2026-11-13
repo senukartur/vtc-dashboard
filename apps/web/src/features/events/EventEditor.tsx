@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
+import { DateTimeField } from "../../shared/ui/date-time-field.js";
 import { Button, Input, Label } from "../../shared/ui/primitives.js";
 import { EventFailureView, useEventTimezone } from "./components.js";
 import { type DTO, eventTime, utcInput } from "./model.js";
@@ -166,15 +167,15 @@ export function EventEditor({
             <Label htmlFor={`${id}-${key}`}>
               {t(key)} (UTC){key === "endsAt" ? ` · ${t("optional")}` : ""}
             </Label>
-            <Input
+            <DateTimeField
               id={`${id}-${key}`}
-              type="datetime-local"
-              step="0.001"
+              fieldName={t(key)}
+              timeZone="UTC"
               required={key !== "endsAt"}
               value={times[key]}
-              onChange={(e) => {
+              onChange={(value) => {
                 setSaved(false);
-                setTimes((v) => ({ ...v, [key]: e.target.value }));
+                setTimes((v) => ({ ...v, [key]: value }));
               }}
             />
             {utcInput(times[key]) && (

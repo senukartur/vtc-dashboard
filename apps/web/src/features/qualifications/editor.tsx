@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type AdrClass, adrClasses } from "../../shared/catalog-selectors/contracts.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
+import { todayIn } from "../../shared/ui/date-time.js";
+import { DateTimeField } from "../../shared/ui/date-time-field.js";
 import { Button, FieldError, Input, Label } from "../../shared/ui/primitives.js";
 import {
   Confirm,
@@ -313,15 +315,16 @@ export function LevelEditor({
         {schedule && (
           <>
             <RequiredLabel id={`effective-${level.id}`}>{t("effectiveAt")}</RequiredLabel>
-            <Input
+            <DateTimeField
               id={`effective-${level.id}`}
-              type="datetime-local"
-              step="0.001"
+              fieldName={t("effectiveAt")}
+              timeZone="UTC"
+              min={todayIn("UTC", Date.now())}
               required
-              aria-invalid={timeInvalid}
+              invalid={timeInvalid}
               aria-describedby={timeInvalid ? `error-effective-${level.id}` : undefined}
               value={time}
-              onChange={(e) => setTime(e.target.value)}
+              onChange={setTime}
             />
             <FieldError id={`error-effective-${level.id}`}>
               {timeInvalid ? t("timeInvalid") : undefined}

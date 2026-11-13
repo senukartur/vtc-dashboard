@@ -5,6 +5,7 @@ import { and, eq, isNull, trips as tripRows } from "@vtc/db/trips-schema";
 import { pngBytes } from "../fixtures/manual-images.ts";
 import { origin, resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
+import { expectDateTime, fillDateTime } from "./support/date-time.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { manualReferenceTimes } from "./support/manual-reference.ts";
 import {
@@ -484,12 +485,8 @@ async function fill(page: Page, unresolved = false, initialReads?: TripReadSnaps
     await page.getByLabel("Cargo mass (kg)", { exact: true }).fill("18000");
     step = "distance";
     await page.getByLabel("Actual driven distance (m)", { exact: true }).fill("123400");
-    await page
-      .getByLabel("Trip start", { exact: true })
-      .fill(manualReferenceTimes.startedAt.slice(0, 16));
-    await page
-      .getByLabel("Trip completion", { exact: true })
-      .fill(manualReferenceTimes.completedAt.slice(0, 16));
+    await fillDateTime(page, "Trip start", manualReferenceTimes.startedAt.slice(0, 16));
+    await fillDateTime(page, "Trip completion", manualReferenceTimes.completedAt.slice(0, 16));
     step = "selection";
     // Selecting an option starts a separate current-entity read. Settle this
     // setup before measuring upload, including reads queued by the shared lane.
@@ -766,8 +763,7 @@ test(
       await page
         .getByLabel("Comment (optional)", { exact: true })
         .fill("Fictional durable partial draft");
-      const tripStart = page.getByLabel("Trip start", { exact: true });
-      await tripStart.fill(manualReferenceTimes.startedAt.slice(0, 16));
+      await fillDateTime(page, "Trip start", manualReferenceTimes.startedAt.slice(0, 16));
       await page.getByRole("button", { name: "Save draft", exact: true }).click();
       await expect(page).toHaveURL(/\/account\/reports\/drafts\//);
       await page.reload();
@@ -775,8 +771,8 @@ test(
       await expect(page.getByLabel("Comment (optional)", { exact: true })).toHaveValue(
         "Fictional durable partial draft",
       );
-      await expect(tripStart).toHaveValue(manualReferenceTimes.startedAt.slice(0, 16));
-      await expect(page.getByLabel("Trip completion", { exact: true })).toHaveValue("");
+      await expectDateTime(page, "Trip start", manualReferenceTimes.startedAt.slice(0, 16));
+      await expectDateTime(page, "Trip completion", "");
       await resetAccountLimits();
       phase = "UPLOAD_SUBMIT";
       await fill(page, true, mainReads.snapshot());
@@ -803,9 +799,7 @@ test(
         .getByLabel("Comment (optional)", { exact: true })
         .fill("Fictional edit after staff opened review");
       const revisedCompletion = "2025-01-12T11:15:00.000Z";
-      await page
-        .getByLabel("Trip completion", { exact: true })
-        .fill(revisedCompletion.slice(0, 16));
+      await fillDateTime(page, "Trip completion", revisedCompletion.slice(0, 16));
       const revisePath = `/api/v1/manual-reports/${reportId}/revisions`;
       let observedRevision: Request | null = null;
       const revisionRequest = (request: Request) => {

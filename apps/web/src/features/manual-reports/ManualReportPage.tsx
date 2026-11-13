@@ -514,6 +514,7 @@ function ManualEditor({
                   name={name}
                   value={times[name]}
                   noteId={referenceNoteId}
+                  timezone={timezone}
                   error={name === "startedAt" ? startError : endError}
                   onChange={(value) => {
                     setTimes((previous) => ({ ...previous, [name]: value }));

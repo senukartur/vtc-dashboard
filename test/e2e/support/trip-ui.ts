@@ -11,6 +11,7 @@ import {
   list,
   mockCatalogs,
 } from "./catalogs.ts";
+import { fillDateTime } from "./date-time.ts";
 import { expect } from "./fixtures.ts";
 import { manualReferenceTimes } from "./manual-reference.ts";
 import { inertNotifications } from "./notifications.ts";
@@ -115,12 +116,8 @@ export async function completeForm(page: Page) {
     );
   await page.getByLabel("Cargo mass (kg)", { exact: true }).fill("1000");
   await page.getByLabel("Actual driven distance (m)", { exact: true }).fill("0");
-  await page
-    .getByLabel("Trip start", { exact: true })
-    .fill(manualReferenceTimes.startedAt.slice(0, 16));
-  await page
-    .getByLabel("Trip completion", { exact: true })
-    .fill(manualReferenceTimes.completedAt.slice(0, 16));
+  await fillDateTime(page, "Trip start", manualReferenceTimes.startedAt.slice(0, 16));
+  await fillDateTime(page, "Trip completion", manualReferenceTimes.completedAt.slice(0, 16));
   await expect(page.locator(".manual-company-field [role=status]")).toHaveCount(0);
   await page
     .getByLabel("Choose completion screenshot", { exact: true })

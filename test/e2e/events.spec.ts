@@ -15,6 +15,7 @@ import {
   chooseCatalogRow,
   envelope,
 } from "./support/catalogs.ts";
+import { fillDateTime } from "./support/date-time.ts";
 import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
 import {
   coverCaption,
@@ -595,7 +596,7 @@ test(
       .fill("Fictional changed route after uncertainty");
     await save.click();
     await expect(dialog.getByRole("status")).toHaveText("Changes saved.");
-    await dialog.getByLabel("Start time (UTC)", { exact: true }).fill("2099-10-25T14:00");
+    await fillDateTime(dialog, "Start time (UTC)", "2099-10-25T14:00");
     await expect(dialog.getByText("Changes saved.", { exact: true })).toHaveCount(0);
     await save.click();
     await expect(dialog.getByRole("status")).toHaveText("Changes saved.");

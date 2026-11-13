@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { todayIn } from "../../shared/ui/date-time.js";
+import { DateTimeField } from "../../shared/ui/date-time-field.js";
 import { Card, Input, Label } from "../../shared/ui/primitives.js";
 import { Confirm, Failure, LevelContext, MemberContext, Recovery } from "./components.js";
 import { useQualificationCommand } from "./queries.js";
@@ -126,20 +128,24 @@ export function AssignmentEditor({
         {historical && (
           <>
             <Label htmlFor="assignment-start">{t("assignedAt")}</Label>
-            <Input
+            <DateTimeField
               id="assignment-start"
-              type="datetime-local"
-              step="0.001"
+              fieldName={t("assignedAt")}
+              precision="millisecond"
+              timeZone="UTC"
+              max={todayIn("UTC", Date.now())}
               value={start}
-              onChange={(e) => setStart(e.target.value)}
+              onChange={setStart}
             />
             <Label htmlFor="assignment-end">{t("endedAt")}</Label>
-            <Input
+            <DateTimeField
               id="assignment-end"
-              type="datetime-local"
-              step="0.001"
+              fieldName={t("endedAt")}
+              precision="millisecond"
+              timeZone="UTC"
+              max={todayIn("UTC", Date.now())}
               value={end}
-              onChange={(e) => setEnd(e.target.value)}
+              onChange={setEnd}
             />
             <p>
               UTC · [ {assignedAt ?? "—"}, {endedAt ?? "—"} )
