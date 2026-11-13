@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { isIsoDate } from "../../../shared/ui/date-time.js";
 import { DateField, TimeField } from "../../../shared/ui/date-time-field.js";
 import { Button, Input, Label, Select } from "../../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../../shared/ui/segmented-control.js";
@@ -284,15 +285,21 @@ export function TimeFields({
   const [showEnd, setShowEnd] = useState(!!form.endsAt);
   const [meetingDate, setMeetingDate] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
+  const [anchor, setAnchor] = useState<string | null>(null);
   const date = selectedDate ?? inferred;
   const separateMeetingDate =
     meetingDate !== null || Boolean(local.meetingAt.date && local.meetingAt.date !== date);
 
   function changeDate(next: string) {
+    // The last complete shared date: retyping it moves the other dates once it is complete again.
+    const from = isIsoDate(date) ? date : anchor;
     setSelectedDate(next);
-    setMeetingDate(meetingDate === null ? null : moveDate(meetingDate, date, next));
-    setEndDate(endDate === null ? null : moveDate(endDate, date, next));
-    onScheduleChange(moveSchedule(form, date, next));
+    setAnchor(next ? (isIsoDate(next) ? next : from) : null);
+    const move = (value: string | null) =>
+      value === null || !next ? null : moveDate(value, date, next, from);
+    setMeetingDate(move(meetingDate));
+    setEndDate(move(endDate));
+    onScheduleChange(moveSchedule(form, date, next, from));
   }
 
   function clock(name: ScheduleField) {

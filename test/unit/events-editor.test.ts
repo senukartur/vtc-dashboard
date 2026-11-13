@@ -21,6 +21,7 @@ import {
 } from "../../apps/web/src/features/events/editor/rebase.ts";
 import {
   fromMoscow,
+  moveDate,
   moveSchedule,
   toMoscow,
 } from "../../apps/web/src/features/events/editor/schedule.ts";
@@ -473,30 +474,78 @@ test("incomplete Stage 2 dates and times stay in the form as invalid times and r
     expect(validateEventEditor({ ...form, startsAt }).draftErrors.startsAt).toBe("invalidTime");
 });
 
-test("moving the Stage 2 shared date shifts complete times and keeps incomplete entries", () => {
-  const schedule = {
-    meetingAt: "2099-10-24T20:30",
-    startsAt: "2099-10-24T22:00",
-    endsAt: "2099-10-25T21:15",
-  };
-  expect(moveSchedule(schedule, "2099-10-25", "2099-10-27")).toEqual({
+// Moscow: separate meeting date 24.10 23:30, start on the shared date 25.10 01:00, end 26.10 00:15.
+const separateSchedule = {
+  meetingAt: "2099-10-24T20:30",
+  startsAt: "2099-10-24T22:00",
+  endsAt: "2099-10-25T21:15",
+};
+
+test("a complete shared date change shifts the whole Stage 2 schedule by the same days", () => {
+  expect(moveSchedule(separateSchedule, "2099-10-25", "2099-10-27", "2099-10-25")).toEqual({
     meetingAt: "2099-10-26T20:30",
     startsAt: "2099-10-26T22:00",
     endsAt: "2099-10-27T21:15",
   });
-  // An incomplete shared date keeps the times of the fields on that date as invalid entries.
+  expect(moveDate("2099-10-24", "2099-10-25", "2099-10-27", "2099-10-25")).toBe("2099-10-26");
+});
+
+test("retyping the Stage 2 shared date moves separate dates once it is complete again", () => {
+  for (const [next, meetingDate, expected] of [
+    // Later: 01.11.2099 is 7 days after 25.10.2099.
+    [
+      "2099-11-01",
+      "2099-10-31",
+      { meetingAt: "2099-10-31T20:30", startsAt: "2099-10-31T22:00", endsAt: "2099-11-01T21:15" },
+    ],
+    // Earlier: retyping the year as 2098 is 365 days before.
+    [
+      "2098-10-25",
+      "2098-10-24",
+      { meetingAt: "2098-10-24T20:30", startsAt: "2098-10-24T22:00", endsAt: "2098-10-25T21:15" },
+    ],
+  ] as const) {
+    const anchor = "2099-10-25";
+    const first = incompleteValue("0", emptyTime);
+    const second = incompleteValue("01.1", emptyTime);
+    // While incomplete only the start, on the shared date, follows; separate dates wait.
+    let schedule = moveSchedule(separateSchedule, anchor, first, anchor);
+    expect(schedule.meetingAt).toBe(separateSchedule.meetingAt);
+    expect(schedule.endsAt).toBe(separateSchedule.endsAt);
+    expect(toMoscow(schedule.startsAt)).toEqual({ date: first, time: "01:00" });
+    expect(validateEventEditor({ ...completeForm(), ...schedule }).draftErrors.startsAt).toBe(
+      "invalidTime",
+    );
+    schedule = moveSchedule(schedule, first, second, anchor);
+    expect(toMoscow(schedule.startsAt)).toEqual({ date: second, time: "01:00" });
+    expect(moveSchedule(schedule, second, next, anchor)).toEqual(expected);
+    // The separate date states move the same way.
+    expect(moveDate("2099-10-24", second, next, anchor)).toBe(meetingDate);
+    expect(moveDate(second, second, next, anchor)).toBe(next);
+  }
+  // Values on another date stay byte-identical while the shared date is incomplete.
+  const exact = { meetingAt: "2099-10-24T12:00:00.000", startsAt: "", endsAt: "" };
   const typed = incompleteValue("27.10", emptyTime);
-  const pending = moveSchedule(schedule, "2099-10-25", typed);
-  expect(pending.meetingAt).toBe(schedule.meetingAt);
-  expect(pending.endsAt).toBe(schedule.endsAt);
-  expect(toMoscow(pending.startsAt)).toEqual({ date: typed, time: "01:00" });
-  expect(moveSchedule(pending, typed, "2099-10-27")).toEqual({
-    meetingAt: schedule.meetingAt,
-    startsAt: "2099-10-26T22:00",
-    endsAt: schedule.endsAt,
+  expect(moveSchedule(exact, "2099-10-25", typed, "2099-10-25")).toEqual(exact);
+  expect(moveSchedule(exact, typed, incompleteValue("27.10.2", emptyTime), "2099-10-25")).toEqual(
+    exact,
+  );
+});
+
+test("fully clearing the Stage 2 shared date clears the schedule", () => {
+  expect(moveSchedule(separateSchedule, "2099-10-25", "", "2099-10-25")).toEqual({
+    meetingAt: "",
+    startsAt: "",
+    endsAt: "",
   });
-  // Values on another date do not follow an incomplete shared date and stay byte-identical.
-  const exact = { meetingAt: "2099-10-25T12:00:00.000", startsAt: "", endsAt: "" };
-  expect(moveSchedule(exact, "2099-10-26", typed)).toEqual(exact);
-  expect(moveSchedule(exact, typed, "2099-10-27")).toEqual(exact);
+  const typed = incompleteValue("2", emptyTime);
+  const pending = moveSchedule(separateSchedule, "2099-10-25", typed, "2099-10-25");
+  expect(moveSchedule(pending, typed, "", "2099-10-25")).toEqual({
+    meetingAt: "",
+    startsAt: "",
+    endsAt: "",
+  });
+  expect(
+    validateEventEditor({ ...completeForm(), meetingAt: "", startsAt: "", endsAt: "" }).draft,
+  ).toBeDefined();
 });

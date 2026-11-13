@@ -66,24 +66,36 @@ export function fromMoscow(date: string, time: string): string {
 }
 
 /**
- * Moves a date when the shared date changes. Between two complete dates every complete date
- * moves by the same number of days; otherwise only dates equal to the previous shared date
- * follow it, and incomplete dates stay as typed.
+ * Moves a date when the shared date changes from `previous` to `next`. `anchor` is the last
+ * complete shared date. Dates on the previous shared date follow it, also while it is being typed;
+ * other dates do not move while the shared date is incomplete. Once it is complete again, every
+ * other complete date moves by the days from the anchor to the new date, so a complete change
+ * shifts the whole schedule by the same number of days.
  */
-export function moveDate(value: string, previous: string, next: string) {
+export function moveDate(value: string, previous: string, next: string, anchor: string | null) {
   if (value === previous) return next;
-  if (!isIsoDate(previous) || !isIsoDate(next) || !isIsoDate(value)) return value;
-  const delta = Date.parse(next) - Date.parse(previous);
+  const from = isIsoDate(previous) ? previous : anchor;
+  if (!from || !isIsoDate(from) || !isIsoDate(next) || !isIsoDate(value)) return value;
+  const delta = Date.parse(next) - Date.parse(from);
   return shiftWallTime(`${value}T00:00`, delta).slice(0, 10) || value;
 }
 
-/** The schedule after the shared date changes; values whose date does not move stay exact. */
-export function moveSchedule(form: Schedule, previous: string, next: string): Schedule {
+/**
+ * The schedule after the shared date changes; values whose date does not move stay exact.
+ * A fully cleared shared date clears the schedule.
+ */
+export function moveSchedule(
+  form: Schedule,
+  previous: string,
+  next: string,
+  anchor: string | null,
+): Schedule {
+  if (!next) return { meetingAt: "", startsAt: "", endsAt: "" };
   const moved = { ...form };
   for (const name of scheduleFields) {
     if (!form[name]) continue;
     const local = toMoscow(form[name]);
-    const date = moveDate(local.date, previous, next);
+    const date = moveDate(local.date, previous, next, anchor);
     if (date !== local.date) moved[name] = fromMoscow(date, local.time);
   }
   return moved;

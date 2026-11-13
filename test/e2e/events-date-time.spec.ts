@@ -1,8 +1,8 @@
-import type { Page, Request } from "@playwright/test";
+import type { Locator, Page, Request } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { stage2Fixture } from "../fixtures/events-stage-2.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
-import { dateTimeField, timeField } from "./support/date-time.ts";
+import { dateTimeField, fillDate, fillTime, timeField } from "./support/date-time.ts";
 import { mockEvents } from "./support/events.ts";
 import { detailsPath } from "./support/events-detail.ts";
 import { mockEventsStage2 } from "./support/events-stage-2.ts";
@@ -235,6 +235,107 @@ test(
       meetingAt: "2099-10-25T09:00:00.000Z",
       startsAt: "2099-10-25T10:00:00.000Z",
     });
+  },
+);
+
+// Moscow: shared date 25.10.2099, separate meeting 24.10 23:30, start 01:00, end 26.10 00:15.
+async function separateSchedule(page: Page) {
+  await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+  const posts = captureWrites(page, "POST", "/api/v1/admin/events");
+  await page.goto("/account/events/new");
+  await catalogLanguage(page);
+  const schedule = page.getByRole("group", { name: "When", exact: true });
+  await fillDate(schedule, "Date", "2099-10-25");
+  await schedule.getByRole("button", { name: "Set a separate meeting date" }).click();
+  await fillDate(schedule, "Meeting date", "2099-10-24");
+  await fillTime(schedule, "Meeting time", "23:30");
+  await fillTime(schedule, "Start time", "01:00");
+  await schedule.getByRole("button", { name: "+ Set end time", exact: true }).click();
+  const end = schedule.getByRole("group", { name: "End time", exact: true });
+  await fillDate(end, "Date", "2099-10-26");
+  await fillTime(end, "End time", "00:15");
+  // The shared date comes first; the end date has the same label.
+  const date = schedule.getByRole("textbox", { name: "Date", exact: true }).first();
+  return { posts, schedule, end, date };
+}
+
+for (const { direction, retype, shared, meeting, endDate, body } of [
+  {
+    direction: "later by retyping the whole date",
+    retype: async (date: Locator) => {
+      await date.press("ControlOrMeta+A");
+      await date.pressSequentially("11/01/2099");
+    },
+    shared: "11/01/2099",
+    meeting: "10/31/2099",
+    endDate: "11/02/2099",
+    body: {
+      meetingAt: "2099-10-31T20:30:00.000Z",
+      startsAt: "2099-10-31T22:00:00.000Z",
+      endsAt: "2099-11-01T21:15:00.000Z",
+    },
+  },
+  {
+    direction: "earlier by retyping the year",
+    retype: async (date: Locator) => {
+      await date.press("End");
+      for (let key = 0; key < 4; key++) await date.press("Backspace");
+      await date.pressSequentially("2098");
+    },
+    shared: "10/25/2098",
+    meeting: "10/24/2098",
+    endDate: "10/26/2098",
+    body: {
+      meetingAt: "2098-10-24T20:30:00.000Z",
+      startsAt: "2098-10-24T22:00:00.000Z",
+      endsAt: "2098-10-25T21:15:00.000Z",
+    },
+  },
+])
+  test(
+    `Stage 2 retyping the shared date ${direction} moves the separate dates with it`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const { posts, schedule, end, date } = await separateSchedule(page);
+      await date.click();
+      await retype(date);
+      await expect(date).toHaveValue(shared);
+      await expect(
+        schedule.getByRole("textbox", { name: "Meeting date", exact: true }),
+      ).toHaveValue(meeting);
+      await expect(end.getByRole("textbox", { name: "Date", exact: true })).toHaveValue(endDate);
+      await page.getByRole("button", { name: "Save draft", exact: true }).click();
+      await expect.poll(() => posts.length).toBe(1);
+      expect(posts[0]).toMatchObject({ draft: true, ...body });
+    },
+  );
+
+test(
+  "Stage 2 clearing the shared date clears the schedule and a draft still saves",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const { posts, schedule, end, date } = await separateSchedule(page);
+    await date.click();
+    await date.press("ControlOrMeta+A");
+    await date.press("Backspace");
+    await expect(date).toHaveValue("");
+    const meeting = timeField(schedule, "Meeting time");
+    const start = timeField(schedule, "Start time");
+    const finish = timeField(end, "End time");
+    // Every control that remains is empty; disabled controls hold no entry to fix.
+    for (const control of [start, finish]) {
+      await expect(control.segment("hours")).toHaveValue("");
+      await expect(control.segment("minutes")).toHaveValue("");
+      await expect(control.segment("hours")).toBeDisabled();
+    }
+    await expect(meeting.segment("hours")).toHaveValue("");
+    await expect(schedule.getByRole("textbox", { name: "Meeting date", exact: true })).toHaveCount(
+      0,
+    );
+    await expect(schedule.getByText("Enter a valid date and time.")).toHaveCount(0);
+    await page.getByRole("button", { name: "Save draft", exact: true }).click();
+    await expect.poll(() => posts.length).toBe(1);
+    expect(posts[0]).toMatchObject({ draft: true, meetingAt: null, startsAt: null, endsAt: null });
   },
 );
 
