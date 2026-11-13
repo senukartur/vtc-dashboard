@@ -4,6 +4,7 @@ import { useSession } from "../../app/Session.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
 import {
+  affectedQualificationProjection,
   affectedRead,
   type Change,
   type CommandOwner,
@@ -185,19 +186,12 @@ export function useQualificationCommand(
       // Older reads were fenced above; only another post-commit read may be coalesced here.
       { cancelRefetch: false },
     );
-    if (change.kind === "ladder") {
-      const game = change.game;
-      await client.invalidateQueries({
-        predicate: ({ queryKey }) =>
-          (queryKey[0] === "administration" &&
-            pathOf(queryKey) === "/admin/reinstatement-options") ||
-          (queryKey[0] === "driver-progress" &&
-            queryKey.some(
-              (key) =>
-                typeof key === "string" && key.endsWith(`/qualification-progress?game=${game}`),
-            )),
-      });
-    }
+    const projectionFilters = {
+      predicate: ({ queryKey }: { queryKey: readonly unknown[] }) =>
+        affectedQualificationProjection(change, queryKey),
+    };
+    await client.cancelQueries(projectionFilters);
+    await client.invalidateQueries(projectionFilters, { cancelRefetch: false });
   }
   async function run<K extends keyof DTO>(
     path: string,

@@ -6,7 +6,7 @@ export type CommandOwner =
   | { kind: "level"; id: string; game: Game }
   | { kind: "member"; id: string; game: Game; rolePromotionLevelId: string | null };
 export type Change =
-  | { kind: "ladder"; game: Game }
+  | { kind: "ladder"; game: Game; archive: boolean }
   | { kind: "level"; id: string; game: Game }
   | { kind: "member"; id: string; game: Game; levelId: string; roleChange: boolean };
 const uncertain = () => new AccountFailure("uncertain");
@@ -26,7 +26,7 @@ export function commandChange(
         (path === `${root}/levels` ||
           (path.startsWith(`${root}/levels/`) && path.endsWith("/archive"))))
     )
-      return { kind: "ladder", game: owner.game };
+      return { kind: "ladder", game: owner.game, archive: path.endsWith("/archive") };
     throw uncertain();
   }
   if (
@@ -134,4 +134,25 @@ export function isRuleHistory(id: string, path: string) {
     `/qualification-levels/${id}/rule-versions`,
     `/admin/qualification-levels/${id}/rule-versions`,
   ].includes(pathname);
+}
+
+export function affectedQualificationProjection(change: Change, key: readonly unknown[]) {
+  const path = String(key.at(-2) ?? "");
+  if (key[0] === "administration") {
+    if (path === "/admin/company-settings") return change.kind !== "member";
+    if (path.startsWith("/admin/audit")) return true;
+    if (path === "/admin/reinstatement-options") return change.kind !== "member";
+    return (
+      change.kind === "ladder" && change.archive && /^\/admin\/members(?:\?|\/[^/?]+$)/.test(path)
+    );
+  }
+  if (key[0] === "driver-progress") {
+    const target = change.kind === "member" ? `/members/${change.id}/` : "/members/";
+    const progress = String(key.at(-1) ?? "");
+    return (
+      progress.startsWith(target) &&
+      progress.endsWith(`/qualification-progress?game=${change.game}`)
+    );
+  }
+  return key[0] === "driver-profile" && change.kind === "ladder" && change.archive;
 }

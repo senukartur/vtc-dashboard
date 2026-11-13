@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import {
+  affectedQualificationProjection,
   affectedRead,
   commandChange,
   validateChangedResult,
@@ -21,6 +22,24 @@ const level = {
   requiredDistanceM: "100",
 };
 const envelope = (data: unknown) => ({ data, meta: { requestId: "synthetic-change" } });
+test("ladder refresh covers readiness and relocation projections while preserving other game progress", () => {
+  const add = { kind: "ladder", game: "ets2", archive: false } as const;
+  const archive = { ...add, archive: true };
+  const settings = ["administration", "/admin/company-settings", "EnvelopeCompanySettings"];
+  const members = ["administration", "/admin/members?limit=25", "EnvelopeListMemberAdmin"];
+  const profile = ["driver-profile", "/members/fixture"];
+  expect(affectedQualificationProjection(add, settings)).toBe(true);
+  expect(affectedQualificationProjection(add, members)).toBe(false);
+  expect(affectedQualificationProjection(archive, members)).toBe(true);
+  expect(affectedQualificationProjection(archive, profile)).toBe(true);
+  for (const game of ["ets2", "ats"])
+    expect(
+      affectedQualificationProjection(archive, [
+        "driver-progress",
+        `/members/fixture/qualification-progress?game=${game}`,
+      ]),
+    ).toBe(game === "ets2");
+});
 test("closed command success must belong to the requested level and game before affecting private caches", () => {
   const owner = { kind: "level", id, game: "ets2" } as const;
   const change = commandChange(
