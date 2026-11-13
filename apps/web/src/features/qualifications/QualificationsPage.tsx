@@ -1,6 +1,6 @@
 import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { formatQuantity } from "../../shared/formatting.js";
 import { Badge, Card, Label } from "../../shared/ui/primitives.js";
@@ -20,19 +20,23 @@ const games = [
 ] as const;
 
 /** Gate: without company.read no workspace query hook mounts, so nothing is requested. */
-export function QualificationsPage() {
+export function QualificationsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const session = useSession(),
     { t } = useTranslation("qualifications"),
     [params, setParams] = useSearchParams(),
+    { hash } = useLocation(),
+    navigate = useNavigate(),
     game: Game = params.get("game") === "ats" ? "ats" : "ets2";
   if (!session.self?.capabilities.includes("company.read"))
     return (
       <div className="qualification-workspace stack">
-        <header className="qualification-header">
-          <div className="qualification-title">
-            <h1>{t("title")}</h1>
-          </div>
-        </header>
+        {!embedded && (
+          <header className="qualification-header">
+            <div className="qualification-title">
+              <h1>{t("title")}</h1>
+            </div>
+          </header>
+        )}
         <Card>
           <p>{t("forbidden")}</p>
         </Card>
@@ -48,7 +52,7 @@ export function QualificationsPage() {
     <div className="qualification-workspace stack">
       <header className="qualification-header">
         <div className="qualification-title">
-          <h1>{t("title")}</h1>
+          {!embedded && <h1>{t("title")}</h1>}
           <p className="qualification-intro">{t("intro")}</p>
           <p className="qualification-roles">{t("roles")}</p>
         </div>
@@ -56,7 +60,12 @@ export function QualificationsPage() {
           aria-label={t("game")}
           value={game}
           options={games}
-          onValueChange={(value) => setParams({ game: value })}
+          onValueChange={(value) => {
+            if (!embedded) return setParams({ game: value });
+            const next = new URLSearchParams(params);
+            next.set("game", value);
+            navigate({ search: next.toString(), hash });
+          }}
         />
       </header>
       <Workspace key={`${scope}:${game}`} game={game} />

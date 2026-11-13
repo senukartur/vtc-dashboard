@@ -14,9 +14,11 @@ import { AccountIndex, AccountPage } from "../features/account/AccountPage.js";
 import { AuthPage } from "../features/account/AuthPage.js";
 import type { LinkHandoff } from "../features/account/link.js";
 import { SignOutProvider } from "../features/account/sign-out.js";
+import { SettingsLeadershipReceiptProvider } from "../features/admin/SettingsLeadershipReceiptProvider.js";
 import { CatalogsPage } from "../features/catalogs/CatalogsPage.js";
 import { publicContent } from "../features/landing/content.js";
 import { LandingPage } from "../features/landing/LandingPage.js";
+import { NotificationsProvider } from "../features/notifications/controller.js";
 import { Button, Card } from "../shared/ui/primitives.js";
 import { AppLayout } from "./AppLayout.js";
 import { matchRouteMeta, paths, type RouteId } from "./navigation-model.js";
@@ -24,7 +26,7 @@ import { ReadinessPage } from "./ReadinessPage.js";
 import { RouteErrorBoundary } from "./RouteErrorBoundary.js";
 import { ProtectedAccount, SessionProvider } from "./Session.js";
 import { createAppQueryClient } from "./session-cache.js";
-import { NotificationsProvider } from "../features/notifications/controller.js";
+
 const NotificationsPage = lazy(() =>
   import("../features/notifications/page.js").then((module) => ({
     default: module.NotificationsPage,
@@ -297,9 +299,11 @@ export function App({ handoff }: { handoff: LinkHandoff }) {
       <BrowserRouter>
         <SessionProvider>
           <SignOutProvider>
-            <NotificationsProvider>
-              <Shell handoff={handoff} />
-            </NotificationsProvider>
+            <SettingsLeadershipReceiptProvider>
+              <NotificationsProvider>
+                <Shell handoff={handoff} />
+              </NotificationsProvider>
+            </SettingsLeadershipReceiptProvider>
           </SignOutProvider>
         </SessionProvider>
       </BrowserRouter>
