@@ -170,7 +170,7 @@ export async function mockEvents(
         const status = state.failNext;
         state.failNext = 0;
         if (status === 412) {
-          state.definitionVersion++;
+          state.event.version = ++state.definitionVersion;
           state.response.version++;
           state.attendanceVersion++;
         }
@@ -205,8 +205,10 @@ export async function mockEvents(
           state.attendanceVersion,
         );
       }
-      if (p.endsWith("/cancellation")) state.event.status = "cancelled";
-      else {
+      if (p.endsWith("/cancellation")) {
+        state.event.status = "cancelled";
+        state.event.version = ++state.definitionVersion;
+      } else {
         const input = body as S["EventInput"];
         state.event = {
           ...state.event,

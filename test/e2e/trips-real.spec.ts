@@ -185,14 +185,13 @@ test(
       await nav.getByRole("link", { name: "Overview", exact: true }).click();
       await actions.getByRole("link", { name: event.title, exact: true }).click();
       await expect(page).toHaveURL(`${origin}/account/events/${event.id}`);
+      const refreshed = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/me/workspace-summary",
+      );
       await page
         .getByRole("group", { name: "Your response", exact: true })
         .getByRole("button", { name: "Participating", exact: true })
         .click();
-      const refreshed = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === "/api/v1/me/workspace-summary",
-      );
-      await page.getByRole("button", { name: "Save response", exact: true }).click();
       await expect(page.getByText("Response saved.", { exact: true })).toBeVisible();
       const nextEvents =
         eventCount === 1 ? "Events" : `Events (${eventCount - 1} awaiting your response)`;
