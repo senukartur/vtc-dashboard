@@ -3,7 +3,6 @@ import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { stage2EventId, stage2Fixture, stage2LegacyEventId } from "../fixtures/events-stage-2.ts";
 import { mockDashboardRoutes } from "./support/dashboard-ui.ts";
-import { eventFixture } from "./support/events.ts";
 import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
@@ -245,7 +244,8 @@ test(
   async ({ page }) => {
     const nearest = upcomingProjection();
     if (!nearest.data) throw new Error("Missing Stage 2 projection");
-    const event = { ...eventFixture(), id: stage2EventId };
+    const detail = stage2Fixture("getEvent", "structured")
+      .response as DTO["EventStage2EnvelopeMember"];
     const dashboard = await mockStage2Dashboard(page);
     dashboard.response = { response: "unanswered", declineReason: null, version: 7 };
     dashboard.counts = { participating: 4, declined: 0 };
@@ -268,21 +268,17 @@ test(
         },
       });
     });
-    await page.route(`**/api/v1/events/${stage2EventId}`, (route) =>
+    await page.route(`**/api/v1/events/${stage2EventId}?locale=en`, (route) =>
       route.fulfill({
         json: {
+          ...detail,
           data: {
-            event,
-            visibility: "members",
+            ...detail.data,
             myResponse: dashboard.response,
-            myAttendance: "unconfirmed",
-            prescribedCargoId: null,
-            prescribedTrailerTypeId: null,
-            prescribedMassKg: null,
+            responseCounts: dashboard.counts,
           },
-          meta: nearest.meta,
         },
-        headers: { ETag: '"v1"' },
+        headers: { ETag: `"v${detail.data.event.version}"` },
       }),
     );
 
@@ -290,8 +286,13 @@ test(
     const headerGoing = page.locator(".event-nearest").getByRole("button", { name: "Going" });
     const main = page.getByRole("main");
     await expect(headerGoing).toHaveAttribute("aria-pressed", "false");
-    await main.getByRole("button", { name: "Participating", exact: true }).click();
-    await main.getByRole("button", { name: "Save response" }).click();
+    await expect(
+      main.getByRole("heading", { name: detail.data.event.title, exact: true }),
+    ).toBeVisible();
+    await main
+      .getByRole("group", { name: "Your response", exact: true })
+      .getByRole("button", { name: "Participating", exact: true })
+      .click();
     await expect(main.getByText("Response saved.")).toBeVisible();
     await expect(headerGoing).toHaveAttribute("aria-pressed", "true");
     expect(nearestReads).toBe(2);
