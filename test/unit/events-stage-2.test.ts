@@ -30,6 +30,19 @@ test("Stage 2 commands refresh landing lists in both locales and public cover by
   ).toBe(true);
   expect(isEventStage2CommandRead(["events-stage-2", scope], scope)).toBe(true);
   expect(isEventStage2CommandRead(["events-stage-2", "different-session"], scope)).toBe(false);
+  const upcoming = [
+    "dashboard-upcoming-event",
+    scope,
+    "events-stage-2",
+    "company.read",
+    "/me/upcoming-event?locale=en",
+    "EventStage2EnvelopeUpcoming",
+  ];
+  expect(isEventStage2CommandRead(upcoming, scope)).toBe(true);
+  expect(isEventStage2CommandRead(upcoming, "different-session")).toBe(false);
+  expect(
+    isEventStage2CommandRead(["dashboard-upcoming-event", scope, 1, "/me/upcoming-event"], scope),
+  ).toBe(false);
   expect(
     isEventStage2CommandRead(["public-events", "/public/events", "EnvelopeListEventPublic"], scope),
   ).toBe(false);
