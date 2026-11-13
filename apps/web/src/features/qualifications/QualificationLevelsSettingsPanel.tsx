@@ -167,7 +167,7 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
   }
   return (
     <>
-      {ladder && (
+      {visible && ladder && (
         <>
           {!ladder.ladderEditsEnabled && <p className="muted">{t("ladderEditsUnavailable")}</p>}
           <table className="qualification-ladder-table" role="table" aria-label={t("ladderTitle")}>
@@ -401,7 +401,8 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
           </div>
         );
       })}
-      {ladder?.ladderEditsEnabled &&
+      {visible &&
+        ladder?.ladderEditsEnabled &&
         (levels.length < maxLevels ? (
           <AddLevel
             ladder={ladder}
