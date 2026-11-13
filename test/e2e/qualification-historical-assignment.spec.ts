@@ -51,14 +51,15 @@ test(
     await page.goto("/account/qualifications?game=ets2");
     const purpose = page.locator("#assignment-purpose");
     const liveChoices = page.locator("#assignment-level");
-    const archived = page.getByLabel("Archived levels", { exact: true });
+    const assignmentForm = page.getByRole("group").filter({ has: purpose });
+    const archived = assignmentForm.getByLabel("Archived levels", { exact: true });
     await expect(purpose).toBeVisible();
     expect(reads).toEqual([]);
     await expect(liveChoices.getByRole("option", { name, exact: true })).toHaveCount(0);
     await purpose.selectOption("historical_resolution");
     await expect(archived.getByRole("option", { name, exact: true })).toHaveCount(1);
     await archived.selectOption(archivedId);
-    await page.getByRole("button", { name: "Next page", exact: true }).first().click();
+    await assignmentForm.getByRole("button", { name: "Next page", exact: true }).click();
     await expect(
       archived.getByRole("option", { name: "Fictional other tier", exact: true }),
     ).toHaveCount(1);
