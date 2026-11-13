@@ -10,7 +10,10 @@ type Receipt<K extends EventStage2Envelope> = { data: DTO[K]; etag: string };
 export type EditorStep<K extends EventStage2Envelope> = {
   request: EventStage2Command<K>;
   refreshReads: EventStage2CommandReadFilter;
-  commit: (receipt: Receipt<K>) => EditorStep<K> | undefined;
+  commit: (
+    receipt: Receipt<K>,
+    replay: boolean,
+  ) => EditorStep<K> | undefined | Promise<EditorStep<K> | undefined>;
   onRejected?: () => void;
 };
 
@@ -37,7 +40,7 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
     return () => window.clearTimeout(timer);
   }, [waitUntil]);
 
-  async function run(step: EditorStep<K>) {
+  async function run(step: EditorStep<K>, replay = false) {
     if (running.current || waitUntil > Date.now()) return;
     running.current = true;
     setPending(true);
@@ -47,7 +50,7 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
     try {
       while (current) {
         const receipt = await transport.run(current.request, current.refreshReads);
-        current = current.commit(receipt);
+        current = await current.commit(receipt, replay && current === step);
       }
     } catch (error) {
       const reason = error instanceof AccountFailure ? error : new AccountFailure("uncertain");
@@ -79,6 +82,6 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
     run,
     clearFailure: () => setFailure(null),
     discardRetry,
-    retryRequest: () => retry && run(retry),
+    retryRequest: () => retry && run(retry, true),
   };
 }

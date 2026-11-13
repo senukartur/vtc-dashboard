@@ -7,6 +7,7 @@ import {
   stage2LegacyEventId,
   stage2MediaId,
 } from "../fixtures/events-stage-2.ts";
+import { pngBytes } from "../fixtures/manual-images.ts";
 import {
   catalogItem,
   catalogLanguage,
@@ -1435,6 +1436,126 @@ test.describe("Stage 2 draft entry", () => {
       });
     },
   );
+
+  for (const command of ["upload", "caption"] as const) {
+    test(
+      `a replayed gallery ${command} waits for the current collection before another edit`,
+      browserCase(["@functional"]),
+      async ({ page }) => {
+        const mock = await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+        const collection = `/api/v1/admin/events/${stage2DraftId}/media`;
+        const itemPath = `${collection}/${stage2MediaId}`;
+        const original = stage2Fixture("listAdminEventMedia", "gallery")
+          .response as components["schemas"]["EventStage2EnvelopeAdminMediaList"];
+        const receipt = stage2Fixture("uploadEventMedia", "processing")
+          .response as components["schemas"]["EventStage2EnvelopeMediaUpload"];
+        receipt.data.version = 5;
+        receipt.data.item.state = "rejected";
+        const saved = structuredClone(original);
+        saved.data.version = 3;
+        const savedMedia = saved.data.items[0]?.media;
+        if (!savedMedia) throw new Error("Missing synthetic gallery item");
+        savedMedia.caption = "Fictional saved caption";
+        const latest = structuredClone(original);
+        latest.data.version = 5;
+        const latestMedia = latest.data.items[0]?.media;
+        if (!latestMedia) throw new Error("Missing synthetic gallery item");
+        latestMedia.caption = "Fictional newer caption";
+        const writes: { method: string; etag: string | undefined; key: string | undefined }[] = [];
+        let galleryReads = 0;
+        await page.route("**/api/v1/me/upload-policy", (route) =>
+          route.fulfill({
+            json: envelope({
+              enabled: true,
+              maxFileBytes: 1048576,
+              maxFilesPerReport: 5,
+              allowedMimeTypes: ["image/png"],
+              policyRevision: 1,
+            }),
+          }),
+        );
+        await page.route("**/api/v1/admin/events/**/media**", (route) => {
+          const request = route.request();
+          const target = new URL(request.url()).pathname;
+          const method = request.method();
+          if (target === collection && method === "GET") {
+            galleryReads++;
+            if (galleryReads === 2) return route.fulfill({ status: 503 });
+            const data = galleryReads === 1 ? original : latest;
+            return route.fulfill({ json: data, headers: { ETag: `"v${data.data.version}"` } });
+          }
+          if (
+            (target === collection && method === "POST") ||
+            (target === itemPath && method === "PATCH")
+          ) {
+            const headers = request.headers();
+            writes.push({ method, etag: headers["if-match"], key: headers["idempotency-key"] });
+            if (writes.length === 1) return route.abort("failed");
+            if (writes.length === 2) {
+              return command === "upload"
+                ? route.fulfill({ status: 202, json: receipt, headers: { ETag: '"v5"' } })
+                : route.fulfill({ json: saved, headers: { ETag: '"v3"' } });
+            }
+            latestMedia.caption = request.postDataJSON().caption;
+            latest.data.version = 6;
+            return route.fulfill({ json: latest, headers: { ETag: '"v6"' } });
+          }
+          return route.fallback();
+        });
+        await page.goto(url);
+        const gallery = page.getByRole("group", { name: "Screenshots", exact: true });
+        const caption = gallery.getByRole("textbox", { name: "Caption · Screenshot 1" });
+        await expect(caption).toHaveValue("Fictional route screenshot");
+        await expect
+          .poll(
+            () => mock.requests.filter(({ route }) => route === "GET /me/upcoming-event").length,
+          )
+          .toBe(1);
+        const file = gallery.locator('input[type="file"]');
+        if (command === "upload") {
+          await file.setInputFiles({
+            name: "synthetic.png",
+            mimeType: "image/png",
+            buffer: pngBytes(),
+          });
+          await gallery.getByRole("button", { name: "Upload screenshot" }).click();
+        } else {
+          await caption.fill("Fictional saved caption");
+          await gallery.getByRole("button", { name: "Save caption" }).click();
+        }
+        const retryWrite = gallery.getByRole("button", { name: "Retry the same request" });
+        await retryWrite.click();
+        await expect(gallery.getByRole("alert")).toHaveText("Screenshots are unavailable.");
+        await expect(retryWrite).toHaveCount(0);
+        await expect(file).toBeDisabled();
+        if (command === "upload") await expect(file).toHaveValue(/synthetic\.png$/);
+        await expect(caption).toHaveCount(0);
+        expect(galleryReads).toBe(2);
+        expect(writes).toEqual([
+          {
+            method: command === "upload" ? "POST" : "PATCH",
+            etag: '"v2"',
+            key: expect.any(String),
+          },
+          writes[0],
+        ]);
+        await gallery.getByRole("button", { name: "Try again", exact: true }).click();
+        await expect(caption).toHaveValue("Fictional newer caption");
+        if (command === "upload") await expect(file).toHaveValue("");
+        expect(galleryReads).toBe(3);
+        expect(writes).toHaveLength(2);
+        await caption.fill("Fictional next edit");
+        await gallery.getByRole("button", { name: "Save caption" }).click();
+        await expect(
+          gallery.getByRole("status").filter({ hasText: "Gallery updated." }),
+        ).toBeVisible();
+        expect(writes[2]).toMatchObject({ method: "PATCH", etag: '"v5"' });
+        expect(
+          mock.requests.filter(({ route }) => route === "GET /me/upcoming-event"),
+        ).toHaveLength(1);
+      },
+    );
+  }
 
   test(
     "a reopened draft publishes with the fresh revision after saving and without reading the retired draft",

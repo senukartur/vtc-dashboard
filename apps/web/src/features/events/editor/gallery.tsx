@@ -29,6 +29,12 @@ type Media = DTO["EventStage2Media"];
 type MediaEdit = DTO["EventStage2MediaEditInput"];
 type GalleryEnvelope = "EventStage2EnvelopeMediaUpload" | "EventStage2EnvelopeAdminMediaList";
 type Snapshot = { eventId: string; gallery: Gallery; etag: string };
+type Confirmation = {
+  eventId: string;
+  scope: string | null;
+  minimumVersion: number;
+  complete: () => void;
+};
 
 export function useEditorGallery(
   eventId: string | null,
@@ -50,6 +56,8 @@ export function useEditorGallery(
   const { refetch } = query;
   const writes = useEditorCommands<GalleryEnvelope>();
   const [committed, setCommitted] = useState<Snapshot | null>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [confirming, setConfirming] = useState<Confirmation | null>(null);
   const [captionEdits, setCaptionEdits] = useState<{
     eventId: string;
     values: Map<string, string>;
@@ -64,6 +72,7 @@ export function useEditorGallery(
   const [lastUpload, setLastUpload] = useState<string | null>(null);
   const [operation, setOperation] = useState<"upload" | "edit">();
   const firstRead = useRef<AbortController | null>(null);
+  const confirmationRead = useRef<AbortController | null>(null);
   const previousGallery = useRef<{ eventId: string; gallery: Gallery } | null>(null);
   const fetchedEtag = eventRevisionTag(query.data?.etag);
   const fetched =
@@ -71,6 +80,11 @@ export function useEditorGallery(
       ? { eventId, gallery: query.data.data.data, etag: fetchedEtag }
       : null;
   const received = committed?.eventId === eventId ? committed : null;
+  const unconfirmed =
+    enabled && confirmation?.eventId === eventId && confirmation.scope === scope
+      ? confirmation
+      : null;
+  const checkingConfirmation = !!unconfirmed && confirming === unconfirmed;
   const error = prepareError ?? writes.failure;
   const terminalRead = eventEditorAccessLost(query.error);
   const terminalWrite = eventEditorAccessLost(error);
@@ -82,7 +96,7 @@ export function useEditorGallery(
     failureKind === "unauthorized" ||
     (terminalWrite && operation === "upload");
   const snapshot =
-    query.isError || terminal
+    query.isError || terminal || unconfirmed
       ? null
       : fetched && (!received || fetched.gallery.version >= received.gallery.version)
         ? fetched
@@ -112,7 +126,13 @@ export function useEditorGallery(
     );
   }, [eventId, accessLost]);
 
-  useEffect(() => () => firstRead.current?.abort(), []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: abort outstanding reads when editor access changes
+  useEffect(() => {
+    return () => {
+      firstRead.current?.abort();
+      confirmationRead.current?.abort();
+    };
+  }, [scope, enabled]);
   useEffect(() => {
     if (!enabled || !processing || query.isError) return;
     const timer = window.setInterval(() => {
@@ -156,6 +176,65 @@ export function useEditorGallery(
     writes.clearFailure();
   }
 
+  function commitSnapshot(next: Snapshot) {
+    setCommitted((previous) =>
+      previous?.eventId === next.eventId && previous.gallery.version > next.gallery.version
+        ? previous
+        : next,
+    );
+  }
+
+  async function confirmWrite(pending: Confirmation) {
+    if (!pending.scope || pending.scope !== scope || confirmationRead.current) return;
+    const controller = new AbortController();
+    confirmationRead.current = controller;
+    setConfirmation(pending);
+    setConfirming(pending);
+    setPrepareError(null);
+    const spec = eventStage2Reads.adminMedia(pending.eventId);
+    const filters = {
+      predicate: ({ queryKey }: { queryKey: readonly unknown[] }) =>
+        queryKey[1] === scope && queryKey.at(-1) === spec.schema && queryKey.at(-2) === spec.path,
+    };
+    try {
+      await client.cancelQueries(filters);
+      const response = await readEventStage2(spec, controller.signal);
+      const gallery = response.data.data;
+      const etag = eventRevisionTag(response.etag);
+      if (controller.signal.aborted) return;
+      if (!etag || etag !== `"v${gallery.version}"` || gallery.version < pending.minimumVersion)
+        throw new AccountFailure("unavailable");
+      // A focus or polling read may have completed during confirmation.
+      client.setQueriesData<typeof response>(filters, (previous) => {
+        if (previous && previous.data.data.version > gallery.version) return previous;
+        return response;
+      });
+      commitSnapshot({ eventId: pending.eventId, gallery, etag });
+      setConfirmation(null);
+      pending.complete();
+    } catch (failure) {
+      if (!controller.signal.aborted) {
+        setPrepareError(failure);
+        if (failure instanceof AccountFailure) {
+          if (failure.kind === "unauthorized")
+            await session.confirmSessionLoss(controller.signal).catch(() => undefined);
+          if (failure.kind === "forbidden") {
+            client.removeQueries({
+              type: "inactive",
+              predicate: (query) => query.meta?.private === true,
+            });
+            await session.refresh().catch(() => undefined);
+          }
+        }
+      }
+    } finally {
+      if (confirmationRead.current === controller) {
+        confirmationRead.current = null;
+        setConfirming(null);
+      }
+    }
+  }
+
   async function upload() {
     if (!enabled || !file || locked || firstRead.current || policyPending || (eventId && !snapshot))
       return;
@@ -182,26 +261,46 @@ export function useEditorGallery(
       if (!result) throw new AccountFailure("unavailable");
       const afterSave = eventScreenshotError(file, result.gallery.items.length, maxBytes);
       if (afterSave) {
-        setCommitted(result);
+        commitSnapshot(result);
         return;
       }
       setUploading(true);
       await writes.run({
         request: eventStage2Commands.upload(target, file, result.etag),
         refreshReads: editorGalleryReads(target, published),
-        commit({ data: { data }, etag }) {
+        async commit({ data: { data }, etag }, replay) {
           if (!("item" in data)) throw new AccountFailure("uncertain");
-          setCommitted({
-            eventId: target,
-            etag,
-            gallery: {
-              version: data.version,
-              items: [...result.gallery.items.filter(({ id }) => id !== data.item.id), data.item],
-            },
-          });
-          setLastUpload(data.item.id);
-          setFile(null);
-          setFileVersion((previous) => previous + 1);
+          const complete = () => {
+            setLastUpload(data.item.id);
+            setFile(null);
+            setFileVersion((previous) => previous + 1);
+          };
+          // An upload replay returns one item at the current collection version.
+          if (
+            replay ||
+            data.item.state !== "processing" ||
+            result.etag !== `"v${result.gallery.version}"` ||
+            data.version !== result.gallery.version + 1 ||
+            etag !== `"v${data.version}"` ||
+            result.gallery.items.some(({ id }) => id === data.item.id)
+          ) {
+            await confirmWrite({
+              eventId: target,
+              scope,
+              minimumVersion: Math.max(data.version, result.gallery.version + 1),
+              complete,
+            });
+          } else {
+            commitSnapshot({
+              eventId: target,
+              etag,
+              gallery: {
+                version: data.version,
+                items: [...result.gallery.items, data.item],
+              },
+            });
+            complete();
+          }
           return undefined;
         },
       });
@@ -239,19 +338,36 @@ export function useEditorGallery(
             ? cover?.id === mediaId
             : value.isCover !== undefined && value.isCover !== (cover?.id === mediaId),
       }),
-      commit({ data: { data }, etag }) {
+      async commit({ data: { data }, etag }, replay) {
         if (!("items" in data)) throw new AccountFailure("uncertain");
-        setCommitted({ eventId, gallery: data, etag });
-        if (value === null || value.caption !== undefined) {
-          setCaptionEdits((previous) => {
-            if (previous?.eventId !== eventId || !previous.values.has(mediaId)) return previous;
-            const values = new Map(previous.values);
-            values.delete(mediaId);
-            return { eventId, values };
+        const complete = () => {
+          if (value === null || value.caption !== undefined) {
+            setCaptionEdits((previous) => {
+              if (previous?.eventId !== eventId || !previous.values.has(mediaId)) return previous;
+              const values = new Map(previous.values);
+              values.delete(mediaId);
+              return { eventId, values };
+            });
+          }
+          setStatus(true);
+          onSaved?.();
+        };
+        // An edit replay returns its original collection, which may now be stale.
+        if (
+          replay ||
+          data.version !== snapshot.gallery.version + 1 ||
+          etag !== `"v${data.version}"`
+        ) {
+          await confirmWrite({
+            eventId,
+            scope,
+            minimumVersion: Math.max(data.version, snapshot.gallery.version + 1),
+            complete,
           });
+        } else {
+          commitSnapshot({ eventId, gallery: data, etag });
+          complete();
         }
-        setStatus(true);
-        onSaved?.();
         return undefined;
       },
     });
@@ -259,6 +375,10 @@ export function useEditorGallery(
 
   async function refresh() {
     if (!enabled || !eventId) return;
+    if (unconfirmed) {
+      await confirmWrite(unconfirmed);
+      return;
+    }
     const fresh = await refetch({ cancelRefetch: false });
     if (!fresh.isError && eventRevisionTag(fresh.data?.etag)) {
       if (terminal) {
@@ -294,7 +414,7 @@ export function useEditorGallery(
       ) ?? null,
     unavailable: failureKind === "unavailable",
     conflict: conflict && !terminal,
-    refreshing: query.isFetching,
+    refreshing: query.isFetching || checkingConfirmation,
     refusedUpload: operation === "upload" && failureKind === "invalid",
     loading: !!eventId && !snapshot && query.isPending && !terminal,
     readError: !!eventId && !snapshot && (terminal || !query.isPending),
