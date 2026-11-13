@@ -156,7 +156,7 @@ export function createQualificationInitialization(
           unit,
           outbox,
           () => assignedAt,
-          eligibilityTrackingSince !== undefined && assignedAt >= eligibilityTrackingSince,
+          eligibilityTrackingSince !== undefined,
         )(tx, actor, {
           userId,
           game: input.game,
@@ -234,7 +234,7 @@ export function createQualificationInitialization(
           .set({
             assignmentId: null,
             version: state.version + 1,
-            ...(eligibilityTrackingSince !== undefined && endedAt >= eligibilityTrackingSince
+            ...(eligibilityTrackingSince !== undefined
               ? { eligibleSince: null, eligibilityEvaluatedAt: null }
               : {}),
           })

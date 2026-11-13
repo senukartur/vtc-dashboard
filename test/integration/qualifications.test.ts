@@ -623,6 +623,94 @@ test("immediate rule and lifecycle changes reset or establish onset even in the 
   });
 });
 
+test("a new zero-minimum assignment begins eligibility exactly at the tracking cutoff", async () => {
+  await publish("ets2", 0, 0, null);
+  tick();
+  const cutoff = iso();
+  service = tracked(cutoff);
+  const target = await member(["trainee"], false);
+  await service.assign(director, target.actor.userId, newId(), 1, {
+    game: "ets2",
+    levelId: structuralLevels.ets2[0],
+    purpose: "initial",
+    reason: "Fictional placement",
+  });
+  const candidates = await service.promotionCandidates(director, { game: "ets2" });
+  expect(candidates.items.find((row) => row.member.id === target.actor.userId)).toMatchObject({
+    acceptedTrips: 0,
+    eligible: true,
+    eligibleSince: cutoff,
+  });
+  expect(await ownerCandidate()).toMatchObject({ eligible: true, eligibleSince: null });
+});
+
+test("tracking clears old checkpoints on assignment replacement and lifecycle writes before the cutoff clock", async () => {
+  await publish("ets2", 0, 1, null);
+  await publish("ats", 0, 1, null);
+  tick();
+  const cutoff = iso();
+  service = tracked(cutoff);
+  const ets2Trip = await fixture(),
+    atsTrip = await fixture({ game: "ats" });
+  await replace([ets2Trip.change, atsTrip.change]);
+  const old = { eligibleSince: cutoff, eligibilityEvaluatedAt: cutoff };
+  expect(await eligibilityState()).toMatchObject(old);
+  expect(await eligibilityState(owner.userId, "ats")).toMatchObject(old);
+
+  tick(-1);
+  const { version } = await progress();
+  await service.assign(director, owner.userId, newId(), version, {
+    game: "ets2",
+    levelId: structuralLevels.ets2[0],
+    purpose: "administrative_correction",
+    reason: "Fictional replacement",
+  });
+  const cleared = { eligibleSince: null, eligibilityEvaluatedAt: null };
+  expect(await eligibilityState()).toMatchObject(cleared);
+
+  const disabled = createQualificationInitialization(unit);
+  const enabled = createQualificationInitialization(unit, undefined, cutoff);
+  const underCompanyFence = (
+    operation: (tx: Parameters<typeof enabled.close>[0]) => Promise<void>,
+  ) =>
+    identity.transaction(async (tx) => {
+      await identity.qualificationContextInTransaction(tx, [owner.userId]);
+      await operation(tx);
+    });
+  // An earlier disabled close may have retained an old checkpoint even with no open assignment.
+  await underCompanyFence((tx) => disabled.close(tx, owner.userId, iso()));
+  expect(await eligibilityState(owner.userId, "ats")).toMatchObject({ assignmentId: null, ...old });
+  await underCompanyFence((tx) =>
+    enabled.reinstate(
+      tx,
+      director,
+      owner.userId,
+      [
+        {
+          game: "ats",
+          levelId: structuralLevels.ats[0],
+          purpose: "reinstatement",
+          reason: "Fictional return",
+        },
+      ],
+      iso(),
+    ),
+  );
+  expect(await eligibilityState(owner.userId, "ats")).toMatchObject(cleared);
+
+  // Check active close directly on a state with a tracked contribution.
+  const deputyTrip = await fixture({ ownerId: deputy.userId });
+  tick(1);
+  await replace([deputyTrip.change]);
+  expect(await eligibilityState(deputy.userId)).toMatchObject(old);
+  tick(-1);
+  await identity.transaction(async (tx) => {
+    await identity.qualificationContextInTransaction(tx, [deputy.userId]);
+    await enabled.close(tx, deputy.userId, iso());
+  });
+  expect(await eligibilityState(deputy.userId)).toMatchObject({ assignmentId: null, ...cleared });
+});
+
 test("default-off writers preserve the old checkpoint and a fresh cutoff makes prior onset unknown", async () => {
   await publish("ets2", 0, 1, null);
   tick();
@@ -694,6 +782,10 @@ test("stage 3 member search and action history opt in to exact private represent
   const actionUrl = `/api/v1/admin/members/${named.actor.userId}/qualification-action-history?game=ets2`;
   const get = (url: string, cookie = directorCookie) => app.inject({ url, headers: { cookie } });
   try {
+    const jsonType = "application/json; charset=utf-8";
+    const legacyMembers = await get(searchUrl);
+    expect(legacyMembers.statusCode).toBe(200);
+    expect(legacyMembers.headers["content-type"]).toBe(jsonType);
     expect((await get(`${searchUrl}?search=Fictional`)).statusCode).toBe(422);
     expect((await get(`${searchUrl}?view=stage3&search=%20%20`)).statusCode).toBe(422);
     expect((await get(`${searchUrl}?view=stage3&search=Fictional`, ownerCookie)).statusCode).toBe(
@@ -704,6 +796,7 @@ test("stage 3 member search and action history opt in to exact private represent
     ).toEqual({ items: [], nextCursor: null });
     const first = await get(`${searchUrl}?view=stage3&limit=1&search=%20%25_%20`);
     expect(first.statusCode).toBe(200);
+    expect(first.headers["content-type"]).toBe(jsonType);
     expect(first.headers["cache-control"]).toBe("no-store");
     const { items, nextCursor } = first.json().data;
     expect(items).toHaveLength(1);
@@ -728,7 +821,10 @@ test("stage 3 member search and action history opt in to exact private represent
     ).toBe(200);
     const legacy = await get(actionUrl);
     const staged = await get(`${actionUrl}&view=stage3&limit=1`);
+    expect(legacy.statusCode).toBe(200);
+    expect(legacy.headers["content-type"]).toBe(jsonType);
     expect(staged.statusCode).toBe(200);
+    expect(staged.headers["content-type"]).toBe(jsonType);
     expect(staged.headers.etag).toBe(legacy.headers.etag);
     expect(staged.headers["cache-control"]).toBe("no-store");
     const legacyAction = legacy.json().data.items[0];

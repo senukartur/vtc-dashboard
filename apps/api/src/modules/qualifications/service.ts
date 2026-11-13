@@ -113,8 +113,6 @@ export function createQualifications(
       ports.identity,
       config.eligibilityTrackingSince,
     );
-  const tracking = (instant: string) =>
-    config.eligibilityTrackingSince !== undefined && instant >= config.eligibilityTrackingSince;
   function game(value: string): asserts value is Game {
     if (!["ets2", "ats"].includes(value)) throw identityError(422);
   }
@@ -450,7 +448,7 @@ export function createQualifications(
       unit,
       outbox,
       at,
-      tracking(assignedAt),
+      config.eligibilityTrackingSince !== undefined,
     )(tx, actor, {
       userId,
       game: selectedGame,

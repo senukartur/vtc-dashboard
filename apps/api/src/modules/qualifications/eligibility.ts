@@ -76,8 +76,8 @@ function trackingStart(row: Assignment, cutoff: string, instant: string) {
   const valid = checkpoint !== null && checkpoint >= cutoff && checkpoint >= row.assignedAt;
   if (valid && checkpoint > instant) throw new Error("ELIGIBILITY_CLOCK_REGRESSION");
   return {
-    start: valid ? checkpoint : row.assignedAt > cutoff ? row.assignedAt : cutoff,
-    since: valid ? row.eligibleSince : row.assignedAt > cutoff ? row.assignedAt : null,
+    start: valid ? checkpoint : row.assignedAt >= cutoff ? row.assignedAt : cutoff,
+    since: valid ? row.eligibleSince : row.assignedAt >= cutoff ? row.assignedAt : null,
   };
 }
 

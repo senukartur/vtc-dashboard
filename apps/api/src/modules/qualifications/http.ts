@@ -105,6 +105,7 @@ export async function registerQualificationRoutes(
   });
   function selectResponse(reply: FastifyReply, schema: ReturnType<typeof ref>) {
     // The list variants overlap on an empty page. Validate the requested representation explicitly.
+    reply.type("application/json; charset=utf-8");
     reply.serializer(reply.compileSerializationSchema(schema));
   }
   app.get<{ Querystring: Page & { view?: "stage3"; search?: string } }>(
