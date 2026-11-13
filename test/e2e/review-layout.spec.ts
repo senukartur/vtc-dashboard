@@ -246,7 +246,7 @@ for (const defensiveOwn of [false, true])
         panel(page).getByText(
           defensiveOwn
             ? /cannot review your own manual report/
-            : "This record is unavailable or inaccessible.",
+            : "Your current permissions do not allow this action.",
         ),
       ).toBeVisible();
       await expect(form(page)).toHaveCount(0);

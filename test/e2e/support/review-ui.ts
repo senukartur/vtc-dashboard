@@ -730,7 +730,8 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
         rest = match[2] ?? "";
       if (rest === "/review") {
         mock.details.push(path + url.search);
-        if (staged && key === "own" && !options.defensiveOwn) return route.fulfill(error(404));
+        if (staged && key === "own" && !options.defensiveOwn)
+          return route.fulfill({ status: 403, json: { error: { code: "SELF_REVIEW_FORBIDDEN" } } });
         return route.fulfill({
           json: envelope(staged ? stagedDetail(state, key) : state.review),
           headers: { ETag: `"v${state.version}"` },
