@@ -13,6 +13,7 @@ const fields = [
   "fuelUsedL",
   "cargoDamageFraction",
 ] as const;
+const degradable = ["recording", "ruleContext", "trailers"];
 function supported(f: Evidence) {
   return new Set([
     ...fields.filter((key) => f[key].status === "known"),
@@ -68,6 +69,14 @@ export function selectQuality(
     if (conflicts.length) {
       reasons.add("quality_supported_conflict");
       continue;
+    }
+    if (evolving) {
+      // Within one source's lineage the newer revision may lose completeness context, never facts.
+      const [older, newer] = selected.factRevisionId === progression.fromFactId ? [a, b] : [b, a];
+      if ([...older].every((key) => newer.has(key) || degradable.includes(key))) {
+        if (next.factRevisionId === progression.toFactId) selected = next;
+        continue;
+      }
     }
     if ([...a].every((key) => b.has(key)) && b.size > a.size) selected = next;
     else if (![...b].every((key) => a.has(key))) reasons.add("quality_incomparable_snapshots");

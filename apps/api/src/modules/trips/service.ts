@@ -132,7 +132,11 @@ function lifetimeTotals(
   return { acceptedTrips: tripCount(accepted), actualDistanceM };
 }
 
-function differing(previous: NormalizedTripEvidence, next: NormalizedTripEvidence): string[] {
+function differing(
+  previous: NormalizedTripEvidence,
+  next: NormalizedTripEvidence,
+  progression = false,
+): string[] {
   const reasons: string[] = [];
   if (previous.outcome !== "open" && previous.outcome !== next.outcome)
     reasons.push(next.outcome === "open" ? "attempted_reopen" : "terminal_outcome_conflict");
@@ -169,13 +173,16 @@ function differing(previous: NormalizedTripEvidence, next: NormalizedTripEvidenc
   }
   const trailerIds = (f: NormalizedTripEvidence) =>
     f.trailers.items.map((item) => (item.status === "known" ? item.value.entityId : null));
-  if (
-    previous.trailers.complete &&
-    previous.trailers.items.every((f) => f.status === "known") &&
-    (!next.trailers.complete ||
-      canonicalJson(trailerIds(previous)) !== canonicalJson(trailerIds(next)))
-  )
-    reasons.push("trailer_context_conflict");
+  if (previous.trailers.complete && previous.trailers.items.every((f) => f.status === "known")) {
+    const before = trailerIds(previous),
+      after = trailerIds(next);
+    // Inside one source lineage an incomplete or unknown chain is unproven, not changed.
+    const changed = progression
+      ? after.some((id, index) => id !== null && id !== before[index]) ||
+        (next.trailers.complete && after.length !== before.length)
+      : !next.trailers.complete || canonicalJson(before) !== canonicalJson(after);
+    if (changed) reasons.push("trailer_context_conflict");
+  }
   return reasons;
 }
 export function createTrips(
@@ -465,25 +472,22 @@ export function createTrips(
       throw new Error("TRIP_FACT_POINTER_INVALID");
     const previous = current?.evidence;
     const newer = !existing || key.revision > Number(existing.latestRevision);
-    const [lineage] =
-      ports.sourceStored &&
-      previous &&
-      existing &&
-      provider === "ets2telemetry" &&
-      previous.outcome === "open" &&
-      newer
+    // Any older revision of this exact source trip is a progression base, so one held
+    // revision cannot freeze later ones. Revisions are decimal text and compare numerically.
+    const [base] =
+      previous && existing && provider === "ets2telemetry" && previous.outcome === "open" && newer
         ? await c(tx)
-            .select({ id: sourceMessages.id })
+            .select({ revision: sourceMessages.revision })
             .from(sourceMessages)
             .where(
               and(
                 eq(sourceMessages.id, previous.sourceRecordId),
                 eq(sourceMessages.sourceTripId, existing.id),
-                eq(sourceMessages.revision, existing.latestRevision),
               ),
             )
             .for("share")
         : [];
+    const lineage = !!base && Number(base.revision) < key.revision;
     const quality =
       previous && !supersede
         ? selectQuality(
@@ -497,7 +501,7 @@ export function createTrips(
     const conflicts =
       previous && !supersede && (newer || fact.outcome !== "open")
         ? [
-            ...differing(previous, fact),
+            ...differing(previous, fact, lineage),
             ...(ports.sourceStored ? (quality?.reasons ?? []) : []),
             ...(ports.sourceStored && quality?.selected?.factRevisionId !== fact.factRevisionId
               ? ["quality_cannot_replace_supported_snapshot"]

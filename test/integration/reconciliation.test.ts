@@ -640,6 +640,40 @@ test.each([
   }
 });
 
+test("a held source revision does not freeze the lineage: a later clean revision advances from the older current fact", async () => {
+  const composed = productionComposition(),
+    start = payload("started"),
+    first = await receive(start, owner, composed.trips),
+    opened = await state(first.tripId);
+  const held = structuredClone(start);
+  held.eventId = newId();
+  held.revision = 2;
+  held.snapshot.fuelUsed = {
+    available: false,
+    reason: "not-observed",
+    unit: "L",
+  } as typeof held.snapshot.fuelUsed;
+  await receive(held, owner, composed.trips);
+  const blocked = await state(first.tripId);
+  expect(blocked).toMatchObject({ currentFactId: opened?.currentFactId, reviewHold: true });
+  expect(blocked?.reviewReasons).toContain("quality_cannot_replace_supported_snapshot");
+  const clean = structuredClone(start);
+  clean.eventId = newId();
+  clean.revision = 3;
+  if (clean.snapshot.fuelUsed.available) clean.snapshot.fuelUsed.value = 41;
+  if (clean.snapshot.observedDistance.available) clean.snapshot.observedDistance.value = 2500;
+  const advanced = await receive(clean, owner, composed.trips),
+    fact = await unit.run((tx) =>
+      composed.trips.sourceEvidenceInTransaction(tx, advanced.sourceRecordId),
+    ),
+    after = await state(first.tripId);
+  expect(after).toMatchObject({ currentFactId: fact?.factRevisionId, outcome: "open" });
+  expect(after?.version).toBeGreaterThan(blocked?.version as number);
+  expect(fact?.fuelUsedL).toMatchObject({ status: "known", value: "41" });
+  expect(fact?.reasonCodes.filter((code) => code.startsWith("quality_"))).toEqual([]);
+  expect(fact?.reasonCodes).not.toContain("trailer_context_conflict");
+});
+
 test("production telemetry and manual ingestion persist an unconfigured JSON rule and replay exactly with all optional matching settings omitted", async () => {
   const composed = productionComposition({ key: config.key }),
     p = payload(),
