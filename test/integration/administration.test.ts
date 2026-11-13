@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
+import type { components } from "@vtc/contracts";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { applications } from "@vtc/db/admissions-schema";
-import { eq, membership, user, company, roles as identityRoles } from "@vtc/db/identity-schema";
 import { steamAccounts, steamLinks } from "@vtc/db/external-identities-schema";
+import { company, eq, roles as identityRoles, membership, user } from "@vtc/db/identity-schema";
 import { qualificationAssignments } from "@vtc/db/qualifications-schema";
 import { trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
@@ -11,13 +12,13 @@ import {
   expect,
   test,
   vi,
-  beforeAll as vitestBeforeAll,
   afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
 } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import {
-  createIdentity,
   type Actor,
+  createIdentity,
   type PrivateChallenge,
 } from "../../apps/api/src/modules/identity/service.ts";
 import {
@@ -57,6 +58,7 @@ const enabled = {
 };
 const cookies = (values: readonly string[]) =>
   values.map((value) => value.split(";", 1)[0]).join("; ");
+type AuditStage3Entry = components["schemas"]["AuditStage3Entry"];
 async function member(
   roles: ("driver" | "trainee" | "dispatcher" | "deputy_director")[] = ["driver"],
   name = "Fictional Administration Member",
@@ -152,17 +154,18 @@ test("new HTTP read families enforce current roles and bounded private projectio
       `/admin/members/${ordinary.id}`,
       "/admin/company-settings",
       "/admin/audit",
+      "/admin/audit?view=stage3",
       "/admin/source-capabilities",
     ]) {
-      expect((await app.inject({ url: `/api/v1${path}` })).statusCode).toBe(401);
-      expect(
-        (await app.inject({ url: `/api/v1${path}`, headers: { cookie: ordinary.cookie } }))
-          .statusCode,
-      ).toBe(403);
-      expect(
-        (await app.inject({ url: `/api/v1${path}`, headers: { cookie: deputy.cookie } }))
-          .statusCode,
-      ).toBe(200);
+      for (const [cookie, statusCode] of [
+        ["", 401],
+        [ordinary.cookie, 403],
+        [deputy.cookie, 200],
+      ] as const) {
+        const response = await app.inject({ url: `/api/v1${path}`, headers: { cookie } });
+        expect(response.statusCode).toBe(statusCode);
+        expect(response.headers["cache-control"]).toBe("no-store");
+      }
     }
     const sources = await app.inject({
       url: "/api/v1/admin/source-capabilities",
@@ -248,6 +251,11 @@ test("member command journey preserves versions, idempotency and protected targe
     const after = await app.inject({ url: `/api/v1/admin/members/${ordinary.id}`, headers });
     expect(after.statusCode).toBe(200);
     expect(after.json().data.profile.member.roles).toEqual(["dispatcher", "driver"]);
+    const audit = await composed.administration.auditStage3(director, { action: "roles.changed" });
+    expect(audit.items.find((row) => row.subjectId === ordinary.id)?.details).toEqual({
+      before: { roles: ["driver"] },
+      after: { roles: ["dispatcher", "driver"] },
+    });
     expect(after.json().data.profile.qualifications).toEqual(
       detail.json().data.profile.qualifications,
     );
@@ -321,6 +329,155 @@ test("admin keysets bind session, status, route and limit and audit excludes pri
   expect(plan.length).toBeGreaterThan(0);
 });
 
+test("Stage 3 filters exact action before the time/ID keyset and preserves unsafe or legacy rows", async () => {
+  const { app } = await browser();
+  const { id: companyId } = await composed.administration.settings(director);
+  const former = await member(["driver"], "Fictional Former Driver");
+  await composed.identity.administer(director, former.id, newId(), 1, { kind: "deactivate" });
+  const deputy = await member(["deputy_director"]);
+  const secondSession = await composed.identity.login(deputy.email, password);
+  const [low, high] = [newId(), newId()].sort();
+  if (!low || !high) throw new Error("SYNTHETIC_AUDIT_IDS_REQUIRED");
+  const invalidSnapshotsIds = [newId(), newId(), newId()] as const;
+  const ids: string[] = [];
+  const valid = { before: null, after: { reportingTimezone: "Europe/Warsaw" } };
+  const seed = (
+    action: string,
+    options: {
+      id?: string;
+      company?: string | null;
+      subject?: "user" | "company";
+      details?: unknown;
+    } = {},
+  ) => {
+    const id = options.id ?? newId();
+    ids.push(id);
+    return control.execute(
+      "INSERT INTO audit_entries (id,actor_kind,actor_id,operation,subject_kind,subject_id,occurred_at,reason,company_id,details) VALUES (?,'user',?,?,?,?,?,'operator_request',?,?)",
+      [
+        id,
+        former.id,
+        action,
+        options.subject ?? "company",
+        options.subject === "user" ? former.id : companyId,
+        "2000-01-01 00:00:00.000",
+        options.company === undefined ? companyId : options.company,
+        options.details === undefined ? null : JSON.stringify(options.details),
+      ],
+    );
+  };
+  const read = (query: string, cookie = directorCookie) =>
+    app.inject({ url: `/api/v1/admin/audit${query}`, headers: { cookie } });
+  try {
+    await seed("legacy.test", { id: low, company: null });
+    await seed("legacy.test", { id: high, subject: "user", details: valid });
+    await seed("Legacy.test");
+    await seed("légacy.test");
+    await seed("legacy.test ");
+    await seed("legacy.test", { company: newId() });
+    await seed("configuration.changed", {
+      id: invalidSnapshotsIds[0],
+      details: { ...valid, after: { ...valid.after, email: "synthetic-private@example.invalid" } },
+    });
+    await seed("configuration.changed", {
+      id: invalidSnapshotsIds[1],
+      details: "malformed stored snapshot",
+    });
+    await seed("configuration.changed", {
+      id: invalidSnapshotsIds[2],
+      subject: "user",
+      details: valid,
+    });
+
+    const query = "?view=stage3&action=legacy.test&limit=1";
+    const first = await read(query);
+    expect(first.statusCode).toBe(200);
+    expect(first.headers["cache-control"]).toBe("no-store");
+    const expected = {
+      actorId: former.id,
+      actorNickname: "Fictional Former Driver",
+      action: "legacy.test",
+      details: null,
+      occurredAt: "2000-01-01T00:00:00.000Z",
+    };
+    expect(first.json().data).toEqual({
+      items: [
+        {
+          ...expected,
+          id: high,
+          objectType: "user",
+          objectName: "Fictional Former Driver",
+          subjectId: former.id,
+        },
+      ],
+      nextCursor: expect.any(String),
+    });
+    const cursor = encodeURIComponent(first.json().data.nextCursor);
+    const second = await read(`${query}&cursor=${cursor}`);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().data).toEqual({
+      items: [
+        {
+          ...expected,
+          id: low,
+          objectType: "company",
+          objectName: "Yukon Union",
+          subjectId: companyId,
+        },
+      ],
+      nextCursor: null,
+    });
+    for (const mismatch of [
+      "?view=stage3&action=Legacy.test&limit=1",
+      "?view=stage3&limit=1",
+      "?view=stage3&action=legacy.test&limit=2",
+      "?limit=1",
+    ]) {
+      const response = await read(`${mismatch}&cursor=${cursor}`);
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error.code).toBe("VERSION_CONFLICT");
+    }
+    expect((await read(`${query}&cursor=${cursor}`, deputy.cookie)).statusCode).toBe(409);
+    const deputyPage = await read(query, deputy.cookie);
+    expect(deputyPage.statusCode).toBe(200);
+    const deputyCursor = encodeURIComponent(deputyPage.json().data.nextCursor);
+    expect(
+      (await read(`${query}&cursor=${deputyCursor}`, cookies(secondSession.cookies))).statusCode,
+    ).toBe(409);
+    const legacy = await read("?limit=1");
+    expect(legacy.statusCode).toBe(200);
+    const legacyCursor = encodeURIComponent(legacy.json().data.nextCursor);
+    expect((await read(`?limit=1&cursor=${legacyCursor}`)).statusCode).toBe(200);
+    expect((await read(`?view=stage3&limit=1&cursor=${legacyCursor}`)).statusCode).toBe(409);
+
+    const malformed = await read("?view=stage3&action=configuration.changed");
+    expect(malformed.statusCode).toBe(200);
+    const invalidSnapshots = (malformed.json().data.items as AuditStage3Entry[]).filter((row) =>
+      invalidSnapshotsIds.some((id) => id === row.id),
+    );
+    expect(invalidSnapshots).toHaveLength(3);
+    expect(invalidSnapshots.every((row) => row.details === null)).toBe(true);
+    for (const invalid of [
+      "?action=legacy.test",
+      "?view=stage2",
+      "?view=stage3&view=stage3",
+      "?view=stage3&action=",
+      "?view=stage3&action=legacy.test&action=legacy.test",
+      "?view=stage3&unknown=yes",
+    ]) {
+      const response = await read(invalid);
+      expect(response.statusCode).toBe(422);
+      expect(response.headers["cache-control"]).toBe("no-store");
+    }
+  } finally {
+    await control.execute(
+      `DELETE FROM audit_entries WHERE id IN (${ids.map(() => "?").join(",")})`,
+      ids,
+    );
+    await app.close();
+  }
+});
+
 test("deactivation and explicit reinstatement retain identity/history and never revive old credentials", async () => {
   const target = await member();
   await linkSteam(target.id);
@@ -336,6 +493,16 @@ test("deactivation and explicit reinstatement retain identity/history and never 
       payload: { reason: "Fictional leave" },
     });
     expect(deactivate.statusCode).toBe(200);
+    const deactivated = await composed.administration.auditStage3(director, {
+      action: "membership.changed",
+    });
+    expect(deactivated.items.find((row) => row.subjectId === target.id)).toMatchObject({
+      objectName: "Fictional Administration Member",
+      details: {
+        before: { status: "active", role: "driver" },
+        after: { status: "inactive", role: null },
+      },
+    });
     expect(
       (await app.inject({ url: "/api/v1/me", headers: { cookie: target.cookie } })).statusCode,
     ).toBe(401);
@@ -373,6 +540,19 @@ test("deactivation and explicit reinstatement retain identity/history and never 
       },
     });
     expect(restored.statusCode).toBe(200);
+    const reinstated = await composed.administration.auditStage3(director, {
+      action: "membership.changed",
+    });
+    expect(reinstated.items.filter((row) => row.subjectId === target.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          details: {
+            before: { status: "inactive", role: null },
+            after: { status: "active", role: "driver" },
+          },
+        }),
+      ]),
+    );
     const login = await composed.identity.login(target.email, password);
     expect(login.data.member.id).toBe(target.id);
     await expect(telemetry.connection(`Bearer ${issued.token}`, "127.0.0.1")).rejects.toMatchObject(
@@ -445,6 +625,7 @@ test("reinstatement qualification/event failure rolls back status, roles, period
 });
 
 test("timezone settings remain partial without qualification setup and update real company reporting state", async () => {
+  const deputy = await member(["deputy_director"]);
   const { app, headers } = await browser();
   try {
     const initial = await app.inject({ url: "/api/v1/admin/company-settings", headers });
@@ -471,6 +652,28 @@ test("timezone settings remain partial without qualification setup and update re
     expect(changed.statusCode).toBe(200);
     expect(changed.json().data.missingSetup).toEqual(["qualification_configuration"]);
     expect(changed.json().data.launchReady).toBe(false);
+    for (const cookie of [directorCookie, deputy.cookie]) {
+      const audit = await app.inject({
+        url: "/api/v1/admin/audit?view=stage3&action=configuration.changed",
+        headers: { cookie },
+      });
+      expect(audit.statusCode).toBe(200);
+      expect(audit.headers["cache-control"]).toBe("no-store");
+      expect(audit.json().data.items).toContainEqual({
+        id: expect.any(String),
+        action: "configuration.changed",
+        actorId: director.userId,
+        actorNickname: "Fictional Administration Director",
+        subjectId: changed.json().data.id,
+        objectName: "Yukon Union",
+        objectType: "company",
+        occurredAt: expect.any(String),
+        details: {
+          before: { reportingTimezone: null },
+          after: { reportingTimezone: "Europe/Warsaw" },
+        },
+      });
+    }
     expect((await composed.identity.current(director)).data.missingSetup).not.toContain(
       "company_reporting_timezone",
     );
@@ -753,7 +956,28 @@ test("direct membership change keeps idempotency, preconditions, authority and n
       expect(normalized.statusCode).toBe(200);
       expect(normalized.json().data).toEqual({ id: subject.id, version: 2 });
       expect(await explicitRoles(subject.id)).toEqual(expected);
+      const audit = await composed.administration.auditStage3(director, {
+        action: "membership.changed",
+      });
+      expect(audit.items.find((row) => row.subjectId === subject.id)?.details).toEqual({
+        before: { status: "active", role: null },
+        after: { status: "active", role: "driver" },
+      });
     }
+    await composed.identity.transaction((tx) =>
+      composed.identity.completeTraineeInTransaction(tx, director, target.id),
+    );
+    const promotion = await composed.administration.auditStage3(director, {
+      action: "membership.changed",
+    });
+    expect(promotion.items.filter((row) => row.subjectId === target.id)).toContainEqual(
+      expect.objectContaining({
+        details: {
+          before: { status: "active", role: "trainee" },
+          after: { status: "active", role: "driver" },
+        },
+      }),
+    );
   } finally {
     await app.close();
   }
@@ -1411,6 +1635,18 @@ test("bound succession HTTP accepts only challenge/code and preserves singleton 
       "dispatcher",
       "driver",
     ]);
+    const audit = await administration.auditStage3(successor.actor, {
+      action: "leadership.transferred",
+    });
+    expect(audit.items).toHaveLength(2);
+    expect(audit.items.find((row) => row.subjectId === director.userId)?.details).toEqual({
+      before: { director: true },
+      after: { director: false },
+    });
+    expect(audit.items.find((row) => row.subjectId === successor.id)?.details).toEqual({
+      before: { director: false },
+      after: { director: true },
+    });
   } finally {
     await unit.run((tx) =>
       unit

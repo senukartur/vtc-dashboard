@@ -4,10 +4,11 @@ import type { SQL, SQLWrapper } from "drizzle-orm";
 import type { Admissions } from "../modules/admissions/service.js";
 import { type Actor, type Identity, identityError } from "../modules/identity/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
-import { pagination, type Page } from "../modules/qualifications/pagination.js";
+import { type Page, pagination } from "../modules/qualifications/pagination.js";
 import { createTripActivity } from "../modules/trips/activity.js";
 
 const MEMBER_ACTIVITY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const COMPANY_NAME = "Yukon Union";
 
 interface MemberCounterSources {
   tripActivity?: {
@@ -18,7 +19,8 @@ interface MemberCounterSources {
       throughInclusive: string,
     ): SQL;
   };
-  admissions?: Pick<Admissions, "usableInvitationCountInTransaction">;
+  admissions?: Pick<Admissions, "usableInvitationCountInTransaction"> &
+    Partial<Pick<Admissions, "auditLabelsInTransaction">>;
 }
 
 export function createAdministration(
@@ -157,6 +159,63 @@ export function createAdministration(
           after: paging.after,
         });
         return paging.finish(rows, (row) => ({ id: row.id, time: row.occurredAt }));
+      });
+    },
+    async auditStage3(
+      actor: Actor,
+      options: Page & { action?: string },
+    ): Promise<components["schemas"]["AuditStage3List"]> {
+      const paging = page(actor, ["audit", "stage3", options.action ?? null], options);
+      return identity.transaction(async (tx) => {
+        const current = await identity.authorizeInTransaction(tx, actor, "members.manage");
+        const company = await identity.onboardingCompany(tx);
+        const rows = await audit.listStage3(tx, {
+          companyId: company.id,
+          limit: paging.limit + 1,
+          after: paging.after,
+          ...(options.action === undefined ? {} : { action: options.action }),
+        });
+        const { items, nextCursor } = paging.finish(rows, (row) => ({
+          id: row.id,
+          time: row.occurredAt,
+        }));
+        const userIds = new Set<string>();
+        const applicationIds = new Set<string>();
+        const invitationIds = new Set<string>();
+        for (const row of items) {
+          if (row.actorId) userIds.add(row.actorId);
+          if (row.objectType === "user") userIds.add(row.subjectId);
+          if (row.objectType === "application") applicationIds.add(row.subjectId);
+          if (row.objectType === "invitation") invitationIds.add(row.subjectId);
+        }
+        const nicknames = await identity.auditNicknamesInTransaction(tx, [...userIds]);
+        const admissionLabels =
+          admissions && current.capabilities.includes("applications.manage")
+            ? await admissions.auditLabelsInTransaction?.(
+                tx,
+                current,
+                [...applicationIds],
+                [...invitationIds],
+              )
+            : undefined;
+        return {
+          items: items.map((row) => {
+            let objectName: string | null = null;
+            if (row.objectType === "user") objectName = nicknames.get(row.subjectId) ?? null;
+            if (row.objectType === "company" && row.subjectId === company.id)
+              objectName = COMPANY_NAME;
+            if (row.objectType === "application")
+              objectName = admissionLabels?.applications.get(row.subjectId) ?? null;
+            if (row.objectType === "invitation")
+              objectName = admissionLabels?.invitations.get(row.subjectId) ?? null;
+            return {
+              ...row,
+              objectName,
+              actorNickname: row.actorId ? (nicknames.get(row.actorId) ?? null) : null,
+            };
+          }),
+          nextCursor,
+        };
       });
     },
     async sources(actor: Actor) {
