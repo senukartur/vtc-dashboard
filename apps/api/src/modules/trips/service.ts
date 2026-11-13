@@ -136,6 +136,34 @@ function lifetimeTotals(
 function provenTrailers(chain: NormalizedTripEvidence["trailers"]) {
   return chain.complete && chain.items.every((item) => item.status === "known");
 }
+const identityFields = [
+  "origin",
+  "destination",
+  "cargo",
+  "cargoMassKg",
+  "plannedDistanceM",
+  "adrCategory",
+] as const;
+const terminalMetrics = ["actualDistanceM", "deliveredDistanceM"] as const;
+const verifiedTimes = ["start", "end"] as const;
+// Every code that ingestion adds when it holds a source revision instead of making it current.
+// Adapter codes such as `distance_conflict` are not ingestion holds and are deliberately absent.
+export const ingestionConflictCodes: ReadonlySet<string> = new Set([
+  "attempted_reopen",
+  "terminal_outcome_conflict",
+  "trailer_context_conflict",
+  ...[...identityFields, ...terminalMetrics].flatMap((field) => [
+    `${field}_became_unknown`,
+    `${field}_conflict`,
+  ]),
+  ...verifiedTimes.flatMap((field) => [
+    `${field}_time_became_unverified`,
+    `${field}_time_conflict`,
+  ]),
+  "quality_supported_conflict",
+  "quality_incomparable_snapshots",
+  "quality_cannot_replace_supported_snapshot",
+]);
 function differing(
   previous: NormalizedTripEvidence,
   next: NormalizedTripEvidence,
@@ -146,14 +174,7 @@ function differing(
   const reasons: string[] = [];
   if (previous.outcome !== "open" && previous.outcome !== next.outcome)
     reasons.push(next.outcome === "open" ? "attempted_reopen" : "terminal_outcome_conflict");
-  for (const field of [
-    "origin",
-    "destination",
-    "cargo",
-    "cargoMassKg",
-    "plannedDistanceM",
-    "adrCategory",
-  ] as const) {
+  for (const field of identityFields) {
     const a = previous[field],
       b = next[field];
     if (a.status === "known" && b.status === "unknown") reasons.push(`${field}_became_unknown`);
@@ -164,7 +185,7 @@ function differing(
     }
   }
   if (previous.outcome !== "open") {
-    for (const field of ["actualDistanceM", "deliveredDistanceM"] as const) {
+    for (const field of terminalMetrics) {
       const a = previous[field],
         b = next[field];
       if (a.status === "known" && b.status === "unknown") reasons.push(`${field}_became_unknown`);
@@ -172,7 +193,7 @@ function differing(
         reasons.push(`${field}_conflict`);
     }
   }
-  for (const field of ["start", "end"] as const) {
+  for (const field of verifiedTimes) {
     if (!previous[field].verifiedActual) continue;
     if (!next[field].verifiedActual) reasons.push(`${field}_time_became_unverified`);
     else if (previous[field].utc !== next[field].utc) reasons.push(`${field}_time_conflict`);

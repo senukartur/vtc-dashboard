@@ -4310,10 +4310,14 @@ test.each([
     after = await state(first.tripId),
     stored = await unit.run((tx) => tripsService.sourceEvidenceInTransaction(tx, r.sourceRecordId));
   if (held) {
-    // Ingestion records the conflict on the held revision; assessment then reviews the stale pair.
-    expect(after).toMatchObject({ currentFactId: before?.currentFactId, reviewHold: true });
+    // Ingestion records the conflict on the held revision; assessment keeps it as a review reason.
+    expect(after).toMatchObject({
+      currentFactId: before?.currentFactId,
+      decision: "pending_review",
+      reviewHold: true,
+    });
     expect(stored?.reasonCodes).toContain("trailer_context_conflict");
-    expect(after?.reviewReasons).toContain("quality_supported_conflict");
+    expect(after?.reviewReasons).toContain("trailer_context_conflict");
   } else {
     expect(after).toMatchObject({ currentFactId: stored?.factRevisionId, reviewHold: false });
     for (const code of qualityHolds) {
@@ -4323,18 +4327,22 @@ test.each([
   }
 });
 
-// A revision held for a changed chain keeps the old current fact and is never accepted.
-async function heldChange(tripId: string, receipt: { sourceRecordId: string }) {
+// A revision held by ingestion keeps the old current fact, is never the decision basis and keeps
+// its conflict as a review reason until staff decide.
+async function heldBy(code: string, tripId: string, receipt: { sourceRecordId: string }) {
   const after = await state(tripId),
     stored = await unit.run((tx) =>
       tripsService.sourceEvidenceInTransaction(tx, receipt.sourceRecordId),
     );
-  expect(stored?.reasonCodes).toContain("trailer_context_conflict");
+  expect(stored?.reasonCodes).toContain(code);
   expect(after?.currentFactId).not.toBe(stored?.factRevisionId);
-  expect(after?.decision).not.toBe("accepted");
+  expect(after).toMatchObject({ decision: "pending_review", reviewHold: true });
+  expect(after?.reviewReasons).toContain(code);
   expect(await credit(tripId)).toBeUndefined();
   return after;
 }
+const heldChange = (tripId: string, receipt: { sourceRecordId: string }) =>
+  heldBy("trailer_context_conflict", tripId, receipt);
 test.each([
   { name: "an unknown chain then a complete one", unproven: "unknown", complete: true },
   {
@@ -4372,7 +4380,6 @@ test.each([
       changedChain(changed);
       const after = await heldChange(first.tripId, await receive(changed, who));
       expect(after?.currentFactId).toBe(advanced?.currentFactId);
-      if (revision === 3) expect(after?.reviewHold).toBe(true);
     }
     const delivered = payload();
     delivered.source = structuredClone(opened.source);
@@ -4409,8 +4416,7 @@ test("a changed body type is held against a proven chain older than many unprove
   changed.revision = 14;
   const [trailer] = changed.snapshot.trailers.items;
   if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
-  // Ingestion holds the revision; the open trip keeps its current fact. Assessment compares only
-  // the latest and current facts, so its own hold flag is not asserted here.
+  // Ingestion holds the revision; the open trip keeps its current fact and stays in review.
   expect((await heldChange(first.tripId, await receive(changed, who)))?.currentFactId).toBe(
     current,
   );
@@ -4428,4 +4434,61 @@ test("a changed body type is held against a proven chain older than many unprove
     currentFactId: current,
     outcome: "open",
   });
+});
+
+test("a held delivered superset with equal metrics after an unknown chain is never auto-accepted", async () => {
+  const who = await member(),
+    opened = payload("started");
+  opened.snapshot.recordingCompleteness = "complete";
+  measured(opened, 0, 38.5);
+  const first = await receive(opened, who);
+  const middle = structuredClone(opened);
+  middle.eventId = newId();
+  middle.revision = 2;
+  middle.snapshot.trailers = { complete: false, items: [] };
+  measured(middle, 123400, 38.5);
+  const between = await receive(middle, who);
+  expect((await state(first.tripId))?.currentFactId).toBe(await factOf(between));
+  // Every shared metric matches, so the held snapshot strictly extends the current one.
+  const delivered = payload();
+  delivered.source = structuredClone(opened.source);
+  delivered.snapshot.start = structuredClone(opened.snapshot.start);
+  delivered.revision = 3;
+  const [trailer] = delivered.snapshot.trailers.items;
+  if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
+  expect(await heldChange(first.tripId, await receive(delivered, who))).toMatchObject({
+    currentFactId: await factOf(between),
+    outcome: "open",
+  });
+});
+
+test("a later revision held by a held terminal's guards is never auto-accepted", async () => {
+  const who = await member(),
+    opened = payload("started");
+  opened.snapshot.recordingCompleteness = "complete";
+  measured(opened, 0, 38.5);
+  const first = await receive(opened, who),
+    current = await factOf(first);
+  const delivered = payload();
+  delivered.source = structuredClone(opened.source);
+  delivered.snapshot.start = structuredClone(opened.snapshot.start);
+  delivered.revision = 2;
+  const changed = structuredClone(delivered),
+    [trailer] = changed.snapshot.trailers.items;
+  if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
+  expect((await heldChange(first.tripId, await receive(changed, who)))?.currentFactId).toBe(
+    current,
+  );
+  // The correction keeps the opening chain, so only the held terminal's guards hold it.
+  const corrected = structuredClone(delivered);
+  corrected.eventId = newId();
+  corrected.revision = 3;
+  corrected.type = "trip.corrected";
+  for (const field of ["observedDistance", "deliveredDistance"] as const) {
+    const distance = corrected.snapshot[field];
+    if (distance.available) distance.value = 130000;
+  }
+  expect(
+    await heldBy("actualDistanceM_conflict", first.tripId, await receive(corrected, who)),
+  ).toMatchObject({ currentFactId: current, outcome: "open", actualDistanceM: null });
 });
