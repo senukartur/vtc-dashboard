@@ -2,6 +2,11 @@ export const eventStage2QueryPrefix = "events-stage-2";
 export const eventUpcomingQueryPrefix = "dashboard-upcoming-event";
 export const landingConvoysQueryName = "landing-convoys";
 
+export type EventStage2CommandReadFilter = (
+  key: readonly unknown[],
+  outcome: "success" | "conflict",
+) => boolean;
+
 export function isEventStage2QueryKey(key: readonly unknown[]) {
   return (
     key[0] === eventStage2QueryPrefix ||

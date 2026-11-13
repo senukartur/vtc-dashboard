@@ -9,6 +9,7 @@ import type { DTO } from "../model.js";
 import { eventUpcomingQueryPrefix, isEventStage2QueryKey } from "../stage-2-model.js";
 import { useEventStage2Query } from "../stage-2-queries.js";
 import { eventStage2Commands, eventStage2Reads } from "../stage-2-transport.js";
+import { draftEditorReads, publishedEditorReads } from "./command-reads.js";
 import { type EditorStep, eventEditorAccessLost, useEditorCommands } from "./commands.js";
 import { type DraftFields, eventRevisionTag, type OpenEventDraft } from "./draft.js";
 import { eventDefinitionSeed, type FieldName } from "./model.js";
@@ -74,6 +75,7 @@ export function useDefinitionActions(
 
   function draftStep(
     fields: DraftFields,
+    beforePublication: boolean,
     then?: (value: OpenEventDraft) => DefinitionStep | undefined,
   ): DefinitionStep {
     const request =
@@ -82,6 +84,7 @@ export function useDefinitionActions(
         : eventStage2Commands.create({ ...fields, draft: true }, locale);
     return {
       request,
+      refreshReads: draftEditorReads(eventId, beforePublication),
       commit({ data: { data }, etag }) {
         if (!("lifecycle" in data) || (definition.kind === "draft" && data.id !== definition.id)) {
           throw new AccountFailure("uncertain");
@@ -99,7 +102,7 @@ export function useDefinitionActions(
     let savedId: string | null = null;
     setStatus(undefined);
     await writes.run(
-      draftStep(fields, ({ id }) => {
+      draftStep(fields, false, ({ id }) => {
         savedId = id;
         return undefined;
       }),
@@ -134,12 +137,13 @@ export function useDefinitionActions(
     };
     if (definition.kind === "draft") {
       await writes.run(
-        draftStep(fields, ({ id, etag }) => {
+        draftStep(fields, true, ({ id, etag }) => {
           // Publishing removes the draft read while the command invalidates active queries.
           // Suspend that observer through exact retries until the outcome is authoritative.
           onDraftPublication?.(true);
           return {
             request: eventStage2Commands.publishDraft(id, etag, locale),
+            refreshReads: publishedEditorReads(id, "draft"),
             commit: finish,
             onRejected: () => onDraftPublication?.(false),
           };
@@ -154,10 +158,19 @@ export function useDefinitionActions(
           definition.etag,
           locale,
         ),
+        refreshReads: publishedEditorReads(
+          eventId,
+          "published",
+          fields.visibility !== definition.member.visibility,
+        ),
         commit: finish,
       });
     } else {
-      await writes.run({ request: eventStage2Commands.create(fields, locale), commit: finish });
+      await writes.run({
+        request: eventStage2Commands.create(fields, locale),
+        refreshReads: publishedEditorReads(null, "new"),
+        commit: finish,
+      });
     }
   }
 

@@ -1,8 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type Query, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure } from "../account/transport.js";
 import {
+  type EventStage2CommandReadFilter,
   eventStage2ImageQueryPolicy,
   eventStage2QueryPrefix,
   eventUpcomingQueryPrefix,
@@ -122,29 +123,42 @@ export function useEventStage2Command<K extends EventStage2Envelope>() {
   const scope = eventStage2SessionScope(session);
   const inFlight = useRef<AbortController | null>(null);
 
-  function invalidate() {
-    return client.invalidateQueries({
-      predicate: (query) => isEventStage2CommandRead(query.queryKey, scope),
-    });
+  async function invalidate(
+    filter: EventStage2CommandReadFilter | undefined,
+    outcome: "success" | "conflict",
+  ) {
+    const predicate = ({ queryKey }: Query) =>
+      isEventStage2CommandRead(queryKey, scope) && (!filter || filter(queryKey, outcome));
+    if (!filter) return client.invalidateQueries({ predicate });
+    // An initial read in flight may have started before this write committed.
+    await client.cancelQueries({ predicate });
+    return client.invalidateQueries({ predicate }, { cancelRefetch: false });
   }
 
   const mutation = useMutation({
     mutationKey: [eventStage2QueryPrefix, scope, "command"],
     retry: false,
     gcTime: 0,
-    mutationFn: async (command: EventStage2Command<K>) => {
+    mutationFn: async ({
+      command,
+      filter,
+    }: {
+      command: EventStage2Command<K>;
+      filter: EventStage2CommandReadFilter | undefined;
+    }) => {
       if (!hasAccess(session, "events.manage")) throw new AccountFailure("forbidden");
       if (inFlight.current) throw new AccountFailure("conflict");
       const controller = new AbortController();
       inFlight.current = controller;
       try {
         const result = await sendEventStage2(command, controller.signal);
-        await invalidate();
+        await invalidate(filter, "success");
         controller.signal.throwIfAborted();
         return result;
       } catch (failure) {
         await refreshAccess(failure, controller.signal, session, client);
-        if (failure instanceof AccountFailure && failure.kind === "conflict") await invalidate();
+        if (failure instanceof AccountFailure && failure.kind === "conflict")
+          await invalidate(filter, "conflict");
         throw failure;
       } finally {
         if (inFlight.current === controller) inFlight.current = null;
@@ -164,7 +178,8 @@ export function useEventStage2Command<K extends EventStage2Envelope>() {
   }, [scope, reset]);
 
   return {
-    run: mutation.mutateAsync,
+    run: (command: EventStage2Command<K>, filter?: EventStage2CommandReadFilter) =>
+      mutation.mutateAsync({ command, filter }),
     pending: mutation.isPending,
     failure: mutation.error instanceof AccountFailure ? mutation.error : null,
   };

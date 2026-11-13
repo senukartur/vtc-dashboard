@@ -1,5 +1,10 @@
 import { expect, test } from "vitest";
 import {
+  draftEditorReads,
+  editorGalleryReads,
+  publishedEditorReads,
+} from "../../apps/web/src/features/events/editor/command-reads.ts";
+import {
   changeEditorCity,
   changeEditorDepot,
   changeEditorGame,
@@ -12,11 +17,112 @@ import {
 } from "../../apps/web/src/features/events/editor/model.ts";
 import { rebaseEventEditor } from "../../apps/web/src/features/events/editor/rebase.ts";
 import type { DTO } from "../../apps/web/src/features/events/model.ts";
+import {
+  eventStage2QueryPrefix,
+  eventUpcomingQueryPrefix,
+  landingConvoysQueryName,
+} from "../../apps/web/src/features/events/stage-2-model.ts";
+import {
+  type EventStage2Envelope,
+  type EventStage2Read,
+  eventStage2Content,
+  eventStage2Reads,
+} from "../../apps/web/src/features/events/stage-2-transport.ts";
 import { stage2Fixture } from "../fixtures/events-stage-2.ts";
 
 const member = () =>
   (stage2Fixture("getEvent", "structured").response as DTO["EventStage2EnvelopeMember"]).data;
 const completeForm = () => initialEventEditor(eventDefinitionSeed(member()));
+
+const eventId = "e1320000-0000-4000-8000-000000000001";
+const mediaId = "e1320000-0000-4000-8000-000000000002";
+const readKey = ({ access, path, schema }: EventStage2Read<EventStage2Envelope>) => [
+  eventStage2QueryPrefix,
+  access === "public" ? "public" : "session",
+  access,
+  path,
+  schema,
+];
+const draftKey = readKey(eventStage2Reads.draft(eventId));
+const draftsKey = readKey(eventStage2Reads.adminList({ period: "drafts", locale: "ru" }));
+const adminGalleryKey = readKey(eventStage2Reads.adminMedia(eventId));
+const memberGalleryKey = readKey(eventStage2Reads.memberMedia(eventId));
+const upcoming = eventStage2Reads.upcoming();
+const upcomingKey = [
+  eventUpcomingQueryPrefix,
+  "session",
+  eventStage2QueryPrefix,
+  upcoming.access,
+  upcoming.path,
+  upcoming.schema,
+];
+const thumbKey = [
+  eventStage2QueryPrefix,
+  "session",
+  "company.read",
+  eventStage2Content.member(eventId, mediaId, "thumb").path,
+  "image",
+];
+
+test("draft writes refresh their own definition and draft list without touching upcoming or media", () => {
+  const save = draftEditorReads(eventId, false);
+  const beforePublish = draftEditorReads(eventId, true);
+  expect(save(draftKey, "success")).toBe(true);
+  expect(save(draftsKey, "success")).toBe(true);
+  expect(save(readKey(eventStage2Reads.draft(mediaId)), "success")).toBe(false);
+  expect(save(readKey(eventStage2Reads.adminList({ period: "published" })), "success")).toBe(false);
+  expect(beforePublish(draftKey, "success")).toBe(false);
+  expect(beforePublish(draftsKey, "success")).toBe(true);
+  expect(beforePublish(draftKey, "conflict")).toBe(true);
+  for (const key of [adminGalleryKey, memberGalleryKey, thumbKey, upcomingKey]) {
+    expect(save(key, "success")).toBe(false);
+    expect(save(key, "conflict")).toBe(false);
+  }
+});
+
+test("publication refreshes event projections without reloading already confirmed gallery content", () => {
+  const publish = publishedEditorReads(eventId, "draft");
+  const memberDetail = readKey(eventStage2Reads.memberDetail(eventId, "ru"));
+  const landing = ["public-events", "/public/events?period=upcoming", landingConvoysQueryName];
+  for (const key of [draftKey, draftsKey, upcomingKey, memberDetail, landing]) {
+    expect(publish(key, "success")).toBe(true);
+  }
+  for (const key of [adminGalleryKey, memberGalleryKey, thumbKey]) {
+    expect(publish(key, "success")).toBe(false);
+  }
+  expect(publish(draftKey, "conflict")).toBe(true);
+  expect(publishedEditorReads(eventId, "published")(memberDetail, "conflict")).toBe(true);
+});
+
+test("gallery writes refresh only affected projections and keep immutable thumbnails", () => {
+  const upload = editorGalleryReads(eventId, true);
+  const edit = editorGalleryReads(eventId, true, { coverChanged: false });
+  const cover = editorGalleryReads(eventId, true, { coverChanged: true });
+  const memberList = readKey(eventStage2Reads.memberList());
+  const publicCover = [
+    eventStage2QueryPrefix,
+    "public",
+    "public",
+    eventStage2Content.publicCover(eventId).path,
+    "image",
+  ];
+  expect(upload(adminGalleryKey, "conflict")).toBe(true);
+  expect(upload(readKey(eventStage2Reads.adminMedia(mediaId)), "conflict")).toBe(false);
+  expect(upload(adminGalleryKey, "success")).toBe(false);
+  expect(upload(memberGalleryKey, "success")).toBe(false);
+  expect(edit(memberGalleryKey, "success")).toBe(true);
+  expect(edit(memberList, "success")).toBe(false);
+  expect(edit(publicCover, "success")).toBe(false);
+  expect(cover(memberList, "success")).toBe(true);
+  expect(cover(publicCover, "success")).toBe(true);
+  expect(editorGalleryReads(eventId, false, { coverChanged: true })(publicCover, "success")).toBe(
+    false,
+  );
+  for (const key of [draftKey, draftsKey, thumbKey, upcomingKey]) {
+    expect(cover(key, "success")).toBe(false);
+    expect(cover(key, "conflict")).toBe(false);
+  }
+});
 
 test("a draft can omit fields while publication reports every missing required field", () => {
   const result = validateEventEditor(initialEventEditor({}));

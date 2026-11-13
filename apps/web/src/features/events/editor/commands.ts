@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountFailure } from "../../account/transport.js";
 import type { DTO } from "../model.js";
+import type { EventStage2CommandReadFilter } from "../stage-2-model.js";
 import { useEventStage2Command } from "../stage-2-queries.js";
 import type { EventStage2Command, EventStage2Envelope } from "../stage-2-transport.js";
 import { EventFailure } from "../transport.js";
@@ -8,6 +9,7 @@ import { EventFailure } from "../transport.js";
 type Receipt<K extends EventStage2Envelope> = { data: DTO[K]; etag: string };
 export type EditorStep<K extends EventStage2Envelope> = {
   request: EventStage2Command<K>;
+  refreshReads: EventStage2CommandReadFilter;
   commit: (receipt: Receipt<K>) => EditorStep<K> | undefined;
   onRejected?: () => void;
 };
@@ -44,7 +46,7 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
     let current: EditorStep<K> | undefined = step;
     try {
       while (current) {
-        const receipt = await transport.run(current.request);
+        const receipt = await transport.run(current.request, current.refreshReads);
         current = current.commit(receipt);
       }
     } catch (error) {

@@ -288,6 +288,7 @@ function EventEditorForm({
     actions.accessFailure ? null : eventId,
     ensureDraft,
     galleryEnabled && !actions.accessFailure,
+    definition.kind === "published",
   );
   const disableForm = actions.locked || gallery.busy;
   const saving = actions.pending || gallery.busy;

@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import { useSession } from "../../../app/Session.js";
 import { Button, Input, Label } from "../../../shared/ui/primitives.js";
@@ -5,13 +6,18 @@ import { AccountFailure } from "../../account/transport.js";
 import { useTripQuery } from "../../trips/queries.js";
 import { EventFailureView } from "../components.js";
 import type { DTO } from "../model.js";
-import { useEventStage2Image, useEventStage2Query } from "../stage-2-queries.js";
+import {
+  eventStage2SessionScope,
+  useEventStage2Image,
+  useEventStage2Query,
+} from "../stage-2-queries.js";
 import {
   eventStage2Commands,
   eventStage2Content,
   eventStage2Reads,
   readEventStage2,
 } from "../stage-2-transport.js";
+import { editorGalleryReads, isEditorMemberGalleryRead } from "./command-reads.js";
 import { eventEditorAccessLost, useEditorCommands } from "./commands.js";
 import { eventRevisionTag } from "./draft.js";
 import { eventScreenshotAccept, eventScreenshotError, eventScreenshotLimit } from "./model.js";
@@ -28,8 +34,11 @@ export function useEditorGallery(
   eventId: string | null,
   ensureDraft: () => Promise<string | null>,
   enabled: boolean,
+  published: boolean,
 ) {
   const session = useSession();
+  const client = useQueryClient();
+  const scope = eventStage2SessionScope(session);
   const readPolicy = enabled && !!session.self?.capabilities.includes("trips.submit_own");
   const policy = useTripQuery("/me/upload-policy", "EnvelopeUploadPolicy", readPolicy);
   const maxBytes = policy.data?.data.data.enabled ? policy.data.data.data.maxFileBytes : null;
@@ -55,6 +64,7 @@ export function useEditorGallery(
   const [lastUpload, setLastUpload] = useState<string | null>(null);
   const [operation, setOperation] = useState<"upload" | "edit">();
   const firstRead = useRef<AbortController | null>(null);
+  const previousGallery = useRef<{ eventId: string; gallery: Gallery } | null>(null);
   const fetchedEtag = eventRevisionTag(query.data?.etag);
   const fetched =
     eventId && query.data && fetchedEtag
@@ -88,6 +98,7 @@ export function useEditorGallery(
   const conflict = failureKind === "conflict";
   const locked = busy || !!writes.retry || conflict || terminal || (!!eventId && !snapshot);
   const captions = captionEdits?.eventId === eventId ? captionEdits.values : undefined;
+  const gallery = snapshot?.gallery;
 
   useEffect(() => {
     if (terminalRead && retry) discardRetry();
@@ -111,6 +122,31 @@ export function useEditorGallery(
     }, 1500);
     return () => window.clearInterval(timer);
   }, [enabled, processing, query.isError, refetch]);
+  useEffect(() => {
+    const previous = previousGallery.current;
+    if (!eventId) {
+      previousGallery.current = null;
+      return;
+    }
+    if (!gallery) return;
+    previousGallery.current = { eventId, gallery };
+    if (
+      !published ||
+      !scope ||
+      previous?.eventId !== eventId ||
+      !gallery.items.some(
+        ({ id, state }) =>
+          state === "ready" &&
+          !previous.gallery.items.some((item) => item.id === id && item.state === "ready"),
+      )
+    )
+      return;
+    // The member read omits processing items. Refresh it when polling first sees a ready item.
+    void client.invalidateQueries({
+      predicate: ({ queryKey }) =>
+        queryKey[1] === scope && isEditorMemberGalleryRead(queryKey, eventId),
+    });
+  }, [client, eventId, gallery, published, scope]);
 
   function choose(value: File | null) {
     if (locked) return;
@@ -152,6 +188,7 @@ export function useEditorGallery(
       setUploading(true);
       await writes.run({
         request: eventStage2Commands.upload(target, file, result.etag),
+        refreshReads: editorGalleryReads(target, published),
         commit({ data: { data }, etag }) {
           if (!("item" in data)) throw new AccountFailure("uncertain");
           setCommitted({
@@ -196,6 +233,12 @@ export function useEditorGallery(
       request: value
         ? eventStage2Commands.updateMedia(eventId, mediaId, value, snapshot.etag)
         : eventStage2Commands.deleteMedia(eventId, mediaId, snapshot.etag),
+      refreshReads: editorGalleryReads(eventId, published, {
+        coverChanged:
+          value === null
+            ? cover?.id === mediaId
+            : value.isCover !== undefined && value.isCover !== (cover?.id === mediaId),
+      }),
       commit({ data: { data }, etag }) {
         if (!("items" in data)) throw new AccountFailure("uncertain");
         setCommitted({ eventId, gallery: data, etag });

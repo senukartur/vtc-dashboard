@@ -1289,7 +1289,7 @@ test.describe("Stage 2 draft entry", () => {
     "a manager opens a draft, retries its exact save and reloads without mutating media",
     browserCase(["@functional"]),
     async ({ page }) => {
-      await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
+      const mock = await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
       const draft = fixture();
       const retained = {
         originCityId: "e1320000-0000-4000-8000-000000000002",
@@ -1304,7 +1304,7 @@ test.describe("Stage 2 draft entry", () => {
       const writes: { body: unknown; etag: string | undefined; key: string | undefined }[] = [];
       page.on("request", (request) => {
         const path = new URL(request.url()).pathname;
-        if (path.endsWith("/media") && request.method() !== "GET")
+        if (/\/media(?:\/[^/]+)?$/.test(path) && request.method() !== "GET")
           mediaWrites.push(request.method());
       });
       let loseReceipt = true;
@@ -1327,6 +1327,11 @@ test.describe("Stage 2 draft entry", () => {
       await page.goto(url);
       const title = page.getByRole("textbox", { name: "Event title" });
       await expect(title).toHaveValue(draft.data.fields.title ?? "");
+      const mediaRead = `GET /admin/events/${stage2DraftId}/media`;
+      const upcomingRead = "GET /me/upcoming-event";
+      const count = (path: string) => mock.requests.filter(({ route }) => route === path).length;
+      await expect.poll(() => count(mediaRead)).toBe(1);
+      await expect.poll(() => count(upcomingRead)).toBe(1);
       await title.fill("Fictional draft revision");
       await page.getByRole("button", { name: "Save draft" }).click();
       await expect(title).toHaveValue("Fictional draft revision");
@@ -1340,6 +1345,8 @@ test.describe("Stage 2 draft entry", () => {
         },
         { body: writes[0]?.body, etag: '"v1"', key: writes[0]?.key },
       ]);
+      expect(count(mediaRead)).toBe(1);
+      expect(count(upcomingRead)).toBe(1);
       await page.reload();
       await expect(title).toHaveValue("Fictional draft revision");
       expect(mediaWrites).toEqual([]);
