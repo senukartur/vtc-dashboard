@@ -9,6 +9,7 @@ import { publicContent, publicPath } from "../landing/content.js";
 import { EventState, KeepFocusButton, useEventTimezone } from "./components.js";
 import { EventEditor, Stage2EventEditor } from "./EventEditor.js";
 import { useDraftText } from "./editor/draft.js";
+import { MemberEventsPage } from "./MemberEventsPage.js";
 import { type DTO, periodFrom } from "./model.js";
 import { useEventQuery } from "./queries.js";
 import { compactTime, dateTile, timezoneLabel } from "./view-model.js";
@@ -16,11 +17,18 @@ import "./events.css";
 import "./events-workspace.css";
 
 export function EventsPage({ publicView = false }: { publicView?: boolean }) {
+  const session = useSession();
+  if (!publicView && session.eventsStage2Enabled) return <MemberEventsPage />;
+  return <LegacyEventsPage publicView={publicView} />;
+}
+
+function LegacyEventsPage({ publicView }: { publicView: boolean }) {
   const { t, i18n } = useTranslation("events"),
     session = useSession(),
     [search, setSearch] = useSearchParams(),
-    period = periodFrom(search.get("period")),
-    cursor = search.get("cursor"),
+    requestedPeriod = search.get("period"),
+    period = periodFrom(requestedPeriod),
+    cursor = !publicView && requestedPeriod === "drafts" ? null : search.get("cursor"),
     allowed = publicView || !!session.self?.capabilities.includes("company.read"),
     timezone = useEventTimezone(publicView),
     [now] = useState(Date.now),

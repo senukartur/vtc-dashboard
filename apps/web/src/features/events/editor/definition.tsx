@@ -6,6 +6,7 @@ import { Button } from "../../../shared/ui/primitives.js";
 import { AccountFailure } from "../../account/transport.js";
 import { EventFailureView } from "../components.js";
 import type { DTO } from "../model.js";
+import { eventUpcomingQueryPrefix, isEventStage2QueryKey } from "../stage-2-model.js";
 import { useEventStage2Query } from "../stage-2-queries.js";
 import { eventStage2Commands, eventStage2Reads } from "../stage-2-transport.js";
 import { type EditorStep, eventEditorAccessLost, useEditorCommands } from "./commands.js";
@@ -120,7 +121,7 @@ export function useDefinitionActions(
       void client
         .invalidateQueries({
           predicate: ({ queryKey: key }) =>
-            key[0] === "dashboard-upcoming-event" ||
+            (key[0] === eventUpcomingQueryPrefix && !isEventStage2QueryKey(key)) ||
             (key[0] === "events" &&
               key[1] === session.self?.member.id &&
               key[2] === session.generation &&

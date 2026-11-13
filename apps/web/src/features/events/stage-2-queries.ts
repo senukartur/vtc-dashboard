@@ -5,6 +5,7 @@ import { AccountFailure } from "../account/transport.js";
 import {
   eventStage2ImageQueryPolicy,
   eventStage2QueryPrefix,
+  eventUpcomingQueryPrefix,
   isEventStage2CommandRead,
   visibleEventStage2Image,
 } from "./stage-2-model.js";
@@ -21,7 +22,7 @@ import {
 
 type Session = ReturnType<typeof useSession>;
 
-function sessionScope(session: Session) {
+export function eventStage2SessionScope(session: Session) {
   const self = session.self;
   return self
     ? JSON.stringify([self.member.id, session.generation, self.identityEpoch, self.capabilities])
@@ -57,14 +58,12 @@ function useStage2Read<T>(
   const client = useQueryClient();
   const publicRead = spec.access === "public";
   const allowed = hasAccess(session, spec.access);
+  const scope = publicRead ? "public" : eventStage2SessionScope(session);
   const query = useQuery({
-    queryKey: [
-      eventStage2QueryPrefix,
-      publicRead ? "public" : sessionScope(session),
-      spec.access,
-      spec.path,
-      name,
-    ],
+    queryKey:
+      name === "EventStage2EnvelopeUpcoming"
+        ? [eventUpcomingQueryPrefix, scope, eventStage2QueryPrefix, spec.access, spec.path, name]
+        : [eventStage2QueryPrefix, scope, spec.access, spec.path, name],
     meta: { private: !publicRead },
     enabled: enabled && allowed,
     retry: false,
@@ -120,7 +119,7 @@ export function useEventStage2Image(spec: EventStage2Content, enabled = true) {
 export function useEventStage2Command<K extends EventStage2Envelope>() {
   const session = useSession();
   const client = useQueryClient();
-  const scope = sessionScope(session);
+  const scope = eventStage2SessionScope(session);
   const inFlight = useRef<AbortController | null>(null);
 
   function invalidate() {

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type {
   Browser,
   BrowserContextOptions,
@@ -10,8 +10,16 @@ import type {
 import type { components } from "@vtc/contracts";
 import type { RowDataPacket } from "mysql2/promise";
 import { testConnection } from "../persistence/support.ts";
-import { resetAccountLimits, staffContext, write } from "./support/account.ts";
+import { guardedAllocation } from "../support/environment.ts";
+import {
+  csrf,
+  origin as legacyOrigin,
+  resetAccountLimits,
+  staffContext,
+  write,
+} from "./support/account.ts";
 import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
+import { startStage2EventsServer } from "./support/events-stage-2-real.ts";
 import { selectPastReportEvent } from "./support/events.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { createLandingCoverFixture } from "./support/landing-cover.ts";
@@ -643,6 +651,486 @@ test(
       await expect(page.getByText(/An RSVP alone grants no exception/)).toBeVisible();
     } finally {
       await s.close();
+    }
+  },
+);
+
+function stage2Journey(browser: Browser) {
+  const servers: Awaited<ReturnType<typeof startStage2EventsServer>>[] = [];
+  async function start(draftsEnabled: boolean) {
+    const server = await startStage2EventsServer(draftsEnabled);
+    servers.push(server);
+    return server;
+  }
+  const contexts: Awaited<ReturnType<Browser["newContext"]>>[] = [];
+  let blocked = 0;
+
+  async function commandHeaders(request: Page["request"], origin: string, etag?: string) {
+    return {
+      Origin: origin,
+      "X-CSRF-Token": await csrf(request),
+      "Idempotency-Key": randomUUID(),
+      ...(etag ? { "If-Match": etag } : {}),
+    };
+  }
+
+  async function post(
+    request: Page["request"],
+    path: string,
+    data: unknown,
+    origin: string,
+    etag?: string,
+  ) {
+    return request.post(`/api/v1${path}`, {
+      headers: await commandHeaders(request, origin, etag),
+      data,
+      maxRedirects: 0,
+    });
+  }
+
+  async function cancel(request: Page["request"], origin: string, id: string) {
+    const current = await request.get(`/api/v1/events/${id}?locale=en`);
+    expect(current.status()).toBe(200);
+    const { data } = (await current.json()) as components["schemas"]["EventStage2EnvelopeMember"];
+    if (data.event.status !== "scheduled") return;
+    const etag = current.headers().etag;
+    if (!etag) throw new Error("STAGE_2_EVENT_CLEANUP_VERSION_MISSING");
+    const cancelled = await post(
+      request,
+      `/admin/events/${id}/cancellation?locale=en`,
+      { reason: "Synthetic browser fixture cleanup" },
+      origin,
+      etag,
+    );
+    expect(cancelled.status()).toBe(200);
+  }
+
+  async function discard(request: Page["request"], origin: string, id: string) {
+    const current = await request.get(`/api/v1/admin/events/drafts/${id}`);
+    expect(current.status()).toBe(200);
+    const etag = current.headers().etag;
+    if (!etag) throw new Error("STAGE_2_DRAFT_CLEANUP_VERSION_MISSING");
+    const discarded = await request.delete(`/api/v1/admin/events/${id}`, {
+      headers: await commandHeaders(request, origin, etag),
+      maxRedirects: 0,
+    });
+    expect(discarded.status()).toBe(200);
+  }
+
+  async function actor(email: string, credentialKey: string, origin: string) {
+    const context = await browser.newContext({
+      baseURL: origin,
+      locale: "en-GB",
+      timezoneId: "UTC",
+      serviceWorkers: "block",
+    });
+    contexts.push(context);
+    await context.route("**/*", (route) => {
+      const url = new URL(route.request().url());
+      if (url.origin === origin && !url.username && !url.password) return route.continue();
+      blocked++;
+      return route.abort("blockedbyclient");
+    });
+    const password = createHmac("sha256", guardedAllocation().token)
+      .update(credentialKey)
+      .digest("base64url");
+    const login = await post(context.request, "/auth/login", { email, password }, origin);
+    expect(login.status()).toBe(200);
+    return context.newPage();
+  }
+
+  async function close() {
+    try {
+      await Promise.all(contexts.map((context) => context.close()));
+    } finally {
+      await Promise.all(servers.map((server) => server.close()));
+    }
+  }
+
+  return { start, post, actor, cancel, discard, close, blockedRequests: () => blocked };
+}
+
+async function openEventsAs(
+  page: Page,
+  origin: string,
+  path: string,
+  stage2: boolean,
+  drafts: boolean,
+  capability: "events.manage" | "events.respond",
+) {
+  const browserSession = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" && new URL(response.url()).pathname === "/api/v1/me",
+  );
+  await page.goto(path);
+  expect(new URL(page.url()).origin).toBe(origin);
+  const response = await browserSession;
+  expect(new URL(response.url()).origin).toBe(origin);
+  expect(response.status(), "browser session status").toBe(200);
+  expect(response.headers()["x-vtc-events-stage2"]).toBe(stage2 ? "1" : undefined);
+  expect(response.headers()["x-vtc-events-drafts"]).toBe(drafts ? "1" : undefined);
+  const { capabilities, member } = (
+    (await response.json()) as components["schemas"]["EnvelopeSelf"]
+  ).data;
+  expect(capabilities.includes("company.read")).toBe(true);
+  expect(capabilities.includes(capability)).toBe(true);
+  await catalogLanguage(page);
+  await expect(
+    page.getByRole("main").getByRole("heading", { name: "Company events", exact: true }),
+  ).toBeVisible();
+  return member.id;
+}
+
+test(
+  "real Stage 2 cards persist quick RSVP and pick up the event detail revision",
+  browserCase(["@real"]),
+  async ({ browser, page }, info) => {
+    test.setTimeout(60000);
+    type DTO = components["schemas"];
+    const journey = stage2Journey(browser);
+    const { actor, post } = journey;
+    let cleanup = async () => {};
+    let legacy: Awaited<ReturnType<typeof staffContext>> | undefined;
+
+    try {
+      const server = await journey.start(false);
+      const manager = await actor(
+        "browser@example.invalid",
+        "browser-identity-password",
+        server.origin,
+      );
+      const project = info.project.name.split("-")[0];
+      const member = await actor(
+        `browser-steam-${project}@example.invalid`,
+        `browser-steam-${project}`,
+        server.origin,
+      );
+      const managerSelf = await manager.request.get("/api/v1/me");
+      expect(managerSelf.status()).toBe(200);
+      const organizer = ((await managerSelf.json()) as DTO["EnvelopeSelf"]).data.member.id;
+      const suffix = randomUUID().slice(0, 8);
+      const title = `Fictional Stage 2 convoy ${suffix}`;
+      const start = Date.now() + 1800000;
+      const published = await post(
+        manager.request,
+        "/admin/events?locale=en",
+        {
+          title,
+          description: "Synthetic Stage 2 event",
+          game: "ets2",
+          platform: "truckersmp",
+          server: "Fictional Simulation",
+          organizerMemberId: organizer,
+          route: "Fictional North to Fictional South",
+          meetingLocation: "Fictional harbour",
+          meetingAt: new Date(start - 60000).toISOString(),
+          startsAt: new Date(start).toISOString(),
+          endsAt: null,
+          visibility: "members",
+          originCityId: null,
+          destinationCityId: null,
+          prescribedCargoId: null,
+          prescribedMassKg: null,
+          prescribedTrailerTypeId: null,
+          requiredDlcIds: [],
+        } satisfies DTO["EventStage2PublishedCreationInput"],
+        server.origin,
+      );
+      expect(published.status()).toBe(201);
+      const created = ((await published.json()) as DTO["EventStage2EnvelopeCreation"]).data;
+      if (!("event" in created)) throw new Error("STAGE_2_PUBLISHED_EVENT_MISSING");
+      const eventId = created.event.id;
+      cleanup = () => journey.cancel(manager.request, server.origin, eventId);
+
+      const publishedOnly = manager;
+      let draftReads = 0;
+      publishedOnly.on("request", (request) => {
+        if (
+          request.method() === "GET" &&
+          new URL(request.url()).pathname.startsWith("/api/v1/admin/events")
+        )
+          draftReads++;
+      });
+      const publishedOnlyList = publishedOnly.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname === "/api/v1/events",
+      );
+      await openEventsAs(
+        publishedOnly,
+        server.origin,
+        "/account/events?period=drafts&cursor=fictional-draft-cursor",
+        true,
+        false,
+        "events.manage",
+      );
+      const fallbackList = await publishedOnlyList;
+      expect(fallbackList.status()).toBe(200);
+      const fallbackSearch = new URL(fallbackList.url()).searchParams;
+      expect(fallbackSearch.has("locale")).toBe(true);
+      expect(fallbackSearch.get("period")).toBe("upcoming");
+      expect(fallbackSearch.has("cursor")).toBe(false);
+      await expect(
+        publishedOnly.getByRole("main").getByRole("link", { name: title, exact: true }),
+      ).toBeVisible();
+      await expect(publishedOnly.getByRole("button", { name: "Drafts", exact: true })).toHaveCount(
+        0,
+      );
+      await expect(
+        publishedOnly.getByRole("link", { name: "Create event", exact: true }),
+      ).toBeVisible();
+      expect(draftReads).toBe(0);
+
+      legacy = await staffContext();
+      await page.context().addCookies((await legacy.storageState()).cookies);
+      const legacyRead = page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname === "/api/v1/events",
+      );
+      await openEventsAs(
+        page,
+        legacyOrigin,
+        "/account/events?period=drafts&cursor=fictional-draft-cursor",
+        false,
+        false,
+        "events.manage",
+      );
+      const legacyList = await legacyRead;
+      expect(legacyList.status()).toBe(200);
+      const legacySearch = new URL(legacyList.url()).searchParams;
+      expect(legacySearch.has("locale")).toBe(false);
+      expect(legacySearch.get("period")).toBe("upcoming");
+      expect(legacySearch.has("cursor")).toBe(false);
+      await expect(
+        page.getByRole("main").getByRole("link", { name: title, exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("button", { name: "Drafts", exact: true })).toHaveCount(0);
+
+      let ownReads = 0;
+      const responsePath = `/api/v1/events/${eventId}/my-response`;
+      member.on("request", (request) => {
+        if (request.method() === "GET" && new URL(request.url()).pathname === responsePath)
+          ownReads++;
+      });
+      const firstList = member.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === "GET" &&
+          url.pathname === "/api/v1/events" &&
+          url.searchParams.get("locale") === "en"
+        );
+      });
+      const memberId = await openEventsAs(
+        member,
+        server.origin,
+        "/account/events",
+        true,
+        false,
+        "events.respond",
+      );
+      expect((await firstList).status()).toBe(200);
+      const memberMain = member.getByRole("main");
+      const card = memberMain.getByRole("listitem").filter({
+        has: member.getByRole("link", { name: title, exact: true }),
+      });
+      await expect(card).toContainText("TruckersMP");
+      await expect(card).toContainText("No DLC required");
+      await expect(card).toContainText("Participating: 0");
+      await expect(memberMain.getByRole("button", { name: "Drafts", exact: true })).toHaveCount(0);
+
+      const responseWritten = () =>
+        member.waitForResponse(
+          (response) =>
+            response.request().method() === "PUT" &&
+            new URL(response.url()).pathname === responsePath,
+        );
+      const going = responseWritten();
+      await card.getByRole("button", { name: "Going", exact: true }).click();
+      const goingResult = await going;
+      expect(goingResult.status()).toBe(200);
+      expect(goingResult.request().headers()["if-match"]).toBe('"v1"');
+      const goingEtag = goingResult.headers().etag;
+      expect(goingEtag).toMatch(/^"v[1-9][0-9]*"$/);
+      await expect(card.getByText("Response saved.", { exact: true })).toBeVisible();
+      await expect(card).toContainText("Participating: 1");
+
+      await card.getByRole("button", { name: "Can't go", exact: true }).click();
+      await card
+        .getByLabel("Private decline reason", { exact: true })
+        .fill("Fictional schedule conflict");
+      const decline = responseWritten();
+      await card.getByRole("button", { name: "Save response", exact: true }).click();
+      const declineResult = await decline;
+      expect(declineResult.status()).toBe(200);
+      expect(declineResult.request().headers()["if-match"]).toBe(goingEtag);
+      await expect(card.getByText("Response saved.", { exact: true })).toBeVisible();
+      await member.reload();
+      await expect(card).toContainText("Participating: 0");
+      await expect(card).toContainText("Can't attend: 1");
+      await expect(card).toContainText("Your response: Can't attend");
+      expect(ownReads).toBe(0);
+
+      const header = member.locator(".event-nearest");
+      await expect(header.getByRole("link", { name: new RegExp(title) })).toBeVisible();
+      const headerGoing = header.getByRole("button", { name: "Going", exact: true });
+      await card.getByRole("link", { name: title, exact: true }).click();
+      await expect(memberMain.getByRole("heading", { name: title, exact: true })).toBeVisible();
+      const detailResponse = memberMain.getByRole("group", { name: "Your response", exact: true });
+      const reset = responseWritten();
+      await detailResponse.getByRole("button", { name: "No answer", exact: true }).click();
+      const resetResult = await reset;
+      expect(resetResult.status()).toBe(200);
+      expect(resetResult.request().headers()["if-match"]).toBe(declineResult.headers().etag);
+      const resetEtag = resetResult.headers().etag;
+      expect(resetEtag).toMatch(/^"v[1-9][0-9]*"$/);
+      await expect(memberMain.getByText("Response saved.", { exact: true })).toBeVisible();
+      const detailOwnReads = ownReads;
+      const participants = memberMain.getByRole("region", { name: "Participants", exact: true });
+      const signedUp = participants.getByRole("region", { name: "Signed up", exact: true });
+      const selfLink = signedUp.locator(`a[href="/account/drivers/${memberId}"]`);
+      await expect(participants).toContainText("Participating: 0");
+      await expect(selfLink).toHaveCount(0);
+      const fromHeader = responseWritten();
+      await headerGoing.click();
+      const headerResult = await fromHeader;
+      expect(headerResult.status()).toBe(200);
+      expect(headerResult.request().headers()["if-match"]).toBe(resetEtag);
+      await expect(headerGoing).toHaveAttribute("aria-pressed", "true");
+      await expect(participants).toContainText("Participating: 1");
+      await expect(selfLink).toBeVisible();
+      expect(ownReads).toBe(detailOwnReads);
+
+      expect(journey.blockedRequests()).toBe(0);
+    } finally {
+      try {
+        await cleanup();
+      } finally {
+        try {
+          await legacy?.dispose();
+        } finally {
+          await journey.close();
+        }
+      }
+    }
+  },
+);
+
+test(
+  "real Stage 2 Continue opens and saves the same draft across reload",
+  browserCase(["@real"]),
+  async ({ browser }, info) => {
+    test.setTimeout(60000);
+    type DTO = components["schemas"];
+    const journey = stage2Journey(browser);
+    const { actor, post } = journey;
+    let cleanup = async () => {};
+
+    try {
+      const server = await journey.start(true);
+      const manager = await actor(
+        "browser@example.invalid",
+        "browser-identity-password",
+        server.origin,
+      );
+      const project = info.project.name.split("-")[0];
+      const member = await actor(
+        `browser-steam-${project}@example.invalid`,
+        `browser-steam-${project}`,
+        server.origin,
+      );
+      const draftTitle = `Fictional saved draft ${randomUUID().slice(0, 8)}`;
+      const draftDescription = "Synthetic saved description for direct draft entry.";
+      const saved = await post(
+        manager.request,
+        "/admin/events?locale=en",
+        {
+          draft: true,
+          title: draftTitle,
+          description: draftDescription,
+        } satisfies DTO["EventStage2DraftCreationInput"],
+        server.origin,
+      );
+      expect(saved.status()).toBe(201);
+      const draft = ((await saved.json()) as DTO["EventStage2EnvelopeCreation"]).data;
+      if (!("lifecycle" in draft) || draft.lifecycle !== "draft")
+        throw new Error("STAGE_2_SAVED_DRAFT_MISSING");
+      cleanup = () => journey.discard(manager.request, server.origin, draft.id);
+      const draftPath = `/api/v1/admin/events/drafts/${draft.id}`;
+      expect((await member.request.get(draftPath)).status()).toBe(403);
+
+      await openEventsAs(manager, server.origin, "/account/events", true, true, "events.manage");
+      const managerMain = manager.getByRole("main");
+      const period = managerMain.getByRole("group", { name: "Period", exact: true });
+      const drafts = period.getByRole("button", { name: "Drafts", exact: true });
+      await expect(drafts).toBeVisible();
+      const draftList = manager.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === "GET" &&
+          url.pathname === "/api/v1/admin/events" &&
+          url.searchParams.get("period") === "drafts"
+        );
+      });
+      await drafts.click();
+      expect((await draftList).status()).toBe(200);
+      await expect(drafts).toHaveAttribute("aria-pressed", "true");
+      const draftRow = managerMain.getByRole("listitem").filter({
+        has: manager.getByRole("heading", { name: draftTitle, exact: true }),
+      });
+      const draftRead = () =>
+        manager.waitForResponse(
+          (response) =>
+            response.request().method() === "GET" && new URL(response.url()).pathname === draftPath,
+        );
+      const resumedUrl = `${server.origin}/account/events/new?draftId=${draft.id}`;
+      const continued = draftRead();
+      await draftRow.getByRole("link", { name: "Continue", exact: true }).click();
+      const assertSavedDraft = async (expectedDescription: string) => {
+        await expect(manager).toHaveURL(resumedUrl);
+        await expect(
+          manager.getByRole("heading", { name: "Edit event draft", exact: true }),
+        ).toBeVisible();
+        await expect(manager.getByLabel("Event title", { exact: true })).toHaveValue(draftTitle);
+        await expect(manager.getByLabel("Description", { exact: true })).toHaveValue(
+          expectedDescription,
+        );
+      };
+      const continuedDraft = await continued;
+      expect(continuedDraft.status()).toBe(200);
+      const draftEtag = continuedDraft.headers().etag;
+      expect(draftEtag).toMatch(/^"v[1-9][0-9]*"$/);
+      await assertSavedDraft(draftDescription);
+      const revisedDescription = "Synthetic description revised in the saved draft editor.";
+      await manager.getByLabel("Description", { exact: true }).fill(revisedDescription);
+      const savedRevision = manager.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" && new URL(response.url()).pathname === draftPath,
+      );
+      await manager.getByRole("button", { name: "Save draft", exact: true }).click();
+      const patched = await savedRevision;
+      expect(patched.status()).toBe(200);
+      expect(patched.request().headers()["if-match"]).toBe(draftEtag);
+      const patchedEtag = patched.headers().etag;
+      expect(patchedEtag).toMatch(/^"v[1-9][0-9]*"$/);
+      expect(patchedEtag).not.toBe(draftEtag);
+      const revisedDraft = ((await patched.json()) as DTO["EventStage2EnvelopeDraft"]).data;
+      expect(revisedDraft.id).toBe(draft.id);
+      expect(revisedDraft.fields.description).toBe(revisedDescription);
+      await expect(manager.getByText("Draft saved.", { exact: true })).toBeVisible();
+      const reopened = draftRead();
+      await manager.reload();
+      const reopenedDraft = await reopened;
+      expect(reopenedDraft.status()).toBe(200);
+      expect(reopenedDraft.headers().etag).toBe(patchedEtag);
+      await assertSavedDraft(revisedDescription);
+      expect(journey.blockedRequests()).toBe(0);
+    } finally {
+      try {
+        await cleanup();
+      } finally {
+        await journey.close();
+      }
     }
   },
 );
