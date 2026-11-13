@@ -288,7 +288,7 @@ export function createTrips(
       data: { tripId, sourceRecordId: fact.sourceRecordId, factRevisionId: fact.factRevisionId },
     });
   }
-  // Most recent complete all-known trailer chain among this source trip's lower revisions.
+  // Most recent complete all-known trailer chain among all of this source trip's lower revisions.
   async function provenChain(tx: TxContext, sourceTripId: string, revision: number) {
     const rows = await c(tx)
       .select({ id: tripFacts.id })
@@ -302,17 +302,20 @@ export function createTrips(
         ),
       )
       .orderBy(sql`CAST(${sourceMessages.revision} AS UNSIGNED) DESC`)
-      .limit(10)
       .for("share");
-    const facts = await factsRepository.read(
-      tx,
-      rows.map((row) => row.id),
-      true,
-    );
-    for (const row of rows) {
-      const chain = facts.get(row.id)?.evidence.trailers;
-      if (!chain) throw new Error("SOURCE_FACT_MISSING");
-      if (provenTrailers(chain)) return chain;
+    // Revisions per source trip are few; read them in repository-sized batches, newest first.
+    for (let start = 0; start < rows.length; start += 100) {
+      const batch = rows.slice(start, start + 100),
+        facts = await factsRepository.read(
+          tx,
+          batch.map((row) => row.id),
+          true,
+        );
+      for (const row of batch) {
+        const chain = facts.get(row.id)?.evidence.trailers;
+        if (!chain) throw new Error("SOURCE_FACT_MISSING");
+        if (provenTrailers(chain)) return chain;
+      }
     }
     return null;
   }
@@ -515,8 +518,15 @@ export function createTrips(
     const newer = !existing || key.revision > Number(existing.latestRevision);
     // Any older revision of this exact source trip is a progression base, so one held
     // revision cannot freeze later ones. Revisions are decimal text and compare numerically.
+    // Only the composition that stores sources for assessment grants lineage; without it the
+    // strict rules apply.
     const [base] =
-      previous && existing && provider === "ets2telemetry" && previous.outcome === "open" && newer
+      ports.sourceStored &&
+      previous &&
+      existing &&
+      provider === "ets2telemetry" &&
+      previous.outcome === "open" &&
+      newer
         ? await c(tx)
             .select({ revision: sourceMessages.revision })
             .from(sourceMessages)

@@ -1419,6 +1419,27 @@ const stored = async (p: Telemetry) => {
   return { evidence, fact, children };
 };
 
+test("without source-stored assessment an open refresh keeps the strict trailer rule", async () => {
+  const { trips } = await listedTrips();
+  const opened = fixture("started");
+  opened.eventId = newId();
+  opened.source.tripId = newId();
+  opened.source.pluginSessionId = newId();
+  opened.snapshot.recordingCompleteness = "complete";
+  const first = await receive(opened, trips),
+    before = await state(first.tripId),
+    proven = await unit.run((tx) => trips.sourceEvidenceInTransaction(tx, first.sourceRecordId));
+  expect(proven?.trailers).toMatchObject({ complete: true, items: [{ status: "known" }] });
+  const next = structuredClone(opened);
+  next.eventId = newId();
+  next.revision = 2;
+  next.snapshot.trailers.complete = false;
+  await receive(next, trips);
+  const after = await state(first.tripId);
+  expect(after).toMatchObject({ currentFactId: before?.currentFactId, reviewHold: true });
+  expect(after?.reviewReasons).toContain("trailer_context_conflict");
+});
+
 test("telemetry recognizes a coupling by the first body type when the trailer id matches nothing", async () => {
   const { rows } = await listedTrips();
   const { evidence, fact, children } = await stored(

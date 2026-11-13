@@ -4366,3 +4366,38 @@ test.each([
     expect(stored?.reasonCodes).toContain("trailer_context_conflict");
   },
 );
+
+test("a changed body type is held against a proven chain older than many unproven complete revisions", async () => {
+  const who = await member(),
+    opened = payload("started");
+  opened.snapshot.recordingCompleteness = "complete";
+  const first = await receive(opened, who);
+  let latest = opened,
+    current: string | undefined;
+  // More complete chains with an unknown body type than any fixed lookup window.
+  for (let revision = 2; revision <= 13; revision++) {
+    const next = structuredClone(latest);
+    next.eventId = newId();
+    next.revision = revision;
+    measured(next, revision * 1000, revision);
+    const [trailer] = next.snapshot.trailers.items;
+    if (trailer) trailer.bodyType = { available: false, reason: "not-observed" };
+    const r = await receive(next, who);
+    current = await factOf(r);
+    expect((await state(first.tripId))?.currentFactId).toBe(current);
+    latest = next;
+  }
+  const changed = structuredClone(latest);
+  changed.eventId = newId();
+  changed.revision = 14;
+  const [trailer] = changed.snapshot.trailers.items;
+  if (trailer) trailer.bodyType = { available: true, value: "fixture_flatbed" };
+  const r = await receive(changed, who),
+    after = await state(first.tripId),
+    stored = await unit.run((tx) => tripsService.sourceEvidenceInTransaction(tx, r.sourceRecordId));
+  // Ingestion holds the revision; the open trip keeps its current fact. Assessment compares only
+  // the latest and current facts, so its own hold flag is not asserted here.
+  expect(after?.currentFactId).toBe(current);
+  expect(after?.currentFactId).not.toBe(stored?.factRevisionId);
+  expect(stored?.reasonCodes).toContain("trailer_context_conflict");
+});
