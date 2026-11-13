@@ -5,7 +5,6 @@ import { catalogLanguage } from "./support/catalogs.ts";
 import { eventFixture, eventId, mockEvents } from "./support/events.ts";
 import {
   coverCaption,
-  decoyCompanyId,
   detailsPath,
   eventPath,
   galleryLabel,
@@ -701,9 +700,9 @@ for (const locale of ["en", "ru"] as const) {
     `Stage 2 ${locale} event detail shows the structured route, load and gallery`,
     browserCase(["@layout"]),
     async ({ page }, info) => {
+      await page.addInitScript((language) => localStorage.setItem("vtc.locale", language), locale);
       const state = await mockStructuredDetail(page, locale, "driver");
       await page.goto(detailsPath);
-      await catalogLanguage(page, locale);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.member.event.title);
       const gallery = page.getByRole("region", { name: galleryLabel[locale] });
       await expect(gallery.locator("figcaption")).toHaveText([
@@ -720,6 +719,7 @@ for (const locale of ["en", "ru"] as const) {
       ).toBeVisible();
       await expect(route.getByText("Fictional Plateau Depot")).toBeVisible();
       await route.scrollIntoViewIfNeeded();
+      await expect(route.locator(".company-logo img")).toHaveCount(1);
       await expect(route.locator(".company-logo img")).toBeVisible();
       await page.evaluate(() => window.scrollTo(0, 0));
       await expect(page.getByText("TruckersMP", { exact: true })).toBeVisible();
@@ -746,17 +746,29 @@ for (const locale of ["en", "ru"] as const) {
         locale === "en" ? "Can't attend: 1" : "Не смогут: 1",
       );
       expect(state.requests.some((url) => url.pathname.endsWith("/response-counts"))).toBe(false);
-      expect(state.requests.some((url) => url.pathname.includes(decoyCompanyId))).toBe(false);
-      expect(
-        state.requests.some(
-          (url) =>
-            url.pathname.endsWith("/catalogs/depots") &&
-            url.searchParams.get("game") === "ets2" &&
-            url.searchParams.get("includeHidden") === "true" &&
-            url.searchParams.get("cityId") === state.member.event.origin?.entityId &&
-            url.searchParams.get("locale") === locale,
-        ),
-      ).toBe(true);
+      const depotReads = state.requests
+        .filter((url) => url.pathname === "/api/v1/catalogs/depots")
+        .map((url) => Object.fromEntries(url.searchParams));
+      const { origin, destination, originDepot, destinationDepot, game } = state.member.event;
+      expect(depotReads).toHaveLength(2);
+      expect(depotReads).toEqual(
+        expect.arrayContaining([
+          {
+            game,
+            cityId: origin?.entityId,
+            depotId: originDepot?.id,
+            includeHidden: "true",
+            locale,
+          },
+          {
+            game,
+            cityId: destination?.entityId,
+            depotId: destinationDepot?.id,
+            includeHidden: "true",
+            locale,
+          },
+        ]),
+      );
       expect(
         state.requests.some(
           (url) => url.pathname.endsWith(eventPath) && url.searchParams.get("locale") === locale,

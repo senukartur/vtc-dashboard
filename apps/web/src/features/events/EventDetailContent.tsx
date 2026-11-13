@@ -1,7 +1,8 @@
-import { useEffect, useId } from "react";
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { useCatalogPages } from "../../shared/catalog-selectors/queries.js";
+import { catalogParams } from "../../shared/catalog-selectors/contracts.js";
+import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
 import { Card } from "../../shared/ui/primitives.js";
 import { CompanyLogo } from "../catalogs/CompanyLogo.js";
 import { depotListSchema } from "../catalogs/transport.js";
@@ -90,33 +91,18 @@ export function EventSchedule({
 function DepotLogo({
   game,
   cityId,
-  depot,
+  depotId,
 }: {
   game: DetailEvent["game"];
   cityId: string;
-  depot: NonNullable<DetailEvent["originDepot"]>;
+  depotId: string;
 }) {
   const locale = useDetailLocale();
-  const pages = useCatalogPages(
-    ["event-detail-depot", depot.id],
-    "/catalogs/depots",
-    { game, cityId, search: depot.code, includeHidden: "true", locale },
-    depotListSchema,
+  const path = `/catalogs/depots?${catalogParams({ game, cityId, depotId, includeHidden: "true", locale })}`;
+  const query = useCatalogQuery(["event-detail-depot", path], path, depotListSchema);
+  const row = query.data?.data.data.items.find(
+    (item) => item.id === depotId && item.game === game && item.city.id === cityId,
   );
-  const row = pages.data?.pages
-    .flatMap((page) => page.data.data.items)
-    .find(
-      (row) =>
-        row.id === depot.id &&
-        row.game === game &&
-        row.city.id === cityId &&
-        row.company.code === depot.code,
-    );
-  const { fetchNextPage, hasNextPage, isFetching, isFetchNextPageError } = pages;
-  useEffect(() => {
-    if (!row && hasNextPage && !isFetching && !isFetchNextPageError) void fetchNextPage();
-  }, [row, fetchNextPage, hasNextPage, isFetching, isFetchNextPageError]);
-
   return row ? <CompanyLogo companyId={row.company.id} logo={row.company.logo} /> : null;
 }
 
@@ -151,7 +137,9 @@ function RouteStop({
               <span>{depot.name}</span>
               <span className="muted">{depot.code}</span>
             </span>
-            {!publicView && city && <DepotLogo game={game} cityId={city.entityId} depot={depot} />}
+            {!publicView && city && (
+              <DepotLogo game={game} cityId={city.entityId} depotId={depot.id} />
+            )}
           </>
         )}
       </dd>

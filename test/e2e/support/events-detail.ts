@@ -14,7 +14,6 @@ export const detailsPath = `/account${eventPath}`;
 const secondaryId = "e1320000-0000-4000-8000-000000000091";
 const earlierId = "e1320000-0000-4000-8000-000000000092";
 const companyId = "e1320000-0000-4000-8000-000000000093";
-export const decoyCompanyId = "e1320000-0000-4000-8000-000000000094";
 const finishDepotId = "e1320000-0000-4000-8000-000000000095";
 const declinerId = "e1320000-0000-4000-8000-000000000096";
 export const galleryLabel = { en: "Gallery", ru: "Галерея" };
@@ -255,12 +254,23 @@ export async function mockStructuredDetail(page: Page, locale: Locale, role?: Ro
       });
     }
     if (role && path === "/catalogs/depots") {
-      const company = (id: string) => ({
-        id,
-        code: originDepot.code,
-        label: { ...origin, entityId: id, label: originDepot.name },
-        logo: { version: logoVersion, byteLength: logo.length },
-      });
+      const params = url.searchParams;
+      const depotId = params.get("depotId");
+      const cityId = params.get("cityId");
+      if (
+        !depotId ||
+        !cityId ||
+        params.has("search") ||
+        params.has("cursor") ||
+        params.get("game") !== event.game ||
+        params.get("includeHidden") !== "true" ||
+        params.get("locale") !== locale
+      )
+        return route.fulfill({ status: 422 });
+
+      if (depotId !== originDepot.id || cityId !== origin.entityId)
+        return envelope({ items: [], nextCursor: null, total: 0 });
+
       const depot = {
         id: originDepot.id,
         hidden: true,
@@ -268,20 +278,14 @@ export async function mockStructuredDetail(page: Page, locale: Locale, role?: Ro
         dlc: null,
         city: { id: origin.entityId, code: "fictional_harbour", label: origin },
         game: event.game,
+        company: {
+          id: companyId,
+          code: originDepot.code,
+          label: { ...origin, entityId: companyId, label: originDepot.name },
+          logo: { version: logoVersion, byteLength: logo.length },
+        },
       };
-      if (url.searchParams.get("search") !== originDepot.code)
-        return envelope({ items: [], nextCursor: null, total: 0 });
-      return url.searchParams.has("cursor")
-        ? envelope({
-            items: [{ ...depot, company: company(companyId) }],
-            nextCursor: null,
-            total: 2,
-          })
-        : envelope({
-            items: [{ ...depot, id: earlierId, company: company(decoyCompanyId) }],
-            nextCursor: "fictional-depot-cursor",
-            total: 2,
-          });
+      return envelope({ items: [depot], nextCursor: null, total: 1 });
     }
     if (role && path === `/catalogs/companies/${companyId}/logo`)
       return route.fulfill({ body: logo, contentType: "image/png" });
