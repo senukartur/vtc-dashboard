@@ -1,0 +1,1 @@
+ALTER TABLE `qualification_states` ADD `eligibility_evaluated_at` datetime(3);
