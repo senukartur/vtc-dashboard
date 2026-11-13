@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { cityNameText } from "../../shared/catalog-selectors/native-name.js";
+import { decodeIncomplete } from "../../shared/ui/date-time.js";
 import { Button, Card, Input, Label } from "../../shared/ui/primitives.js";
 import { Confirm, Failure, Fields, State } from "../trips/components.js";
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
@@ -259,6 +260,8 @@ function ManualEditor({
     [target, setTarget] = useState<DTO["ManualTelemetryTarget"] | null>(draft?.targetTrip ?? null),
     [ready, setReady] = useState(false),
     [invalid, setInvalid] = useState(false),
+    // An incomplete time shows its error only once focus left that field or a save was tried.
+    [timesLeft, setTimesLeft] = useState({ startedAt: false, completedAt: false }),
     [saved, setSaved] = useState(
       !draftEditor?.focusHeading && location.state?.manualDraftSaved === true,
     );
@@ -330,6 +333,12 @@ function ManualEditor({
   const timeErrors = submissionTimeErrors(startedAt, completedAt, Date.now());
   const startError = times.startedAt && !startedAt ? "referenceInvalid" : timeErrors.startedAt;
   const endError = times.completedAt && !completedAt ? "referenceInvalid" : timeErrors.completedAt;
+  const shownTimeError = (name: "startedAt" | "completedAt") =>
+    !timesLeft[name] && decodeIncomplete(times[name])
+      ? undefined
+      : name === "startedAt"
+        ? startError
+        : endError;
   const damageInvalid = damage !== "" && cargoDamagePercent === undefined;
   const companyPending = originCompany.blocked || destinationCompany.blocked;
   const partialInvalid =
@@ -355,6 +364,7 @@ function ManualEditor({
   if (cargoDamagePercent === undefined) delete submission.cargoDamagePercent;
   async function save() {
     if (draftBlocked || companyPending) return;
+    setTimesLeft({ startedAt: true, completedAt: true });
     const input: DTO["ManualDraftWriteInput"] = { fields: submission, targetTrip: target };
     if (partialInvalid || !schema("ManualDraftWriteInput").safeParse(input).success) {
       setInvalid(true);
@@ -515,7 +525,12 @@ function ManualEditor({
                   value={times[name]}
                   noteId={referenceNoteId}
                   timezone={timezone}
-                  error={name === "startedAt" ? startError : endError}
+                  error={shownTimeError(name)}
+                  onLeave={() =>
+                    setTimesLeft((previous) =>
+                      previous[name] ? previous : { ...previous, [name]: true },
+                    )
+                  }
                   onChange={(value) => {
                     setTimes((previous) => ({ ...previous, [name]: value }));
                     changed();

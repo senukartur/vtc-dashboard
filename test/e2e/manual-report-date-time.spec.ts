@@ -133,6 +133,23 @@ test(
     await expect(startEn.segment("hours")).toHaveValue("09");
     await expect(startEn.segment("minutes")).toHaveValue("30");
 
+    // Typing into a filled segment replaces it, whether Tab or Shift+Tab reached it.
+    await startEn.date.focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await expect(startEn.segment("hours")).toBeFocused();
+    await page.keyboard.type("7");
+    await expect(startEn.segment("hours")).toHaveValue("07");
+    await expect(startEn.segment("minutes")).toBeFocused();
+    await page.keyboard.type("45");
+    await expect(startEn.segment("minutes")).toHaveValue("45");
+    await page.keyboard.press("Shift+Tab");
+    await expect(startEn.segment("hours")).toBeFocused();
+    await page.keyboard.type("18");
+    await expect(startEn.segment("hours")).toHaveValue("18");
+    await expect(startEn.segment("minutes")).toBeFocused();
+    await expect(startEn.segment("minutes")).toHaveValue("45");
+
     const end = dateTimeField(page, "Trip completion");
     await expect(end.date).toHaveAttribute("placeholder", "mm/dd/yyyy");
     // Without a typed date the calendar opens on the account-zone today.
@@ -165,7 +182,7 @@ test(
     await expect
       .poll(() => submitted()?.fields)
       .toMatchObject({
-        startedAt: "2026-11-03T19:30:00.000Z",
+        startedAt: "2026-11-04T04:45:00.000Z",
         completedAt: "2026-11-04T07:05:00.000Z",
       });
   },
@@ -182,6 +199,23 @@ test(
       name: "Перед отправкой заполните или исправьте:",
       exact: true,
     });
+    const fieldAlert = page.getByRole("alert").filter({ hasText: "Укажите существующие дату" });
+    // A partial entry is not announced while it is still being typed, even in the calendar
+    // button; leaving the field shows the existing error.
+    await start.date.focus();
+    await page.keyboard.type("04.1");
+    await expect(start.date).not.toHaveAttribute("aria-invalid");
+    await page.keyboard.press("Tab");
+    await expect(start.calendarButton).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(start.segment("hours")).toBeFocused();
+    await expect(fieldAlert).toHaveCount(0);
+    await expect(missing).toContainText("Начало рейса");
+    await page.getByLabel("Ущерб грузу, % (необязательно)", { exact: true }).focus();
+    await expect(fieldAlert).toHaveCount(1);
+    await expect(start.date).toHaveAttribute("aria-invalid", "true");
+    await expect(start.segment("hours")).toHaveAttribute("aria-invalid", "true");
+
     await start.date.fill("31.02.2026");
     await start.segment("hours").fill("10");
     await start.segment("minutes").fill("00");

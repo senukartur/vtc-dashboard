@@ -19,6 +19,7 @@ export function ReferenceTimeField({
   timezone,
   error,
   onChange,
+  onLeave,
 }: {
   name: "startedAt" | "completedAt";
   value: string;
@@ -27,11 +28,26 @@ export function ReferenceTimeField({
   timezone: string;
   error: "referenceInvalid" | "referenceFuture" | "referenceOrder" | undefined;
   onChange: (value: string) => void;
+  /** Focus left the date, calendar and time controls of this field. */
+  onLeave: () => void;
 }) {
   const { t } = useTranslation("trips");
   const errorId = `manual-${name}-error`;
   return (
-    <div className="field">
+    // biome-ignore lint/a11y/noStaticElementInteractions: it only observes focus leaving its controls.
+    <div
+      className="field"
+      onBlur={(event) => {
+        // Focus moving between the field's controls or into its portaled calendar stays inside.
+        const next = event.relatedTarget;
+        if (
+          next instanceof Element &&
+          (event.currentTarget.contains(next) || next.closest(".date-time-popover"))
+        )
+          return;
+        onLeave();
+      }}
+    >
       <Label htmlFor={name}>{t(name)}</Label>
       <DateTimeField
         id={name}
