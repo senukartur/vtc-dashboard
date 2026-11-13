@@ -542,7 +542,12 @@ export async function mockDashboardRoutes(
     if (endpoint === "event") {
       return route.fulfill({ json: makeOptionalEventFixture(state.upcoming) });
     }
-    if (endpoint === "summary") return route.fulfill({ json: { data: summary, meta } });
+    if (endpoint === "summary") {
+      const { reviewQueue, ...sections } = summary;
+      return route.fulfill({
+        json: { data: { ...sections, legacyReviewQueue: reviewQueue }, meta },
+      });
+    }
     if (endpoint === "stats") {
       return route.fulfill({ json: makeCompanyStatsFixture(state.reportingTimezone) });
     }

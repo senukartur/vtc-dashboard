@@ -50,9 +50,10 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "e
       return route.fulfill({ json: { data: eventFixture(), meta } });
     if (path === summaryPath) {
       state.summaryReads += 1;
+      const { reviewQueue, ...sections } = state.summary;
       const response =
         state.summaryStatus === 200
-          ? { json: { data: state.summary, meta } }
+          ? { json: { data: { ...sections, legacyReviewQueue: reviewQueue }, meta } }
           : error(state.summaryStatus);
       state.onSummary?.();
       await state.summaryGate;

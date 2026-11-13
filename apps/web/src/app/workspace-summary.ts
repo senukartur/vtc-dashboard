@@ -9,7 +9,23 @@ import { workspaceSummaryKey, workspaceSummaryPrefix } from "./workspace-summary
 
 export { refreshWorkspaceSummary } from "./workspace-summary-cache.js";
 
-export type WorkspaceSummary = DTO["WorkspaceSummary"];
+export type WorkspaceSummary = DTO["WorkspaceSummary"] & {
+  dispatch?: "stage3" | "legacy";
+  promotionsReady?: DTO["WorkspaceStage3Summary"]["promotionsReady"];
+};
+
+export function workspaceSummary(data: DTO["WorkspaceStage3Summary"]): WorkspaceSummary {
+  const { reviewQueue: staged, legacyReviewQueue: legacy, ...sections } = data;
+  if (staged && legacy) throw new AccountFailure("unavailable");
+  if (staged)
+    return {
+      ...sections,
+      dispatch: "stage3",
+      reviewQueue: { count: staged.waitingCount, oldestAgeSeconds: staged.oldestAgeSeconds },
+    };
+  if (legacy) return { ...sections, dispatch: "legacy", reviewQueue: legacy };
+  return sections;
+}
 
 export function useWorkspaceSummary({ refreshOnFocus = false } = {}) {
   const client = useQueryClient();
@@ -32,8 +48,12 @@ export function useWorkspaceSummary({ refreshOnFocus = false } = {}) {
     refetchOnReconnect: false,
     queryFn: async ({ signal }) => {
       try {
-        return (await dashboardRead("/me/workspace-summary", "EnvelopeWorkspaceSummary", signal))
-          .data.data;
+        const result = await dashboardRead(
+          "/me/workspace-summary?view=stage3",
+          "WorkspaceStage3SummaryEnvelope",
+          signal,
+        );
+        return workspaceSummary(result.data.data);
       } catch (error) {
         if (!signal.aborted && error instanceof AccountFailure) {
           if (error.kind === "unauthorized") void session.confirmSessionLoss(signal);
