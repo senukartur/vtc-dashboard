@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableName, isNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, getTableName, isNull, lt, or, sql } from "drizzle-orm";
 import { mysqlTable } from "drizzle-orm/mysql-core";
 import {
   auditEntries,
@@ -31,6 +31,74 @@ type AuditCodes = {
 };
 
 export type AuditInput = AuditMetadata & ((AuditCodes & { details?: never }) | AuditDetailRecord);
+
+interface AuditPage {
+  companyId: string;
+  limit: number;
+  after: { id: string; time: string | null } | null;
+}
+
+const auditListFields = {
+  id: auditEntries.id,
+  actorId: auditEntries.actorId,
+  action: auditEntries.operation,
+  subjectId: auditEntries.subjectId,
+  occurredAt: auditEntries.occurredAt,
+};
+
+function auditPagePredicate(input: AuditPage, action?: string) {
+  applicationId(input.companyId);
+  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 101)
+    throw new Error("AUDIT_QUERY_BOUND_EXCEEDED");
+  if (input.after) {
+    applicationId(input.after.id);
+    utcDateTime(input.after.time as string);
+  }
+  return and(
+    // This single-company product also retains old module entries without a company reference.
+    or(eq(auditEntries.companyId, input.companyId), isNull(auditEntries.companyId)),
+    input.after
+      ? or(
+          lt(auditEntries.occurredAt, input.after.time as string),
+          and(
+            eq(auditEntries.occurredAt, input.after.time as string),
+            lt(auditEntries.id, input.after.id),
+          ),
+        )
+      : undefined,
+    action === undefined
+      ? undefined
+      : sql`cast(${auditEntries.operation} as binary) = cast(${action} as binary)`,
+  );
+}
+
+type ReadableDetails = {
+  [Record in AuditDetailRecord as Record["operation"]]: {
+    action: Record["operation"];
+    objectType: Record["subjectKind"];
+    details: Record["details"];
+  };
+}[AuditDetailRecord["operation"]];
+
+function readableDetails(
+  action: AuditCodes["operation"],
+  objectType: AuditCodes["subjectKind"],
+  raw: unknown,
+) {
+  if (raw !== null) {
+    try {
+      // The allowlist checks the action, subject and both snapshots together.
+      return {
+        action,
+        objectType,
+        details: safeAuditDetails(action, objectType, raw),
+      } as ReadableDetails;
+    } catch {
+      // An unsupported or malformed historical snapshot must not hide its audit row.
+    }
+  }
+  return { action, objectType, details: null };
+}
 
 // Drizzle includes all table columns in INSERT. This projection keeps detail-free writes
 // compatible with the published pre-Stage 3 schema and its migration-prefix tests.
@@ -85,48 +153,34 @@ function safeInput(raw: AuditInput): AuditMetadata & AuditCodes & { details?: Au
 export function createAudit(unitOfWork: UnitOfWork) {
   return {
     // The caller must authorize company administration on this same transaction first.
-    async list(
-      tx: TxContext,
-      input: {
-        companyId: string;
-        limit: number;
-        after: { id: string; time: string | null } | null;
-      },
-    ) {
-      applicationId(input.companyId);
-      if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 101)
-        throw new Error("AUDIT_QUERY_BOUND_EXCEEDED");
-      if (input.after) {
-        applicationId(input.after.id);
-        utcDateTime(input.after.time as string);
-      }
+    async list(tx: TxContext, input: AuditPage) {
       return unitOfWork
         .client(tx)
-        .select({
-          id: auditEntries.id,
-          actorId: auditEntries.actorId,
-          action: auditEntries.operation,
-          subjectId: auditEntries.subjectId,
-          occurredAt: auditEntries.occurredAt,
-        })
+        .select(auditListFields)
         .from(auditEntries)
-        .where(
-          and(
-            // This single-company product also retains old module entries without a company reference.
-            or(eq(auditEntries.companyId, input.companyId), isNull(auditEntries.companyId)),
-            input.after
-              ? or(
-                  lt(auditEntries.occurredAt, input.after.time as string),
-                  and(
-                    eq(auditEntries.occurredAt, input.after.time as string),
-                    lt(auditEntries.id, input.after.id),
-                  ),
-                )
-              : undefined,
-          ),
-        )
+        .where(auditPagePredicate(input))
         .orderBy(desc(auditEntries.occurredAt), desc(auditEntries.id))
         .limit(input.limit);
+    },
+    // Same authorization requirement as list. Keep legacy reads independent of the details column.
+    async listStage3(tx: TxContext, input: AuditPage & { action?: string }) {
+      if (input.action !== undefined && (input.action.length < 1 || [...input.action].length > 48))
+        throw new Error("AUDIT_QUERY_BOUND_EXCEEDED");
+      const rows = await unitOfWork
+        .client(tx)
+        .select({
+          ...auditListFields,
+          objectType: auditEntries.subjectKind,
+          details: auditEntries.details,
+        })
+        .from(auditEntries)
+        .where(auditPagePredicate(input, input.action))
+        .orderBy(desc(auditEntries.occurredAt), desc(auditEntries.id))
+        .limit(input.limit);
+      return rows.map(({ action, objectType, details, ...row }) => ({
+        ...row,
+        ...readableDetails(action, objectType, details),
+      }));
     },
     async append(tx: TxContext, input: AuditInput): Promise<string> {
       const client = unitOfWork.client(tx);
