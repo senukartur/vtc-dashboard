@@ -77,6 +77,7 @@ export function EventQuickResponse({
         <Button
           type="button"
           variant="outline"
+          size={compact ? "xs" : "sm"}
           aria-pressed={view.response === "participating" && !declining}
           aria-disabled={disabled || undefined}
           onClick={() => void going()}
