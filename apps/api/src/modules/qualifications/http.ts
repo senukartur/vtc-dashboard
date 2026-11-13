@@ -1,6 +1,6 @@
 import type { components } from "@vtc/contracts";
 import { applicationId } from "@vtc/db";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { csrfProtection } from "../identity/http.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { Game } from "./initialization.js";
@@ -9,6 +9,14 @@ import type { Qualifications } from "./service.js";
 
 type S = components["schemas"];
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
+const memberResponses = {
+  legacy: ref("EnvelopeListMemberSummary"),
+  stage3: ref("QualificationStage3MemberSearchListEnvelope"),
+};
+const actionResponses = {
+  legacy: ref("EnvelopeListQualificationActionHistory"),
+  stage3: ref("QualificationStage3ActionHistoryListEnvelope"),
+};
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
   type: "object",
   properties,
@@ -21,6 +29,7 @@ const id = {
     pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
   },
   game = { type: "string", enum: ["ets2", "ats"] },
+  view = { type: "string", const: "stage3" },
   page = {
     limit: { type: "integer", minimum: 1, maximum: 100 },
     cursor: { type: "string", minLength: 1, maxLength: 2048 },
@@ -35,7 +44,11 @@ export async function registerQualificationRoutes(
   const owned = (path: string) =>
     path.startsWith("/api/v1/qualification-levels") ||
     path.startsWith("/api/v1/admin/qualification-levels") ||
-    path === "/api/v1/admin/qualification-members" ||
+    [
+      "/api/v1/admin/qualification-members",
+      "/api/v1/admin/promotion-candidates",
+      "/api/v1/admin/promotion-history",
+    ].includes(path) ||
     path === "/api/v1/admin/qualification-rule-previews" ||
     /^\/api\/v1\/(?:admin\/)?members\/:memberId\/(?:qualification-progress|qualification-assignments|qualification-action-history|promotions)$/.test(
       path,
@@ -90,13 +103,62 @@ export async function registerQualificationRoutes(
     data,
     meta: { requestId: request.id },
   });
-  app.get<{ Querystring: Page }>(
+  function selectResponse(reply: FastifyReply, schema: ReturnType<typeof ref>) {
+    // The list variants overlap on an empty page. Validate the requested representation explicitly.
+    reply.serializer(reply.compileSerializationSchema(schema));
+  }
+  app.get<{ Querystring: Page & { view?: "stage3"; search?: string } }>(
     "/api/v1/admin/qualification-members",
     {
-      schema: { querystring: object(page), response: { 200: ref("EnvelopeListMemberSummary") } },
+      schema: {
+        querystring: {
+          anyOf: [
+            object(page),
+            object(
+              {
+                ...page,
+                view,
+                search: { type: "string", minLength: 1, maxLength: 128, pattern: "\\S" },
+              },
+              ["view"],
+            ),
+          ],
+        },
+      },
+    },
+    async (request, reply) => {
+      const result = await qualifications.members(await actor(request), request.query);
+      selectResponse(reply, memberResponses[request.query.view ?? "legacy"]);
+      return envelope(request, result);
+    },
+  );
+  app.get<{ Querystring: Page & { game: Game; status?: "eligible" | "all" } }>(
+    "/api/v1/admin/promotion-candidates",
+    {
+      schema: {
+        querystring: object(
+          { ...page, game, status: { type: "string", enum: ["eligible", "all"] } },
+          ["game"],
+        ),
+        response: { 200: ref("QualificationStage3PromotionCandidateListEnvelope") },
+      },
     },
     async (request) =>
-      envelope(request, await qualifications.members(await actor(request), request.query)),
+      envelope(
+        request,
+        await qualifications.promotionCandidates(await actor(request), request.query),
+      ),
+  );
+  app.get<{ Querystring: Page & { game?: Game; memberId?: string } }>(
+    "/api/v1/admin/promotion-history",
+    {
+      schema: {
+        querystring: object({ ...page, game, memberId: id }),
+        response: { 200: ref("QualificationStage3PromotionHistoryListEnvelope") },
+      },
+    },
+    async (request) =>
+      envelope(request, await qualifications.promotionHistory(await actor(request), request.query)),
   );
   app.post<{ Body: S["QualificationPreviewInput"] }>(
     "/api/v1/admin/qualification-rule-previews",
@@ -111,13 +173,12 @@ export async function registerQualificationRoutes(
     async (request) =>
       envelope(request, await qualifications.preview(await actor(request), request.body)),
   );
-  app.get<{ Params: { memberId: string }; Querystring: Page & { game: Game } }>(
+  app.get<{ Params: { memberId: string }; Querystring: Page & { game: Game; view?: "stage3" } }>(
     "/api/v1/admin/members/:memberId/qualification-action-history",
     {
       schema: {
         params: object({ memberId: id }, ["memberId"]),
-        querystring: object({ ...page, game }, ["game"]),
-        response: { 200: ref("EnvelopeListQualificationActionHistory") },
+        querystring: object({ ...page, game, view }, ["game"]),
       },
     },
     async (request, reply) => {
@@ -128,6 +189,7 @@ export async function registerQualificationRoutes(
         request.query,
       );
       reply.header("ETag", `"v${result.version}"`);
+      selectResponse(reply, actionResponses[request.query.view ?? "legacy"]);
       return envelope(request, result.data);
     },
   );

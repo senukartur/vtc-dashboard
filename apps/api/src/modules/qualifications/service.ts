@@ -42,6 +42,13 @@ import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import type { ContributionChange } from "../trips/contributions.js";
 import type { Trips } from "../trips/service.js";
 import { createAssignmentWriter } from "./assignment-writer.js";
+import {
+  type CompanyHistoryFilters,
+  createCompanyHistory,
+  qualificationActor,
+  qualificationMembersById,
+} from "./company-history.js";
+import { createEligibility, nextLevel, promotionEligible, successor } from "./eligibility.js";
 import type { Game } from "./initialization.js";
 import { type Page, pagination } from "./pagination.js";
 import { previewRules, validateDraftRules } from "./preview.js";
@@ -49,16 +56,26 @@ import { previewRules, validateDraftRules } from "./preview.js";
 type S = components["schemas"];
 type Assignment = typeof qualificationAssignments.$inferSelect;
 type Level = typeof qualificationLevels.$inferSelect;
-export function nextLevel(code: Level["code"]): Level["code"] | null {
-  const position = levelCodes.indexOf(code);
-  return position < 0 ? null : (levelCodes[position + 1] ?? null);
-}
+
+export { nextLevel } from "./eligibility.js";
 
 export interface QualificationsConfig {
   cursorKey: string;
+  eligibilityTrackingSince?: string;
 }
-export function validateQualificationsConfig(config: QualificationsConfig) {
+export function validateEligibilityTrackingSince(since: string, instant = new Date()) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(since) ||
+    utcIso(utcDateTime(since)) !== since ||
+    since > instant.toISOString()
+  )
+    throw new Error("INVALID_ELIGIBILITY_TRACKING_SINCE");
+}
+
+export function validateQualificationsConfig(config: QualificationsConfig, instant?: Date) {
   if (!/^[0-9a-f]{64}$/.test(config.cursorKey)) throw new Error("INVALID_QUALIFICATIONS_CONFIG");
+  if (config.eligibilityTrackingSince !== undefined)
+    validateEligibilityTrackingSince(config.eligibilityTrackingSince, instant);
 }
 interface Ports {
   identity: Pick<
@@ -80,12 +97,24 @@ export function createQualifications(
   ports: Ports,
   now = () => new Date(),
 ) {
-  validateQualificationsConfig(config);
+  validateQualificationsConfig(
+    config,
+    config.eligibilityTrackingSince === undefined ? undefined : now(),
+  );
   const c = (tx: TxContext) => unit.client(tx),
     at = () => now().toISOString(),
     audit = createAudit(unit),
     outbox = ports.events ?? createOutbox(unit),
-    page = pagination(config.cursorKey);
+    page = pagination(config.cursorKey),
+    companyHistory = createCompanyHistory(unit, ports.identity),
+    eligibility = createEligibility(
+      unit,
+      ports.trips.contributions,
+      ports.identity,
+      config.eligibilityTrackingSince,
+    );
+  const tracking = (instant: string) =>
+    config.eligibilityTrackingSince !== undefined && instant >= config.eligibilityTrackingSince;
   function game(value: string): asserts value is Game {
     if (!["ets2", "ats"].includes(value)) throw identityError(422);
   }
@@ -144,7 +173,10 @@ export function createQualifications(
   }
   async function state(tx: TxContext, userId: string, selectedGame: Game) {
     let [row] = await c(tx)
-      .select()
+      .select({
+        assignmentId: qualificationStates.assignmentId,
+        version: qualificationStates.version,
+      })
       .from(qualificationStates)
       .where(
         and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, selectedGame)),
@@ -155,7 +187,10 @@ export function createQualifications(
         .insert(qualificationStates)
         .values({ userId, game: selectedGame, assignmentId: null, version: 1 });
       [row] = await c(tx)
-        .select()
+        .select({
+          assignmentId: qualificationStates.assignmentId,
+          version: qualificationStates.version,
+        })
         .from(qualificationStates)
         .where(
           and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, selectedGame)),
@@ -194,19 +229,6 @@ export function createQualifications(
       levelId: row.levelId,
       assignedAt: row.assignedAt,
     };
-  }
-  async function actors(tx: TxContext, ids: (string | null)[]) {
-    const unique = [...new Set(ids.filter((id): id is string => id !== null))].sort();
-    const names = new Map<string, string>();
-    for (let offset = 0; offset < unique.length; offset += 100) {
-      const members = await ports.identity.memberSummariesInTransaction(
-        tx,
-        unique.slice(offset, offset + 100),
-      );
-      for (const [id, member] of members) names.set(id, member.nickname);
-    }
-    return (id: string | null): S["QualificationActionActor"] | null =>
-      id === null ? null : { id, nickname: names.get(id) ?? null };
   }
   async function levelDto(tx: TxContext, row: Level): Promise<S["QualificationLevel"]> {
     const rule = await ruleAt(tx, row.id, at());
@@ -362,17 +384,16 @@ export function createQualifications(
       .for("update");
     if (!assignment || assignment.endedAt !== null || assignment.assignedAt > instant)
       throw identityError(409, "SETUP_REQUIRED");
-    const selected = await level(tx, assignment.levelId),
+    const gameLevels = await eligibility.levels(tx, selectedGame);
+    if (!gameLevels.some((item) => item.id === assignment.levelId)) throw identityError(404);
+    const next = successor(gameLevels, selectedGame, assignment.levelId),
       rule = await ruleAt(tx, assignment.levelId, instant),
       totals = await ports.trips.contributions.totals(tx, assignment.id);
     const requirements = {
       requiredTrips: rule?.requiredTrips ?? null,
       requiredDistanceM: rule?.requiredDistanceM == null ? null : decimal(rule.requiredDistanceM),
     };
-    const eligible =
-      nextLevel(selected.code) !== null &&
-      !!rule &&
-      evaluateQualificationProgress(requirements, totals).eligibleForPromotion;
+    const eligible = promotionEligible(next !== null, rule, totals);
     const data: S["ProgressPublic"] = {
       assignment: assignmentDto(assignment),
       acceptedTrips: totals.completedTrips,
@@ -425,7 +446,12 @@ export function createQualifications(
     endedAt: string | null,
     text: string,
   ) {
-    const result = await createAssignmentWriter(unit, outbox, at)(tx, actor, {
+    const result = await createAssignmentWriter(
+      unit,
+      outbox,
+      at,
+      tracking(assignedAt),
+    )(tx, actor, {
       userId,
       game: selectedGame,
       levelId,
@@ -438,7 +464,7 @@ export function createQualifications(
   }
 
   async function prepare(tx: TxContext, owners: { ownerId: string; game: Game }[], actor?: Actor) {
-    await ports.identity.qualificationContextInTransaction(
+    const authority = await ports.identity.qualificationContextInTransaction(
       tx,
       [...new Set(owners.map((r) => r.ownerId))],
       actor,
@@ -461,11 +487,20 @@ export function createQualifications(
         .orderBy(asc(qualificationAssignments.id))
         .for("update");
     }
+    return authority;
   }
   return {
     config,
     nextLevel,
-    prepareInTransaction: prepare,
+    nextLevelInGame: successor,
+    async prepareInTransaction(
+      tx: TxContext,
+      owners: { ownerId: string; game: Game }[],
+      actor?: Actor,
+    ) {
+      await prepare(tx, owners, actor);
+    },
+    workspacePromotionsReadyInTransaction: eligibility.ready,
     async notificationAssignmentInTransaction(tx: TxContext, id: string) {
       const [row] = await c(tx)
         .select({
@@ -496,20 +531,17 @@ export function createQualifications(
           .for("share");
         if (!current) throw new Error("NOTIFICATION_QUALIFICATION_STATE_MISSING");
         if (current.assignmentId === row.id) {
-          const [selected] = await c(tx)
-            .select({ code: qualificationLevels.code })
-            .from(qualificationLevels)
-            .where(eq(qualificationLevels.id, row.levelId))
-            .for("share");
-          if (!selected) throw new Error("NOTIFICATION_QUALIFICATION_LEVEL_MISSING");
+          const gameLevels = await eligibility.levels(tx, row.game);
+          if (!gameLevels.some((item) => item.id === row.levelId))
+            throw new Error("NOTIFICATION_QUALIFICATION_LEVEL_MISSING");
+          const next = successor(gameLevels, row.game, row.levelId);
           const rule = await ruleAt(tx, row.levelId, instant);
-          eligible =
-            nextLevel(selected.code) !== null &&
-            !!rule &&
-            evaluateQualificationProgress(
+          if (next && rule)
+            eligible = promotionEligible(
+              true,
               rule,
               await ports.trips.contributions.totals(tx, row.id, "share"),
-            ).eligibleForPromotion;
+            );
         }
       }
       return {
@@ -552,18 +584,78 @@ export function createQualifications(
         ),
       );
     },
-    async members(actor: Actor, options: Page = {}) {
+    async members(actor: Actor, options: Page & { view?: "stage3"; search?: string } = {}) {
+      const search = options.search?.trim();
+      if (
+        options.search !== undefined &&
+        (options.view !== "stage3" || !search || options.search.length > 128)
+      )
+        throw identityError(422);
       return ports.identity.transaction(async (tx) => {
         await ports.identity.qualificationContextInTransaction(tx, [], actor);
-        const paging = page(actor, ["qualification-members"], options);
+        const paging = page(
+          actor,
+          options.view === "stage3"
+            ? ["stage3-qualification-members", search ?? null]
+            : ["qualification-members"],
+          options,
+        );
         return paging.finish(
           await ports.identity.qualificationMembersInTransaction(
             tx,
             paging.after?.id ?? null,
             paging.limit,
+            search,
           ),
           (row) => ({ id: row.id, time: null }),
         );
+      });
+    },
+    async promotionCandidates(
+      actor: Actor,
+      options: Page & { game: Game; status?: "eligible" | "all" },
+    ): Promise<S["QualificationStage3PromotionCandidateList"]> {
+      game(options.game);
+      const status = options.status ?? "eligible";
+      if (status !== "eligible" && status !== "all") throw identityError(422);
+      return ports.identity.transaction(async (tx) => {
+        await ports.identity.qualificationContextInTransaction(tx, [], actor);
+        const paging = page(actor, ["promotion-candidates", options.game, status], options);
+        const { rows, total } = await eligibility.candidates(
+          tx,
+          options.game,
+          status,
+          at(),
+          paging.after,
+          paging.limit,
+        );
+        const { items, nextCursor } = paging.finish(rows, (row) => ({
+          id: row.id,
+          time: row.eligibleSince,
+        }));
+        return { items: items.map(({ id: _id, ...row }) => row), nextCursor, total };
+      });
+    },
+    async promotionHistory(
+      actor: Actor,
+      options: Page & CompanyHistoryFilters = {},
+    ): Promise<S["QualificationStage3PromotionHistoryList"]> {
+      if (options.game !== undefined) game(options.game);
+      if (options.memberId !== undefined) applicationId(options.memberId);
+      return ports.identity.transaction(async (tx) => {
+        await ports.identity.qualificationContextInTransaction(tx, [], actor);
+        const paging = page(
+          actor,
+          ["company-qualification-history", options.game ?? null, options.memberId ?? null],
+          options,
+        );
+        const result = await companyHistory(tx, options, paging.after, paging.limit);
+        const { items, nextCursor } = paging.finish(result.actions, ({ id, time, kind }) => ({
+          id,
+          time,
+          kind,
+        }));
+        return { items: items.map(result.dto), nextCursor, total: result.total };
       });
     },
     async preview(actor: Actor, input: S["QualificationPreviewInput"]) {
@@ -638,8 +730,9 @@ export function createQualifications(
           .orderBy(desc(qualificationRules.effectiveAt), desc(qualificationRules.id))
           .limit(paging.limit + 1);
         const result = paging.finish(rows, (row) => ({ id: row.id, time: row.effectiveAt }));
-        const actorDto = staff
-          ? await actors(
+        const publishers = staff
+          ? await qualificationMembersById(
+              ports.identity,
               tx,
               result.items.map((row) => row.actorId),
             )
@@ -653,7 +746,7 @@ export function createQualifications(
           rules: row.rules as S["Rule"][],
           requiredTrips: row.requiredTrips,
           requiredDistanceM: row.requiredDistanceM == null ? null : decimal(row.requiredDistanceM),
-          ...(actorDto ? { publisher: actorDto(row.actorId) } : {}),
+          ...(publishers ? { publisher: qualificationActor(publishers, row.actorId) } : {}),
         }));
         if (ruleVersionId && !items.length) throw identityError(404);
         return { ...result, items };
@@ -759,6 +852,11 @@ export function createQualifications(
                 }
               }
             }
+            if (effectiveAt === publishedAt)
+              await eligibility.applyImmediateRule(tx, selected, effectiveAt, {
+                requiredTrips: input.requiredTrips,
+                requiredDistanceM: distance,
+              });
             await c(tx)
               .insert(qualificationRules)
               .values({
@@ -869,26 +967,14 @@ export function createQualifications(
         tx,
         changes.map((change) => change.tripId),
       );
-      await ports.identity.qualificationContextInTransaction(tx, [
-        ...new Set(owners.map((row) => row.ownerId)),
-      ]);
-      for (const row of [...owners].sort((a, b) =>
-        `${a.ownerId}:${a.game}`.localeCompare(`${b.ownerId}:${b.game}`),
-      )) {
-        await state(tx, row.ownerId, row.game);
-        await c(tx)
-          .select({ id: qualificationAssignments.id })
-          .from(qualificationAssignments)
-          .where(
-            and(
-              eq(qualificationAssignments.userId, row.ownerId),
-              eq(qualificationAssignments.game, row.game),
-            ),
-          )
-          .orderBy(asc(qualificationAssignments.id))
-          .for("update");
-      }
+      const locked = await prepare(tx, owners);
       const contexts = await ports.trips.contributions.contexts(tx, changes);
+      const changedAt = at();
+      const finishEligibility = await eligibility.prepareContributionBatch(
+        tx,
+        owners.filter(({ ownerId }) => locked.members.get(ownerId)?.status === "active"),
+        changedAt,
+      );
       const affected: string[] = [];
       for (const context of contexts) {
         const resolved = await lookup(tx, context.evidence, context.change.manualConfirmedAt);
@@ -902,10 +988,11 @@ export function createQualifications(
               attributionAt: resolved.attributionAt,
               attributionBasis: resolved.attributionBasis,
             },
-            at(),
+            changedAt,
           )),
         );
       }
+      await finishEligibility(new Set(affected));
       await reviewProofs(tx, affected);
       return { affectedPeriods: [...new Set(affected)] };
     },
@@ -981,15 +1068,34 @@ export function createQualifications(
         };
       });
     },
-    async actionHistory(actor: Actor, userId: string, selectedGame: Game, options: Page = {}) {
+    async actionHistory(
+      actor: Actor,
+      userId: string,
+      selectedGame: Game,
+      options: Page & { view?: "stage3" } = {},
+    ) {
       game(selectedGame);
       applicationId(userId);
       return ports.identity.transaction(async (tx) => {
         await ports.identity.qualificationContextInTransaction(tx, [userId], actor);
-        const current = await state(tx, userId, selectedGame);
+        const stage3 = options.view === "stage3";
+        // Staff history is readable for former members or games that have no current assignment.
+        const [current] = await c(tx)
+          .select({ version: qualificationStates.version })
+          .from(qualificationStates)
+          .where(
+            and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, selectedGame)),
+          )
+          .for("share");
+        const version = current?.version ?? 1;
         const paging = page(
           actor,
-          ["staff-action-history", userId, selectedGame, current.version],
+          [
+            stage3 ? "stage3-staff-action-history" : "staff-action-history",
+            userId,
+            selectedGame,
+            version,
+          ],
           options,
         );
         const rows = await c(tx)
@@ -1013,16 +1119,14 @@ export function createQualifications(
           .orderBy(desc(qualificationAssignments.assignedAt), desc(qualificationAssignments.id))
           .limit(paging.limit + 1);
         const result = paging.finish(rows, (row) => ({ id: row.id, time: row.assignedAt }));
-        const actorDto = await actors(
-          tx,
-          result.items.map((row) => row.actorId),
-        );
         const proofs = result.items.length
           ? await c(tx)
               .select({
                 id: qualificationPromotions.id,
                 targetAssignmentId: qualificationPromotions.targetAssignmentId,
                 confirmedAt: qualificationPromotions.confirmedAt,
+                actorId: qualificationPromotions.actorId,
+                reason: qualificationPromotions.reason,
               })
               .from(qualificationPromotions)
               .where(
@@ -1035,25 +1139,45 @@ export function createQualifications(
           : [];
         if (proofs.length > result.items.length)
           throw new Error("AMBIGUOUS_QUALIFICATION_PROMOTION");
-        const byTarget = new Map<string, S["QualificationActionHistory"]["promotion"]>();
+        const byTarget = new Map<string, (typeof proofs)[number]>();
         for (const proof of proofs) {
           if (byTarget.has(proof.targetAssignmentId))
             throw new Error("AMBIGUOUS_QUALIFICATION_PROMOTION");
-          byTarget.set(proof.targetAssignmentId, { id: proof.id, confirmedAt: proof.confirmedAt });
+          byTarget.set(proof.targetAssignmentId, proof);
         }
-        return {
-          data: {
-            ...result,
-            items: result.items.map((row): S["QualificationActionHistory"] => ({
+        const members = await qualificationMembersById(ports.identity, tx, [
+          ...result.items.map((row) => row.actorId),
+          ...(stage3 ? proofs.map((proof) => proof.actorId) : []),
+        ]);
+        const items = result.items.map(
+          (row): S["QualificationActionHistory"] | S["QualificationStage3ActionHistory"] => {
+            const proof = byTarget.get(row.id);
+            const common = {
               ...assignmentDto(row),
               endedAt: row.endedAt,
               purpose: row.purpose,
-              actor: actorDto(row.actorId),
-              promotion: byTarget.get(row.id) ?? null,
-            })),
+              actor: qualificationActor(members, row.actorId),
+            };
+            if (!stage3)
+              return {
+                ...common,
+                promotion: proof ? { id: proof.id, confirmedAt: proof.confirmedAt } : null,
+              };
+            return {
+              ...common,
+              assignmentReason: row.reason.trim() ? row.reason : null,
+              promotion: proof
+                ? {
+                    id: proof.id,
+                    confirmedAt: proof.confirmedAt,
+                    actor: qualificationActor(members, proof.actorId),
+                    reason: proof.reason.trim() ? proof.reason : null,
+                  }
+                : null,
+            };
           },
-          version: current.version,
-        };
+        );
+        return { data: { ...result, items }, version };
       });
     },
     async assign(
@@ -1186,9 +1310,12 @@ export function createQualifications(
               .where(eq(qualificationAssignments.id, input.assignmentId))
               .for("update");
             if (!assignment) throw identityError(409);
-            const source = await level(tx, assignment.levelId),
-              target = await level(tx, input.targetLevelId);
-            if (target.game !== input.game || target.code !== nextLevel(source.code))
+            const source = await level(tx, assignment.levelId);
+            const target = await level(tx, input.targetLevelId);
+            if (
+              successor(await eligibility.levels(tx, input.game), input.game, source.id)?.id !==
+              target.id
+            )
               throw identityError(409);
             // One confirmation instant selects the immutable rule used by evaluation and proof.
             const confirmedAt = at(),
