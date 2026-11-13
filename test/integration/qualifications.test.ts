@@ -1371,17 +1371,18 @@ test("archive closes and replaces a representative roster under one fence with a
   if (!source || !target) throw new Error("SYNTHETIC_LEVEL_MISSING");
   expect(source.currentDriverCount).toBeGreaterThanOrEqual(rosterSize);
   const transfers = source.currentDriverCount;
-  const statements = { select: 0, update: 0, insert: 0 };
+  const statements = { select: 0, update: 0, insert: 0, delete: 0 };
   const measuredUnit = {
     ...unit,
     client(tx: Parameters<UnitOfWork["client"]>[0]) {
       const db = unit.client(tx);
       return new Proxy(db, {
         get(database, property, receiver) {
-          if (property === "select" || property === "update" || property === "insert") {
+          if (Object.hasOwn(statements, property)) {
             return (...args: unknown[]) => {
-              statements[property]++;
-              return Reflect.apply(database[property], database, args);
+              const operation = property as keyof typeof statements;
+              statements[operation]++;
+              return Reflect.apply(database[operation], database, args);
             };
           }
           return Reflect.get(database, property, receiver);
@@ -1450,9 +1451,11 @@ test("archive closes and replaces a representative roster under one fence with a
   expect(after?.version).toBe(version + 1);
   expect(after?.data.levels.some((row) => row.id === source.id)).toBe(false);
   expect(after?.data.levels[0]?.currentDriverCount).toBe(target.currentDriverCount + transfers);
-  expect(statements.select).toBeLessThanOrEqual(3 * transfers + 20);
+  // Each transfer locks the member, state and old assignment, and verifies its new outbox event.
+  expect(statements.select).toBeLessThanOrEqual(4 * transfers + 20);
   expect(statements.update).toBeLessThanOrEqual(2 * transfers + 10);
   expect(statements.insert).toBeLessThanOrEqual(3 * transfers + 10);
+  expect(statements.delete).toBe(1);
   console.log(
     JSON.stringify({ event: "qualification_archive_statement_count", transfers, ...statements }),
   );
@@ -1462,6 +1465,13 @@ test("archive closes and replaces a representative roster under one fence with a
     { levelId: target.id, assignedAt: iso(), endedAt: null, purpose: "ladder_archive_transfer" },
     { levelId: source.id, endedAt: iso(), purpose: "initial" },
   ]);
+  const newAssignment = history.data.items[0];
+  if (!newAssignment) throw new Error("SYNTHETIC_ASSIGNMENT_MISSING");
+  const [events] = await control.query<RowDataPacket[]>(
+    "SELECT aggregate_version FROM outbox_events WHERE type=CAST('qualification.assigned' AS BINARY) AND aggregate_id=?",
+    [newAssignment.id],
+  );
+  expect(events).toEqual([{ aggregate_version: history.version }]);
 });
 
 test("admission holds the same company fence as archive and stale observed counts cannot move a new member", async () => {
