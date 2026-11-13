@@ -67,6 +67,7 @@ export function useQualificationCommand(
     level: DTO["QualificationLevel"],
     operation: "rename" | "publish" | "schedule",
   ) => void,
+  options?: { preserveLimitedRecovery?: boolean },
 ) {
   const session = useSession(),
     client = useQueryClient(),
@@ -84,6 +85,7 @@ export function useQualificationCommand(
     } | null>(null);
   const [pending, setPending] = useState(false),
     [failure, setFailure] = useState<AccountFailure | null>(null),
+    [recoveryLimited, setRecoveryLimited] = useState(false),
     [waitUntil, setWaitUntil] = useState(0),
     [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -200,12 +202,14 @@ export function useQualificationCommand(
     etag?: string | null,
     method: "POST" | "PATCH" = "POST",
     fingerprint?: string,
+    recovering = false,
   ): Promise<{ data: DTO[K]; etag: string | null } | undefined> {
     if (!active.current || controller.current || waitUntil > Date.now()) return;
     const ctl = new AbortController();
     controller.current = ctl;
     setPending(true);
     setFailure(null);
+    setRecoveryLimited(false);
     const timeout = window.setTimeout(() => ctl.abort(), 15000);
     const previousAttempt = attempt.current,
       previousRequest = request.current;
@@ -289,6 +293,8 @@ export function useQualificationCommand(
       const safe = error instanceof AccountFailure ? error : new AccountFailure("uncertain");
       if (active.current) {
         setFailure(safe);
+        if (options?.preserveLimitedRecovery && recovering && safe.kind === "limited")
+          setRecoveryLimited(true);
         if (safe.kind === "unauthorized") await session.confirmSessionLoss(ctl.signal);
         if (safe.kind === "forbidden") {
           client.removeQueries({
@@ -324,17 +330,20 @@ export function useQualificationCommand(
     failure,
     seconds: Math.max(0, Math.ceil((waitUntil - now) / 1000)),
     canRecover:
-      !!request.current && !!failure && ["uncertain", "unavailable"].includes(failure.kind),
+      !!request.current &&
+      !!failure &&
+      (["uncertain", "unavailable"].includes(failure.kind) || recoveryLimited),
     recover: () => {
       const saved = request.current;
       return saved
-        ? run(saved.path, saved.body, saved.name, saved.etag, saved.method, saved.fingerprint)
+        ? run(saved.path, saved.body, saved.name, saved.etag, saved.method, saved.fingerprint, true)
         : Promise.resolve(undefined);
     },
     reset: () => {
       attempt.current = null;
       request.current = null;
       setFailure(null);
+      setRecoveryLimited(false);
     },
   };
 }

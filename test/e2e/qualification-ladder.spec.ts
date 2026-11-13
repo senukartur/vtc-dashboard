@@ -60,16 +60,17 @@ async function mockLadder(page: Page) {
   let revision = 1;
   let order: readonly (typeof ids)[number][] = ids;
   let failNext = false;
-  let archivedReadStatus = 200;
+  let ladderStatus = 200;
+  let renameReplayStatus = 409;
   const commands: { etag: string | undefined; key: string | undefined; input: unknown }[] = [];
   const renameCommands: typeof commands = [];
   await page.route("**/api/v1/admin/qualification-ladders/ats**", async (route) => {
     const request = route.request();
     const etag = `"v${revision}"`;
     if (request.method() === "GET") {
-      if (archivedReadStatus !== 200)
+      if (ladderStatus !== 200)
         return route.fulfill({
-          status: archivedReadStatus,
+          status: ladderStatus,
           json: { error: { code: "UNAVAILABLE" } },
         });
       const data: Ladder = {
@@ -120,9 +121,33 @@ async function mockLadder(page: Page) {
       key: request.headers()["idempotency-key"],
       input: request.postDataJSON(),
     });
-    return renameCommands.length === 1
-      ? route.abort("failed")
-      : route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
+    if (renameCommands.length === 1) return route.abort("failed");
+    if (renameCommands.length === 2)
+      return route.fulfill({
+        status: 429,
+        headers: { "Retry-After": "1" },
+        json: { error: { code: "RATE_LIMITED" } },
+      });
+    if (renameReplayStatus === 409)
+      return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
+    return route.fulfill({
+      status: 200,
+      headers: { etag: '"v2"' },
+      json: envelope({
+        id: ids[0],
+        game: "ats",
+        name: "Fictional name with a held receipt",
+        position: 1,
+        version: 2,
+        terminal: false,
+        configured: false,
+        promotionConfigured: false,
+        ruleVersionId: null,
+        freightRuleSummary: null,
+        requiredTrips: null,
+        requiredDistanceM: null,
+      }),
+    });
   });
   return {
     commands,
@@ -136,7 +161,10 @@ async function mockLadder(page: Page) {
       failNext = true;
     },
     ladderRead(status: number) {
-      archivedReadStatus = status;
+      ladderStatus = status;
+    },
+    renameReplay(status: number) {
+      renameReplayStatus = status;
     },
   };
 }
@@ -183,40 +211,56 @@ test(
   },
 );
 
-test(
-  "P11 offers a held receipt when its level is archived while a different editor is open",
-  browserCase(["@functional"]),
-  async ({ page }) => {
-    const server = await mockLadder(page);
-    await page.goto(`${path}&game=ats`);
-    const panel = page.getByRole("region", { name: labels.en.ladder });
-    const dialog = page.getByRole("dialog");
-    const recover = panel.getByRole("button", { name: "Check the previous action", exact: true });
-    await panel.getByRole("button", { name: "Edit Fictional level 1", exact: true }).click();
-    await panel.locator(`#level-name-${ids[0]}`).fill("Fictional name with a held receipt");
-    await panel.getByRole("button", { name: "Save name", exact: true }).click();
-    await dialog.getByRole("button", { name: labels.en.confirm, exact: true }).click();
-    await page.keyboard.press("Escape");
-    await expect(recover).toBeVisible();
-    await panel.getByRole("button", { name: "Edit Fictional level 2", exact: true }).click();
-    await expect(recover).toHaveCount(0);
-    server.external([ids[1], ids[2]]);
-    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
-    await expect(recover).toBeVisible();
-    await expect(panel.locator(`#level-name-${ids[0]}`)).toHaveCount(0);
-    await expect(panel.locator(`#level-name-${ids[1]}`)).toBeVisible();
-    const replay = page.waitForResponse(
-      (response) =>
-        response.request().method() === "PATCH" &&
-        new URL(response.url()).pathname.endsWith(ids[0]),
-    );
-    await recover.click();
-    expect((await replay).status()).toBe(409);
-    expect(server.renameCommands).toHaveLength(2);
-    expect(server.renameCommands[1]).toEqual(server.renameCommands[0]);
-    await expect(panel.locator(`#level-name-${ids[0]}`)).toHaveCount(0);
-  },
-);
+for (const outcome of [200, 409])
+  test(
+    `P11 shows archived level receipt outcome ${outcome} after a limited recovery`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const server = await mockLadder(page);
+      await page.goto(`${path}&game=ats`);
+      const panel = page.getByRole("region", { name: labels.en.ladder });
+      const dialog = page.getByRole("dialog");
+      const recover = panel.getByRole("button", { name: "Check the previous action", exact: true });
+      await panel.getByRole("button", { name: "Edit Fictional level 1", exact: true }).click();
+      await panel.locator(`#level-name-${ids[0]}`).fill("Fictional name with a held receipt");
+      await panel.getByRole("button", { name: "Save name", exact: true }).click();
+      await dialog.getByRole("button", { name: labels.en.confirm, exact: true }).click();
+      await page.keyboard.press("Escape");
+      await expect(recover).toBeVisible();
+      await panel.getByRole("button", { name: "Edit Fictional level 2", exact: true }).click();
+      await expect(recover).toHaveCount(0);
+      server.external([ids[1], ids[2]]);
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await expect(recover).toBeVisible();
+      await expect(panel.locator(`#level-name-${ids[0]}`)).toHaveCount(0);
+      await expect(panel.locator(`#level-name-${ids[1]}`)).toBeVisible();
+      server.renameReplay(outcome);
+      async function replay() {
+        const response = page.waitForResponse(
+          (response) =>
+            response.request().method() === "PATCH" &&
+            new URL(response.url()).pathname.endsWith(ids[0]),
+        );
+        await recover.click();
+        return (await response).status();
+      }
+      expect(await replay()).toBe(429);
+      await expect(recover).toBeDisabled();
+      await expect(recover).toBeEnabled();
+      expect(await replay()).toBe(outcome);
+      expect(server.renameCommands).toHaveLength(3);
+      expect(server.renameCommands[1]).toEqual(server.renameCommands[0]);
+      expect(server.renameCommands[2]).toEqual(server.renameCommands[0]);
+      const receipt = panel
+        .getByRole("heading", { name: "Fictional level 1", exact: true })
+        .locator("..");
+      if (outcome === 409) await expect(receipt.getByRole("alert")).toBeVisible();
+      else await expect(receipt.getByRole("status")).toHaveText("The server confirmed the change.");
+      await receipt.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(receipt).toHaveCount(0);
+      await expect(panel.locator(`#level-name-${ids[0]}`)).toHaveCount(0);
+    },
+  );
 
 test(
   "P11 closes the portal and clears recovery when qualification authority changes",

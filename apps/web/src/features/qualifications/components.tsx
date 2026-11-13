@@ -53,9 +53,11 @@ export function LevelContext({ level }: { level: DTO["QualificationLevel"] | und
 }
 export function Recovery({
   command,
+  onAttempt,
   onRecovered,
 }: {
   command: ReturnType<typeof useQualificationCommand>;
+  onAttempt?: (() => void) | undefined;
   onRecovered: () => void | Promise<void>;
 }) {
   const { t } = useTranslation("qualifications");
@@ -65,6 +67,7 @@ export function Recovery({
       variant="outline"
       disabled={command.pending || command.seconds > 0}
       onClick={async () => {
+        onAttempt?.();
         if (await command.recover()) await onRecovered();
       }}
     >

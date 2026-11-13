@@ -100,7 +100,9 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
   const query = useQualificationQuery(root, "EnvelopeQualificationLadder", visible);
   const snapshot = query.data?.data.data;
   const ladder = snapshot?.game === game ? snapshot : undefined;
-  const command = useQualificationCommand({ kind: "ladder", game });
+  const command = useQualificationCommand({ kind: "ladder", game }, undefined, undefined, {
+    preserveLimitedRecovery: true,
+  });
   const [selectedId, setSelected] = useState<string | null>(null);
   const [openedEditors, setOpenedEditors] = useState<LadderLevel[]>([]);
   const [archiveDraft, setArchiveDraft] = useState<ArchiveDraft>();

@@ -52,6 +52,7 @@ export function LevelEditor({
           // Name changes and future publication do not own the currently active rules.
           ruleVersionId: operation === "publish" ? result.ruleVersionId : previous.ruleVersionId,
         })),
+      { preserveLimitedRecovery: settingsVisibility !== undefined },
     ),
     previewCommand = useQualificationCommand();
   const [name, setName] = useState(level.name),
@@ -79,7 +80,8 @@ export function LevelEditor({
       fingerprint: string;
       result: DTO["QualificationPreview"];
     } | null>(null),
-    [success, setSuccess] = useState(false);
+    [success, setSuccess] = useState(false),
+    [checkingReceipt, setCheckingReceipt] = useState(false);
   const distance = distanceDraft ?? distanceForEditor(initialDistanceM, locale);
   const max = exactInput(mass),
     requiredTrips = level.terminal ? null : countInput(count),
@@ -152,17 +154,45 @@ export function LevelEditor({
     );
     setSuccess(false);
   }
+  function checkingPreviousAction() {
+    setCheckingReceipt(true);
+    setSuccess(false);
+  }
   if (!visible) return null;
-  if (recoveryOnly)
-    return command.canRecover || command.pending || command.seconds > 0 ? (
+  if (recoveryOnly) {
+    const settled =
+      checkingReceipt && !command.pending && !command.canRecover && (success || command.failure);
+    return command.canRecover || command.pending || command.seconds > 0 || settled ? (
       <Card className="stack">
         <h3>{level.name}</h3>
         <p>{t("cellUnavailable")}</p>
         {command.pending && <p role="status">{t("trips:loading")}</p>}
         <Failure error={command.failure} seconds={command.seconds} />
-        <Recovery command={command} onRecovered={() => setPreview(null)} />
+        <Recovery
+          command={command}
+          onAttempt={checkingPreviousAction}
+          onRecovered={() => {
+            setPreview(null);
+            setSuccess(true);
+          }}
+        />
+        {settled && success && <p role="status">{t("success")}</p>}
+        {settled && (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setCheckingReceipt(false);
+              setSuccess(false);
+              command.reset();
+            }}
+          >
+            {t("close")}
+          </Button>
+        )}
       </Card>
     ) : null;
+  }
   const editor = (
     <section className="stack">
       <h4>{t("rules")}</h4>
@@ -426,6 +456,7 @@ export function LevelEditor({
       <Failure error={command.failure} seconds={command.seconds} />
       <Recovery
         command={command}
+        onAttempt={settingsVisibility === undefined ? undefined : checkingPreviousAction}
         onRecovered={() => {
           setSuccess(true);
           setPreview(null);
