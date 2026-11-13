@@ -57,7 +57,7 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { telemetryFixture } from "../support/builders.ts";
-import { deferred } from "../support/concurrency.ts";
+import { bounded, deferred } from "../support/concurrency.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
@@ -1190,6 +1190,103 @@ test("archive rechecks count and target, transfers at one instant, and preserves
     unit.client(tx).select().from(qualificationLevels).where(eq(qualificationLevels.id, source.id)),
   );
   expect(archived?.activePosition).toBeNull();
+});
+
+test("admission holds the same company fence as archive and stale observed counts cannot move a new member", async () => {
+  const { data: before } = await ladderService.ladder(director, "ets2");
+  const [source, target] = before.levels;
+  if (!source || !target) throw new Error("SYNTHETIC_LEVEL_MISSING");
+  const newMember = newId();
+  const credential = await identity.prepareCredential(password);
+  const held = deferred<void>(),
+    release = deferred<void>(),
+    attempted = deferred<void>();
+  const initialization = createQualificationInitialization(unit);
+  const admission = unit.run(async (tx) => {
+    await identity.onboardingCompany(tx);
+    await identity.insertWithCredential(tx, {
+      userId: newMember,
+      email: `${newMember}@example.invalid`,
+      name: "Fictional Concurrent Onboarding",
+      ...credential,
+      roles: ["trainee"],
+    });
+    await initialization.initialize(tx, {
+      userId: newMember,
+      games: ["ets2", "ats"],
+      assignedAt: iso(),
+    });
+    held.resolve();
+    await bounded(release.promise, "release_admission");
+  });
+  const racing = createQualifications(
+    unit,
+    { ...config, ladderEditsEnabled: true },
+    {
+      identity: {
+        ...identity,
+        qualificationContextInTransaction: (...args) => {
+          attempted.resolve();
+          return identity.qualificationContextInTransaction(...args);
+        },
+      },
+      trips: tripService,
+    },
+    now,
+  );
+  const input = {
+    type: "archive",
+    levelId: source.id,
+    input: {
+      targetLevelId: target.id,
+      observedDriverCount: source.currentDriverCount,
+    },
+  } as const;
+  let archive: Promise<unknown> | undefined;
+  try {
+    await bounded(held.promise, "admission_lock");
+    archive = racing.changeLadder(director, "ets2", newId(), before.revision, input);
+    const stale = expect(archive).rejects.toMatchObject({
+      statusCode: 409,
+      publicCode: "VERSION_CONFLICT",
+    });
+    await bounded(attempted.promise, "archive_attempt");
+    release.resolve();
+    await Promise.all([admission, stale]);
+  } finally {
+    release.resolve();
+    await Promise.allSettled([admission, archive]);
+  }
+  const joined = await service.progress(director, newMember, "ets2", "admin");
+  expect(joined.data.assignment.levelId).toBe(source.id);
+  const { data: refreshed } = await ladderService.ladder(director, "ets2");
+  expect(refreshed.revision).toBe(before.revision);
+  const observedDriverCount = refreshed.levels[0]?.currentDriverCount;
+  expect(observedDriverCount).toBe(source.currentDriverCount + 1);
+  if (observedDriverCount === undefined) throw new Error("SYNTHETIC_DRIVER_COUNT_MISSING");
+  tick();
+  await racing.changeLadder(director, "ets2", newId(), before.revision, {
+    ...input,
+    input: { ...input.input, observedDriverCount },
+  });
+  const after = await member();
+  expect(
+    (await service.progress(director, newMember, "ets2", "admin")).data.assignment.levelId,
+  ).toBe(target.id);
+  expect((await progress("ets2", after.actor)).data.assignment.levelId).toBe(target.id);
+  expect((await progress("ats", after.actor)).data.assignment.levelId).toBe(
+    structuralLevels.ats[0],
+  );
+  for (const game of ["ets2", "ats"] as const) {
+    const { data } = await service.ladder(director, game);
+    for (const level of data.levels)
+      await service.publish(director, level.id, newId(), level.version, {
+        rules: [],
+        requiredTrips: null,
+        requiredDistanceM: null,
+      });
+  }
+  expect(await unit.run((tx) => initialization.administrationReadiness(tx, iso()))).toBe(true);
 });
 test("distance-only progress and notification agree just below and at 20 km; corrections use the nullable proof", async () => {
   await publish("ets2", 0, null, "20000");
