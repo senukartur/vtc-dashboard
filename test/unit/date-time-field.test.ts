@@ -4,6 +4,7 @@ import { referenceInstant } from "../../apps/web/src/features/manual-reports/ref
 import { utcInput as qualificationUtcInput } from "../../apps/web/src/features/qualifications/transport.ts";
 import {
   clampSegment,
+  composeTime,
   composeWallClock,
   decodeIncomplete,
   editSegment,
@@ -11,8 +12,10 @@ import {
   formatDateText,
   incompleteValue,
   inDateRange,
+  isIsoDate,
   parseDateText,
   segmentsFor,
+  splitTime,
   splitWallClock,
   stepSegment,
   todayIn,
@@ -187,5 +190,25 @@ describe("exact wall-clock strings", () => {
     expect(decodeIncomplete(marker)).toEqual({ date: "31.02.2026", ...time });
     expect(decodeIncomplete("2026-11-17T18:00")).toBeUndefined();
     expect(decodeIncomplete("invalid:not-json")).toBeUndefined();
+  });
+});
+
+describe("date-only and time-only values", () => {
+  test("ISO dates and times of day split and compose with the wall-clock rules", () => {
+    expect(isIsoDate("2099-10-25")).toBe(true);
+    expect(isIsoDate("2026-02-31")).toBe(false);
+    expect(isIsoDate("25.10.2099")).toBe(false);
+    expect(splitTime("17:00:30.5")).toEqual({
+      hours: "17",
+      minutes: "00",
+      seconds: "30",
+      milliseconds: "500",
+    });
+    expect(splitTime("7:00")).toBeUndefined();
+    expect(composeTime({ ...emptyTime, hours: "9", minutes: "5" }, "minute")).toBe("09:05");
+    expect(composeTime({ ...emptyTime, hours: "24", minutes: "00" }, "minute")).toBeUndefined();
+    expect(
+      composeTime({ hours: "17", minutes: "00", seconds: "30", milliseconds: "500" }, "minute"),
+    ).toBe("17:00");
   });
 });

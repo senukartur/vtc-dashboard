@@ -7,6 +7,7 @@ import { cn } from "../cn.js";
 import { Calendar } from "./calendar.js";
 import {
   clampSegment,
+  composeTime,
   composeWallClock,
   type DateLocale,
   decodeIncomplete,
@@ -14,12 +15,14 @@ import {
   emptyTime,
   formatDateText,
   incompleteValue,
+  isIsoDate,
   isoDate,
   type Precision,
   parseDateText,
   type Segment,
   segmentSpec,
   segmentsFor,
+  splitTime,
   splitWallClock,
   stepSegment,
   type TimeParts,
@@ -51,28 +54,54 @@ export type DateTimeFieldProps = {
   disabled?: boolean;
 };
 
+export type DateFieldProps = Omit<DateTimeFieldProps, "value" | "onChange" | "precision"> & {
+  /** "" | "YYYY-MM-DD" | an incomplete-entry marker. */
+  value: string;
+  onChange: (value: string) => void;
+  /** Show the zone next to the field; off when the form shows it in linked help text. */
+  showZone?: boolean;
+};
+export type TimeFieldProps = Omit<DateTimeFieldProps, "value" | "onChange" | "min" | "max"> & {
+  /** "" | "HH:mm[:ss[.SSS]]" | an incomplete-entry marker. The id is set on the hours segment. */
+  value: string;
+  onChange: (value: string) => void;
+  showZone?: boolean;
+};
+
+type Mode = "datetime" | "date" | "time";
 type Display = { date: string } & TimeParts;
 type FieldState = { value: string; locale: DateLocale; display: Display; dateBlurred: boolean };
 
-function deriveDisplay(value: string, locale: DateLocale, precision: Precision): Display {
-  if (!value) return { date: "", ...emptyTime };
-  const incomplete = decodeIncomplete(value);
-  if (incomplete) return incomplete;
-  const split = splitWallClock(value);
-  if (!split) return { date: value, ...emptyTime };
+function visibleTime(parts: TimeParts, precision: Precision): TimeParts {
   return {
-    date: formatDateText(split.date, locale),
-    hours: split.hours,
-    minutes: split.minutes,
-    seconds: precision === "minute" ? "" : split.seconds,
-    milliseconds: precision === "millisecond" ? split.milliseconds : "",
+    hours: parts.hours,
+    minutes: parts.minutes,
+    seconds: precision === "minute" ? "" : parts.seconds,
+    milliseconds: precision === "millisecond" ? parts.milliseconds : "",
   };
 }
 
-function displayValue(display: Display, locale: DateLocale, precision: Precision): string {
-  const segments = segmentsFor(precision);
+function deriveDisplay(value: string, locale: DateLocale, precision: Precision, mode: Mode) {
+  if (!value) return { date: "", ...emptyTime };
+  const incomplete = decodeIncomplete(value);
+  if (incomplete) return incomplete;
+  if (mode === "date")
+    return { date: isIsoDate(value) ? formatDateText(value, locale) : value, ...emptyTime };
+  if (mode === "time") {
+    const parts = splitTime(value);
+    return { date: "", ...(parts ? visibleTime(parts, precision) : emptyTime) };
+  }
+  const split = splitWallClock(value);
+  if (!split) return { date: value, ...emptyTime };
+  return { date: formatDateText(split.date, locale), ...visibleTime(split, precision) };
+}
+
+function displayValue(display: Display, locale: DateLocale, precision: Precision, mode: Mode) {
+  const segments = mode === "date" ? [] : segmentsFor(precision);
   if (!display.date.trim() && segments.every((segment) => !display[segment])) return "";
+  if (mode === "time") return composeTime(display, precision) ?? incompleteValue("", display);
   const date = parseDateText(display.date, locale);
+  if (mode === "date") return date ?? incompleteValue(display.date, emptyTime);
   return (
     (date && composeWallClock({ ...display, date }, precision)) ??
     incompleteValue(display.date, display)
@@ -117,7 +146,21 @@ function CalendarIcon() {
  * Shared RU/EN date and 24-hour time field: a typed date with an optional calendar
  * (shadcn "Input" date-picker layout) and hour/minute(/second/millisecond) segments.
  */
-export function DateTimeField({
+export function DateTimeField(props: DateTimeFieldProps) {
+  return <DateTimeControl {...props} mode="datetime" showZone />;
+}
+
+/** The date part alone: a typed date with the optional calendar. */
+export function DateField({ showZone = true, ...props }: DateFieldProps) {
+  return <DateTimeControl {...props} mode="date" showZone={showZone} />;
+}
+
+/** The 24-hour time part alone. */
+export function TimeField({ showZone = true, ...props }: TimeFieldProps) {
+  return <DateTimeControl {...props} mode="time" showZone={showZone} />;
+}
+
+function DateTimeControl({
   id,
   fieldName,
   value,
@@ -131,10 +174,12 @@ export function DateTimeField({
   invalid,
   "aria-describedby": describedBy,
   disabled,
-}: DateTimeFieldProps) {
+  mode,
+  showZone,
+}: DateTimeFieldProps & { mode: Mode; showZone: boolean }) {
   const { t, i18n } = useTranslation("core");
   const locale: DateLocale = i18n.resolvedLanguage === "en" ? "en" : "ru";
-  const segments = segmentsFor(precision);
+  const segments = mode === "date" ? [] : segmentsFor(precision);
   const ids = useId();
   const hintId = `${ids}-format`;
   const zoneId = `${ids}-zone`;
@@ -147,7 +192,7 @@ export function DateTimeField({
   const [state, setState] = useState<FieldState>(() => ({
     value,
     locale,
-    display: deriveDisplay(value, locale, precision),
+    display: deriveDisplay(value, locale, precision, mode),
     dateBlurred: false,
   }));
   // Derive the display from props during render: an external value change re-reads it, and a
@@ -157,7 +202,7 @@ export function DateTimeField({
     current = {
       value,
       locale,
-      display: deriveDisplay(value, locale, precision),
+      display: deriveDisplay(value, locale, precision, mode),
       dateBlurred: false,
     };
     setState(current);
@@ -179,7 +224,7 @@ export function DateTimeField({
     [describedBy, ...extra].filter(Boolean).join(" ") || undefined;
 
   function update(next: Display) {
-    const nextValue = displayValue(next, locale, precision);
+    const nextValue = displayValue(next, locale, precision, mode);
     setState({ ...current, value: nextValue, display: next });
     if (nextValue !== value) onChange(nextValue);
   }
@@ -258,164 +303,175 @@ export function DateTimeField({
 
   return (
     <Popover open={open} onOpenChange={openCalendar} modal>
-      <div className="date-time-field" data-precision={precision}>
-        <PopoverAnchor asChild>
-          <div className="date-time-date">
-            <input
-              ref={inputRef}
-              id={id}
-              className="input date-time-date-input"
-              type="text"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder={t("dateTime.datePlaceholder")}
-              value={display.date}
-              required={required}
-              disabled={disabled}
-              aria-required={requiredAttr}
-              aria-invalid={invalidAttr}
-              aria-describedby={describe(hintId)}
-              onChange={(event) => update({ ...display, date: event.target.value })}
-              onBlur={() =>
-                showDisplay(
-                  {
-                    ...display,
-                    date: parsedDate ? formatDateText(parsedDate, locale) : display.date,
-                  },
-                  true,
-                )
-              }
-              onKeyDown={(event) => {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  openCalendar(true);
-                }
-              }}
-            />
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                className="date-time-trigger"
-                disabled={disabled}
-                aria-label={t("dateTime.chooseDate", { field: fieldName })}
-                aria-describedby={describedBy}
-              >
-                <CalendarIcon />
-              </Button>
-            </PopoverTrigger>
-          </div>
-        </PopoverAnchor>
-        <PopoverContent
-          className="date-time-popover"
-          aria-label={t("dateTime.calendar", { field: fieldName })}
-          ref={contentRef}
-          onOpenAutoFocus={(event) => {
-            // Focus the selected day, else today, else the first enabled day. This runs after the
-            // popover focus scope pauses an enclosing dialog scope, which would otherwise take
-            // focus back from a day focused during the first render.
-            event.preventDefault();
-            contentRef.current
-              ?.querySelector<HTMLElement>('.calendar-day-button[tabindex="0"]')
-              ?.focus();
-          }}
-          onEscapeKeyDown={() => {
-            returnFocus.current = true;
-          }}
-          onCloseAutoFocus={(event) => {
-            // Escape and a picked day return to the typed date, not to the calendar button.
-            if (!returnFocus.current) return;
-            returnFocus.current = false;
-            event.preventDefault();
-            inputRef.current?.focus();
-          }}
-        >
-          <Calendar
-            mode="single"
-            required
-            fixedWeeks
-            selected={parsedDate ? localDate(parsedDate) : undefined}
-            defaultMonth={localDate(parsedDate ?? today ?? todayIn(timeZone, 0))}
-            onSelect={pick}
-            locale={locale === "en" ? enUS : ru}
-            disabled={disabledDays}
-            {...(today ? { today: localDate(today) } : {})}
-            {...(min ? { startMonth: localDate(min) } : {})}
-            {...(max ? { endMonth: localDate(max) } : {})}
-            labels={{
-              labelNav: () => t("dateTime.monthNavigation"),
-              labelPrevious: () => t("dateTime.previousMonth"),
-              labelNext: () => t("dateTime.nextMonth"),
-              labelDayButton: dayLabel,
-              labelGridcell: dayLabel,
-            }}
-          />
-        </PopoverContent>
-        {/* biome-ignore lint/a11y/useSemanticElements: a fieldset would add a second visible field title. */}
-        <div
-          className={cn("input date-time-time", disabled && "date-time-disabled")}
-          role="group"
-          aria-label={t("dateTime.time", { field: fieldName })}
-          aria-describedby={zoneId}
-          data-invalid={invalidAttr}
-        >
-          {segments.map((segment, index) => {
-            const text = display[segment];
-            return (
-              <Fragment key={segment}>
-                {index > 0 && (
-                  <span className="date-time-separator" aria-hidden="true">
-                    {segment === "milliseconds" ? "." : ":"}
-                  </span>
-                )}
+      <div className="date-time-field" data-precision={precision} data-mode={mode}>
+        {mode !== "time" && (
+          <>
+            <PopoverAnchor asChild>
+              <div className="date-time-date">
                 <input
-                  ref={(element) => {
-                    segmentRefs.current[segment] = element;
-                  }}
-                  className="date-time-segment"
-                  data-segment={segment}
+                  ref={inputRef}
+                  id={id}
+                  className="input date-time-date-input"
                   type="text"
-                  inputMode="numeric"
                   autoComplete="off"
-                  role="spinbutton"
-                  placeholder={t(`dateTime.${segment}Placeholder`)}
-                  value={text}
+                  spellCheck={false}
+                  placeholder={t("dateTime.datePlaceholder")}
+                  value={display.date}
+                  required={required}
                   disabled={disabled}
-                  required={required && index < 2}
-                  aria-label={t(`dateTime.${segment}`)}
-                  aria-valuemin={0}
-                  aria-valuemax={segmentSpec[segment].max}
-                  aria-valuenow={text ? Number(text) : undefined}
-                  aria-valuetext={text ? clampSegment(text, segment) : t("dateTime.empty")}
-                  aria-required={(requiredAttr && index < 2) || undefined}
+                  aria-required={requiredAttr}
                   aria-invalid={invalidAttr}
-                  aria-describedby={describe(zoneId)}
-                  onFocus={(event) => event.currentTarget.select()}
-                  onChange={(event) =>
-                    typeInto(
-                      segment,
-                      index,
-                      event.target.value,
-                      (event.nativeEvent as Partial<InputEvent>).inputType,
+                  aria-describedby={describe(hintId)}
+                  onChange={(event) => update({ ...display, date: event.target.value })}
+                  onBlur={() =>
+                    showDisplay(
+                      {
+                        ...display,
+                        date: parsedDate ? formatDateText(parsedDate, locale) : display.date,
+                      },
+                      true,
                     )
                   }
-                  onKeyDown={(event) => segmentKey(segment, index, event)}
-                  onBlur={() => {
-                    const padded = clampSegment(text, segment);
-                    if (padded !== text) showDisplay({ ...display, [segment]: padded });
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      openCalendar(true);
+                    }
                   }}
                 />
-              </Fragment>
-            );
-          })}
-        </div>
-        <span id={zoneId} className="date-time-zone">
-          <span className="visually-hidden">{t("dateTime.timeZone")}: </span>
-          {timeZone}
-        </span>
-        <span id={hintId} className="visually-hidden">
-          {t("dateTime.dateFormat")}
-        </span>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="date-time-trigger"
+                    disabled={disabled}
+                    aria-label={t("dateTime.chooseDate", { field: fieldName })}
+                    aria-describedby={describedBy}
+                  >
+                    <CalendarIcon />
+                  </Button>
+                </PopoverTrigger>
+              </div>
+            </PopoverAnchor>
+            <PopoverContent
+              className="date-time-popover"
+              aria-label={t("dateTime.calendar", { field: fieldName })}
+              ref={contentRef}
+              onOpenAutoFocus={(event) => {
+                // Focus the selected day, else today, else the first enabled day. This runs after the
+                // popover focus scope pauses an enclosing dialog scope, which would otherwise take
+                // focus back from a day focused during the first render.
+                event.preventDefault();
+                contentRef.current
+                  ?.querySelector<HTMLElement>('.calendar-day-button[tabindex="0"]')
+                  ?.focus();
+              }}
+              onEscapeKeyDown={() => {
+                returnFocus.current = true;
+              }}
+              onCloseAutoFocus={(event) => {
+                // Escape and a picked day return to the typed date, not to the calendar button.
+                if (!returnFocus.current) return;
+                returnFocus.current = false;
+                event.preventDefault();
+                inputRef.current?.focus();
+              }}
+            >
+              <Calendar
+                mode="single"
+                required
+                fixedWeeks
+                selected={parsedDate ? localDate(parsedDate) : undefined}
+                defaultMonth={localDate(parsedDate ?? today ?? todayIn(timeZone, 0))}
+                onSelect={pick}
+                locale={locale === "en" ? enUS : ru}
+                disabled={disabledDays}
+                {...(today ? { today: localDate(today) } : {})}
+                {...(min ? { startMonth: localDate(min) } : {})}
+                {...(max ? { endMonth: localDate(max) } : {})}
+                labels={{
+                  labelNav: () => t("dateTime.monthNavigation"),
+                  labelPrevious: () => t("dateTime.previousMonth"),
+                  labelNext: () => t("dateTime.nextMonth"),
+                  labelDayButton: dayLabel,
+                  labelGridcell: dayLabel,
+                }}
+              />
+            </PopoverContent>
+          </>
+        )}
+        {mode !== "date" && (
+          // biome-ignore lint/a11y/useSemanticElements: a fieldset would add a second visible field title.
+          <div
+            className={cn("input date-time-time", disabled && "date-time-disabled")}
+            role="group"
+            aria-label={t("dateTime.time", { field: fieldName })}
+            aria-describedby={showZone ? zoneId : undefined}
+            data-invalid={invalidAttr}
+          >
+            {segments.map((segment, index) => {
+              const text = display[segment];
+              return (
+                <Fragment key={segment}>
+                  {index > 0 && (
+                    <span className="date-time-separator" aria-hidden="true">
+                      {segment === "milliseconds" ? "." : ":"}
+                    </span>
+                  )}
+                  <input
+                    ref={(element) => {
+                      segmentRefs.current[segment] = element;
+                    }}
+                    id={mode === "time" && index === 0 ? id : undefined}
+                    className="date-time-segment"
+                    data-segment={segment}
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    role="spinbutton"
+                    placeholder={t(`dateTime.${segment}Placeholder`)}
+                    value={text}
+                    disabled={disabled}
+                    required={required && index < 2}
+                    aria-label={t(`dateTime.${segment}`)}
+                    aria-valuemin={0}
+                    aria-valuemax={segmentSpec[segment].max}
+                    aria-valuenow={text ? Number(text) : undefined}
+                    aria-valuetext={text ? clampSegment(text, segment) : t("dateTime.empty")}
+                    aria-required={(requiredAttr && index < 2) || undefined}
+                    aria-invalid={invalidAttr}
+                    aria-describedby={describe(...(showZone ? [zoneId] : []))}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onChange={(event) =>
+                      typeInto(
+                        segment,
+                        index,
+                        event.target.value,
+                        (event.nativeEvent as Partial<InputEvent>).inputType,
+                      )
+                    }
+                    onKeyDown={(event) => segmentKey(segment, index, event)}
+                    onBlur={() => {
+                      const padded = clampSegment(text, segment);
+                      if (padded !== text) showDisplay({ ...display, [segment]: padded });
+                    }}
+                  />
+                </Fragment>
+              );
+            })}
+          </div>
+        )}
+        {showZone && (
+          <span id={zoneId} className="date-time-zone">
+            <span className="visually-hidden">{t("dateTime.timeZone")}: </span>
+            {timeZone}
+          </span>
+        )}
+        {mode !== "time" && (
+          <span id={hintId} className="visually-hidden">
+            {t("dateTime.dateFormat")}
+          </span>
+        )}
       </div>
     </Popover>
   );

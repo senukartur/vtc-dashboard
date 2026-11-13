@@ -56,6 +56,25 @@ export function splitWallClock(value: string): ({ date: string } & TimeParts) | 
   return { date, hours, minutes, seconds, milliseconds: fraction ? fraction.padEnd(3, "0") : "" };
 }
 
+/** A real calendar date already in "YYYY-MM-DD" form. */
+export function isIsoDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return !!match && isoDate(Number(match[1]), Number(match[2]), Number(match[3])) === value;
+}
+
+/** Splits a time of day "HH:mm[:ss[.SSS]]" into segments. */
+export function splitTime(value: string): TimeParts | undefined {
+  const split = splitWallClock(`2000-01-01T${value}`);
+  if (!split) return undefined;
+  const { date: _, ...parts } = split;
+  return parts;
+}
+
+/** Builds a time of day "HH:mm[:ss[.SSS]]" with the same rules as `composeWallClock`. */
+export function composeTime(parts: TimeParts, precision: Precision): string | undefined {
+  return composeWallClock({ ...parts, date: "2000-01-01" }, precision)?.slice(11);
+}
+
 function segmentValue(text: string, segment: Segment): number | undefined {
   if (!/^\d+$/.test(text) || text.length > segmentSpec[segment].length) return undefined;
   const value = Number(text);
