@@ -44,6 +44,22 @@ test("staged queries include effective filters and validate the new response sha
   await expect(readEventStage2(spec, signal)).rejects.toMatchObject({ kind: "unavailable" });
 });
 
+test("staged public list defaults to English and reads a populated Stage 2 response", async () => {
+  const example = stage2Fixture("listPublicEvents", "structured-and-legacy");
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(example.response));
+  vi.stubGlobal("fetch", fetch);
+  const signal = new AbortController().signal;
+
+  await expect(readEventStage2(eventStage2Reads.publicList(), signal)).resolves.toMatchObject({
+    data: example.response,
+  });
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/v1/public/events?locale=en",
+    expect.objectContaining({ credentials: "omit", cache: "no-store" }),
+  );
+  expect(eventStage2Reads.publicList({ locale: "ru" }).path).toBe("/public/events?locale=ru");
+});
+
 test("browser transport preserves own RSVP versions for member list and upcoming reads", async () => {
   const list = stage2Fixture("listEvents", "own-response");
   const upcoming = stage2Fixture("getUpcomingEvent", "own-response");

@@ -150,10 +150,10 @@ async function runNext(kind = "events.media-thumbnail") {
   await jobs.execute(claim);
   return claim;
 }
-async function cleanup() {
+async function cleanup(service = media) {
   clock += 120_000;
-  await media.maintenance(signal);
-  const jobs = queue();
+  await service.maintenance(signal);
+  const jobs = createQueue(unit, service.handlers);
   for (let n = 0; n < 20; n++) {
     const claim = await jobs.claim();
     if (!claim) return;
@@ -656,6 +656,50 @@ test("draft flag gates gallery access while publication preserves media in Event
     await inactiveApp.close();
     await withoutMediaApp.close();
   }
+});
+
+test("media maintenance retires drafts discarded while media was disabled", async () => {
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const draftEvents = createEvents(
+    unit,
+    { ...config, routeEnabled: true, draftsEnabled: true },
+    { identity, catalogs },
+    now,
+  );
+  const drafts = draftEvents.drafts;
+  if (!drafts) throw new Error("EXPECTED_DRAFTS");
+  const saved = await drafts.create(director.actor, newId(), {
+    title: "Fictional abandoned draft",
+  });
+  const id = saved.data.id;
+  const ready = await upload(id, 1);
+  await runNext();
+  const processing = await upload(id, 3);
+  await drafts.discard(director.actor, id, newId(), saved.version);
+  expect((await state(ready.item.id))?.state).toBe("ready");
+  expect((await state(processing.item.id))?.state).toBe("processing");
+
+  const resumed = createEventMedia(
+    unit,
+    { ...storage, draftsEnabled: false },
+    config.cursorKey,
+    identity,
+    blobs,
+    now,
+  );
+  const jobs = createQueue(unit, resumed.handlers);
+  const thumbnail = await jobs.claim();
+  expect(thumbnail?.kind.toString()).toBe("events.media-thumbnail");
+  if (!thumbnail) throw new Error("EXPECTED_MEDIA_JOB");
+  await jobs.execute(thumbnail);
+  expect((await state(processing.item.id))?.state).toBe("processing");
+
+  clock += 120_000;
+  await resumed.maintenance(signal);
+  expect((await state(ready.item.id))?.state).toBe("deleting");
+  expect((await state(processing.item.id))?.state).toBe("deleting");
+  await cleanup(resumed);
+  expect(await readdir(directory)).toEqual([]);
 });
 
 test("thumbnail retry is fenced from deletion and terminal failures expose rejected state without files", async () => {

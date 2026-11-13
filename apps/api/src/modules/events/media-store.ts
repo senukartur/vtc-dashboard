@@ -71,11 +71,9 @@ export function createMediaStore(unit: UnitOfWork, draftsEnabled: boolean) {
       if (event) return { kind: "published" as const, visibility: event.visibility, metadata };
     }
     if (metadata && !metadata.publishedEventId) {
-      // An active draft reserves its metadata in the creation transaction.
-      // Discard fences media in the same transaction, so background work can
-      // finish or clean up existing objects without draft-table grants.
-      if (!draftsEnabled)
-        return { kind: background ? ("draft" as const) : ("missing" as const), metadata };
+      // HTTP draft access follows the draft rollout. Media jobs also read the
+      // discard marker to recover drafts discarded while media was disabled.
+      if (!draftsEnabled && !background) return { kind: "missing" as const, metadata };
       const [draft] = await c(tx)
         .select({ discardedAt: eventDrafts.discardedAt })
         .from(eventDrafts)
