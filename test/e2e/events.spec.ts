@@ -745,7 +745,7 @@ test.describe("Stage 2 draft entry", () => {
 
   test(
     "a manager opens a draft directly, saves it and reloads without requesting media",
-    browserCase(["@functional", "@smoke-events"]),
+    browserCase(["@functional"]),
     async ({ page }) => {
       await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
       const draft = fixture();
