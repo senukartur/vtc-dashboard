@@ -14821,7 +14821,8 @@
             "reinstatement",
             "historical_resolution",
             "administrative_correction",
-            "promotion"
+            "promotion",
+            "ladder_archive_transfer"
           ]
         },
         "actor": {
@@ -17288,7 +17289,8 @@
             "initial",
             "reinstatement",
             "historical_resolution",
-            "administrative_correction"
+            "administrative_correction",
+            "ladder_archive_transfer"
           ]
         },
         "actor": {

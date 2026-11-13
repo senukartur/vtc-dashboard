@@ -5494,7 +5494,7 @@ export interface components {
                 reason: string | null;
             } | null;
             /** @enum {string} */
-            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion";
+            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion" | "ladder_archive_transfer";
         };
         QualificationStage3ActionHistoryList: {
             items: components["schemas"]["QualificationStage3ActionHistory"][];
@@ -5516,7 +5516,7 @@ export interface components {
             level: components["schemas"]["QualificationStage3LevelSummary"];
             member: components["schemas"]["MemberSummary"];
             /** @enum {string} */
-            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction";
+            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "ladder_archive_transfer";
             reason: string | null;
         };
         QualificationStage3CompanyAction: components["schemas"]["QualificationStage3PromotionHistory"] | components["schemas"]["QualificationStage3AssignmentHistory"];
