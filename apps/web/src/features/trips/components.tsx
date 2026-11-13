@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
@@ -67,6 +67,8 @@ export function Confirm({
   title,
   description,
   destructiveLabel,
+  visible = true,
+  dialogClassName,
 }: {
   label: string;
   guard: string;
@@ -81,7 +83,10 @@ export function Confirm({
   title?: string;
   description?: string;
   destructiveLabel?: string;
+  visible?: boolean;
+  dialogClassName?: string;
 }) {
+  const trigger = useRef<HTMLButtonElement>(null);
   const { t } = useTranslation("trips"),
     [snapshot, setSnapshot] = useState<{
       guard: string;
@@ -92,12 +97,13 @@ export function Confirm({
   useEffect(() => {
     if (
       snapshot &&
-      (snapshot.guard !== guard ||
+      (!visible ||
+        snapshot.guard !== guard ||
         (failure !== snapshot.failure &&
           (failure as AccountFailure | undefined)?.kind === "conflict"))
     )
       setSnapshot(null);
-  }, [guard, failure, snapshot]);
+  }, [guard, failure, snapshot, visible]);
   const cancel = (
     <DialogClose asChild>
       <Button variant="ghost" disabled={pending}>
@@ -107,13 +113,14 @@ export function Confirm({
   );
   return (
     <Dialog
-      open={!!snapshot}
+      open={visible && !!snapshot}
       onOpenChange={(open) => {
         if (!open && !(destructiveLabel && pending)) setSnapshot(null);
       }}
     >
       <DialogTrigger asChild>
         <Button
+          ref={trigger}
           type="button"
           variant={variant}
           aria-describedby={describedBy}
@@ -128,7 +135,16 @@ export function Confirm({
           {label}
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent
+        className={dialogClassName}
+        onCloseAutoFocus={(event) => {
+          if (
+            dialogClassName &&
+            (!trigger.current?.isConnected || trigger.current.closest("[hidden]"))
+          )
+            event.preventDefault();
+        }}
+      >
         <DialogTitle>{title ?? t("confirmTitle")}</DialogTitle>
         <DialogDescription>{description ?? t("confirmHelp")}</DialogDescription>
         <div className="stack trip-wrap">

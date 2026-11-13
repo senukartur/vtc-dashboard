@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type AdrClass, adrClasses } from "../../shared/catalog-selectors/contracts.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
@@ -8,6 +8,7 @@ import {
   DraftEntities,
   Failure,
   LevelContext,
+  QualificationSettingsVisibility,
   Recovery,
   RulesView,
   Thresholds,
@@ -27,11 +28,14 @@ export function LevelEditor({
   level,
   current,
   allowRenameReason = false,
+  recoveryOnly = false,
 }: {
   level: DTO["QualificationLevel"];
   current: DTO["QualificationRuleVersion"] | undefined;
   allowRenameReason?: boolean;
+  recoveryOnly?: boolean;
 }) {
+  const visible = useContext(QualificationSettingsVisibility) ?? true;
   const { t, i18n } = useTranslation("qualifications");
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const [baseline, setBaseline] = useState({
@@ -147,6 +151,15 @@ export function LevelEditor({
     );
     setSuccess(false);
   }
+  if (!visible || recoveryOnly)
+    return recoveryOnly && visible ? (
+      <>
+        <p>{t("cellUnavailable")}</p>
+        <Failure error={command.failure} seconds={command.seconds} />
+        <Recovery command={command} onRecovered={() => setSuccess(true)} />
+        {success && <p role="status">{t("success")}</p>}
+      </>
+    ) : null;
   return (
     <section className="stack">
       <h4>{t("rules")}</h4>

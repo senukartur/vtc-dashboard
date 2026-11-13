@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
-import { resetAccountLimits, staffContext, write } from "./support/account.ts";
+import { deferred } from "../support/concurrency.ts";
+import { csrf, origin, resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage, envelope, mockCatalogs } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
@@ -52,8 +53,9 @@ const labels = {
 };
 
 async function mockLadder(page: Page) {
+  const capabilities = ["company.read", "company.configure", "qualifications.manage"];
   await mockCatalogs(page, true, {
-    capabilities: ["company.read", "company.configure", "qualifications.manage"],
+    capabilities,
   });
   let revision = 1;
   let order: readonly (typeof ids)[number][] = ids;
@@ -106,6 +108,7 @@ async function mockLadder(page: Page) {
   });
   return {
     commands,
+    capabilities,
     external(next: readonly (typeof ids)[number][]) {
       order = next;
       revision++;
@@ -115,6 +118,251 @@ async function mockLadder(page: Page) {
     },
   };
 }
+
+test(
+  "P11 closes the portal and clears recovery when qualification authority changes",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const server = await mockLadder(page);
+    await page.goto(`${path}&game=ats`);
+    const panel = page.getByRole("region", { name: labels.en.ladder });
+    const recovery = panel.getByRole("button", { name: "Check the previous action", exact: true });
+    await panel
+      .getByLabel(labels.en.name, { exact: true })
+      .fill("Fictional authority-scoped level");
+    await panel.getByRole("button", { name: labels.en.add, exact: true }).click();
+    server.failResponse();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: labels.en.confirm, exact: true }).click();
+    await page.keyboard.press("Escape");
+    await expect(recovery).toBeVisible();
+    await expect.poll(() => server.commands.length).toBe(1);
+
+    server.capabilities.pop();
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(page.getByRole("heading", { name: "Access restricted" })).toBeVisible();
+    await expect(panel).toHaveCount(0);
+    await expect(dialog).toHaveCount(0);
+
+    server.capabilities.push("qualifications.manage");
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(panel.getByLabel(labels.en.name, { exact: true })).toHaveValue("");
+    await expect(recovery).toHaveCount(0);
+    expect(server.commands).toHaveLength(1);
+  },
+);
+
+test(
+  "P11 retains a real level rename receipt in its own game and level editor",
+  browserCase(["@real"]),
+  async ({ page }) => {
+    const staff = await staffContext();
+    const name = `Fictional recovered rename ${randomUUID().slice(0, 8)}`;
+    const panel = page.getByRole("region", { name: labels.en.ladder });
+    const dialog = page.getByRole("dialog");
+    const qualificationTab = page.getByRole("tab", { name: "Qualification levels", exact: true });
+    const audit = page.getByRole("tab", { name: "Audit log", exact: true });
+    const writes: { key: string | undefined; etag: string | undefined; body: string | null }[] = [];
+    const snapshot = async () => {
+      const response = await staff.get(api);
+      expect(response.status()).toBe(200);
+      return (await response.json()).data as Ladder;
+    };
+    const original = (await snapshot()).levels[0];
+    if (!original) throw new Error("SYNTHETIC_LEVEL_MISSING");
+    const editPath = `/admin/qualification-levels/${original.id}`;
+    const editor = panel
+      .getByRole("heading", { level: 3, name: original.name, exact: true })
+      .or(panel.getByRole("heading", { level: 3, name, exact: true }))
+      .locator("..");
+    const recover = editor.getByRole("button", { name: "Check the previous action", exact: true });
+    try {
+      await page.context().addCookies((await staff.storageState()).cookies);
+      await resetAccountLimits();
+      await page.goto(`${path}&game=ats`);
+      await panel.getByRole("button", { name: `Edit ${original.name}`, exact: true }).click();
+      await page.route(`**/api/v1${editPath}`, async (route) => {
+        const request = route.request();
+        const headers = request.headers();
+        writes.push({
+          key: headers["idempotency-key"],
+          etag: headers["if-match"],
+          body: request.postData(),
+        });
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        return writes.length === 1 ? route.abort("failed") : route.fulfill({ response });
+      });
+      await editor.locator(`#level-name-${original.id}`).fill(name);
+      await editor.getByRole("button", { name: "Save name", exact: true }).click();
+      await dialog.getByRole("button", { name: labels.en.confirm, exact: true }).click();
+      await page.keyboard.press("Escape");
+      await expect(recover).toBeVisible();
+      await audit.click();
+      await expect(dialog).toHaveCount(0);
+      await qualificationTab.click();
+      await expect(recover).toBeVisible();
+      await panel.getByRole("button", { name: "ETS2", exact: true }).click();
+      await expect(panel.getByRole("table").getByRole("rowheader").first()).toBeVisible();
+      await expect(
+        panel.getByRole("button", { name: "Check the previous action", exact: true }),
+      ).toHaveCount(0);
+      await panel.getByRole("button", { name: "ATS", exact: true }).click();
+      await expect(recover).toBeVisible();
+      await expect(editor.locator(`#level-name-${original.id}`)).toHaveValue(name);
+      await recover.click();
+      await expect(recover).toHaveCount(0);
+      await expect(editor.getByRole("heading", { name, exact: true })).toBeVisible();
+      expect(writes).toHaveLength(2);
+      expect(writes[0]?.etag).toBe(`"v${original.version}"`);
+      expect(writes[0]?.key).toMatch(/^[\da-f-]{36}$/);
+      expect(writes[1]).toEqual(writes[0]);
+      expect((await snapshot()).levels.find(({ id }) => id === original.id)).toMatchObject({
+        name,
+        version: original.version + 1,
+      });
+    } finally {
+      const current = (await snapshot()).levels.find(({ id }) => id === original.id);
+      if (current?.name === name) {
+        const response = await staff.patch(`/api/v1${editPath}`, {
+          headers: {
+            Origin: origin,
+            "X-CSRF-Token": await csrf(staff),
+            "Idempotency-Key": randomUUID(),
+            "If-Match": `"v${current.version}"`,
+          },
+          data: { name: original.name },
+        });
+        expect(response.status()).toBe(200);
+      }
+      await staff.dispose();
+    }
+  },
+);
+
+test(
+  "P11 recovers a real committed add after Back, tabs and game navigation",
+  browserCase(["@real"]),
+  async ({ page }) => {
+    const staff = await staffContext();
+    const name = `Fictional recovered add ${randomUUID().slice(0, 8)}`;
+    const dialog = page.getByRole("dialog");
+    const panel = page.getByRole("region", { name: labels.en.ladder });
+    const table = panel.getByRole("table", { name: labels.en.ladder });
+    const qualifications = page.getByRole("tab", { name: "Qualification levels", exact: true });
+    const general = page.getByRole("tab", { name: "General", exact: true });
+    const audit = page.getByRole("tab", { name: "Audit log", exact: true });
+    const recovered = panel.getByRole("button", { name: "Check the previous action", exact: true });
+    const rows = () => table.getByRole("rowheader").filter({ hasText: name });
+    const firstCommitted = deferred<{ status: number; etag: string | undefined }>();
+    const dropResponse = deferred<void>();
+    const firstDropped = deferred<void>();
+    const writes: { key?: string; etag?: string; body: string | null }[] = [];
+    const reads: string[] = [];
+    page.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (request.method() === "GET" && pathname.includes("/qualification-ladders/"))
+        reads.push(pathname);
+    });
+    const snapshot = async () => {
+      const response = await staff.get(api);
+      expect(response.status()).toBe(200);
+      return (await response.json()).data as Ladder;
+    };
+    try {
+      await page.context().addCookies((await staff.storageState()).cookies);
+      await resetAccountLimits();
+      await page.goto("/account/admin/settings?game=ats");
+      await expect(general).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByLabel("Company reporting timezone", { exact: true })).toBeVisible();
+      expect(reads).toEqual([]);
+      await qualifications.click();
+      const starting = await snapshot();
+      await expect(table.getByRole("rowheader").first()).toBeVisible();
+      await page.route(`**${api}/levels`, async (route) => {
+        const request = route.request();
+        const headers = request.headers();
+        writes.push({
+          ...(headers["idempotency-key"] && { key: headers["idempotency-key"] }),
+          ...(headers["if-match"] && { etag: headers["if-match"] }),
+          body: request.postData(),
+        });
+        const response = await route.fetch();
+        if (writes.length > 1) return route.fulfill({ response });
+        firstCommitted.resolve({ status: response.status(), etag: response.headers().etag });
+        await dropResponse.promise;
+        await route.abort("failed");
+        firstDropped.resolve();
+      });
+      await panel.getByLabel(labels.en.name, { exact: true }).fill(name);
+      await panel.getByRole("button", { name: labels.en.add, exact: true }).click();
+      await dialog.getByRole("button", { name: labels.en.confirm, exact: true }).click();
+      expect(await firstCommitted.promise).toEqual({
+        status: 201,
+        etag: `"v${starting.revision + 1}"`,
+      });
+      expect((await snapshot()).levels.filter((row) => row.name === name)).toHaveLength(1);
+      await page.goBack();
+      await expect(general).toBeFocused();
+      await expect(dialog).toHaveCount(0);
+      const readsAtHide = reads.length;
+      dropResponse.resolve();
+      await firstDropped.promise;
+      await audit.click();
+      await expect(audit).toHaveAttribute("aria-selected", "true");
+      expect(reads).toHaveLength(readsAtHide);
+      expect(writes).toHaveLength(1);
+      await qualifications.click();
+      await expect(rows()).toHaveCount(1);
+      await expect(recovered).toBeVisible();
+      const atsReads = reads.filter((pathname) => pathname === api).length;
+      await panel.getByRole("button", { name: "ETS2", exact: true }).click();
+      await expect(panel.getByRole("button", { name: "ETS2", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(table.getByRole("rowheader").first()).toBeVisible();
+      await expect(recovered).toHaveCount(0);
+      await expect(dialog).toHaveCount(0);
+      expect(reads.filter((pathname) => pathname === api)).toHaveLength(atsReads);
+      await page.goBack();
+      await expect(panel.getByRole("button", { name: "ATS", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(recovered).toBeVisible();
+      await recovered.click();
+      await expect(recovered).toHaveCount(0);
+      await expect(rows()).toHaveCount(1);
+      expect(writes).toHaveLength(2);
+      expect(writes[0]?.key).toMatch(/^[\da-f-]{36}$/);
+      expect(writes[1]).toEqual(writes[0]);
+      const final = await snapshot();
+      expect(final.revision).toBe(starting.revision + 1);
+      expect(final.levels.filter((row) => row.name === name)).toHaveLength(1);
+    } finally {
+      dropResponse.resolve();
+      const latest = await snapshot();
+      const source = latest.levels.find((row) => row.name === name);
+      const target = latest.levels.find((row) => row.id !== source?.id);
+      if (source && target)
+        expect(
+          (
+            await write(
+              staff,
+              `/admin/qualification-ladders/ats/levels/${source.id}/archive`,
+              {
+                targetLevelId: target.id,
+                observedDriverCount: source.currentDriverCount,
+              },
+              `"v${latest.revision}"`,
+            )
+          ).status(),
+        ).toBe(200);
+      await staff.dispose();
+    }
+  },
+);
 
 for (const orderOfConflict of ["read first", "command first"] as const) {
   test(

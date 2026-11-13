@@ -1,15 +1,34 @@
-import { type ReactNode, useId, useState } from "react";
+import {
+  type ComponentProps,
+  createContext,
+  type ReactNode,
+  useContext,
+  useId,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { itemSchema } from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { Button } from "../../shared/ui/primitives.js";
-import { Confirm, Failure, PageNav, State } from "../trips/components.js";
+import { Failure, PageNav, State, Confirm as TripConfirm } from "../trips/components.js";
 import { type useQualificationCommand, useQualificationQuery } from "./queries.js";
 import type { DTO, Game } from "./transport.js";
 
-export { Confirm, Failure, PageNav, State };
+export { Failure, PageNav, State };
+export const QualificationSettingsVisibility = createContext<boolean | undefined>(undefined);
+
+export function Confirm(props: ComponentProps<typeof TripConfirm>) {
+  const visible = useContext(QualificationSettingsVisibility);
+  return (
+    <TripConfirm
+      {...props}
+      visible={visible ?? true}
+      {...(visible !== undefined && { dialogClassName: "qualification-settings-confirmation" })}
+    />
+  );
+}
 export function MemberContext({ name, id }: { name: string; id: string }) {
   const { t } = useTranslation("qualifications");
   return (

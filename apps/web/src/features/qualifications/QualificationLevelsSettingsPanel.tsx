@@ -7,7 +7,15 @@ import { useSession } from "../../app/Session.js";
 import { formatQuantity } from "../../shared/formatting.js";
 import { Badge, Button, Card, Input, Label } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
-import { Confirm, Failure, Recovery, RulesView, State } from "./components.js";
+import { useSignOut } from "../account/sign-out.js";
+import {
+  Confirm,
+  Failure,
+  QualificationSettingsVisibility,
+  Recovery,
+  RulesView,
+  State,
+} from "./components.js";
 import { LevelEditor } from "./editor.js";
 import { useQualificationCommand, useQualificationQuery } from "./queries.js";
 import type { DTO, Game } from "./transport.js";
@@ -30,15 +38,30 @@ type Insertion = { etag: string | null; before: string | null };
 type AddDraft = { name: string; reason: string; insertion?: Insertion };
 const emptyAddDraft: AddDraft = { name: "", reason: "" };
 
-export function QualificationLevelsSettingsPanel() {
+export function QualificationLevelsSettingsPanel({ visible = true }: { visible?: boolean }) {
   const session = useSession();
+  const signOut = useSignOut();
+  const { t } = useTranslation("qualifications");
+  if (signOut.active || !session.self?.capabilities.includes("qualifications.manage"))
+    return <p>{t("ladderPermission")}</p>;
+  const scope = JSON.stringify([
+    session.generation,
+    session.self.member.id,
+    session.self.identityEpoch,
+    session.self.capabilities,
+  ]);
+  return <QualificationSettingsGames key={scope} visible={visible} />;
+}
+
+function QualificationSettingsGames({ visible }: { visible: boolean }) {
   const { t, i18n } = useTranslation("qualifications");
   const { search, hash } = useLocation();
   const navigate = useNavigate();
   const params = new URLSearchParams(search);
   const game: Game = params.get("game") === "ats" ? "ats" : "ets2";
-  if (!session.self?.capabilities.includes("qualifications.manage"))
-    return <p>{t("ladderPermission")}</p>;
+  const [opened, setOpened] = useState<readonly Game[]>([]);
+  // Keep only game panes actually opened during this authorized Settings visit.
+  if (visible && !opened.includes(game)) setOpened([...opened, game]);
   return (
     <section
       className="qualification-ladder stack"
@@ -54,22 +77,32 @@ export function QualificationLevelsSettingsPanel() {
           navigate({ search: params.toString(), hash });
         }}
       />
-      <LadderSettings
-        key={`${session.generation}:${session.self.member.id}:${session.self.identityEpoch}:${game}`}
-        game={game}
-      />
+      {games.map(({ value }) => {
+        const active = visible && game === value;
+        return (
+          (active || opened.includes(value)) && (
+            <div key={value} className={active ? "stack" : undefined} hidden={!active}>
+              <QualificationSettingsVisibility value={active}>
+                <LadderSettings game={value} visible={active} />
+              </QualificationSettingsVisibility>
+            </div>
+          )
+        );
+      })}
     </section>
   );
 }
 
-function LadderSettings({ game }: { game: Game }) {
+function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
   const { t, i18n } = useTranslation("qualifications");
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const root = `/admin/qualification-ladders/${game}`;
-  const query = useQualificationQuery(root, "EnvelopeQualificationLadder");
-  const ladder = query.data?.data.data;
+  const query = useQualificationQuery(root, "EnvelopeQualificationLadder", visible);
+  const snapshot = query.data?.data.data;
+  const ladder = snapshot?.game === game ? snapshot : undefined;
   const command = useQualificationCommand({ kind: "ladder", game });
   const [selectedId, setSelected] = useState<string | null>(null);
+  const [openedEditors, setOpenedEditors] = useState<LadderLevel[]>([]);
   const [archiveId, setArchive] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [reorderDraft, setReorderDraft] = useState<{ etag: string; ids: string[] }>();
@@ -77,15 +110,9 @@ function LadderSettings({ game }: { game: Game }) {
   const [addDraft, setAddDraft] = useState<AddDraft>(emptyAddDraft);
   const attemptedEdit = useRef<Edit | null>(null);
   const reasonId = useId();
-  if (!ladder || ladder.game !== game)
-    return query.isError || query.isPending ? (
-      <State query={query} />
-    ) : (
-      <p role="alert">{t("cellUnavailable")}</p>
-    );
-  const etag = query.data?.etag === `"v${ladder.revision}"` ? query.data.etag : null;
-  const hold = !etag || command.pending || command.seconds > 0 || command.canRecover;
-  const levels = ladder.levels;
+  const etag = ladder && query.data?.etag === `"v${ladder.revision}"` ? query.data.etag : null;
+  const hold = !visible || !etag || command.pending || command.seconds > 0 || command.canRecover;
+  const levels = ladder?.levels ?? [];
   const currentIds = levels.map((row) => row.id);
   const staleOrder = reorderDraft !== undefined && reorderDraft.etag !== etag;
   const order = reorderDraft && !staleOrder ? reorderDraft.ids : currentIds;
@@ -98,8 +125,13 @@ function LadderSettings({ game }: { game: Game }) {
     const row = levels.find((level) => level.id === id);
     return row ? [row] : [];
   });
-  const selected = levels.find((row) => row.id === selectedId);
   const archiving = levels.find((row) => row.id === archiveId);
+  function selectEditor(row: LadderLevel) {
+    setOpenedEditors((previous) =>
+      previous.some(({ id }) => id === row.id) ? previous : [...previous, row],
+    );
+    setSelected(row.id === selectedId ? null : row.id);
+  }
   function move(index: number, delta: number) {
     if (!etag || staleOrder) return;
     const ids = [...order];
@@ -135,207 +167,241 @@ function LadderSettings({ game }: { game: Game }) {
   }
   return (
     <>
-      {!ladder.ladderEditsEnabled && <p className="muted">{t("ladderEditsUnavailable")}</p>}
-      <table className="qualification-ladder-table" role="table" aria-label={t("ladderTitle")}>
-        <thead role="rowgroup">
-          <tr role="row">
-            {[
-              "level",
-              "colMass",
-              "colTrailers",
-              "colAdr",
-              "colThreshold",
-              "ladderDrivers",
-              "ladderActions",
-            ].map((key) => (
-              <th key={key} scope="col" role="columnheader">
-                {t(key)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody role="rowgroup">
-          {rows.map((row, index) => {
-            const rules = row.freightRuleSummary;
-            const allowlist = (count: number | null) =>
-              count === null
-                ? t("noRestriction")
-                : count === 0
-                  ? t("noneAllowed")
-                  : t("allowedCount", { count });
-            return (
-              <tr key={row.id} role="row">
-                <th scope="row" role="rowheader" className="qualification-ladder-level">
-                  <strong>{row.name}</strong>
-                  <p className="qualification-ladder-meta">
-                    <span>
-                      {t("stage")} {index + 1}
-                    </span>
-                    {index === 0 && <Badge size="xs">{t("ladderFirst")}</Badge>}
-                    {index === rows.length - 1 && <Badge size="xs">{t("topLevel")}</Badge>}
-                    <Badge
-                      size="xs"
-                      className={row.configured ? "badge-accepted" : "qualification-badge-pending"}
-                    >
-                      {t(row.configured ? "statusEffective" : "statusUnpublished")}
-                    </Badge>
-                  </p>
-                </th>
-                <LadderCell label={t("colMass")}>
-                  {!rules
-                    ? t("unset")
-                    : rules.maxMassKg === null
-                      ? t("noRestriction")
-                      : formatQuantity(rules.maxMassKg, "t", locale)}
-                </LadderCell>
-                <LadderCell label={t("colTrailers")}>
-                  {rules ? allowlist(rules.allowedTrailerTypeCount) : t("unset")}
-                </LadderCell>
-                <LadderCell label={t("colAdr")}>
-                  {rules ? allowlist(rules.allowedAdrCategoryCount) : t("unset")}
-                </LadderCell>
-                <LadderCell label={t("colThreshold")}>
-                  {row.terminal
-                    ? t("topLevel")
-                    : row.promotionConfigured
-                      ? t("thresholdValue", {
-                          trips: row.requiredTrips ?? t("noMinimum"),
-                          distance:
-                            row.requiredDistanceM === null
-                              ? t("noMinimum")
-                              : formatQuantity(row.requiredDistanceM, "km", locale),
-                        })
-                      : t("ladderPromotionUnconfigured")}
-                </LadderCell>
-                <LadderCell label={t("ladderDrivers")}>{row.currentDriverCount}</LadderCell>
-                <td className="qualification-ladder-controls" role="cell">
-                  <div className="qualification-actions qualification-ladder-row-actions">
-                    {ladder.ladderEditsEnabled && (
-                      <>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={hold || staleOrder || index === 0}
-                          aria-label={t("ladderMoveUpName", { name: row.name })}
-                          onClick={() => move(index, -1)}
-                        >
-                          {t("ladderMoveUp")}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={hold || staleOrder || index === rows.length - 1}
-                          aria-label={t("ladderMoveDownName", { name: row.name })}
-                          onClick={() => move(index, 1)}
-                        >
-                          {t("ladderMoveDown")}
-                        </Button>
-                      </>
-                    )}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      aria-expanded={row.id === selected?.id}
-                      aria-label={t("ladderEditName", { name: row.name })}
-                      onClick={() => setSelected(row.id === selected?.id ? null : row.id)}
-                    >
-                      {t(row.id === selected?.id ? "close" : "edit")}
-                    </Button>
-                    {ladder.ladderEditsEnabled && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        aria-label={t("ladderArchiveName", { name: row.name })}
-                        aria-expanded={row.id === archiving?.id}
-                        disabled={hold || levels.length === 1 || changed || staleOrder}
-                        onClick={() => setArchive(row.id === archiving?.id ? null : row.id)}
-                      >
-                        {t("ladderArchive")}
-                      </Button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {ladder.ladderEditsEnabled && staleOrder && (
-        <div className="stack">
-          <p role="status">{t("ladderOrderChanged")}</p>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={hold}
-            onClick={() => setReorderDraft(undefined)}
-          >
-            {t("ladderReviewOrder")}
-          </Button>
-        </div>
-      )}
-      {ladder.ladderEditsEnabled && changed && (
-        <div className="stack">
-          <Reason id={reasonId} value={reorderReason} onChange={setReorderReason} disabled={hold} />
-          <div className="qualification-actions">
-            <Confirm
-              label={t("ladderSaveOrder")}
-              guard={JSON.stringify([reorderDraft?.etag, orderInput, rows.map((row) => row.name)])}
-              disabled={hold}
-              pending={command.pending}
-              failure={command.failure}
-              onConfirm={() =>
-                reorderDraft && !staleOrder
-                  ? submit("reorder", `${root}/order`, orderInput, reorderDraft.etag)
-                  : Promise.resolve(undefined)
-              }
-            >
-              <p>{t("ladderOrderWarning")}</p>
-              <ol>
-                {rows.map((row) => (
-                  <li key={row.id}>{row.name}</li>
+      {ladder && (
+        <>
+          {!ladder.ladderEditsEnabled && <p className="muted">{t("ladderEditsUnavailable")}</p>}
+          <table className="qualification-ladder-table" role="table" aria-label={t("ladderTitle")}>
+            <thead role="rowgroup">
+              <tr role="row">
+                {[
+                  "level",
+                  "colMass",
+                  "colTrailers",
+                  "colAdr",
+                  "colThreshold",
+                  "ladderDrivers",
+                  "ladderActions",
+                ].map((key) => (
+                  <th key={key} scope="col" role="columnheader">
+                    {t(key)}
+                  </th>
                 ))}
-              </ol>
-              {orderInput.reason && <p>{orderInput.reason}</p>}
-            </Confirm>
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={hold}
-              onClick={() => {
-                setReorderDraft(undefined);
-                setReorderReason("");
-              }}
-            >
-              {t("trips:cancel")}
-            </Button>
+              </tr>
+            </thead>
+            <tbody role="rowgroup">
+              {rows.map((row, index) => {
+                const rules = row.freightRuleSummary;
+                const allowlist = (count: number | null) =>
+                  count === null
+                    ? t("noRestriction")
+                    : count === 0
+                      ? t("noneAllowed")
+                      : t("allowedCount", { count });
+                return (
+                  <tr key={row.id} role="row">
+                    <th scope="row" role="rowheader" className="qualification-ladder-level">
+                      <strong>{row.name}</strong>
+                      <p className="qualification-ladder-meta">
+                        <span>
+                          {t("stage")} {index + 1}
+                        </span>
+                        {index === 0 && <Badge size="xs">{t("ladderFirst")}</Badge>}
+                        {index === rows.length - 1 && <Badge size="xs">{t("topLevel")}</Badge>}
+                        <Badge
+                          size="xs"
+                          className={
+                            row.configured ? "badge-accepted" : "qualification-badge-pending"
+                          }
+                        >
+                          {t(row.configured ? "statusEffective" : "statusUnpublished")}
+                        </Badge>
+                      </p>
+                    </th>
+                    <LadderCell label={t("colMass")}>
+                      {!rules
+                        ? t("unset")
+                        : rules.maxMassKg === null
+                          ? t("noRestriction")
+                          : formatQuantity(rules.maxMassKg, "t", locale)}
+                    </LadderCell>
+                    <LadderCell label={t("colTrailers")}>
+                      {rules ? allowlist(rules.allowedTrailerTypeCount) : t("unset")}
+                    </LadderCell>
+                    <LadderCell label={t("colAdr")}>
+                      {rules ? allowlist(rules.allowedAdrCategoryCount) : t("unset")}
+                    </LadderCell>
+                    <LadderCell label={t("colThreshold")}>
+                      {row.terminal
+                        ? t("topLevel")
+                        : row.promotionConfigured
+                          ? t("thresholdValue", {
+                              trips: row.requiredTrips ?? t("noMinimum"),
+                              distance:
+                                row.requiredDistanceM === null
+                                  ? t("noMinimum")
+                                  : formatQuantity(row.requiredDistanceM, "km", locale),
+                            })
+                          : t("ladderPromotionUnconfigured")}
+                    </LadderCell>
+                    <LadderCell label={t("ladderDrivers")}>{row.currentDriverCount}</LadderCell>
+                    <td className="qualification-ladder-controls" role="cell">
+                      <div className="qualification-actions qualification-ladder-row-actions">
+                        {ladder.ladderEditsEnabled && (
+                          <>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={hold || staleOrder || index === 0}
+                              aria-label={t("ladderMoveUpName", { name: row.name })}
+                              onClick={() => move(index, -1)}
+                            >
+                              {t("ladderMoveUp")}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={hold || staleOrder || index === rows.length - 1}
+                              aria-label={t("ladderMoveDownName", { name: row.name })}
+                              onClick={() => move(index, 1)}
+                            >
+                              {t("ladderMoveDown")}
+                            </Button>
+                          </>
+                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          aria-expanded={row.id === selectedId}
+                          aria-label={t("ladderEditName", { name: row.name })}
+                          onClick={() => selectEditor(row)}
+                        >
+                          {t(row.id === selectedId ? "close" : "edit")}
+                        </Button>
+                        {ladder.ladderEditsEnabled && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            aria-label={t("ladderArchiveName", { name: row.name })}
+                            aria-expanded={row.id === archiving?.id}
+                            disabled={hold || levels.length === 1 || changed || staleOrder}
+                            onClick={() => setArchive(row.id === archiving?.id ? null : row.id)}
+                          >
+                            {t("ladderArchive")}
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {ladder.ladderEditsEnabled && staleOrder && (
+            <div className="stack">
+              <p role="status">{t("ladderOrderChanged")}</p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={hold}
+                onClick={() => setReorderDraft(undefined)}
+              >
+                {t("ladderReviewOrder")}
+              </Button>
+            </div>
+          )}
+          {ladder.ladderEditsEnabled && changed && (
+            <div className="stack">
+              <Reason
+                id={reasonId}
+                value={reorderReason}
+                onChange={setReorderReason}
+                disabled={hold}
+              />
+              <div className="qualification-actions">
+                <Confirm
+                  label={t("ladderSaveOrder")}
+                  guard={JSON.stringify([
+                    reorderDraft?.etag,
+                    orderInput,
+                    rows.map((row) => row.name),
+                  ])}
+                  disabled={hold}
+                  pending={command.pending}
+                  failure={command.failure}
+                  onConfirm={() =>
+                    reorderDraft && !staleOrder
+                      ? submit("reorder", `${root}/order`, orderInput, reorderDraft.etag)
+                      : Promise.resolve(undefined)
+                  }
+                >
+                  <p>{t("ladderOrderWarning")}</p>
+                  <ol>
+                    {rows.map((row) => (
+                      <li key={row.id}>{row.name}</li>
+                    ))}
+                  </ol>
+                  {orderInput.reason && <p>{orderInput.reason}</p>}
+                </Confirm>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={hold}
+                  onClick={() => {
+                    setReorderDraft(undefined);
+                    setReorderReason("");
+                  }}
+                >
+                  {t("trips:cancel")}
+                </Button>
+              </div>
+            </div>
+          )}
+          {ladder.ladderEditsEnabled && archiving && (
+            <ArchiveLevel
+              key={archiving.id}
+              level={archiving}
+              ladder={ladder}
+              root={root}
+              etag={etag}
+              command={command}
+              hold={hold || changed || staleOrder}
+              submit={submit}
+            />
+          )}
+        </>
+      )}
+      {visible &&
+        !ladder &&
+        (query.isError || query.isPending ? (
+          <State query={query} />
+        ) : (
+          <p role="alert">{t("cellUnavailable")}</p>
+        ))}
+      {openedEditors.map((opened) => {
+        const current = levels.find(({ id }) => id === opened.id);
+        // An archive or failed read can remove the row while an exact receipt is still recoverable.
+        const level = current ?? opened;
+        const editorVisible = visible && opened.id === selectedId;
+        return (
+          <div key={level.id} hidden={!editorVisible}>
+            <QualificationSettingsVisibility value={editorVisible}>
+              <Card className="stack">
+                <h3>{level.name}</h3>
+                {editorVisible && etag && current?.effectiveRule && (
+                  <RulesView rules={current.effectiveRule.rules} game={game} />
+                )}
+                <LevelEditor
+                  level={level}
+                  current={level.effectiveRule ?? undefined}
+                  allowRenameReason={ladder?.ladderEditsEnabled === true}
+                  recoveryOnly={!current || !etag}
+                />
+              </Card>
+            </QualificationSettingsVisibility>
           </div>
-        </div>
-      )}
-      {ladder.ladderEditsEnabled && archiving && (
-        <ArchiveLevel
-          key={archiving.id}
-          level={archiving}
-          ladder={ladder}
-          root={root}
-          etag={etag}
-          command={command}
-          hold={hold || changed || staleOrder}
-          submit={submit}
-        />
-      )}
-      {selected && (
-        <Card className="stack">
-          <h3>{selected.name}</h3>
-          {selected.effectiveRule && <RulesView rules={selected.effectiveRule.rules} game={game} />}
-          <LevelEditor
-            key={selected.id}
-            level={selected}
-            current={selected.effectiveRule ?? undefined}
-            allowRenameReason={ladder.ladderEditsEnabled}
-          />
-        </Card>
-      )}
-      {ladder.ladderEditsEnabled &&
+        );
+      })}
+      {ladder?.ladderEditsEnabled &&
         (levels.length < maxLevels ? (
           <AddLevel
             ladder={ladder}
