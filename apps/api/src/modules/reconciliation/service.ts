@@ -4,6 +4,7 @@ import { applicationId, createAudit, newId, type TxContext, type UnitOfWork } fr
 import {
   and,
   desc,
+  reconciliationCandidateDismissals as dismissals,
   eq,
   inArray,
   lt,
@@ -29,6 +30,7 @@ import { type Actor, type Identity, identityError } from "../identity/service.js
 import type { ManualReports } from "../manual-reports/service.js";
 import type { Qualifications } from "../qualifications/service.js";
 import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
+import type { TripState } from "../trips/groups.js";
 import type { GroupSnapshot } from "../trips/reconciliation.js";
 import type { Trips } from "../trips/service.js";
 import { type Page, pagination } from "./cursor.js";
@@ -41,9 +43,15 @@ import {
   ruleSnapshot,
   validateReconciliationConfig,
 } from "./matcher.js";
+import { type CandidatePage, createStage3Candidates } from "./stage3-candidates.js";
 
 type S = components["schemas"];
 type Row = typeof reconciliations.$inferSelect;
+function stableCandidateHash(primaryVersion: number, secondaryVersion: number, factIds: string[]) {
+  return contentHash(
+    canonicalJson(["dispatch-review-v1", primaryVersion, secondaryVersion, [...factIds].sort()]),
+  );
+}
 function dto(row: Row): S["Reconciliation"] {
   return {
     id: row.id,
@@ -76,6 +84,7 @@ export function createReconciliation(
     coordinator = reconciliationCoordinator(ports),
     audit = createAudit(unit),
     outbox = ports.outbox ?? createOutbox(unit);
+  const stage3 = createStage3Candidates(unit, ports.trips, page, hash);
   let searchQueue: ReturnType<typeof createQueue>;
   async function command<T>(work: (tx: TxContext) => Promise<T>): Promise<T> {
     try {
@@ -94,13 +103,13 @@ export function createReconciliation(
       throw error;
     }
   }
-  async function once(
+  async function once<T extends { data: { version: number }; version: number }>(
     tx: TxContext,
     actor: Actor,
-    operation: "merge" | "reverse",
+    operation: "merge" | "reverse" | "dismiss" | "undo_dismissal",
     key: string,
     input: unknown,
-    command: () => Promise<{ data: S["Reconciliation"]; version: number }>,
+    command: () => Promise<T>,
   ) {
     const fingerprint = createHmac("sha256", Buffer.from(config.key, "hex"))
       .update("reconciliation/command/v1\0")
@@ -114,7 +123,7 @@ export function createReconciliation(
     const [saved] = await c(tx).select().from(reconciliationCommands).where(where).for("update");
     if (saved) {
       if (!saved.fingerprint.equals(fingerprint)) throw identityError(409, "IDEMPOTENCY_CONFLICT");
-      return saved.result as { data: S["Reconciliation"]; version: number };
+      return saved.result as T;
     }
     const result = await command();
     await c(tx)
@@ -260,8 +269,251 @@ export function createReconciliation(
   async function authorize(tx: TxContext, actor: Actor) {
     return ports.identity.authorizeInTransaction(tx, actor, "trips.review");
   }
+  // Adjudication changes the aggregate version, not immutable latest source evidence.
+  // Advance snapshots already current before that write without restarting discovery.
+  async function advanceTripVersionInTransaction(
+    tx: TxContext,
+    previous: TripState,
+    row: TripState,
+  ) {
+    if (!config.dispatchReviewStage3Enabled || row.version === previous.version || row.aliasOf)
+      return;
+    await advanceTripVersionPage(tx, row, previous.version, null);
+  }
+  async function advanceTripVersionPage(
+    tx: TxContext,
+    row: TripState,
+    previous: number,
+    after: string | null,
+  ) {
+    const related = await c(tx)
+      .select()
+      .from(reconciliationCandidates)
+      .where(
+        and(
+          eq(reconciliationCandidates.active, true),
+          eq(reconciliationCandidates.ruleHash, hash),
+          after ? lt(sql`${after}`, reconciliationCandidates.id) : undefined,
+          or(
+            and(
+              eq(reconciliationCandidates.primaryTripId, row.id),
+              sql`${reconciliationCandidates.primaryVersion} <= ${previous}`,
+            ),
+            and(
+              eq(reconciliationCandidates.secondaryTripId, row.id),
+              sql`${reconciliationCandidates.secondaryVersion} <= ${previous}`,
+            ),
+          ),
+        ),
+      )
+      .orderBy(reconciliationCandidates.id)
+      .limit(candidateBound + 1)
+      .for("update");
+    const batch = related.slice(0, candidateBound);
+    const rootGroup = await ports.trips.groups.membersOfRoots(tx, [row.id], "share");
+    const rootEvidence = await ports.trips.reconciliation.matchingEvidence(
+      tx,
+      rootGroup.map((member) => member.id),
+    );
+    for (const snapshot of batch) {
+      const first = snapshot.primaryTripId === row.id;
+      const counterpartId = first ? snapshot.secondaryTripId : snapshot.primaryTripId;
+      const counterpart = await ports.trips.groups.resolve(tx, counterpartId, true);
+      if (
+        counterpart.id !== counterpartId ||
+        row.ownerId !== snapshot.ownerId ||
+        counterpart.ownerId !== row.ownerId ||
+        row.game !== snapshot.game ||
+        counterpart.game !== row.game ||
+        counterpart.version !== (first ? snapshot.secondaryVersion : snapshot.primaryVersion)
+      )
+        continue;
+      const { factIds } = snapshot.evidence as { factIds?: string[] };
+      if (
+        !rootEvidence.complete ||
+        !factIds ||
+        rootEvidence.facts.some((fact) => !factIds.includes(fact.factRevisionId))
+      )
+        continue;
+      const otherGroup = await ports.trips.groups.membersOfRoots(tx, [counterpart.id], "share");
+      const other = await ports.trips.reconciliation.matchingEvidence(
+        tx,
+        otherGroup.map((member) => member.id),
+      );
+      const currentFacts = [...rootEvidence.facts, ...other.facts]
+        .map((fact) => fact.factRevisionId)
+        .sort();
+      if (!other.complete || canonicalJson([...factIds].sort()) !== canonicalJson(currentFacts))
+        continue;
+      const primaryVersion = first ? row.version : snapshot.primaryVersion;
+      const secondaryVersion = first ? snapshot.secondaryVersion : row.version;
+      const reasons = snapshot.reasons.filter(
+        (reason) => reason !== "confirmed_facts_require_review",
+      );
+      if (row.decision === "accepted" || counterpart.decision === "accepted")
+        reasons.push("confirmed_facts_require_review");
+      await c(tx)
+        .update(reconciliationCandidates)
+        .set({ active: false })
+        .where(eq(reconciliationCandidates.id, snapshot.id));
+      await c(tx)
+        .insert(reconciliationCandidates)
+        .values({
+          ...snapshot,
+          id: newId(),
+          primaryVersion,
+          secondaryVersion,
+          searchHash: stableCandidateHash(primaryVersion, secondaryVersion, factIds),
+          reasons: [...new Set(reasons)].sort(),
+          createdAt: at(),
+        })
+        .onDuplicateKeyUpdate({ set: { active: true } });
+    }
+    const last = batch.at(-1);
+    if (last && related.length > batch.length) {
+      const ref = reference({ tripId: row.id, previous, version: row.version, cursor: last.id });
+      await searchQueue.enqueue(tx, {
+        kind: "reconciliation.search",
+        consumer: "reconciliation-search-v1",
+        schemaVersion: 1,
+        eventId: null,
+        effectKey: `snapshot:${contentHash(canonicalJson(ref)).toString("hex")}`,
+        reference: ref,
+        availableAt: at(),
+        maxAttempts: 5,
+      });
+    }
+  }
+
+  async function dismissCandidate(
+    actor: Actor,
+    id: string,
+    key: string,
+    expected: number,
+    input: S["TripStage3DuplicateDismissInput"] | null,
+  ) {
+    applicationId(id);
+    applicationId(key);
+    if (!Number.isSafeInteger(expected) || expected < 1) throw identityError(422);
+    const reason = input?.reason.trim() ?? null;
+    if (input && (!reason || input.reason.length > 2048)) throw identityError(422);
+    return command(async (tx) => {
+      await authorize(tx, actor);
+      const where = eq(reconciliationCandidates.id, id);
+      const [candidate] = await c(tx).select().from(reconciliationCandidates).where(where);
+      if (!candidate) throw identityError(404);
+      const ids = [candidate.primaryTripId, candidate.secondaryTripId];
+      const owners = await ports.trips.contributions.owners(tx, ids);
+      await ports.qualifications.prepareInTransaction(tx, owners, actor);
+      const trips = await ports.trips.groups.members(tx, ids, true);
+      const primary = trips.find((trip) => trip.id === candidate.primaryTripId);
+      const secondary = trips.find((trip) => trip.id === candidate.secondaryTripId);
+      if (
+        !primary ||
+        !secondary ||
+        primary.ownerId !== candidate.ownerId ||
+        secondary.ownerId !== candidate.ownerId ||
+        primary.game !== candidate.game ||
+        secondary.game !== candidate.game
+      )
+        throw identityError(404);
+      if (primary.ownerId === actor.userId) throw identityError(403, "SELF_REVIEW_FORBIDDEN");
+      const [current] = await c(tx)
+        .select()
+        .from(reconciliationCandidates)
+        .where(where)
+        .for("update");
+      return once(
+        tx,
+        actor,
+        input ? "dismiss" : "undo_dismissal",
+        key,
+        { id, expected, reason },
+        async () => {
+          if (
+            !current?.active ||
+            !current.ruleHash.equals(hash) ||
+            primary.aliasOf ||
+            secondary.aliasOf ||
+            primary.version !== current.primaryVersion ||
+            secondary.version !== current.secondaryVersion
+          )
+            throw identityError(409, "VERSION_CONFLICT");
+          const dismissalWhere = eq(dismissals.candidateId, id);
+          const [prior] = await c(tx).select().from(dismissals).where(dismissalWhere).for("update");
+          const previousVersion = prior?.version ?? 1;
+          const previouslyDismissed = prior?.undoneAt === null;
+          const dismissed = input !== null;
+          if (
+            previousVersion !== expected ||
+            dismissed === previouslyDismissed ||
+            previousVersion >= 4294967295
+          )
+            throw identityError(409, "VERSION_CONFLICT");
+          const version = previousVersion + 1;
+          const observedAt = at();
+          const instant = prior && observedAt < prior.dismissedAt ? prior.dismissedAt : observedAt;
+          const dismissedAt = dismissed ? instant : prior?.dismissedAt;
+          if (!dismissedAt) throw new Error("CANDIDATE_DISMISSAL_MISSING");
+          const undoneAt = dismissed ? null : instant;
+          if (reason !== null) {
+            const row = {
+              dismissedBy: actor.userId,
+              dismissedAt,
+              reason,
+              version,
+              undoneBy: null,
+              undoneAt: null,
+            };
+            await c(tx)
+              .insert(dismissals)
+              .values({ candidateId: id, ...row })
+              .onDuplicateKeyUpdate({ set: row });
+          } else {
+            await c(tx)
+              .update(dismissals)
+              .set({ version, undoneBy: actor.userId, undoneAt })
+              .where(dismissalWhere);
+          }
+          await audit.append(tx, {
+            actorKind: "user",
+            actorId: actor.userId,
+            operation: dismissed ? "duplicate.dismissed" : "duplicate.dismissal_undone",
+            subjectKind: "duplicate_candidate",
+            subjectId: id,
+            occurredAt: instant,
+            reason: "staff_review",
+            details: {
+              before: { dismissed: previouslyDismissed, version: previousVersion },
+              after: { dismissed, version },
+            },
+          });
+          return { data: { candidateId: id, dismissed, dismissedAt, undoneAt, version }, version };
+        },
+      );
+    });
+  }
   type Search = typeof reconciliationSearches.$inferSelect;
+  type SnapshotReference = { tripId: string; previous: number; version: number; cursor: string };
   const reference = (value: unknown) => {
+    if (value && typeof value === "object" && Object.hasOwn(value, "previous")) {
+      const snapshot = closed(value, ["tripId", "previous", "version", "cursor"]);
+      if (
+        typeof snapshot.previous !== "number" ||
+        typeof snapshot.version !== "number" ||
+        !Number.isSafeInteger(snapshot.previous) ||
+        !Number.isSafeInteger(snapshot.version) ||
+        snapshot.previous < 1 ||
+        snapshot.version <= snapshot.previous
+      )
+        throw new Error("INVALID_CANDIDATE_SNAPSHOT_VERSION");
+      return {
+        tripId: applicationId(snapshot.tripId as string),
+        previous: snapshot.previous,
+        version: snapshot.version,
+        cursor: applicationId(snapshot.cursor as string),
+      } satisfies SnapshotReference;
+    }
     const p = closed(value, ["tripId", "generation", "phase", "cursor"]);
     if (p.phase !== "partners" && p.phase !== "discovery") throw new Error("INVALID_SEARCH_PHASE");
     return {
@@ -374,6 +626,24 @@ export function createReconciliation(
       .limit(2)
       .for("share");
     if (other.length !== 1) return;
+    if (config.dispatchReviewStage3Enabled) {
+      const expectedRoot =
+        only.row.primaryTripId === root.id ? only.row.primaryVersion : only.row.secondaryVersion;
+      const expectedTarget =
+        only.row.primaryTripId === target.id ? only.row.primaryVersion : only.row.secondaryVersion;
+      if (
+        root.version !== expectedRoot ||
+        target.version !== expectedTarget ||
+        other[0]?.id !== only.row.id
+      )
+        return;
+      const [dismissed] = await c(tx)
+        .select({ undoneAt: dismissals.undoneAt })
+        .from(dismissals)
+        .where(eq(dismissals.candidateId, only.row.id))
+        .for("share");
+      if (dismissed?.undoneAt === null) return;
+    }
     await apply(
       tx,
       {
@@ -423,7 +693,9 @@ export function createReconciliation(
               eq(reconciliationCandidates.primaryTripId, root.id),
               eq(reconciliationCandidates.secondaryTripId, root.id),
             ),
-            sql`COALESCE(JSON_UNQUOTE(JSON_EXTRACT(${reconciliationCandidates.evidence}, '$.searchGeneration')),'') <> ${state.generation}`,
+            config.dispatchReviewStage3Enabled
+              ? undefined
+              : sql`COALESCE(JSON_UNQUOTE(JSON_EXTRACT(${reconciliationCandidates.evidence}, '$.searchGeneration')),'') <> ${state.generation}`,
             state.cursor ? sql`${reconciliationCandidates.id} > ${state.cursor}` : undefined,
           ),
         )
@@ -460,21 +732,25 @@ export function createReconciliation(
     for (const id of ids.sort()) {
       const target = await ports.trips.groups.resolve(tx, id, true);
       // Only this affected pair is replaced. All unrelated review work remains intact.
-      await c(tx)
-        .update(reconciliationCandidates)
-        .set({ active: false })
-        .where(
-          or(
-            and(
-              eq(reconciliationCandidates.primaryTripId, root.id),
-              eq(reconciliationCandidates.secondaryTripId, id),
-            ),
-            and(
-              eq(reconciliationCandidates.secondaryTripId, root.id),
-              eq(reconciliationCandidates.primaryTripId, id),
-            ),
-          ),
-        );
+      const pairCondition = or(
+        and(
+          eq(reconciliationCandidates.primaryTripId, root.id),
+          eq(reconciliationCandidates.secondaryTripId, id),
+        ),
+        and(
+          eq(reconciliationCandidates.secondaryTripId, root.id),
+          eq(reconciliationCandidates.primaryTripId, id),
+        ),
+      );
+      const previous = config.dispatchReviewStage3Enabled
+        ? await c(tx)
+            .select()
+            .from(reconciliationCandidates)
+            .where(and(pairCondition, eq(reconciliationCandidates.active, true)))
+            .orderBy(reconciliationCandidates.id)
+            .for("update")
+        : [];
+      await c(tx).update(reconciliationCandidates).set({ active: false }).where(pairCondition);
       if (
         target.id !== id ||
         target.id === root.id ||
@@ -497,21 +773,43 @@ export function createReconciliation(
         secondary = pair[1];
       if (!primary || !secondary) throw new Error("CANDIDATE_PAIR_MISSING");
       const factIds = [...evidence.facts, ...other.facts].map((f) => f.factRevisionId).sort();
+      const stable = previous.find(
+        (candidate) =>
+          candidate.primaryTripId === primary.id &&
+          candidate.secondaryTripId === secondary.id &&
+          candidate.primaryVersion === primary.version &&
+          candidate.secondaryVersion === secondary.version &&
+          candidate.ruleHash.equals(hash) &&
+          canonicalJson((candidate.evidence as { factIds?: string[] }).factIds ?? []) ===
+            canonicalJson(factIds),
+      );
+      if (stable) {
+        // Stage 3 traverses stable IDs and keeps the reviewed snapshot immutable.
+        await c(tx)
+          .update(reconciliationCandidates)
+          .set({
+            active: true,
+          })
+          .where(eq(reconciliationCandidates.id, stable.id));
+        continue;
+      }
       await c(tx)
         .insert(reconciliationCandidates)
         .values({
           id: newId(),
           ownerId: root.ownerId,
           game: root.game,
-          searchHash: contentHash(
-            canonicalJson([
-              state.generation,
-              epoch.toString("hex"),
-              primary.version,
-              secondary.version,
-              factIds,
-            ]),
-          ),
+          searchHash: config.dispatchReviewStage3Enabled
+            ? stableCandidateHash(primary.version, secondary.version, factIds)
+            : contentHash(
+                canonicalJson([
+                  state.generation,
+                  epoch.toString("hex"),
+                  primary.version,
+                  secondary.version,
+                  factIds,
+                ]),
+              ),
           primaryTripId: primary.id,
           secondaryTripId: secondary.id,
           primaryVersion: primary.version,
@@ -569,6 +867,14 @@ export function createReconciliation(
       const ref = reference(value);
       const owners = await ports.trips.contributions.owners(tx, [ref.tripId]);
       await ports.qualifications.prepareInTransaction(tx, owners);
+      if ("previous" in ref) {
+        if (config.dispatchReviewStage3Enabled && ref.previous !== undefined) {
+          const row = await ports.trips.groups.resolve(tx, ref.tripId, true);
+          if (row.id === ref.tripId && row.version === ref.version)
+            await advanceTripVersionPage(tx, row, ref.previous, ref.cursor);
+        }
+        return;
+      }
       const [state] = await c(tx)
         .select()
         .from(reconciliationSearches)
@@ -589,6 +895,14 @@ export function createReconciliation(
   return {
     config,
     handler,
+    advanceTripVersionInTransaction,
+    stage3DuplicateCountInTransaction: stage3.countInTransaction,
+    stage3List(actor: Actor, options: CandidatePage) {
+      return ports.identity.transaction(async (tx) =>
+        stage3.list(tx, await authorize(tx, actor), options),
+      );
+    },
+    dismissCandidate,
     async refreshInTransaction(tx: TxContext, tripId: string, _sourceRecordId: string) {
       await startSearch(tx, tripId, true);
     },

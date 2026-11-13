@@ -14,7 +14,11 @@ import {
 } from "@vtc/db";
 import { and, eq, roles } from "@vtc/db/identity-schema";
 import { manualEvidence } from "@vtc/db/manual-reports-schema";
-import { reconciliationSearches } from "@vtc/db/reconciliation-schema";
+import {
+  reconciliationCandidates,
+  reconciliationRules,
+  reconciliationSearches,
+} from "@vtc/db/reconciliation-schema";
 import { sql, tripContributions, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { beforeEach, expect, test, afterAll as vAfter, beforeAll as vBefore, vi } from "vitest";
@@ -63,8 +67,8 @@ import {
 } from "../persistence/support.ts";
 import { telemetryFixture } from "../support/builders.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
-import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 import { identityDiagnostics } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vBefore, vAfter);
 const submitDiagnostic = identityDiagnostics("reconciliation");
@@ -193,6 +197,7 @@ beforeEach(async () => {
     "reconciliation_commands",
     "reconciliation_history",
     "reconciliations",
+    "reconciliation_candidate_dismissals",
     "reconciliation_candidates",
     "reconciliation_rules",
     "manual_commands",
@@ -213,6 +218,7 @@ beforeEach(async () => {
     "source_payloads",
     "source_messages",
     "source_trips",
+    "trip_review_reasons",
     "trips",
     "outbox_events",
     "identity_limits",
@@ -1245,6 +1251,169 @@ test("delayed manual report and repeated/overlapping routes retain review candid
   expect((await state(a.tripId))?.aliasOf).toBeNull();
   expect((await state(b.tripId))?.aliasOf).toBeNull();
   expect((await state(r.tripId))?.aliasOf).toBeNull();
+});
+test("Stage 3 duplicates preserve dismissal on equivalent searches and isolate replacement snapshots and replay", async () => {
+  const staged = createReconciliation(
+    unit,
+    { ...config, dispatchReviewStage3Enabled: true },
+    {
+      identity,
+      trips: tripService,
+      qualifications,
+      manual,
+    },
+    now,
+  );
+  const acceptedRoot = await receive();
+  const submitted = await report();
+  await unit.run(async (tx) => {
+    await qualifications.prepareInTransaction(tx, [{ ownerId: owner.userId, game: "ets2" }]);
+    await staged.refreshInTransaction(tx, submitted.tripId, submitted.currentRevision.id);
+  });
+  const ordered = await staged.stage3List(director, { game: "ets2" });
+  expect(ordered.total).toBe(1);
+  const candidate = ordered.items[0];
+  if (!candidate) throw new Error("SYNTHETIC_CANDIDATE_REQUIRED");
+  expect([candidate.primaryTrip.id, candidate.secondaryTrip.id].sort()).toEqual(
+    [acceptedRoot.tripId, submitted.tripId].sort(),
+  );
+  expect(candidate.version).toBe(1);
+  await expect(staged.stage3List(other, {})).rejects.toMatchObject({ statusCode: 403 });
+  const secret = "Fictional private dismissal statement";
+  const key = newId();
+  const [first, concurrent] = await Promise.all([
+    staged.dismissCandidate(director, candidate.id, key, 1, { reason: secret }),
+    staged.dismissCandidate(director, candidate.id, key, 1, { reason: secret }),
+  ]);
+  expect(first).toEqual(concurrent);
+  expect(first.data).toMatchObject({ dismissed: true, version: 2 });
+  expect(first.data).not.toHaveProperty("reason");
+  expect((await staged.stage3List(director, {})).total).toBe(0);
+  expect((await staged.stage3List(director, { status: "dismissed" })).items[0]?.id).toBe(
+    candidate.id,
+  );
+  await unit.run(async (tx) => {
+    await qualifications.prepareInTransaction(tx, [{ ownerId: owner.userId, game: "ets2" }]);
+    await staged.refreshInTransaction(tx, submitted.tripId, newId());
+  });
+  expect((await staged.stage3List(director, { status: "dismissed" })).items[0]?.id).toBe(
+    candidate.id,
+  );
+
+  const undone = await staged.dismissCandidate(director, candidate.id, newId(), 2, null);
+  expect(undone.data).toMatchObject({ dismissed: false, version: 3 });
+  expect(await staged.dismissCandidate(director, candidate.id, key, 1, { reason: secret })).toEqual(
+    first,
+  );
+  await expect(
+    staged.dismissCandidate(director, candidate.id, key, 1, { reason: "Changed synthetic reason" }),
+  ).rejects.toMatchObject({ statusCode: 409, publicCode: "IDEMPOTENCY_CONFLICT" });
+  const [audits] = await control.query<RowDataPacket[]>(
+    "SELECT operation,details,reason FROM audit_entries WHERE subject_id=? ORDER BY operation",
+    [candidate.id],
+  );
+  expect(audits).toHaveLength(2);
+  expect(JSON.stringify(audits)).not.toContain(secret);
+  expect(audits.find((row) => row.operation === "duplicate.dismissed")?.details).toEqual({
+    before: { dismissed: false, version: 1 },
+    after: { dismissed: true, version: 2 },
+  });
+
+  await staged.dismissCandidate(director, candidate.id, newId(), 3, { reason: secret });
+  await control.query("UPDATE trips SET version=version+1 WHERE id=?", [acceptedRoot.tripId]);
+  expect((await staged.stage3List(director, { status: "dismissed" })).total).toBe(0);
+  await expect(
+    staged.dismissCandidate(director, candidate.id, newId(), 4, null),
+  ).rejects.toMatchObject({ statusCode: 409, publicCode: "VERSION_CONFLICT" });
+  expect(await staged.dismissCandidate(director, candidate.id, key, 1, { reason: secret })).toEqual(
+    first,
+  );
+  await unit.run(async (tx) => {
+    await qualifications.prepareInTransaction(tx, [{ ownerId: owner.userId, game: "ets2" }]);
+    await staged.refreshInTransaction(tx, submitted.tripId, newId());
+  });
+  const replacement = await staged.stage3List(director, { game: "ets2" });
+  expect(replacement.total).toBe(1);
+  expect(replacement.items[0]).toMatchObject({ version: 1, dismissed: false });
+  expect(replacement.items[0]?.id).not.toBe(candidate.id);
+});
+
+test("Stage 3 duplicate pages count only current visible pairs and project both sides at the maximum page size", async () => {
+  const staged = createReconciliation(
+    unit,
+    { ...config, dispatchReviewStage3Enabled: true },
+    {
+      identity,
+      trips: tripService,
+      qualifications,
+      manual,
+    },
+    now,
+  );
+  const hash = ruleIdentity(config.rule);
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    const ids = Array.from({ length: 204 }, () => newId());
+    await db.insert(trips).values(
+      ids.map((id, index) => ({
+        id,
+        ownerId: index >= 202 ? director.userId : owner.userId,
+        game: "ets2" as const,
+        version: 1,
+        decision: "unassessed" as const,
+        outcome: "none" as const,
+        recording: "unknown" as const,
+        createdAt: iso(),
+        reviewReasons: [],
+      })),
+    );
+    await db.insert(reconciliationRules).values({
+      hash,
+      version: config.rule.version,
+      config: ruleSnapshot(config.rule),
+      createdAt: iso(),
+    });
+    await db.insert(reconciliationCandidates).values(
+      Array.from({ length: 102 }, (_, index) => ({
+        id: newId(),
+        ownerId: index === 101 ? director.userId : owner.userId,
+        game: "ets2" as const,
+        primaryTripId: ids[index * 2] as string,
+        secondaryTripId: ids[index * 2 + 1] as string,
+        primaryVersion: 1,
+        secondaryVersion: 1,
+        ruleHash: hash,
+        searchHash: randomBytes(32),
+        evidence: {},
+        reasons: ["synthetic_duplicate"],
+        active: true,
+        createdAt: iso(),
+      })),
+    );
+  });
+  const first = await staged.stage3List(director, { game: "ets2", limit: 100 });
+  expect(first.total).toBe(101);
+  expect(first.items).toHaveLength(100);
+  expect(
+    new Set(first.items.flatMap((item) => [item.primaryTrip.id, item.secondaryTrip.id])).size,
+  ).toBe(200);
+  expect(first.items.map((item) => item.id)).toEqual(
+    first.items
+      .map((item) => item.id)
+      .sort()
+      .reverse(),
+  );
+  const cursor = first.nextCursor;
+  if (!cursor) throw new Error("SYNTHETIC_CANDIDATE_CURSOR_REQUIRED");
+  const second = await staged.stage3List(director, { game: "ets2", cursor });
+  expect(second.total).toBe(101);
+  expect(second.items).toHaveLength(1);
+  expect(second.nextCursor).toBeNull();
+  expect(first.items.some((item) => item.id === second.items[0]?.id)).toBe(false);
+  await expect(staged.stage3List(director, { game: "ats", cursor })).rejects.toMatchObject({
+    statusCode: 409,
+    publicCode: "VERSION_CONFLICT",
+  });
 });
 test("reviewed merge resolves aliases, preserves immutable identities/evidence/privacy, excludes alias counts and reverses monotonically", async () => {
   const p = payload(),

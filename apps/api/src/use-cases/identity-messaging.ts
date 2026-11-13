@@ -74,7 +74,10 @@ export function composeIdentity(
   analyticsConfig?: AnalyticsConfig,
   notificationsConfig?: NotificationsConfig,
   eventMediaConfig?: EventMediaConfig,
+  dispatchReviewStage3Enabled = false,
 ) {
+  if (dispatchReviewStage3Enabled && !tripDecisionsConfig)
+    throw new Error("DISPATCH_REVIEW_STAGE3_PREREQUISITES_REQUIRED");
   const outbox = createOutbox(unit, { notifications: !!notificationsConfig });
   let identity: Identity;
   let qualifications: Qualifications | undefined, reconciliation: Reconciliation | undefined;
@@ -150,73 +153,85 @@ export function composeIdentity(
   const catalogs = catalogConfig ? createCatalogs(unit, catalogConfig, { identity }) : undefined;
   let manualReports: ManualReports | undefined;
   const trips = tripsConfig
-    ? createTrips(unit, tripsConfig, {
-        identity,
-        events: outbox,
-        ...(reconciliationConfig || tripDecisionsConfig
-          ? {
-              prepare: async (tx, ownerId, game) => {
-                if (!qualifications) throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
-                await qualifications.prepareInTransaction(tx, [{ ownerId, game }]);
-              },
-              sourceStored: async (tx, tripId, sourceRecordId) => {
-                if (reconciliationConfig && !reconciliation)
-                  throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
-                await reconciliation?.refreshInTransaction(tx, tripId, sourceRecordId);
-                if (tripDecisionsConfig && !tripDecisions)
-                  throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
-                await tripDecisions?.assessInTransaction(tx, tripId);
-              },
-            }
-          : {}),
-        ...(tripDecisionsConfig
-          ? {
-              decisionProjection: (tx, id, actor) => {
-                if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
-                return tripDecisions.privateProjectionInTransaction(tx, id, actor);
-              },
-              eventAssociations: (tx, ids) => {
-                if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
-                return tripDecisions.eventAssociationsInTransaction(tx, ids);
-              },
-              correctionRequested: async (tx, id, requestId, actor, reason) => {
-                if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
-                await tripDecisions.correctionRequestedInTransaction(
-                  tx,
-                  id,
-                  requestId,
-                  actor,
-                  reason,
-                );
-              },
-            }
-          : {}),
-        ...(catalogs ? { catalogs } : {}),
-        ...(eventsConfig
-          ? {
-              eventTitles: (tx, ids, actor) => {
-                if (!events) throw new Error("EVENTS_COMPOSITION_INCOMPLETE");
-                return events.tripTitlesInTransaction(tx, ids, actor);
-              },
-            }
-          : {}),
-        ...(manualConfig
-          ? {
-              manualEvidence: (tx, owner, payload, tripId) => {
-                if (!manualReports) throw new Error("MANUAL_COMPOSITION_INCOMPLETE");
-                return manualReports.validateSourceInTransaction(tx, owner, payload, tripId);
-              },
-              manualProjection: (tx, ids) => {
-                if (!manualReports) throw new Error("MANUAL_COMPOSITION_INCOMPLETE");
-                return manualReports.projectionInTransaction(tx, ids);
-              },
-              manualRevisions: (tx, ids) => {
-                if (!manualReports) throw new Error("MANUAL_COMPOSITION_INCOMPLETE");
-                return manualReports.revisionSummariesInTransaction(tx, ids);
-              },
-            }
-          : {}),
-      })
+    ? createTrips(
+        unit,
+        { ...tripsConfig, dispatchReviewStage3Enabled },
+        {
+          identity,
+          events: outbox,
+          ...(reconciliationConfig || tripDecisionsConfig
+            ? {
+                prepare: async (tx, ownerId, game) => {
+                  if (!qualifications) throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
+                  await qualifications.prepareInTransaction(tx, [{ ownerId, game }]);
+                },
+                sourceStored: async (tx, tripId, sourceRecordId) => {
+                  if (reconciliationConfig && !reconciliation)
+                    throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
+                  await reconciliation?.refreshInTransaction(tx, tripId, sourceRecordId);
+                  if (tripDecisionsConfig && !tripDecisions)
+                    throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                  await tripDecisions?.assessInTransaction(tx, tripId);
+                },
+              }
+            : {}),
+          ...(dispatchReviewStage3Enabled
+            ? {
+                adjudicationChanged: async (tx, before, after) => {
+                  if (!reconciliation) throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
+                  await reconciliation.advanceTripVersionInTransaction(tx, before, after);
+                },
+              }
+            : {}),
+          ...(tripDecisionsConfig
+            ? {
+                decisionProjection: (tx, id, actor) => {
+                  if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                  return tripDecisions.privateProjectionInTransaction(tx, id, actor);
+                },
+                eventAssociations: (tx, ids) => {
+                  if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                  return tripDecisions.eventAssociationsInTransaction(tx, ids);
+                },
+                correctionRequested: async (tx, id, requestId, actor, reason) => {
+                  if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                  await tripDecisions.correctionRequestedInTransaction(
+                    tx,
+                    id,
+                    requestId,
+                    actor,
+                    reason,
+                  );
+                },
+              }
+            : {}),
+          ...(catalogs ? { catalogs } : {}),
+          ...(eventsConfig
+            ? {
+                eventTitles: (tx, ids, actor) => {
+                  if (!events) throw new Error("EVENTS_COMPOSITION_INCOMPLETE");
+                  return events.tripTitlesInTransaction(tx, ids, actor);
+                },
+              }
+            : {}),
+          ...(manualConfig
+            ? {
+                manualEvidence: (tx, owner, payload, tripId) => {
+                  if (!manualReports) throw new Error("MANUAL_COMPOSITION_INCOMPLETE");
+                  return manualReports.validateSourceInTransaction(tx, owner, payload, tripId);
+                },
+                manualProjection: (tx, ids) => {
+                  if (!manualReports) throw new Error("MANUAL_COMPOSITION_INCOMPLETE");
+                  return manualReports.projectionInTransaction(tx, ids);
+                },
+                manualRevisions: (tx, ids) => {
+                  if (!manualReports) throw new Error("MANUAL_COMPOSITION_INCOMPLETE");
+                  return manualReports.revisionSummariesInTransaction(tx, ids);
+                },
+              }
+            : {}),
+        },
+      )
     : undefined;
   qualifications =
     qualificationsConfig && trips
@@ -233,21 +248,25 @@ export function composeIdentity(
   }
   reconciliation =
     reconciliationConfig && trips && qualifications
-      ? createReconciliation(unit, reconciliationConfig, {
-          identity,
-          outbox,
-          trips,
-          qualifications,
-          ...(manualReports ? { manual: manualReports } : {}),
-          ...(tripDecisionsConfig
-            ? {
-                workflowChanged: async (tx, id) => {
-                  if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
-                  await tripDecisions.assessInTransaction(tx, id);
-                },
-              }
-            : {}),
-        })
+      ? createReconciliation(
+          unit,
+          { ...reconciliationConfig, dispatchReviewStage3Enabled },
+          {
+            identity,
+            outbox,
+            trips,
+            qualifications,
+            ...(manualReports ? { manual: manualReports } : {}),
+            ...(tripDecisionsConfig
+              ? {
+                  workflowChanged: async (tx, id) => {
+                    if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                    await tripDecisions.assessInTransaction(tx, id);
+                  },
+                }
+              : {}),
+          },
+        )
       : undefined;
   const eventMedia =
     eventsConfig && eventMediaConfig
@@ -294,14 +313,19 @@ export function composeIdentity(
       })
     : undefined;
   if (tripDecisionsConfig && trips && qualifications && manualReports && events)
-    tripDecisions = createTripDecisions(unit, tripDecisionsConfig, {
-      identity,
-      outbox,
-      trips,
-      qualifications,
-      manual: manualReports,
-      events,
-    });
+    tripDecisions = createTripDecisions(
+      unit,
+      { ...tripDecisionsConfig, dispatchReviewStage3Enabled },
+      {
+        identity,
+        outbox,
+        trips,
+        qualifications,
+        manual: manualReports,
+        events,
+        ...(reconciliation ? { reconciliation } : {}),
+      },
+    );
   if (notificationsConfig && (!trips || !qualifications || !events || !tripDecisions))
     throw new Error("NOTIFICATIONS_PREREQUISITES_REQUIRED");
   const notifications =
@@ -354,6 +378,9 @@ export function composeIdentity(
       : undefined;
   const workspaceSummary = createWorkspaceSummary(identity, {
     ...(tripWorkspace ? { trips: tripWorkspace } : {}),
+    ...(dispatchReviewStage3Enabled && tripDecisions
+      ? { dispatch: tripDecisions.reviewQueue }
+      : {}),
     ...(acceptanceWorkspace ? { acceptance: acceptanceWorkspace } : {}),
     ...(manualReports ? { manualReports } : {}),
     ...(events ? { events: createEventWorkspace(unit) } : {}),

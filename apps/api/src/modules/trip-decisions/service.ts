@@ -31,6 +31,7 @@ import { type Actor, type Identity, identityError } from "../identity/service.js
 import type { ManualReports } from "../manual-reports/service.js";
 import type { Qualifications } from "../qualifications/service.js";
 import { selectQuality } from "../reconciliation/quality.js";
+import type { Reconciliation } from "../reconciliation/service.js";
 import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import type { TripState } from "../trips/groups.js";
@@ -43,12 +44,14 @@ import {
   qualificationCheck,
 } from "./evaluation.js";
 import { type Page, pagination } from "./pagination.js";
+import { createReviewQueue } from "./review-queue.js";
 
 type S = components["schemas"];
 type Decision = typeof tripDecisions.$inferSelect;
 type Proposal = typeof tripProposals.$inferSelect;
 export interface TripDecisionsConfig {
   key: string;
+  dispatchReviewStage3Enabled?: boolean;
 }
 export function validateTripDecisionsConfig(config: TripDecisionsConfig) {
   if (!/^[0-9a-f]{64}$/.test(config.key)) throw new Error("INVALID_TRIP_DECISIONS_CONFIG");
@@ -93,6 +96,40 @@ function dto(row: Decision, e: NormalizedTripEvidence, reviewers: Reviewers): S[
     },
   };
 }
+function safeSourceFacts(e: NormalizedTripEvidence): S["SafeSourceFact"][] {
+  return (
+    [
+      ["origin_city", e.origin],
+      ["destination_city", e.destination],
+      ["cargo", e.cargo],
+      ["cargo_mass", e.cargoMassKg],
+      ["actual_distance", e.actualDistanceM],
+    ] as const
+  ).map(([field, value]) => ({
+    field,
+    sourceValue:
+      value.status === "known"
+        ? typeof value.value === "string"
+          ? value.value
+          : value.value.entityId
+        : null,
+    sourceId: null,
+    sourceLocale: null,
+    mapNamespace: null,
+    evidenceBasis: e.provider === "manual" ? "manual" : "event",
+    evidenceRecordId: e.sourceRecordId,
+    reasonCode: value.status === "unknown" ? value.reasonCode : null,
+    candidateEntityIds: [],
+  }));
+}
+
+function selectTelemetry(evidence: NormalizedTripEvidence[], preferredId: string | null) {
+  return selectQuality(
+    evidence.filter((fact) => fact.provider === "ets2telemetry"),
+    preferredId,
+  ).selected;
+}
+
 export function createTripDecisions(
   unit: UnitOfWork,
   config: TripDecisionsConfig,
@@ -102,6 +139,7 @@ export function createTripDecisions(
     qualifications: Qualifications;
     manual: ManualReports;
     events: Events;
+    reconciliation?: Pick<Reconciliation, "stage3DuplicateCountInTransaction">;
     outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
   },
   now = () => new Date(),
@@ -112,6 +150,7 @@ export function createTripDecisions(
     audit = createAudit(unit),
     outbox = ports.outbox ?? createOutbox(unit),
     page = pagination(config.key);
+  const reviewQueue = createReviewQueue(unit, ports, page, now);
   const run = <T>(fn: (tx: TxContext) => Promise<T>) => retryTransaction(unit, fn);
   const prepare = tripDecisionCoordinator(ports).prepare;
   async function confirmation(
@@ -284,6 +323,7 @@ export function createTripDecisions(
     actor: Actor | null,
     reviewedRevisionId: string | null,
     confirmOverLimits = false,
+    stage3 = false,
   ) {
     const { row } = prepared,
       decidedAt = at(),
@@ -307,6 +347,24 @@ export function createTripDecisions(
         (allowed.mode === "over_limits") !== (confirmOverLimits && actor !== null))
     )
       throw identityError(409, "RESOLUTION_REQUIRED");
+    if (allowed && stage3) {
+      const telemetry = selectTelemetry(s.evidence, row.currentFactId);
+      if (telemetry && telemetry.factRevisionId !== e.factRevisionId) {
+        const historical = await ports.qualifications.lookupInTransaction(tx, telemetry);
+        const telemetryAcceptance = acceptance(
+          telemetry,
+          historical,
+          s.event?.confirmedEvent ?? null,
+          {
+            hasTelemetrySource: true,
+            eventInvalid: s.eventInvalid,
+            eventReviewRequired: !!s.event?.reviewRequired,
+          },
+        );
+        if (telemetryAcceptance.mode !== "ordinary")
+          throw identityError(409, "RESOLUTION_REQUIRED");
+      }
+    }
     const overLimits = allowed?.mode === "over_limits";
     const basis = evaluationSnapshot(e, h, s.event?.confirmedEvent ?? null, manualConfirmedAt),
       pending = await hasPendingProposal(tx, prepared.members);
@@ -647,6 +705,122 @@ export function createTripDecisions(
         : null,
     };
   }
+  async function review(actor: Actor, id: string): Promise<{ data: S["Review"]; version: number }>;
+  async function review(
+    actor: Actor,
+    id: string,
+    stage3: true,
+  ): Promise<{ data: S["TripStage3Review"]; version: number }>;
+  async function review(actor: Actor, id: string, stage3 = false) {
+    return run(async (tx) => {
+      if (stage3) await ports.identity.authorizeInTransaction(tx, actor, "trips.review");
+      // Legacy reviewer authors can inspect their own trip review workspace.
+      const prepared = await prepare(tx, id, actor, false);
+      await ports.identity.authorizeInTransaction(tx, actor, "trips.review");
+      const { members, manual } = prepared;
+      if (stage3 && prepared.row.ownerId === actor.userId)
+        throw identityError(403, "SELF_REVIEW_FORBIDDEN");
+      let row = prepared.row;
+      const s = await support(tx, row, members);
+      const [reviewedSupport] = await c(tx)
+        .select()
+        .from(tripReviewWork)
+        .where(eq(tripReviewWork.tripId, row.id))
+        .for("update");
+      if (!reviewedSupport?.supportHash.equals(s.hash)) {
+        row = await ports.trips.adjudication.write(tx, row, {}, undefined);
+        await work(tx, row, s.hash, row.reviewReasons, true);
+      }
+      const selection = selectQuality(s.evidence, row.currentFactId),
+        e = selection.selected ?? s.evidence.find((e) => e.factRevisionId === row.currentFactId);
+      if (!e) throw identityError(409);
+      const telemetry = stage3 ? selectTelemetry(s.evidence, row.currentFactId) : null;
+      const evaluated = telemetry ?? e;
+      const decidedAt = at(),
+        confirmedAt = await confirmation(tx, row, evaluated, decidedAt),
+        h = await ports.qualifications.lookupInTransaction(tx, evaluated, confirmedAt),
+        blocked = manual.reports.some((r) => r.ownerId === actor.userId)
+          ? ["self_review_forbidden"]
+          : [];
+      const event = s.event?.confirmedEvent ?? null;
+      const allowed = acceptance(evaluated, h, event, {
+        hasTelemetrySource: s.evidence.some((f) => f.provider === "ets2telemetry"),
+        eventInvalid: s.eventInvalid,
+        eventReviewRequired: !!s.event?.reviewRequired,
+      });
+      const ownMode =
+        evaluated === e
+          ? allowed
+          : acceptance(
+              e,
+              await ports.qualifications.lookupInTransaction(
+                tx,
+                e,
+                await confirmation(tx, row, e, decidedAt),
+              ),
+              event,
+              {
+                hasTelemetrySource: true,
+                eventInvalid: s.eventInvalid,
+                eventReviewRequired: !!s.event?.reviewRequired,
+              },
+            );
+      const shared = {
+        factRevisionId: e.factRevisionId,
+        evaluation: evaluationSnapshot(evaluated, h, event, confirmedAt),
+        qualificationCheck: qualificationCheck(evaluated, h, event),
+        acceptance: {
+          mode:
+            allowed.mode === "unavailable" || ownMode.mode === "unavailable"
+              ? ("unavailable" as const)
+              : allowed.mode,
+          blockedReasonCodes: [
+            ...new Set([...allowed.blockedReasonCodes, ...ownMode.blockedReasonCodes]),
+          ].sort(),
+        },
+        canDecide: blocked.length === 0,
+        blockedReasonCodes: blocked,
+      };
+      const trip = await privateProjection(tx, row, actor);
+      if (stage3) {
+        const damage = telemetry?.cargoDamageFraction;
+        const fraction = damage?.status === "known" ? Number(damage.value) : NaN;
+        const normalized =
+          telemetry && (await ports.trips.projectReviewSourceInTransaction(tx, telemetry));
+        const data: S["TripStage3Review"] = {
+          ...shared,
+          summary: { ...trip.summary, number: row.number, createdAt: row.createdAt },
+          effectiveFacts: trip.effectiveFacts ?? null,
+          decisions: trip.decisions,
+          pendingProposalId: trip.pendingProposalId,
+          reviewReasonCodes: trip.reviewReasonCodes,
+          sources: {
+            manual: trip.manualRevision
+              ? { manualRevision: trip.manualRevision, evidence: trip.evidence }
+              : null,
+            telemetry:
+              telemetry && normalized
+                ? {
+                    facts: safeSourceFacts(telemetry),
+                    normalizedFacts: {
+                      ...normalized,
+                      provider: "ets2telemetry",
+                      sourceRecordId: telemetry.sourceRecordId,
+                      cargoDamagePercent: fraction >= 0 && fraction <= 1 ? fraction * 100 : null,
+                    },
+                  }
+                : null,
+          },
+        };
+        return { data, version: row.version };
+      }
+      return {
+        data: { ...shared, trip, facts: safeSourceFacts(e) } satisfies S["Review"],
+        version: row.version,
+      };
+    });
+  }
+
   async function privateProjection(
     tx: TxContext,
     row: TripState,
@@ -787,6 +961,7 @@ export function createTripDecisions(
     actor: Actor,
     p: Proposal,
     value: S["ProposalDecisionInput"],
+    stage3 = false,
   ) {
     const { row, members } = prepared;
     if (
@@ -892,6 +1067,8 @@ export function createTripDecisions(
         reason(value.reason),
         actor,
         p.revisionId,
+        false,
+        stage3,
       );
     } else {
       const effective =
@@ -1182,140 +1359,161 @@ export function createTripDecisions(
       const row = await ports.trips.groups.resolve(tx, id, "share");
       return privateProjection(tx, row, actor);
     },
-    async review(actor: Actor, id: string) {
-      return run(async (tx) => {
-        // Reviewer authors may inspect the workspace but can never execute its commands.
-        const prepared = await prepare(tx, id, actor, false);
-        await ports.identity.authorizeInTransaction(tx, actor, "trips.review");
-        const { members, manual } = prepared;
-        let row = prepared.row;
-        const s = await support(tx, row, members);
-        const [reviewedSupport] = await c(tx)
-          .select()
-          .from(tripReviewWork)
-          .where(eq(tripReviewWork.tripId, row.id))
-          .for("update");
-        if (!reviewedSupport?.supportHash.equals(s.hash)) {
-          row = await ports.trips.adjudication.write(tx, row, {}, undefined);
-          await work(tx, row, s.hash, row.reviewReasons, true);
-        }
-        const selection = selectQuality(s.evidence, row.currentFactId),
-          e = selection.selected ?? s.evidence.find((e) => e.factRevisionId === row.currentFactId);
-        if (!e) throw identityError(409);
-        const decidedAt = at(),
-          h = await ports.qualifications.lookupInTransaction(
-            tx,
-            e,
-            await confirmation(tx, row, e, decidedAt),
-          ),
-          blocked = manual.reports.some((r) => r.ownerId === actor.userId)
-            ? ["self_review_forbidden"]
-            : [],
-          facts: S["SafeSourceFact"][] = [];
-        for (const [field, v] of [
-          ["origin_city", e.origin],
-          ["destination_city", e.destination],
-          ["cargo", e.cargo],
-          ["cargo_mass", e.cargoMassKg],
-          ["actual_distance", e.actualDistanceM],
-        ] as const)
-          facts.push({
-            field,
-            sourceValue:
-              v.status === "known"
-                ? typeof v.value === "string"
-                  ? v.value
-                  : v.value.entityId
-                : null,
-            sourceId: null,
-            sourceLocale: null,
-            mapNamespace: null,
-            evidenceBasis: e.provider === "manual" ? "manual" : "event",
-            evidenceRecordId: e.sourceRecordId,
-            reasonCode: v.status === "unknown" ? v.reasonCode : null,
-            candidateEntityIds: [],
-          });
-        const event = s.event?.confirmedEvent ?? null,
-          allowed = acceptance(e, h, event, {
-            hasTelemetrySource: s.evidence.some((f) => f.provider === "ets2telemetry"),
-            eventInvalid: s.eventInvalid,
-            eventReviewRequired: !!s.event?.reviewRequired,
-          });
-        return {
-          data: {
-            trip: await privateProjection(tx, row, actor),
-            factRevisionId: e.factRevisionId,
-            facts,
-            evaluation: evaluationSnapshot(e, h, event, await confirmation(tx, row, e, decidedAt)),
-            qualificationCheck: qualificationCheck(e, h, event),
-            acceptance: { mode: allowed.mode, blockedReasonCodes: allowed.blockedReasonCodes },
-            canDecide: blocked.length === 0,
-            blockedReasonCodes: blocked,
-          } satisfies S["Review"],
-          version: row.version,
-        };
-      });
+    review,
+    reviewStage3: (actor: Actor, id: string) => review(actor, id, true),
+    reviewQueue,
+    async repairReviewQueueInTransaction(tx: TxContext, after?: string, verify = false) {
+      if (config.dispatchReviewStage3Enabled)
+        throw new Error("DISPATCH_REVIEW_REPAIR_REQUIRES_FLAG_OFF");
+      if (after !== undefined) applicationId(after);
+      await ports.identity.qualificationContextInTransaction(tx, []);
+      const repair = ports.trips.reviewQueueRepair;
+      const rows = await repair.page(tx, after, 26);
+      const batch = rows.slice(0, 25);
+      if (batch.length) await ports.qualifications.prepareInTransaction(tx, batch);
+      let mismatches = 0;
+      for (const { id } of batch) {
+        const invalid = await repair.apply(tx, id, verify, async (row) => {
+          if (row.decision !== "pending_review" || row.correctionPending || !row.currentFactId)
+            return null;
+          const members = await ports.trips.groups.members(tx, [row.id], true);
+          if (members.length !== 1) return null;
+          const sources = await ports.trips.reconciliation.matchingEvidence(tx, [row.id]);
+          if (!sources.complete || sources.facts.length !== 1) return null;
+          const fact = sources.facts[0];
+          if (fact?.provider !== "manual" || fact.factRevisionId !== row.currentFactId) return null;
+          const submitted = await ports.manual.reviewQueueSubmissionInTransaction(tx, row.id);
+          if (!submitted || submitted.sourceRecordId !== fact.sourceRecordId) return null;
+          const [proposal] = await c(tx)
+            .select({ id: tripProposals.id })
+            .from(tripProposals)
+            .where(eq(tripProposals.tripId, row.id))
+            .limit(1)
+            .for("share");
+          if (proposal) return null;
+          const decision = await latest(tx, row.id);
+          if (!decision)
+            return ports.manual.firstReviewSubmissionInTransaction(tx, submitted.reportId);
+          if (
+            decision.outcome === "rejected" &&
+            decision.actorId &&
+            decision.reviewedRevisionId &&
+            decision.reviewedRevisionId !== submitted.id
+          )
+            return ports.manual.firstReviewSubmissionInTransaction(tx, submitted.reportId, {
+              id: decision.reviewedRevisionId,
+              at: decision.decidedAt,
+            });
+          return null;
+        });
+        if (invalid) mismatches++;
+      }
+      return {
+        processed: batch.length,
+        mismatches,
+        nextCursor: rows.length > batch.length ? (batch.at(-1)?.id ?? null) : null,
+      };
     },
-    async decide(actor: Actor, id: string, key: string, version: number, raw: S["DecisionInput"]) {
-      const value = input("DecisionInput", raw);
-      reason(value.reason);
+    async decide(
+      actor: Actor,
+      id: string,
+      key: string,
+      version: number,
+      raw: S["DecisionInput"] | S["TripStage3DecisionInput"],
+      stage3 = false,
+    ) {
+      const value: Omit<S["DecisionInput"], "reason"> & { reason?: string } = input(
+        stage3 ? "TripStage3DecisionInput" : "DecisionInput",
+        raw,
+      );
+      const explanation =
+        stage3 && value.decision === "accept" && value.proposalId === null
+          ? value.reason?.trim() || null
+          : reason(value.reason as string);
       const { confirmOverLimits, ...body } = value,
         confirmed = confirmOverLimits === true;
       // Over-limit confirmation applies only to a direct acceptance (owner decisions 5 and 6).
       if (confirmed && (value.decision !== "accept" || value.proposalId !== null))
         throw identityError(422);
       // An absent or false flag keeps the pre-existing receipt fingerprint for identical retries.
-      const fingerprint = confirmed ? { ...body, confirmOverLimits: true } : body;
+      const normalized = stage3 ? { ...body, reason: explanation } : body;
+      const fingerprint = confirmed ? { ...normalized, confirmOverLimits: true } : normalized;
       return run(async (tx) => {
+        if (stage3) await ports.identity.authorizeInTransaction(tx, actor, "trips.review");
         const prepared = await prepare(tx, id, actor);
-        return once(tx, actor, "decide", key, { id, version, value: fingerprint }, async () => {
-          expected(prepared.row, version);
-          if (value.proposalId) {
-            const [p] = await c(tx)
+        if (stage3 && prepared.row.ownerId === actor.userId)
+          throw identityError(403, "SELF_REVIEW_FORBIDDEN");
+        return once(
+          tx,
+          actor,
+          "decide",
+          key,
+          { id, version, value: fingerprint, ...(stage3 && { view: "stage3" }) },
+          async () => {
+            expected(prepared.row, version);
+            if (value.proposalId) {
+              const [p] = await c(tx)
+                .select()
+                .from(tripProposals)
+                .where(eq(tripProposals.id, value.proposalId))
+                .for("share");
+              if (!p) throw identityError(404);
+              if (stage3 && value.factRevisionId !== (p.derivedFactId ?? p.baseFactId))
+                throw identityError(409, "VERSION_CONFLICT");
+              const reviewed = await reviewProposal(
+                tx,
+                prepared,
+                actor,
+                p,
+                {
+                  decision: value.decision === "accept" ? "approve" : "reject",
+                  reviewedRevisionId: value.reviewedRevisionId,
+                  reason: explanation as string,
+                },
+                stage3,
+              );
+              if (!("outcome" in reviewed.data)) throw identityError(409, "VERSION_CONFLICT");
+              return { data: reviewed.data, version: reviewed.version };
+            }
+            const s = await support(tx, prepared.row, prepared.members),
+              e = s.evidence.find((e) => e.factRevisionId === value.factRevisionId);
+            const [reviewedSupport] = await c(tx)
               .select()
-              .from(tripProposals)
-              .where(eq(tripProposals.id, value.proposalId))
+              .from(tripReviewWork)
+              .where(eq(tripReviewWork.tripId, prepared.row.id))
               .for("share");
-            if (!p) throw identityError(404);
-            const reviewed = await reviewProposal(tx, prepared, actor, p, {
-              decision: value.decision === "accept" ? "approve" : "reject",
-              reviewedRevisionId: value.reviewedRevisionId,
-              reason: value.reason,
-            });
-            if (!("outcome" in reviewed.data)) throw identityError(409, "VERSION_CONFLICT");
-            return { data: reviewed.data, version: reviewed.version };
-          }
-          const s = await support(tx, prepared.row, prepared.members),
-            e = s.evidence.find((e) => e.factRevisionId === value.factRevisionId);
-          const [reviewedSupport] = await c(tx)
-            .select()
-            .from(tripReviewWork)
-            .where(eq(tripReviewWork.tripId, prepared.row.id))
-            .for("share");
-          if (!reviewedSupport?.supportHash.equals(s.hash))
-            throw identityError(409, "VERSION_CONFLICT");
-          if (!e) throw identityError(409, "VERSION_CONFLICT");
-          const manualRevision = prepared.manual.reports.find(
-            (r) => r.revisionId === value.reviewedRevisionId,
-          );
-          if (
-            prepared.manual.reports.length
-              ? !manualRevision
-              : value.reviewedRevisionId !== e.factRevisionId
-          )
-            throw identityError(409, "VERSION_CONFLICT");
-          return commitDecision(
-            tx,
-            prepared,
-            s,
-            e,
-            value.decision === "accept" ? "accepted" : "rejected",
-            reason(value.reason),
-            actor,
-            value.reviewedRevisionId,
-            confirmed,
-          );
-        });
+            if (!reviewedSupport?.supportHash.equals(s.hash))
+              throw identityError(409, "VERSION_CONFLICT");
+            if (
+              !e ||
+              (stage3 &&
+                selectQuality(s.evidence, prepared.row.currentFactId).selected?.factRevisionId !==
+                  e.factRevisionId)
+            )
+              throw identityError(409, "VERSION_CONFLICT");
+            const manualRevision = prepared.manual.reports.find(
+              (r) => r.revisionId === value.reviewedRevisionId,
+            );
+            if (
+              prepared.manual.reports.length
+                ? !manualRevision
+                : value.reviewedRevisionId !== e.factRevisionId
+            )
+              throw identityError(409, "VERSION_CONFLICT");
+            return commitDecision(
+              tx,
+              prepared,
+              s,
+              e,
+              value.decision === "accept" ? "accepted" : "rejected",
+              explanation,
+              actor,
+              value.reviewedRevisionId,
+              confirmed,
+              stage3,
+            );
+          },
+        );
       });
     },
     async propose(

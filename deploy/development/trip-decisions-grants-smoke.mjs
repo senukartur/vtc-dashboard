@@ -2,15 +2,18 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { createUnitOfWork, newId, settingsFromEnvironment } from "@vtc/db";
-import { sourceMessages, sourceTrips, trips, eq, tripContributions } from "@vtc/db/trips-schema";
-import { createFactRepository } from "../dist/modules/trips/facts.js";
+import { reconciliationCandidates, reconciliationRules } from "@vtc/db/reconciliation-schema";
+import { eq, sourceMessages, sourceTrips, tripContributions, trips } from "@vtc/db/trips-schema";
 import {
   createQualificationInitialization,
   structuralLevels,
 } from "../dist/modules/qualifications/initialization.js";
-import { composeIdentity } from "../dist/use-cases/identity-messaging.js";
+import { ruleIdentity, ruleSnapshot } from "../dist/modules/reconciliation/matcher.js";
+import { createFactRepository } from "../dist/modules/trips/facts.js";
 import { createQueue } from "../dist/platform/jobs/queue.js";
 import { runPass } from "../dist/platform/jobs/runner.js";
+import { composeIdentity } from "../dist/use-cases/identity-messaging.js";
+
 assert.equal(process.env.MANUAL_SYNTHETIC_ACK, "synthetic-only");
 const phase = process.argv[2],
   run = process.env.MANUAL_REHEARSAL_RUN ?? "";
@@ -29,21 +32,27 @@ const unit = createUnitOfWork(settingsFromEnvironment()),
       .digest("hex"),
   password = "Fictional-manual-rehearsal-passphrase-42",
   origin = "http://127.0.0.1:4173";
-const composed = composeIdentity(
-  unit,
-  { secret: key("identity"), origin, production: false },
-  undefined,
-  undefined,
-  false,
-  { cursorKey: key("catalog") },
-  { cursorKey: key("trips") },
-  undefined,
-  { key: key("manual"), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
-  { cursorKey: key("qualifications") },
-  { cursorKey: key("events") },
-  { key: key("reconciliation") },
-  { key: key("decisions") },
-);
+const compose = (stage3 = false) =>
+  composeIdentity(
+    unit,
+    { secret: key("identity"), origin, production: false },
+    undefined,
+    undefined,
+    false,
+    { cursorKey: key("catalog") },
+    { cursorKey: key("trips") },
+    undefined,
+    { key: key("manual"), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
+    { cursorKey: key("qualifications") },
+    { cursorKey: key("events") },
+    { key: key("reconciliation") },
+    { key: key("decisions") },
+    undefined,
+    undefined,
+    undefined,
+    stage3,
+  );
+const composed = compose();
 const {
   identity,
   catalogs,
@@ -103,7 +112,7 @@ try {
     });
     step = "seed_facts";
     const tripIds = [];
-    for (let n = 0; n < 2; n++)
+    for (let n = 0; n < 4; n++)
       await unit.run(async (tx) => {
         const tripId = newId(),
           sourceId = newId(),
@@ -121,18 +130,22 @@ try {
             reasonCode: "synthetic_not_supported",
             sourceRecordId: messageId,
           });
-        await unit.client(tx).insert(trips).values({
-          id: tripId,
-          ownerId,
-          game: "ets2",
-          version: 1,
-          outcome: "delivered",
-          recording: "complete",
-          decision: "unassessed",
-          currentFactId: factId,
-          reviewReasons: [],
-          createdAt: time,
-        });
+        await unit
+          .client(tx)
+          .insert(trips)
+          .values({
+            id: tripId,
+            ownerId,
+            game: "ets2",
+            version: 1,
+            outcome: "delivered",
+            recording: "complete",
+            decision: "unassessed",
+            currentFactId: factId,
+            ...(n >= 2 && { assessmentPending: false }),
+            reviewReasons: [],
+            createdAt: time,
+          });
         await unit
           .client(tx)
           .insert(sourceTrips)
@@ -192,8 +205,46 @@ try {
         await createFactRepository(unit).insert(tx, tripId, e, 2);
         tripIds.push(tripId);
       });
+    const candidateId = newId();
+    await unit.run(async (tx) => {
+      const time = new Date().toISOString();
+      const hash = ruleIdentity(undefined);
+      const [rule] = await unit
+        .client(tx)
+        .select({ hash: reconciliationRules.hash })
+        .from(reconciliationRules)
+        .where(eq(reconciliationRules.hash, hash));
+      if (!rule)
+        await unit
+          .client(tx)
+          .insert(reconciliationRules)
+          .values({
+            hash,
+            version: null,
+            config: ruleSnapshot(undefined),
+            createdAt: time,
+          });
+      await unit
+        .client(tx)
+        .insert(reconciliationCandidates)
+        .values({
+          id: candidateId,
+          ownerId,
+          game: "ets2",
+          ruleHash: hash,
+          searchHash: randomBytes(32),
+          primaryTripId: tripIds[2],
+          secondaryTripId: tripIds[3],
+          primaryVersion: 1,
+          secondaryVersion: 1,
+          evidence: {},
+          reasons: ["synthetic_duplicate"],
+          active: true,
+          createdAt: time,
+        });
+    });
     await connection.execute("UPDATE synthetic_trip_decision_guard SET refs=? WHERE id=1", [
-      JSON.stringify({ runtimeTripId: tripIds[0], workerTripId: tripIds[1] }),
+      JSON.stringify({ runtimeTripId: tripIds[0], workerTripId: tripIds[1], candidateId }),
     ]);
   } else {
     const refs = typeof guard[0].refs === "string" ? JSON.parse(guard[0].refs) : guard[0].refs;
@@ -266,7 +317,37 @@ try {
       assert.equal(credit.credited, true);
       assert.equal(credit.factId, corrected.data.basis.factRevisionId);
       assert.equal(credit.actualDistanceM, "200000.000000000000000000");
-      await manual.requestCorrection(owner, id, newId(), corrected.version, {
+      step = "runtime_stage3_projection_and_dismissal";
+      const staged = compose(true);
+      const candidates = await staged.reconciliation.stage3List(actor, { game: "ets2" });
+      assert.equal(
+        candidates.items.some(({ id }) => id === refs.candidateId),
+        true,
+      );
+      const dismissalKey = newId();
+      const dismissal = await staged.reconciliation.dismissCandidate(
+        actor,
+        refs.candidateId,
+        dismissalKey,
+        1,
+        { reason: "Fictional restricted dismissal" },
+      );
+      assert.equal(dismissal.version, 2);
+      const undo = await staged.reconciliation.dismissCandidate(
+        actor,
+        refs.candidateId,
+        newId(),
+        2,
+        null,
+      );
+      assert.equal(undo.version, 3);
+      assert.deepEqual(
+        await staged.reconciliation.dismissCandidate(actor, refs.candidateId, dismissalKey, 1, {
+          reason: "Fictional restricted dismissal",
+        }),
+        dismissal,
+      );
+      await staged.manualReports.requestCorrection(owner, id, newId(), corrected.version, {
         reason: "Fictional pending request observed by restricted worker",
       });
     } else {
@@ -283,8 +364,14 @@ try {
         (e) => [1044, 1142, 1143, 1227].includes(e.errno),
       );
       step = "worker_catchup";
-      await service.catchup();
-      await runPass(createQueue(unit, [service.handler]), new AbortController().signal);
+      const staged = compose(true);
+      const workerService = staged.tripDecisions;
+      await assert.rejects(
+        connection.query("UPDATE reconciliation_candidate_dismissals SET reason=reason"),
+        (e) => [1044, 1142, 1143, 1227].includes(e.errno),
+      );
+      await workerService.catchup();
+      await runPass(createQueue(unit, [workerService.handler]), new AbortController().signal);
       const [credit] = await unit.run((tx) =>
         unit
           .client(tx)
@@ -327,6 +414,9 @@ try {
       "UPDATE trip_facts SET actual_distance_m=actual_distance_m",
       "DELETE FROM trip_facts",
       "UPDATE trip_contribution_history SET snapshot=snapshot",
+      "UPDATE reconciliation_candidates SET evidence=evidence",
+      "DELETE FROM reconciliation_candidate_dismissals",
+      "UPDATE reconciliation_candidate_dismissals SET candidate_id=candidate_id",
     ])
       await assert.rejects(connection.query(statement), (e) =>
         [1044, 1142, 1143, 1227].includes(e.errno),
