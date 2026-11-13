@@ -665,16 +665,56 @@ function stage2Journey(browser: Browser) {
   const contexts: Awaited<ReturnType<Browser["newContext"]>>[] = [];
   let blocked = 0;
 
-  async function post(request: Page["request"], path: string, data: unknown, origin: string) {
+  async function commandHeaders(request: Page["request"], origin: string, etag?: string) {
+    return {
+      Origin: origin,
+      "X-CSRF-Token": await csrf(request),
+      "Idempotency-Key": randomUUID(),
+      ...(etag ? { "If-Match": etag } : {}),
+    };
+  }
+
+  async function post(
+    request: Page["request"],
+    path: string,
+    data: unknown,
+    origin: string,
+    etag?: string,
+  ) {
     return request.post(`/api/v1${path}`, {
-      headers: {
-        Origin: origin,
-        "X-CSRF-Token": await csrf(request),
-        "Idempotency-Key": randomUUID(),
-      },
+      headers: await commandHeaders(request, origin, etag),
       data,
       maxRedirects: 0,
     });
+  }
+
+  async function cancel(request: Page["request"], origin: string, id: string) {
+    const current = await request.get(`/api/v1/events/${id}?locale=en`);
+    expect(current.status()).toBe(200);
+    const { data } = (await current.json()) as components["schemas"]["EventStage2EnvelopeMember"];
+    if (data.event.status !== "scheduled") return;
+    const etag = current.headers().etag;
+    if (!etag) throw new Error("STAGE_2_EVENT_CLEANUP_VERSION_MISSING");
+    const cancelled = await post(
+      request,
+      `/admin/events/${id}/cancellation?locale=en`,
+      { reason: "Synthetic browser fixture cleanup" },
+      origin,
+      etag,
+    );
+    expect(cancelled.status()).toBe(200);
+  }
+
+  async function discard(request: Page["request"], origin: string, id: string) {
+    const current = await request.get(`/api/v1/admin/events/drafts/${id}`);
+    expect(current.status()).toBe(200);
+    const etag = current.headers().etag;
+    if (!etag) throw new Error("STAGE_2_DRAFT_CLEANUP_VERSION_MISSING");
+    const discarded = await request.delete(`/api/v1/admin/events/${id}`, {
+      headers: await commandHeaders(request, origin, etag),
+      maxRedirects: 0,
+    });
+    expect(discarded.status()).toBe(200);
   }
 
   async function actor(email: string, credentialKey: string, origin: string) {
@@ -707,7 +747,7 @@ function stage2Journey(browser: Browser) {
     }
   }
 
-  return { start, post, actor, close, blockedRequests: () => blocked };
+  return { start, post, actor, cancel, discard, close, blockedRequests: () => blocked };
 }
 
 async function openEventsAs(
@@ -749,6 +789,7 @@ test(
     type DTO = components["schemas"];
     const journey = stage2Journey(browser);
     const { actor, post } = journey;
+    let cleanup = async () => {};
     let legacy: Awaited<ReturnType<typeof staffContext>> | undefined;
 
     try {
@@ -799,6 +840,7 @@ test(
       const created = ((await published.json()) as DTO["EventStage2EnvelopeCreation"]).data;
       if (!("event" in created)) throw new Error("STAGE_2_PUBLISHED_EVENT_MISSING");
       const eventId = created.event.id;
+      cleanup = () => journey.cancel(manager.request, server.origin, eventId);
 
       const publishedOnly = manager;
       let draftReads = 0;
@@ -962,9 +1004,13 @@ test(
       expect(journey.blockedRequests()).toBe(0);
     } finally {
       try {
-        await legacy?.dispose();
+        await cleanup();
       } finally {
-        await journey.close();
+        try {
+          await legacy?.dispose();
+        } finally {
+          await journey.close();
+        }
       }
     }
   },
@@ -978,6 +1024,7 @@ test(
     type DTO = components["schemas"];
     const journey = stage2Journey(browser);
     const { actor, post } = journey;
+    let cleanup = async () => {};
 
     try {
       const server = await journey.start(true);
@@ -1008,6 +1055,7 @@ test(
       const draft = ((await saved.json()) as DTO["EventStage2EnvelopeCreation"]).data;
       if (!("lifecycle" in draft) || draft.lifecycle !== "draft")
         throw new Error("STAGE_2_SAVED_DRAFT_MISSING");
+      cleanup = () => journey.discard(manager.request, server.origin, draft.id);
       const draftPath = `/api/v1/admin/events/drafts/${draft.id}`;
       expect((await member.request.get(draftPath)).status()).toBe(403);
 
@@ -1078,7 +1126,11 @@ test(
       await assertSavedDraft(revisedDescription);
       expect(journey.blockedRequests()).toBe(0);
     } finally {
-      await journey.close();
+      try {
+        await cleanup();
+      } finally {
+        await journey.close();
+      }
     }
   },
 );
