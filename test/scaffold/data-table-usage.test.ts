@@ -21,7 +21,8 @@ const root = fileURLToPath(new URL("../../apps/web/src/", import.meta.url));
 const pending: Record<string, Rule[]> = {
   "features/admin/ApplicationsPage.tsx": ["pager", "table-import"],
   "features/admin/MembersPage.tsx": ["pager", "table-import"],
-  "features/admin/SettingsPage.tsx": ["pager", "table-markup"],
+  "features/admin/SettingsAudit.tsx": ["table-markup"],
+  "features/admin/SettingsPage.tsx": ["pager"],
   "features/admin/components.tsx": ["pager"],
   "features/catalogs/CatalogImport.tsx": ["table-markup"],
   "features/catalogs/CatalogTable.tsx": ["table-import"],
