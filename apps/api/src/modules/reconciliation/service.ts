@@ -35,7 +35,6 @@ import type { GroupSnapshot } from "../trips/reconciliation.js";
 import type { Trips } from "../trips/service.js";
 import { type Page, pagination } from "./cursor.js";
 import {
-  automaticCandidate,
   candidateBound,
   matchEvidence,
   type ReconciliationConfig,
@@ -81,7 +80,7 @@ export function createReconciliation(
     at = () => now().toISOString(),
     hash = ruleIdentity(config.rule),
     page = pagination(config.key),
-    coordinator = reconciliationCoordinator(ports),
+    coordinator = reconciliationCoordinator(ports, config.dispatchReviewStage3Enabled),
     audit = createAudit(unit),
     outbox = ports.outbox ?? createOutbox(unit);
   const stage3 = createStage3Candidates(unit, ports.trips, page, hash);
@@ -324,8 +323,7 @@ export function createReconciliation(
         row.ownerId !== snapshot.ownerId ||
         counterpart.ownerId !== row.ownerId ||
         row.game !== snapshot.game ||
-        counterpart.game !== row.game ||
-        counterpart.version !== (first ? snapshot.secondaryVersion : snapshot.primaryVersion)
+        counterpart.game !== row.game
       )
         continue;
       const { factIds } = snapshot.evidence as { factIds?: string[] };
@@ -345,8 +343,10 @@ export function createReconciliation(
         .sort();
       if (!other.complete || canonicalJson([...factIds].sort()) !== canonicalJson(currentFacts))
         continue;
-      const primaryVersion = first ? row.version : snapshot.primaryVersion;
-      const secondaryVersion = first ? snapshot.secondaryVersion : row.version;
+      // Both roots can advance before either deferred page reaches this snapshot.
+      // The complete matching evidence above proves the replacement for both current versions.
+      const primaryVersion = first ? row.version : counterpart.version;
+      const secondaryVersion = first ? counterpart.version : row.version;
       const reasons = snapshot.reasons.filter(
         (reason) => reason !== "confirmed_facts_require_review",
       );
@@ -562,6 +562,22 @@ export function createReconciliation(
     if (immediate) await advanceSearch(tx, state);
     else await enqueueSearch(tx, state);
   }
+  function matchPair(
+    left: Awaited<ReturnType<Trips["reconciliation"]["matchingEvidence"]>>,
+    right: Awaited<ReturnType<Trips["reconciliation"]["matchingEvidence"]>>,
+  ) {
+    const outcomes = left.facts
+      .flatMap((a) => right.facts.map((b) => matchEvidence(a, b, config.rule)))
+      .filter((result) => result.outcome !== "different");
+    return {
+      outcomes,
+      supported:
+        left.complete &&
+        right.complete &&
+        outcomes.length > 0 &&
+        outcomes.every((result) => result.outcome === "supported"),
+    };
+  }
   async function possibleAutomatic(tx: TxContext, state: Search) {
     if (!state.complete) return;
     const related = await c(tx)
@@ -579,22 +595,38 @@ export function createReconciliation(
       )
       .limit(2)
       .for("share");
-    const only = automaticCandidate(
-      related.map((row) => ({
-        row,
-        supported: (row.evidence as { supported?: boolean }).supported === true,
-      })),
-      true,
-    );
-    if (!only) return;
-    const root = await ports.trips.groups.resolve(tx, state.tripId, true),
-      target = await ports.trips.groups.resolve(
-        tx,
-        only.row.primaryTripId === root.id ? only.row.secondaryTripId : only.row.primaryTripId,
-        true,
-      );
-    if (root.id === target.id || root.decision === "accepted" || target.decision === "accepted")
+    const only = related[0];
+    if (related.length !== 1 || !only) return;
+    const root = await ports.trips.groups.resolve(tx, state.tripId, true);
+    const targetId = only.primaryTripId === root.id ? only.secondaryTripId : only.primaryTripId;
+    const target = await ports.trips.groups.resolve(tx, targetId, true);
+    const rootVersion =
+      only.primaryTripId === root.id ? only.primaryVersion : only.secondaryVersion;
+    const targetVersion =
+      only.primaryTripId === targetId ? only.primaryVersion : only.secondaryVersion;
+    if (
+      root.id !== state.tripId ||
+      target.id !== targetId ||
+      root.id === target.id ||
+      root.version !== rootVersion ||
+      target.version !== targetVersion ||
+      root.ownerId !== only.ownerId ||
+      target.ownerId !== only.ownerId ||
+      root.game !== only.game ||
+      target.game !== only.game ||
+      root.decision === "accepted" ||
+      target.decision === "accepted"
+    )
       return;
+    const members = await ports.trips.groups.membersOfRoots(tx, [root.id, target.id], true);
+    const currentEvidence = (id: string) =>
+      ports.trips.reconciliation.matchingEvidence(
+        tx,
+        members.filter((member) => (member.aliasOf ?? member.id) === id).map((member) => member.id),
+      );
+    const left = await currentEvidence(root.id);
+    const right = await currentEvidence(target.id);
+    if (!matchPair(left, right).supported) return;
     const [reciprocal] = await c(tx)
       .select()
       .from(reconciliationSearches)
@@ -625,22 +657,12 @@ export function createReconciliation(
       )
       .limit(2)
       .for("share");
-    if (other.length !== 1) return;
+    if (other.length !== 1 || other[0]?.id !== only.id) return;
     if (config.dispatchReviewStage3Enabled) {
-      const expectedRoot =
-        only.row.primaryTripId === root.id ? only.row.primaryVersion : only.row.secondaryVersion;
-      const expectedTarget =
-        only.row.primaryTripId === target.id ? only.row.primaryVersion : only.row.secondaryVersion;
-      if (
-        root.version !== expectedRoot ||
-        target.version !== expectedTarget ||
-        other[0]?.id !== only.row.id
-      )
-        return;
       const [dismissed] = await c(tx)
         .select({ undoneAt: dismissals.undoneAt })
         .from(dismissals)
-        .where(eq(dismissals.candidateId, only.row.id))
+        .where(eq(dismissals.candidateId, only.id))
         .for("share");
       if (dismissed?.undoneAt === null) return;
     }
@@ -742,14 +764,12 @@ export function createReconciliation(
           eq(reconciliationCandidates.primaryTripId, id),
         ),
       );
-      const previous = config.dispatchReviewStage3Enabled
-        ? await c(tx)
-            .select()
-            .from(reconciliationCandidates)
-            .where(and(pairCondition, eq(reconciliationCandidates.active, true)))
-            .orderBy(reconciliationCandidates.id)
-            .for("update")
-        : [];
+      const previous = await c(tx)
+        .select()
+        .from(reconciliationCandidates)
+        .where(and(pairCondition, eq(reconciliationCandidates.active, true)))
+        .orderBy(reconciliationCandidates.id)
+        .for("update");
       await c(tx).update(reconciliationCandidates).set({ active: false }).where(pairCondition);
       if (
         target.id !== id ||
@@ -764,9 +784,7 @@ export function createReconciliation(
           members.map((t) => t.id),
         );
       state.evidenceComplete = state.evidenceComplete && other.complete;
-      const outcomes = evidence.facts
-        .flatMap((a) => other.facts.map((b) => matchEvidence(a, b, config.rule)))
-        .filter((r) => r.outcome !== "different");
+      const { outcomes, supported } = matchPair(evidence, other);
       if (!outcomes.length && evidence.complete && other.complete) continue;
       const pair = [root, target].sort((a, b) => a.id.localeCompare(b.id)),
         primary = pair[0],
@@ -784,7 +802,8 @@ export function createReconciliation(
             canonicalJson(factIds),
       );
       if (stable) {
-        // Stage 3 traverses stable IDs and keeps the reviewed snapshot immutable.
+        // Keep exact reviewed snapshots immutable across search generations and flag changes.
+        // The partner keyset advances by ID even when the stored search generation is older.
         await c(tx)
           .update(reconciliationCandidates)
           .set({
@@ -819,11 +838,7 @@ export function createReconciliation(
             factIds,
             searchGeneration: state.generation,
             searchComplete: false,
-            supported:
-              evidence.complete &&
-              other.complete &&
-              outcomes.length > 0 &&
-              outcomes.every((r) => r.outcome === "supported"),
+            supported,
           },
           reasons: [
             ...new Set([
@@ -868,9 +883,10 @@ export function createReconciliation(
       const owners = await ports.trips.contributions.owners(tx, [ref.tripId]);
       await ports.qualifications.prepareInTransaction(tx, owners);
       if ("previous" in ref) {
-        if (config.dispatchReviewStage3Enabled && ref.previous !== undefined) {
+        // A snapshot job uses only pre-Stage 3 tables. Finish queued work after disabling review.
+        if (ref.previous !== undefined && ref.version !== undefined) {
           const row = await ports.trips.groups.resolve(tx, ref.tripId, true);
-          if (row.id === ref.tripId && row.version === ref.version)
+          if (row.id === ref.tripId && row.version >= ref.version)
             await advanceTripVersionPage(tx, row, ref.previous, ref.cursor);
         }
         return;

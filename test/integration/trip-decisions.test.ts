@@ -4441,6 +4441,18 @@ test("Disabled queue tracks exact transitions and paged repair restores proven h
         })),
       ),
   );
+  await control.execute("DELETE FROM qualification_states WHERE user_id=? AND game='ats'", [
+    author.userId,
+  ]);
+  const states = async () => {
+    const [rows] = await control.execute<RowDataPacket[]>(
+      "SELECT game,version FROM qualification_states WHERE user_id=? ORDER BY game",
+      [author.userId],
+    );
+    return rows;
+  };
+  const qualificationsBefore = await states();
+  expect(qualificationsBefore.some(({ game }) => game === "ats")).toBe(false);
   const scan = async (verify: boolean) => {
     let cursor: string | undefined,
       mismatches = 0;
@@ -4455,10 +4467,12 @@ test("Disabled queue tracks exact transitions and paged repair restores proven h
     return mismatches;
   };
   expect(await scan(true)).toBeGreaterThan(0);
+  expect(await states()).toEqual(qualificationsBefore);
   expect((await state(submitted.tripId))?.queuedAt).toBe(firstClock);
   await scan(false);
   await scan(false);
   expect(await scan(true)).toBe(0);
+  expect(await states()).toEqual(qualificationsBefore);
   const [codes] = await control.query<RowDataPacket[]>(
     "SELECT code FROM trip_review_reasons WHERE trip_id=? ORDER BY code",
     [submitted.tripId],

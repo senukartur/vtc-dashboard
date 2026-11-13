@@ -118,7 +118,8 @@ try {
       reason: "Fictional restricted proof configuration",
     });
     step = "seed_facts";
-    const tripIds = [];
+    const tripIds = [],
+      factIds = [];
     for (let n = 0; n < 6; n++)
       await unit.run(async (tx) => {
         const tripId = newId(),
@@ -211,6 +212,7 @@ try {
         };
         await createFactRepository(unit).insert(tx, tripId, e, 2);
         tripIds.push(tripId);
+        factIds.push(factId);
       });
     const candidateId = newId();
     await unit.run(async (tx) => {
@@ -244,7 +246,7 @@ try {
           secondaryTripId: tripIds[3],
           primaryVersion: 1,
           secondaryVersion: 1,
-          evidence: {},
+          evidence: { factIds: [factIds[2], factIds[3]].sort() },
           reasons: ["synthetic_duplicate"],
           active: true,
           createdAt: time,
@@ -257,6 +259,8 @@ try {
         candidateId,
         stage3WorkerTripId: tripIds[4],
         stage3RuntimeTripId: tripIds[5],
+        candidatePrimaryId: tripIds[2],
+        candidateSecondaryId: tripIds[3],
       }),
     ]);
   } else {
@@ -268,6 +272,26 @@ try {
         [refs.stage3WorkerTripId],
       );
       assert.equal(result.affectedRows, 1);
+      await unit.run(async (tx) => {
+        const db = unit.client(tx);
+        await db.update(trips).set({ version: 2 }).where(eq(trips.id, refs.candidatePrimaryId));
+        const snapshotQueue = createQueue(unit, [reconciliation.handler]);
+        await snapshotQueue.enqueue(tx, {
+          kind: "reconciliation.search",
+          consumer: "reconciliation-search-v1",
+          schemaVersion: 1,
+          eventId: null,
+          effectKey: `synthetic-snapshot:${run}`,
+          reference: {
+            tripId: refs.candidatePrimaryId,
+            previous: 1,
+            version: 2,
+            cursor: "00000000-0000-4000-8000-000000000000",
+          },
+          availableAt: new Date().toISOString(),
+          maxAttempts: 5,
+        });
+      });
     } else {
       const denied = (error) => [1044, 1142, 1143, 1227].includes(error.errno);
       if (!stage3) {
@@ -413,7 +437,7 @@ try {
           denied,
         );
         await service.catchup();
-        const queue = createQueue(unit, [service.handler]);
+        const queue = createQueue(unit, [service.handler, reconciliation.handler]);
         await runPass(queue, new AbortController().signal);
         const read = async () => {
           const [rows] = await connection.execute(
@@ -424,8 +448,22 @@ try {
         };
         const first = await read();
         assert.ok(first.length > 0 && first.every((row) => row.queued_at !== null));
+        step = "worker_stage3_candidate_continuation";
+        const readCandidate = async () => {
+          const [rows] = await connection.execute(
+            "SELECT CAST(id AS CHAR) id, primary_version, secondary_version FROM reconciliation_candidates WHERE active=TRUE AND primary_trip_id=? AND secondary_trip_id=?",
+            [refs.candidatePrimaryId, refs.candidateSecondaryId],
+          );
+          return rows;
+        };
+        const replacements = await readCandidate();
+        assert.equal(replacements.length, 1);
+        assert.notEqual(replacements[0].id, refs.candidateId);
+        assert.equal(replacements[0].primary_version, 2);
+        assert.equal(replacements[0].secondary_version, 1);
         await runPass(queue, new AbortController().signal);
         assert.deepEqual(await read(), first);
+        assert.deepEqual(await readCandidate(), replacements);
       } else {
         step = "worker_pending_requests";
         assert.equal(

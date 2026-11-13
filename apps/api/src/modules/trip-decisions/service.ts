@@ -1382,7 +1382,11 @@ export function createTripDecisions(
       const repair = ports.trips.reviewQueueRepair;
       const rows = await repair.page(tx, after, 26);
       const batch = rows.slice(0, 25);
-      if (batch.length) await ports.qualifications.prepareInTransaction(tx, batch);
+      if (batch.length)
+        await ports.identity.qualificationContextInTransaction(
+          tx,
+          batch.map(({ ownerId }) => ownerId),
+        );
       let mismatches = 0;
       for (const { id } of batch) {
         const invalid = await repair.apply(tx, id, verify, async (row) => {
