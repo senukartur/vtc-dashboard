@@ -650,7 +650,10 @@ test(
     await expect(queue(page).getByRole("alert")).toBeVisible();
     await capture(page, info, "review-error-en");
     failing.recover();
-    await queue(page).getByRole("button", { name: "Refresh", exact: true }).click();
+    await queue(page)
+      .getByRole("alert")
+      .getByRole("button", { name: "Retry", exact: true })
+      .click();
     await expect(table(page).locator("tbody tr")).toHaveCount(5);
     await page.goto(`/account/review/${reviewIds.missing}`);
     await expect(panel(page).getByRole("alert")).toContainText(
@@ -1212,6 +1215,54 @@ test(
     expect(mock.lists.at(-1)?.toString()).toBe(first);
   },
 );
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `R17e ${locale} the queue pages without a total, shows the page number and has no header sort`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const ru = locale === "ru";
+      const mock = await open(page, "/account/review", { paged: true, locale });
+      await expect(table(page).locator("tbody tr")).toHaveCount(2);
+      // The API orders the queue by submission only, so no header offers sorting.
+      await expect(table(page).locator("th[aria-sort]")).toHaveCount(0);
+      await expect(table(page).locator("thead button")).toHaveCount(0);
+      // Nor does a phone sort select appear in the table; the toolbar keeps its own controls.
+      await expect(queue(page).locator(".data-table-sort-select")).toHaveCount(0);
+      const pager = queue(page).getByRole("navigation", {
+        name: ru ? "Страницы" : "Pages",
+        exact: true,
+      });
+      const summary = pager.locator(".pager-summary");
+      const next = pager.getByRole("button", {
+        name: ru ? "Следующая страница" : "Next page",
+        exact: true,
+      });
+      const previous = pager.getByRole("button", {
+        name: ru ? "Предыдущая страница" : "Previous page",
+        exact: true,
+      });
+      await expect(summary).toHaveText(ru ? "Стр. 1" : "Page 1");
+      await expect(queue(page).locator(".review-list-footer")).toBeVisible();
+      await expect(previous).toBeDisabled();
+      const touch = await coarse(page);
+      for (const button of [previous, next])
+        expect((await button.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(touch ? 40 : 29.5);
+      await next.click();
+      await expect.poll(() => mock.lists.at(-1)?.has("cursor")).toBe(true);
+      await expect(summary).toHaveText(ru ? "Стр. 2" : "Page 2");
+      await expect(table(page).locator("tbody tr")).toHaveCount(3);
+      // The last page keeps focus on Next, now unavailable.
+      await expect(next).toBeFocused();
+      await expect(next).toBeDisabled();
+      await expect(previous).toBeEnabled();
+      await noOverflow(page);
+      await capture(page, info, `review-queue-page-2-${locale}`);
+      await previous.click();
+      await expect(summary).toHaveText(ru ? "Стр. 1" : "Page 1");
+      await expect.poll(() => mock.lists.at(-1)?.has("cursor")).toBe(false);
+    },
+  );
 
 test(
   "R18 toolbar budget with wide-font spare in RU and EN on both tabs and beside the panel",

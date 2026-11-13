@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { refreshWorkspaceSummary } from "../../app/workspace-summary.js";
+import { keepPreviousPage } from "../../shared/paging.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
 import {
@@ -14,28 +15,37 @@ import {
   schema,
   tripRead,
 } from "./transport.js";
+/** Index of the request path in the trip query key; `commandAffects` reads the same slot. */
+const pathIndex = 6;
+/**
+ * `keepPage` keeps the previous page's rows (as placeholder data) while another page, sort or
+ * filter of the same list loads; any identity, capability or language change drops them.
+ */
 export function useTripQuery<K extends keyof DTO>(
   path: string,
   name: K,
   enabled = true,
   poll = false,
+  keepPage = false,
 ) {
   const session = useSession(),
     client = useQueryClient(),
     { i18n } = useTranslation();
+  const queryKey = [
+    "trip-workspace",
+    session.self?.member.id,
+    session.generation,
+    session.self?.identityEpoch,
+    session.self?.capabilities.join(","),
+    i18n.resolvedLanguage,
+    path,
+    name,
+  ];
   const query = useQuery({
-    queryKey: [
-      "trip-workspace",
-      session.self?.member.id,
-      session.generation,
-      session.self?.identityEpoch,
-      session.self?.capabilities.join(","),
-      i18n.resolvedLanguage,
-      path,
-      name,
-    ],
+    queryKey,
     meta: { private: true },
     enabled,
+    ...(keepPage ? { placeholderData: keepPreviousPage(queryKey, pathIndex) } : {}),
     retry: false,
     gcTime: 0,
     staleTime: 0,
@@ -139,7 +149,7 @@ export function useTripCommand(onConflict?: () => void) {
           void refreshWorkspaceSummary(client, session).catch(() => undefined);
         await client.invalidateQueries({
           queryKey: ["trip-workspace"],
-          predicate: (query) => commandAffects(path, String(query.queryKey[6] ?? "")),
+          predicate: (query) => commandAffects(path, String(query.queryKey[pathIndex] ?? "")),
         });
         return { data: parsed.data, etag: response.headers.get("ETag") };
       }
@@ -163,7 +173,7 @@ export function useTripCommand(onConflict?: () => void) {
           onConflict?.();
           await client.invalidateQueries({
             queryKey: ["trip-workspace"],
-            predicate: (query) => commandAffects(path, String(query.queryKey[6] ?? "")),
+            predicate: (query) => commandAffects(path, String(query.queryKey[pathIndex] ?? "")),
           });
         }
         if (!["uncertain", "unavailable", "limited"].includes(safe.kind)) attempt.current = null;

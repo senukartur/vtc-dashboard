@@ -107,11 +107,11 @@ test(
         { key: "mine:ats:accepted", cursor: null },
       ]);
     await expect(page.getByRole("alert")).toHaveCount(0);
-    // Any other failure shows an alert, and Refresh restarts at the first page.
+    // Any other failure shows an alert in the table, and Retry restarts at the first page.
     failNext = 503;
     await next.click();
     await expect(page.getByRole("alert")).toBeVisible();
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect.poll(() => requests.at(-1)).toEqual({ key: "mine:ats:accepted", cursor: null });
     await expect(page.getByRole("alert")).toHaveCount(0);
     expect(requests.every((r) => !r.cursor || r.cursor === r.key)).toBe(true);

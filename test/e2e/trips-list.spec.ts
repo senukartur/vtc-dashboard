@@ -298,7 +298,7 @@ test(
         const row = current.locator("tbody tr").first();
         await expect(row).toHaveRole("row");
         await expect(row.locator("td").nth(1)).toHaveRole("cell");
-        await expect(row.locator(".trips-cell-label").first()).toHaveAttribute(
+        await expect(row.locator(".data-table-label").first()).toHaveAttribute(
           "aria-hidden",
           "true",
         );
@@ -313,6 +313,9 @@ test(
         if (!routeBox || !cargoBox || !rowBox || !listBox) throw new Error("CARD_NOT_RENDERED");
         expect(routeBox.y + routeBox.height).toBeLessThanOrEqual(cargoBox.y + 1);
         expect(Math.abs(rowBox.width - listBox.width)).toBeLessThanOrEqual(2);
+        // Header column widths never shrink a card cell: the route spans the card, others halve it.
+        expect(routeBox.width).toBeGreaterThanOrEqual(rowBox.width * 0.8);
+        expect(cargoBox.width).toBeGreaterThanOrEqual(rowBox.width * 0.4);
       } else {
         await expect(current.getByRole("columnheader")).toHaveText(
           [...names.slice(0, -1), ru ? /Завершение/ : /Completion/],
@@ -526,19 +529,17 @@ test(
     await expect(page.getByRole("combobox", { name: "Source", exact: true })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.getByRole("combobox", { name: "Period", exact: true })).toBeFocused();
-    const sort = page.getByRole("button", { name: "Completion" });
-    if (info.project.name !== "desktop-chromium") {
-      await page.keyboard.press("Tab");
-      await expect(page.getByRole("combobox", { name: "Completion order" })).toBeFocused();
-    }
     await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "Reset", exact: true })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.getByRole("tabpanel")).toBeFocused();
-    if (info.project.name === "desktop-chromium") {
-      await page.keyboard.press("Tab");
-      await expect(sort).toBeFocused();
-    }
+    // The table's sort control comes next: the header button on desktop, the phone select below.
+    await page.keyboard.press("Tab");
+    await expect(
+      info.project.name === "desktop-chromium"
+        ? page.getByRole("button", { name: "Completion" })
+        : page.getByRole("combobox", { name: "Completion order" }),
+    ).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(rowLink(page, first)).toBeFocused();
     if (info.project.name === "desktop-chromium") {
@@ -965,8 +966,12 @@ test(
     await expect(page.getByText("Lifetime accepted trips · 0 · 0 km")).toBeVisible();
     await expect(page.getByRole("link", { name: "New report", exact: true })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: /^Drafts/ })).toHaveCount(0);
-    const retry = page.getByRole("button", { name: "Refresh", exact: true });
+    // The error and its Retry live inside the table, under the kept headers.
+    const retry = table(page)
+      .getByRole("alert")
+      .getByRole("button", { name: "Retry", exact: true });
     await expect(retry).toBeVisible();
+    await expect(table(page).getByRole("alert")).toContainText("The service is unavailable.");
     await expect(page.getByText("Count unavailable", { exact: true })).toBeVisible();
     await expect(page.getByText("Found 0", { exact: true })).toHaveCount(0);
     state = "empty";
@@ -1121,5 +1126,130 @@ test(
       }
       await noOverflow(page);
     }
+  },
+);
+
+/** Fictional page of 25 trips; numbers keep every row id distinct. */
+function tripPage(offset: number) {
+  return Array.from({ length: 25 }, (_, index) => {
+    const n = String(offset + index).padStart(2, "0");
+    return summary(`49000000-0000-4000-8000-0000000001${n}`);
+  });
+}
+
+test(
+  "a slow next page keeps the rows dimmed, the pager busy and focus on Next",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    await mockList(page);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/trips?*", async (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor");
+      if (cursor === "page-2") {
+        await gate;
+        await route
+          .fulfill({ json: envelope({ items: tripPage(25), nextCursor: "page-3", total: 60 }) })
+          .catch(() => {});
+        return;
+      }
+      return route.fulfill({
+        json: envelope({ items: tripPage(0), nextCursor: "page-2", total: 60 }),
+      });
+    });
+    await page.goto("/account/trips");
+    await catalogLanguage(page);
+    const trips = table(page);
+    const next = page.getByRole("button", { name: "Next page", exact: true });
+    const previous = page.getByRole("button", { name: "Previous page", exact: true });
+    await expect(page.getByText("1–25 of 60", { exact: true })).toBeVisible();
+    await expect(trips).not.toHaveAttribute("aria-busy", "true");
+    await next.click();
+    // The previous rows stay, dimmed, while both pager buttons wait for the answer.
+    await expect(trips).toHaveAttribute("aria-busy", "true");
+    await expect(page.locator(".data-table.trips-table")).toHaveAttribute("data-busy", "true");
+    await expect(trips.locator("tbody tr")).toHaveCount(25);
+    await expect(trips.locator("tbody")).toHaveCSS("opacity", "0.5");
+    await expect(next).toHaveAttribute("aria-disabled", "true");
+    await expect(previous).toHaveAttribute("aria-disabled", "true");
+    await expect(next).toBeFocused();
+    await expect(page.getByText("1–25 of 60", { exact: true })).toHaveCount(0);
+    await capture(page, info, "trips-list-busy");
+    release();
+    await expect(page.getByText("26–50 of 60", { exact: true })).toBeVisible();
+    await expect(trips).not.toHaveAttribute("aria-busy", "true");
+    await expect(next).toBeFocused();
+    await expect(next).toBeEnabled();
+    await expect(previous).toBeEnabled();
+  },
+);
+
+test(
+  "the phone sort select drives order= and restarts the cursor",
+  browserCase(["@layout", "@viewport-narrow"]),
+  async ({ page }, info) => {
+    const { lists } = await mockList(page, { paged: true });
+    await page.goto("/account/trips");
+    await catalogLanguage(page);
+    await expect(table(page)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Completion", exact: true })).toBeHidden();
+    const sort = page.getByRole("combobox", { name: "Completion order", exact: true });
+    await expect(sort).toBeVisible();
+    await expect(sort.locator("option")).toHaveText(["Newest first", "Oldest first"]);
+    await expect(sort).toHaveValue("completion:desc");
+    if (await coarse(page))
+      expect((await sort.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40);
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect.poll(() => lists.at(-1)?.get("cursor")).toBe("page-2");
+    await sort.focus();
+    await sort.selectOption("completion:asc");
+    await expect(page).toHaveURL(/[?&]order=completion_asc(&|$)/);
+    await expect(page).not.toHaveURL(/cursor=/);
+    await expect
+      .poll(() => lists.at(-1)?.toString())
+      .toBe("scope=mine&order=completion_asc&locale=en&limit=25");
+    await expect(sort).toBeFocused();
+    await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeDisabled();
+    await catalogLanguage(page, "ru");
+    const localized = page.getByRole("combobox", { name: "Порядок завершения", exact: true });
+    await expect(localized).toHaveValue("completion:asc");
+    await expect(localized.locator("option")).toHaveText(["Сначала новые", "Сначала старые"]);
+    await noOverflow(page);
+    await capture(page, info, "trips-list-phone-sort-ru");
+    expectListParams(lists);
+  },
+);
+
+test(
+  "an empty My trips list offers New report while other empty views do not",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockList(page);
+    await page.route("**/api/v1/trips?*", (route) =>
+      route.fulfill({ json: envelope({ items: [], nextCursor: null, total: 0 }) }),
+    );
+    await page.goto("/account/trips");
+    await catalogLanguage(page);
+    const trips = table(page);
+    await expect(trips).toContainText("No trips yet");
+    await expect(trips.getByRole("link", { name: "New report", exact: true })).toHaveAttribute(
+      "href",
+      "/account/reports/new",
+    );
+    await expect(trips.getByRole("button", { name: "Reset filters" })).toHaveCount(0);
+    // An empty first page has nothing to page through.
+    await expect(page.getByRole("button", { name: "Next page", exact: true })).toHaveCount(0);
+    await page.getByRole("tab", { name: "Accepted company trips", exact: true }).click();
+    await expect(table(page)).toContainText("No records match this view.");
+    await expect(table(page).getByRole("link")).toHaveCount(0);
+    await page.goto("/account/trips?game=ats");
+    const reset = table(page).getByRole("button", { name: "Reset filters", exact: true });
+    await expect(reset).toBeVisible();
+    await expect(table(page).getByRole("link")).toHaveCount(0);
+    await reset.click();
+    await expect(page).not.toHaveURL(/game=/);
+    await expect(table(page)).toContainText("No trips yet");
   },
 );
