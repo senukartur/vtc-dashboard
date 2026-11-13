@@ -432,7 +432,7 @@ export type ReviewMockOptions = {
   locale?: "en" | "ru";
   staged?: boolean;
   defensiveOwn?: boolean;
-  duplicateDetailChanged?: "version" | "alias";
+  duplicateDetailChanged?: "version" | "alias" | "own-telemetry";
   expiredMemberCursor?: boolean;
   /** Awaiting list replaced by an empty page, only the viewer's own trip or an HTTP failure. */
   awaiting?: "empty" | "own" | number;
@@ -627,6 +627,19 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
           : [];
       return route.fulfill({ json: envelope({ items, total: items.length, nextCursor: null }) });
     }
+    if (
+      path === "/api/v1/reconciliation-candidates" &&
+      options.duplicateDetailChanged === "own-telemetry"
+    ) {
+      const legacyCandidate: S["MergeCandidate"] = {
+        id: candidate.id,
+        primaryTripId: candidate.primaryTrip.id,
+        secondaryTripId: candidate.secondaryTrip.id,
+        reasonCodes: candidate.reasonCodes,
+        confidence: "review_required",
+      };
+      return route.fulfill({ json: list(merged ? [] : [legacyCandidate]) });
+    }
     const dismissal = new RegExp(
       `^/api/v1/reconciliation-candidates/${candidate.id}/(dismissals|dismissal-reversals)$`,
     ).exec(path);
@@ -653,7 +666,11 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
         headers: { ETag: `"v${result.version}"` },
       });
     }
-    if (options.staged && path === "/api/v1/reconciliations" && request.method() === "POST") {
+    if (
+      (options.staged || options.duplicateDetailChanged === "own-telemetry") &&
+      path === "/api/v1/reconciliations" &&
+      request.method() === "POST"
+    ) {
       const body = request.postDataJSON() as Record<string, unknown>;
       mock.posts.push({ path, headers: request.headers(), body });
       merged = true;
@@ -811,13 +828,18 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
       if (!rest) {
         const summary = state.review.trip.summary;
         const changed = key === "late" ? options.duplicateDetailChanged : undefined;
+        const view = changed === "own-telemetry" ? states.telemetry.review.trip : state.review.trip;
         return route.fulfill({
           json: envelope({
-            ...state.review.trip,
+            ...view,
             summary: {
               ...summary,
               id: changed === "alias" ? reviewIds.telemetry : summary.id,
               version: changed === "version" ? state.version + 1 : state.version,
+              ...(changed === "own-telemetry" && {
+                owner: member,
+                sourceKinds: ["ets2telemetry"],
+              }),
             },
           }),
           headers: { ETag: `"v${state.version}"` },

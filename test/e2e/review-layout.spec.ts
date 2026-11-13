@@ -276,7 +276,7 @@ test(
   },
 );
 
-for (const change of ["version", "alias"] as const)
+for (const change of ["version", "alias", "own-telemetry"] as const)
   test(
     `Stage 3 duplicate merge blocks a changed detail ${change}`,
     browserCase(["@functional"]),
@@ -285,10 +285,18 @@ for (const change of ["version", "alias"] as const)
       await page.goto("/account/review?tab=duplicates");
       await page.getByRole("button", { name: "Reviewed pair", exact: true }).click();
       await expect(
-        page.getByRole("status").filter({ hasText: "This pair changed." }),
+        page.getByRole("status").filter({
+          hasText:
+            change === "own-telemetry"
+              ? "Your current permissions do not allow this action."
+              : "This pair changed.",
+        }),
       ).toBeVisible();
+      if (change === "own-telemetry")
+        expect(mock.details).not.toContain(`/api/v1/trips/${reviewIds.over}`);
       await expect(page.getByRole("button", { name: "Merge trips", exact: true })).toHaveCount(0);
       await expect(page.getByRole("combobox", { name: "Choose the primary trip" })).toHaveCount(0);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
       expect(mock.posts).toEqual([]);
       const cancel = page.getByRole("button", { name: "Cancel", exact: true });
       await cancel.click();
@@ -307,6 +315,37 @@ test(
       .getByRole("combobox", { name: "Choose the primary trip" })
       .selectOption(reviewIds.over);
     await page.locator("#merge-reason").fill(" Fictional same delivery ");
+    await page.getByRole("button", { name: "Merge trips", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Server confirmed the command." }),
+    ).toBeVisible();
+    expect(mock.posts).toMatchObject([
+      {
+        path: "/api/v1/reconciliations",
+        body: {
+          primaryTripId: reviewIds.over,
+          secondaryTripId: reviewIds.late,
+          primaryVersion: 1,
+          secondaryVersion: 1,
+          reason: "Fictional same delivery",
+        },
+      },
+    ]);
+  },
+);
+
+test(
+  "legacy duplicate merge can submit an own telemetry trip",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { duplicateDetailChanged: "own-telemetry" });
+    await page.goto("/account/review/reconciliation");
+    await page.getByRole("button", { name: "Review candidate", exact: true }).click();
+    await page
+      .getByRole("combobox", { name: "Choose the primary trip" })
+      .selectOption(reviewIds.over);
+    await page.locator("#merge-reason").fill("Fictional same delivery");
     await page.getByRole("button", { name: "Merge trips", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(

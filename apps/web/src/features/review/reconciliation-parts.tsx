@@ -38,6 +38,7 @@ export function MergePair({
   }, [staged]);
   const av = a.data?.data.data,
     as = av?.view === "private" ? av.summary : av;
+  const memberId = session.self?.member.id;
   const primaryStale =
     expectedVersions &&
     as &&
@@ -45,7 +46,7 @@ export function MergePair({
   const b = useTripQuery(
     `/trips/${pair.secondaryTripId}`,
     "EnvelopeTripView",
-    !!as && !primaryStale,
+    !!as && !primaryStale && !(staged && as.owner.id === memberId),
   );
   const bv = b.data?.data.data,
     bs = bv?.view === "private" ? bv.summary : bv;
@@ -54,13 +55,15 @@ export function MergePair({
     (expectedVersions &&
       bs &&
       (bs.id !== pair.secondaryTripId || bs.version !== expectedVersions.secondary));
-  const self = [as, bs].some(
-    (s) => s && s.owner.id === session.self?.member.id && s.sourceKinds.includes("manual"),
+  const ownTrips = [as, bs].filter(
+    (trip): trip is DTO["TripSummary"] => trip !== undefined && trip.owner.id === memberId,
   );
+  const ownManual = ownTrips.some((trip) => trip.sourceKinds.includes("manual"));
+  const stagedSelf = staged && ownTrips.length > 0;
   const p = primary === as?.id ? as : bs,
     s = primary === as?.id ? bs : as,
     body =
-      p && s && !stale
+      p && s && !stale && !ownManual && !stagedSelf
         ? {
             primaryTripId: p.id,
             secondaryTripId: s.id,
@@ -69,13 +72,15 @@ export function MergePair({
             reason: reason.trim(),
           }
         : null;
-  if (stale)
+  if (stale || stagedSelf)
     return (
       <Card className="stack">
         <h2 ref={heading} tabIndex={-1}>
           {t("mergePair")}
         </h2>
-        <p role="status">{t("dispatchCandidateChanged")}</p>
+        <p role="status">
+          {t(stagedSelf ? (ownManual ? "selfReview" : "forbidden") : "dispatchCandidateChanged")}
+        </p>
         {refreshCandidate && (
           <div>
             <Button type="button" variant="outline" onClick={refreshCandidate}>
@@ -123,12 +128,12 @@ export function MergePair({
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
-          {self && <p>{t("selfReview")}</p>}
+          {ownManual && <p>{t("selfReview")}</p>}
           <Failure error={command.failure} seconds={command.seconds} />
           <Confirm
             label={t("merge")}
             guard={JSON.stringify(body)}
-            disabled={self || !reason.trim() || as.id === bs.id || command.seconds > 0}
+            disabled={!body || !reason.trim() || as.id === bs.id || command.seconds > 0}
             pending={command.pending}
             failure={command.failure}
             onConfirm={async () => {
