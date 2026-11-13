@@ -29,7 +29,13 @@ export function createAssignmentWriter(
       )
       .for("update");
     if (!current) {
-      current = { userId: input.userId, game: input.game, assignmentId: null, version: 1 };
+      current = {
+        userId: input.userId,
+        game: input.game,
+        assignmentId: null,
+        eligibleSince: null,
+        version: 1,
+      };
       await c.insert(qualificationStates).values(current);
     }
     if (current.assignmentId && input.purpose !== "historical_resolution") {

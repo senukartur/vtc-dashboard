@@ -204,6 +204,13 @@
       "when": 1794508297032,
       "tag": "0028_faulty_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1794590317849,
+      "tag": "0029_orange_zaladane",
+      "breakpoints": true
     }
   ]
 }

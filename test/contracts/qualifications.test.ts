@@ -150,3 +150,31 @@ test("staged qualification publication accepts an optional nonempty reason and k
     expect(publication({ ...without, ...changes })).toBe(false);
   }
 });
+
+test("Stage 3 company history accepts both promotion proof and ordinary assignment rows", () => {
+  const examples = JSON.parse(
+    readFileSync(new URL("../../docs/contracts/dashboard/examples.json", import.meta.url), "utf8"),
+  );
+  const response = examples.cases.find(
+    (c: { id: string }) => c.id === "listPromotionHistory:stage-3-history",
+  ).response;
+  const check = valid("QualificationStage3PromotionHistoryListEnvelope");
+  expect(response.data.items.map((item: { kind: string }) => item.kind)).toEqual([
+    "promotion",
+    "assignment",
+  ]);
+  expect(check(response)).toBe(true);
+  const [promotion, assignment] = response.data.items;
+  expect(
+    check({
+      ...response,
+      data: { ...response.data, items: [{ ...assignment, confirmedAt: promotion.confirmedAt }] },
+    }),
+  ).toBe(false);
+  expect(
+    check({
+      ...response,
+      data: { ...response.data, items: [{ ...promotion, kind: "assignment" }] },
+    }),
+  ).toBe(false);
+});

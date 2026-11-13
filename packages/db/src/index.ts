@@ -5,6 +5,7 @@ import {
   type RowDataPacket,
 } from "mysql2/promise";
 
+export type { AuditDetails } from "./core/audit-details.js";
 export { type AuditInput, createAudit } from "./core/audit.js";
 export { migrationFolder, migrationLockName, runMigrations } from "./core/migrations.js";
 export { databaseFailureContext } from "./core/operation-context.js";

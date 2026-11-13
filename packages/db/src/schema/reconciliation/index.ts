@@ -69,6 +69,40 @@ export const reconciliationCandidates = mysqlTable(
     check("reconciliation_candidate_distinct", sql`${t.primaryTripId} <> ${t.secondaryTripId}`),
   ],
 );
+export const reconciliationCandidateDismissals = mysqlTable(
+  "reconciliation_candidate_dismissals",
+  {
+    candidateId: idColumn("candidate_id").primaryKey(),
+    dismissedBy: idColumn("dismissed_by").notNull(),
+    dismissedAt: utcColumn("dismissed_at").notNull(),
+    reason: varchar("reason", { length: 2048 }).notNull(),
+    version: int("version", { unsigned: true }).notNull(),
+    undoneBy: idColumn("undone_by"),
+    undoneAt: utcColumn("undone_at"),
+  },
+  (t) => [
+    foreignKey({
+      name: "recon_dismissal_candidate_fk",
+      columns: [t.candidateId],
+      foreignColumns: [reconciliationCandidates.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "recon_dismissal_actor_fk",
+      columns: [t.dismissedBy],
+      foreignColumns: [membership.userId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "recon_dismissal_undo_actor_fk",
+      columns: [t.undoneBy],
+      foreignColumns: [membership.userId],
+    }),
+    check("recon_dismissal_version_positive", sql`${t.version} > 0`),
+    check("recon_dismissal_reason_present", sql`REGEXP_LIKE(${t.reason}, '[^[:space:]]')`),
+    check("recon_dismissal_undo_pair", sql`(${t.undoneBy} IS NULL) = (${t.undoneAt} IS NULL)`),
+    check("recon_dismissal_undo_time", sql`${t.undoneAt} >= ${t.dismissedAt}`),
+  ],
+);
+
 export const reconciliationSearches = mysqlTable("reconciliation_searches", {
   tripId: idColumn("trip_id")
     .primaryKey()
