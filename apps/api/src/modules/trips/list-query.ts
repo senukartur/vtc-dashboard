@@ -129,7 +129,7 @@ export function normalizeListOptions(options: ListOptions) {
 }
 
 const sourceMember = alias(trips, "source_member");
-function tripSourceCondition(db: ReturnType<UnitOfWork["client"]>, source: TripSource): SQL {
+export function tripSourceCondition(db: ReturnType<UnitOfWork["client"]>, source: TripSource): SQL {
   // Two correlated EXISTS probes use source_canonical and trip_group_members.
   return or(
     exists(

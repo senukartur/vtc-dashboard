@@ -1,9 +1,12 @@
 import type { components } from "@vtc/contracts";
 import { applicationId } from "@vtc/db";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { stage3Envelope, stage3Query, stage3QuerySelection } from "../../platform/http/stage3.js";
 import { csrfProtection } from "../identity/http.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { Reconciliation } from "./service.js";
+import type { CandidatePage } from "./stage3-candidates.js";
+
 type S = components["schemas"];
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const id = {
@@ -16,6 +19,7 @@ export async function registerReconciliationRoutes(
   app: FastifyInstance,
   identity: Identity,
   service: Reconciliation,
+  stage3Enabled = service.config.dispatchReviewStage3Enabled === true,
 ) {
   const actors = new WeakMap<FastifyRequest, Actor>();
   const csrf = csrfProtection(identity.config),
@@ -35,6 +39,17 @@ export async function registerReconciliationRoutes(
       throw identityError(422);
     }
   }
+  function version(r: FastifyRequest) {
+    const match = r.headers["if-match"];
+    if (match === undefined) throw identityError(428);
+    if (
+      typeof match !== "string" ||
+      !/^"v[1-9]\d*"$/.test(match) ||
+      !Number.isSafeInteger(Number(match.slice(2, -1)))
+    )
+      throw identityError(422);
+    return Number(match.slice(2, -1));
+  }
   app.addHook("onRequest", async (r) => {
     await identity.rateLimit(r.method === "GET" ? "read" : "command", r.ip);
     const current = await actor(r);
@@ -46,22 +61,65 @@ export async function registerReconciliationRoutes(
         throw identityError(415);
     }
   });
-  app.get<{ Querystring: { limit?: number; cursor?: string } }>(
+  const paging = {
+    limit: { type: "integer", minimum: 1, maximum: 100 },
+    cursor: { type: "string", minLength: 1, maxLength: 2048 },
+  };
+  const listEnvelope = stage3Envelope(
+    "EnvelopeListMergeCandidate",
+    "TripStage3DuplicateListEnvelope",
+  );
+  app.get<{ Querystring: CandidatePage & { view?: "stage3" } }>(
     "/api/v1/reconciliation-candidates",
     {
       schema: {
-        querystring: {
-          ...empty,
+        querystring: stage3QuerySelection({ ...empty, properties: paging }, stage3Enabled, {
+          ...stage3Query,
           properties: {
-            limit: { type: "integer", minimum: 1, maximum: 100 },
-            cursor: { type: "string", minLength: 1, maxLength: 2048 },
+            ...stage3Query.properties,
+            ...paging,
+            game: ref("Game"),
+            status: { type: "string", enum: ["waiting", "dismissed"] },
           },
-        },
-        response: { 200: ref("EnvelopeListMergeCandidate") },
+        }),
       },
     },
-    async (r) => envelope(await service.list(await actor(r), r.query), r),
+    async (r) => {
+      const current = await actor(r);
+      const staged = r.query.view === "stage3";
+      const result = staged
+        ? await service.stage3List(current, r.query)
+        : await service.list(current, r.query);
+      return listEnvelope(staged, envelope(result, r));
+    },
   );
+  if (stage3Enabled) {
+    for (const dismiss of [true, false]) {
+      const suffix = dismiss ? "dismissals" : "dismissal-reversals";
+      app.post<{ Params: { candidateId: string }; Body: S["TripStage3DuplicateDismissInput"] }>(
+        `/api/v1/reconciliation-candidates/:candidateId/${suffix}`,
+        {
+          schema: {
+            params: { ...empty, properties: { candidateId: id }, required: ["candidateId"] },
+            querystring: empty,
+            body: ref(dismiss ? "TripStage3DuplicateDismissInput" : "TripStage3DuplicateUndoInput"),
+            response: { 200: ref("TripStage3DuplicateDismissalEnvelope") },
+          },
+        },
+        async (r, reply) => {
+          const result = await service.dismissCandidate(
+            await actor(r),
+            r.params.candidateId,
+            key(r),
+            version(r),
+            dismiss ? r.body : null,
+          );
+          reply.header("ETag", `"v${result.version}"`);
+          return envelope(result.data, r);
+        },
+      );
+    }
+  }
   app.get<{ Params: { tripId: string }; Querystring: { limit?: number; cursor?: string } }>(
     "/api/v1/trips/:tripId/reconciliations",
     {
@@ -118,19 +176,11 @@ export async function registerReconciliationRoutes(
     async (r, reply) => {
       const current = await actor(r);
       csrf.check(r, current);
-      const match = r.headers["if-match"];
-      if (match === undefined) throw identityError(428);
-      if (
-        typeof match !== "string" ||
-        !/^"v[1-9]\d*"$/.test(match) ||
-        !Number.isSafeInteger(Number(match.slice(2, -1)))
-      )
-        throw identityError(422);
       const result = await service.reverse(
         current,
         r.params.reconciliationId,
         key(r),
-        Number(match.slice(2, -1)),
+        version(r),
         r.body,
       );
       reply.header("ETag", `"v${result.version}"`);

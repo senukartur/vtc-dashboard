@@ -34,6 +34,7 @@ import {
   or,
   sql,
 } from "@vtc/db/manual-reports-schema";
+import { gt } from "drizzle-orm";
 import {
   type BlobConfig,
   BlobFailure,
@@ -2050,6 +2051,53 @@ export function createManualReports(
       } finally {
         if (reserved.replay) await blobs.remove(reserved.key);
       }
+    },
+    // The dispatch repair owns this trip lock. Immutable revision timestamps and
+    // source record identity can establish a narrow manual-only submission.
+    async reviewQueueSubmissionInTransaction(tx: TxContext, tripId: string) {
+      const rows = await c(tx)
+        .select({
+          id: manualRevisions.id,
+          reportId: manualRevisions.reportId,
+          sourceRecordId: manualRevisions.sourceRecordId,
+        })
+        .from(manualReports)
+        .innerJoin(manualRevisions, eq(manualRevisions.id, manualReports.currentRevisionId))
+        .where(eq(manualReports.tripId, tripId))
+        .limit(2)
+        .for("share");
+      return rows.length === 1 ? rows[0] : undefined;
+    },
+    async firstReviewSubmissionInTransaction(
+      tx: TxContext,
+      reportId: string,
+      returned?: { id: string; at: string },
+    ) {
+      const [previous] = returned
+        ? await c(tx)
+            .select({ number: manualRevisions.number })
+            .from(manualRevisions)
+            .where(and(eq(manualRevisions.id, returned.id), eq(manualRevisions.reportId, reportId)))
+            .for("share")
+        : [];
+      if (returned && !previous) return null;
+      const [first] = await c(tx)
+        .select({ at: manualRevisions.submittedAt })
+        .from(manualRevisions)
+        .where(
+          and(
+            eq(manualRevisions.reportId, reportId),
+            previous && returned
+              ? and(
+                  eq(manualRevisions.number, previous.number + 1),
+                  gt(manualRevisions.submittedAt, returned.at),
+                )
+              : eq(manualRevisions.number, 1),
+          ),
+        )
+        .limit(1)
+        .for("share");
+      return first?.at ?? null;
     },
     async reviewContextInTransaction(tx: TxContext, tripId: string) {
       const members = await ports.trips.groups.members(tx, [tripId], true),

@@ -1,21 +1,22 @@
 import type { TxContext } from "@vtc/db";
-import { identityError } from "../modules/identity/service.js";
 import type { Actor } from "../modules/identity/service.js";
+import { identityError } from "../modules/identity/service.js";
 import type { ManualReports } from "../modules/manual-reports/service.js";
 import type { Qualifications } from "../modules/qualifications/service.js";
-import type { Trips } from "../modules/trips/service.js";
 import type { TripState } from "../modules/trips/groups.js";
 import type { GroupSnapshot } from "../modules/trips/reconciliation.js";
-export function reconciliationCoordinator(ports: {
-  trips: Trips;
-  qualifications: Qualifications;
-  manual?: ManualReports;
-}) {
+import type { Trips } from "../modules/trips/service.js";
+export function reconciliationCoordinator(
+  ports: { trips: Trips; qualifications: Qualifications; manual?: ManualReports },
+  excludeOwnTrips = false,
+) {
   async function prepare(tx: TxContext, ids: string[], actor?: Actor) {
     // Discovery is read-only. Company/current members and qualification assignments precede group mutations.
     const rows = await ports.trips.contributions.owners(tx, ids);
     await ports.qualifications.prepareInTransaction(tx, rows, actor);
     const locked = await ports.trips.reconciliation.inspect(tx, ids);
+    if (actor && excludeOwnTrips && locked.some((row) => row.ownerId === actor.userId))
+      throw identityError(403, "SELF_REVIEW_FORBIDDEN");
     const authors = await ports.trips.reconciliation.manualAuthors(
       tx,
       locked.map((t) => t.id),
