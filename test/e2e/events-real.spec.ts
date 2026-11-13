@@ -14,10 +14,12 @@ import { resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
 import { selectPastReportEvent } from "./support/events.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
+import { createLandingCoverFixture } from "./support/landing-cover.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
 test.beforeEach(resetAccountLimits);
+
 async function create(
   page: Page,
   title: string,
@@ -641,6 +643,102 @@ test(
       await expect(page.getByText(/An RSVP alone grants no exception/)).toBeVisible();
     } finally {
       await s.close();
+    }
+  },
+);
+
+test(
+  "real public landing shows the selected ready cover, then its replacement and removal",
+  browserCase(["@real"]),
+  async ({ browser }) => {
+    test.setTimeout(60000);
+    await using event = await createLandingCoverFixture();
+    const context = await browser.newContext({
+      baseURL: event.origin,
+      serviceWorkers: "block",
+      reducedMotion: "reduce",
+    });
+    try {
+      await context.route("**/*", (route) =>
+        new URL(route.request().url()).origin === event.origin
+          ? route.continue()
+          : route.abort("blockedbyclient"),
+      );
+      await context.addCookies([
+        { name: "vtc_fictional_probe", value: "fictional", url: event.origin },
+      ]);
+      const visitor = await context.newPage();
+      const card = visitor.getByRole("article").filter({
+        has: visitor.getByRole("heading", { name: event.title, exact: true }),
+      });
+      const image = card.getByRole("img", { name: event.title, exact: true });
+      async function showLanding(hasCover: boolean, locale: "ru" | "en") {
+        const list = visitor.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            url.pathname === "/api/v1/public/events" &&
+            url.searchParams.get("period") === "upcoming" &&
+            url.searchParams.get("limit") === "3" &&
+            url.searchParams.get("locale") === locale
+          );
+        });
+        await visitor.goto(locale === "en" ? "/en" : "/");
+        const response = await list;
+        expect(response.status()).toBe(200);
+        const { data } =
+          (await response.json()) as components["schemas"]["EventStage2EnvelopePublicList"];
+        expect(data.items.find((item) => item.id === event.id)?.hasCover).toBe(hasCover);
+        await expect(card.getByRole("link", { name: event.title, exact: true })).toBeVisible();
+        await expect(card).toContainText(event.route[locale]);
+      }
+      async function showCover(width: number, locale: "ru" | "en") {
+        const pending = visitor.waitForResponse((response) =>
+          response.url().endsWith(event.coverPath),
+        );
+        await showLanding(true, locale);
+        await card.scrollIntoViewIfNeeded();
+        const response = await pending;
+        expect(response.status()).toBe(200);
+        expect(response.headers()["content-type"]).toBe("image/jpeg");
+        expect(response.headers()["cache-control"]).toBe("no-store");
+        expect(response.headers()["x-content-type-options"]).toBe("nosniff");
+        expect((await response.request().allHeaders()).cookie).toBeUndefined();
+        await expect(image).toBeVisible();
+        // Read the bytes backing the displayed image without another HTTP request.
+        const displayed = await image.evaluate(async (node: HTMLImageElement) => {
+          if (!node.currentSrc.startsWith("blob:")) throw new Error("COVER_BLOB_REQUIRED");
+          const blob = await fetch(node.currentSrc);
+          const buffer = await blob.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", buffer));
+          return {
+            signature: Array.from(bytes.subarray(0, 2)),
+            digest: Array.from(digest),
+            width: node.naturalWidth,
+          };
+        });
+        expect(displayed.signature).toEqual([0xff, 0xd8]);
+        expect(displayed.width).toBe(width);
+        return displayed.digest;
+      }
+
+      await showLanding(false, "en");
+      await expect(image).toHaveCount(0);
+      expect((await visitor.request.get(event.coverPath)).status()).toBe(404);
+      const first = await event.upload(120);
+      await event.select(first);
+      const firstDigest = await showCover(120, "en");
+      const replacement = await event.upload(160);
+      await event.select(replacement);
+      const replacementDigest = await showCover(160, "en");
+      expect(replacementDigest).not.toEqual(firstDigest);
+      await showCover(160, "ru");
+      await event.remove(replacement);
+      await showLanding(false, "en");
+      await expect(image).toHaveCount(0);
+      expect((await visitor.request.get(event.coverPath)).status()).toBe(404);
+    } finally {
+      await context.close();
     }
   },
 );

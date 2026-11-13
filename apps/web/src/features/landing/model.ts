@@ -38,7 +38,9 @@ export function nextChangeDelay(ms: number): number {
   return ms % 60000 || 60000;
 }
 
-export function routeLabel(event: Pick<EventPublic, "origin" | "destination" | "route">): string {
+export function routeLabel(
+  event: Pick<EventPublic, "origin" | "destination"> & { route: string | null },
+): string | null {
   return event.origin && event.destination
     ? `${event.origin.label} → ${event.destination.label}`
     : event.route;
