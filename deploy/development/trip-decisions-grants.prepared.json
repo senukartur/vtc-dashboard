@@ -8,7 +8,15 @@
     "trip_review_work": ["SELECT", "INSERT", "UPDATE"],
     "trip_event_associations": ["SELECT", "INSERT", "UPDATE"],
     "trip_decision_catchup": ["SELECT", "INSERT", "UPDATE"],
-    "manual_correction_requests": ["UPDATE(status)"]
+    "manual_correction_requests": ["UPDATE(status)"],
+    "trip_review_reasons": ["SELECT", "INSERT", "DELETE"],
+    "reconciliation_candidate_dismissals": [
+      "SELECT",
+      "INSERT",
+      "UPDATE(dismissed_by,dismissed_at,reason,version,undone_by,undone_at)"
+    ],
+    "reconciliation_candidates": ["SELECT", "INSERT", "UPDATE(active)"],
+    "reconciliation_commands": ["SELECT", "INSERT"]
   },
   "jobs": {
     "trip_decisions": ["SELECT", "INSERT"],
@@ -45,6 +53,9 @@
     "event_revisions": ["SELECT"],
     "event_attendances": ["SELECT"],
     "event_attendance_revisions": ["SELECT"],
-    "manual_correction_requests": ["SELECT"]
+    "manual_correction_requests": ["SELECT"],
+    "trip_review_reasons": ["SELECT", "INSERT", "DELETE"],
+    "reconciliation_candidate_dismissals": ["SELECT"],
+    "reconciliation_candidates": ["SELECT", "INSERT", "UPDATE(active)"]
   }
 }

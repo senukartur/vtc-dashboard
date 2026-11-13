@@ -1,6 +1,7 @@
 import type { components } from "@vtc/contracts";
 import { applicationId } from "@vtc/db";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { stage3Envelope, stage3QuerySelection } from "../../platform/http/stage3.js";
 import { csrfProtection } from "../identity/http.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { Page } from "./pagination.js";
@@ -31,6 +32,7 @@ export async function registerTripDecisionRoutes(
   app: FastifyInstance,
   identity: Identity,
   service: TripDecisions,
+  stage3Enabled = service.config.dispatchReviewStage3Enabled === true,
 ) {
   const actors = new WeakMap<FastifyRequest, Actor>(),
     csrf = csrfProtection(identity.config),
@@ -72,13 +74,18 @@ export async function registerTripDecisionRoutes(
         throw identityError(415);
     }
   });
-  app.get<{ Params: { tripId: string } }>(
+  const reviewEnvelope = stage3Envelope("EnvelopeReview", "TripStage3ReviewEnvelope");
+  app.get<{ Params: { tripId: string }; Querystring: { view?: "stage3" } }>(
     "/api/v1/trips/:tripId/review",
-    { schema: { params, querystring: empty, response: { 200: ref("EnvelopeReview") } } },
+    { schema: { params, querystring: stage3QuerySelection(empty, stage3Enabled) } },
     async (r, reply) => {
-      const result = await service.review(await actor(r), r.params.tripId);
+      const staged = r.query.view === "stage3";
+      const current = await actor(r);
+      const result = staged
+        ? await service.reviewStage3(current, r.params.tripId)
+        : await service.review(current, r.params.tripId);
       reply.header("ETag", `"v${result.version}"`);
-      return envelope(result.data, r);
+      return reviewEnvelope(staged, envelope(result.data, r));
     },
   );
   app.get<{ Params: { tripId: string }; Querystring: Page }>(
@@ -116,13 +123,17 @@ export async function registerTripDecisionRoutes(
     },
     async (r) => envelope(await service.assignments(await actor(r), r.params.tripId, r.query), r),
   );
-  app.post<{ Params: { tripId: string }; Body: S["DecisionInput"] }>(
+  app.post<{
+    Params: { tripId: string };
+    Querystring: { view?: "stage3" };
+    Body: S["DecisionInput"] | S["TripStage3DecisionInput"];
+  }>(
     "/api/v1/trips/:tripId/decisions",
     {
       schema: {
         params,
-        querystring: empty,
-        body: ref("DecisionInput"),
+        querystring: stage3QuerySelection(empty, stage3Enabled),
+        ...(!stage3Enabled && { body: ref("DecisionInput") }),
         response: { 200: ref("EnvelopeDecision") },
       },
     },
@@ -133,6 +144,7 @@ export async function registerTripDecisionRoutes(
         key(r),
         version(r),
         r.body,
+        r.query.view === "stage3",
       );
       reply.header("ETag", `"v${result.version}"`);
       return envelope(result.data, r);
