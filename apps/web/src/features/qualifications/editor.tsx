@@ -2,7 +2,7 @@ import { useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type AdrClass, adrClasses } from "../../shared/catalog-selectors/contracts.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
-import { Button, FieldError, Input, Label } from "../../shared/ui/primitives.js";
+import { Button, Card, FieldError, Input, Label } from "../../shared/ui/primitives.js";
 import {
   Confirm,
   DraftEntities,
@@ -35,7 +35,8 @@ export function LevelEditor({
   allowRenameReason?: boolean;
   recoveryOnly?: boolean;
 }) {
-  const visible = useContext(QualificationSettingsVisibility) ?? true;
+  const settingsVisibility = useContext(QualificationSettingsVisibility);
+  const visible = settingsVisibility ?? true;
   const { t, i18n } = useTranslation("qualifications");
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const [baseline, setBaseline] = useState({
@@ -151,16 +152,18 @@ export function LevelEditor({
     );
     setSuccess(false);
   }
-  if (!visible || recoveryOnly)
-    return recoveryOnly && visible ? (
-      <>
+  if (!visible) return null;
+  if (recoveryOnly)
+    return command.canRecover || command.pending || command.seconds > 0 ? (
+      <Card className="stack">
+        <h3>{level.name}</h3>
         <p>{t("cellUnavailable")}</p>
+        {command.pending && <p role="status">{t("trips:loading")}</p>}
         <Failure error={command.failure} seconds={command.seconds} />
-        <Recovery command={command} onRecovered={() => setSuccess(true)} />
-        {success && <p role="status">{t("success")}</p>}
-      </>
+        <Recovery command={command} onRecovered={() => setPreview(null)} />
+      </Card>
     ) : null;
-  return (
+  const editor = (
     <section className="stack">
       <h4>{t("rules")}</h4>
       <p>{t("limits")}</p>
@@ -533,6 +536,15 @@ export function LevelEditor({
         ) : null}
       </fieldset>
     </section>
+  );
+  return settingsVisibility !== undefined ? (
+    <Card className="stack">
+      <h3>{level.name}</h3>
+      {current && <RulesView rules={current.rules} game={level.game} />}
+      {editor}
+    </Card>
+  ) : (
+    editor
   );
 }
 

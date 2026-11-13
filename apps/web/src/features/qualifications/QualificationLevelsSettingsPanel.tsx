@@ -13,7 +13,6 @@ import {
   Failure,
   QualificationSettingsVisibility,
   Recovery,
-  RulesView,
   State,
 } from "./components.js";
 import { LevelEditor } from "./editor.js";
@@ -37,6 +36,7 @@ type EditInput = DTO[
 type Insertion = { etag: string | null; before: string | null };
 type AddDraft = { name: string; reason: string; insertion?: Insertion };
 const emptyAddDraft: AddDraft = { name: "", reason: "" };
+type ArchiveDraft = { levelId: string; target?: string; reason: string };
 
 export function QualificationLevelsSettingsPanel({ visible = true }: { visible?: boolean }) {
   const session = useSession();
@@ -103,7 +103,7 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
   const command = useQualificationCommand({ kind: "ladder", game });
   const [selectedId, setSelected] = useState<string | null>(null);
   const [openedEditors, setOpenedEditors] = useState<LadderLevel[]>([]);
-  const [archiveId, setArchive] = useState<string | null>(null);
+  const [archiveDraft, setArchiveDraft] = useState<ArchiveDraft>();
   const [success, setSuccess] = useState(false);
   const [reorderDraft, setReorderDraft] = useState<{ etag: string; ids: string[] }>();
   const [reorderReason, setReorderReason] = useState("");
@@ -111,7 +111,7 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
   const attemptedEdit = useRef<Edit | null>(null);
   const reasonId = useId();
   const etag = ladder && query.data?.etag === `"v${ladder.revision}"` ? query.data.etag : null;
-  const hold = !visible || !etag || command.pending || command.seconds > 0 || command.canRecover;
+  const hold = !etag || command.pending || command.seconds > 0 || command.canRecover;
   const levels = ladder?.levels ?? [];
   const currentIds = levels.map((row) => row.id);
   const staleOrder = reorderDraft !== undefined && reorderDraft.etag !== etag;
@@ -125,7 +125,7 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
     const row = levels.find((level) => level.id === id);
     return row ? [row] : [];
   });
-  const archiving = levels.find((row) => row.id === archiveId);
+  const archiving = levels.find((row) => row.id === archiveDraft?.levelId);
   function selectEditor(row: LadderLevel) {
     setOpenedEditors((previous) =>
       previous.some(({ id }) => id === row.id) ? previous : [...previous, row],
@@ -148,7 +148,7 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
       setReorderDraft(undefined);
       setReorderReason("");
     }
-    if (attemptedEdit.current === "archive") setArchive(null);
+    if (attemptedEdit.current === "archive") setArchiveDraft(undefined);
     if (attemptedEdit.current === "add") setAddDraft(emptyAddDraft);
     attemptedEdit.current = null;
     setSuccess(true);
@@ -284,7 +284,13 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
                             aria-label={t("ladderArchiveName", { name: row.name })}
                             aria-expanded={row.id === archiving?.id}
                             disabled={hold || levels.length === 1 || changed || staleOrder}
-                            onClick={() => setArchive(row.id === archiving?.id ? null : row.id)}
+                            onClick={() =>
+                              setArchiveDraft(
+                                row.id === archiving?.id
+                                  ? undefined
+                                  : { levelId: row.id, reason: "" },
+                              )
+                            }
                           >
                             {t("ladderArchive")}
                           </Button>
@@ -356,7 +362,7 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
               </div>
             </div>
           )}
-          {ladder.ladderEditsEnabled && archiving && (
+          {ladder.ladderEditsEnabled && archiving && archiveDraft && (
             <ArchiveLevel
               key={archiving.id}
               level={archiving}
@@ -366,6 +372,8 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
               command={command}
               hold={hold || changed || staleOrder}
               submit={submit}
+              draft={archiveDraft}
+              setDraft={setArchiveDraft}
             />
           )}
         </>
@@ -381,24 +389,16 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
         const current = levels.find(({ id }) => id === opened.id);
         // An archive or failed read can remove the row while an exact receipt is still recoverable.
         const level = current ?? opened;
-        const editorVisible = visible && opened.id === selectedId;
+        const selected = opened.id === selectedId;
         return (
-          <div key={level.id} hidden={!editorVisible}>
-            <QualificationSettingsVisibility value={editorVisible}>
-              <Card className="stack">
-                <h3>{level.name}</h3>
-                {editorVisible && etag && current?.effectiveRule && (
-                  <RulesView rules={current.effectiveRule.rules} game={game} />
-                )}
-                <LevelEditor
-                  level={level}
-                  current={level.effectiveRule ?? undefined}
-                  allowRenameReason={ladder?.ladderEditsEnabled === true}
-                  recoveryOnly={!current || !etag}
-                />
-              </Card>
-            </QualificationSettingsVisibility>
-          </div>
+          <QualificationSettingsVisibility key={level.id} value={visible && (selected || !current)}>
+            <LevelEditor
+              level={level}
+              current={level.effectiveRule ?? undefined}
+              allowRenameReason={ladder?.ladderEditsEnabled === true}
+              recoveryOnly={!current || !etag}
+            />
+          </QualificationSettingsVisibility>
         );
       })}
       {visible &&
@@ -417,9 +417,13 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
         ) : (
           <p>{t("ladderMaxLevels", { count: maxLevels })}</p>
         ))}
-      <Failure error={command.failure} seconds={command.seconds} />
-      <Recovery command={command} onRecovered={committed} />
-      {success && <p role="status">{t("success")}</p>}
+      {visible && (
+        <>
+          <Failure error={command.failure} seconds={command.seconds} />
+          <Recovery command={command} onRecovered={committed} />
+          {success && <p role="status">{t("success")}</p>}
+        </>
+      )}
     </>
   );
 }
@@ -568,23 +572,27 @@ function ArchiveLevel({
   command,
   hold,
   submit,
-}: StructuralForm & { level: LadderLevel }) {
+  draft,
+  setDraft,
+}: StructuralForm & {
+  level: LadderLevel;
+  draft: ArchiveDraft;
+  setDraft: (draft: ArchiveDraft) => void;
+}) {
   const { t } = useTranslation("qualifications");
   const id = useId();
-  const [target, setTarget] = useState<string>();
-  const [reason, setReason] = useState("");
   const available = ladder.levels.filter((row) => row.id !== level.id);
   const defaultTarget = ladder.levels.find(
     (row) => row.position === (level.position === 1 ? 2 : level.position - 1),
   );
-  const selected = target ? available.find((row) => row.id === target) : defaultTarget;
+  const selected = draft.target ? available.find((row) => row.id === draft.target) : defaultTarget;
   const label = (row: LadderLevel) =>
     t("ladderLevelPosition", { position: row.position, name: row.name });
   if (!defaultTarget) return null;
   const input: DTO["QualificationLadderArchiveInput"] = {
     targetLevelId: selected?.id ?? "",
     observedDriverCount: level.currentDriverCount,
-    ...(reason.trim() && { reason: reason.trim() }),
+    ...(draft.reason.trim() && { reason: draft.reason.trim() }),
   };
   return (
     <Card className="stack">
@@ -597,7 +605,7 @@ function ArchiveLevel({
         id={`${id}-target`}
         value={selected?.id ?? ""}
         disabled={hold}
-        onChange={(event) => setTarget(event.target.value)}
+        onChange={(event) => setDraft({ ...draft, target: event.target.value })}
       >
         {!selected && (
           <option value="" disabled>
@@ -610,7 +618,12 @@ function ArchiveLevel({
           </option>
         ))}
       </select>
-      <Reason id={id} value={reason} onChange={setReason} disabled={hold} />
+      <Reason
+        id={id}
+        value={draft.reason}
+        onChange={(reason) => setDraft({ ...draft, reason })}
+        disabled={hold}
+      />
       <Confirm
         label={t("ladderArchiveReview")}
         guard={JSON.stringify([etag, level.id, label(level), selected && label(selected), input])}
