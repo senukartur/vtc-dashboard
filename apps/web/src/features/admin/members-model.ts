@@ -154,8 +154,8 @@ export function listPath(filters: Filters): string {
   }`;
 }
 
-export type LevelOption = { id: string; game: Game; code: string; name: string };
-export type LevelCell = "none" | "loading" | "unavailable" | { name: string; code: string };
+export type LevelOption = { id: string; game: Game; position: number; name: string };
+export type LevelCell = "none" | "loading" | "unavailable" | { name: string; position: number };
 
 /** The member's current level for one game, resolved through the reinstatement options read. */
 export function levelCell(
@@ -168,7 +168,7 @@ export function levelCell(
   const assignment = assignments.find((row) => row.game === game);
   if (!assignment) return "none";
   const level = levels?.find((row) => row.id === assignment.levelId && row.game === game);
-  if (level) return { name: level.name, code: level.code };
+  if (level) return { name: level.name, position: level.position };
   return pending && !error ? "loading" : "unavailable";
 }
 

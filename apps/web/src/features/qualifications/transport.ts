@@ -87,7 +87,6 @@ export function attemptFor(
     : { fingerprint, key: crypto.randomUUID(), etag };
 }
 export type Game = "ets2" | "ats";
-export const levelOrder = ["trainee", "driver_iii", "driver_ii", "driver_i"] as const;
 export function exactInput(value: string): string | undefined {
   const clean = value.trim().replace(",", ".");
   if (!/^(0|[1-9]\d*)(\.\d+)?$/.test(clean)) return undefined;

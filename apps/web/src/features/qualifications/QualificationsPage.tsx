@@ -235,7 +235,7 @@ function MemberQualification({
       progress.error instanceof QualificationFailure &&
       progress.error.setupRequired;
   // Progress and the level pointer can describe different instants.
-  const terminal = level?.code === "driver_i";
+  const terminal = level?.terminal;
   const hasEffectiveRuleAtProgress =
     !!p && (p.requiredTrips !== null || p.requiredDistanceM !== null || p.eligibleForConfirmation);
   const absentMinimum = t(
@@ -251,7 +251,7 @@ function MemberQualification({
       ? "eligible"
       : hasEffectiveRuleAtProgress
         ? "ineligible"
-        : level && !level.ruleVersionId
+        : level && !level.promotionConfigured
           ? "progressUnconfigured"
           : "progressUnavailable";
   const currentRules = useQualificationQuery(
@@ -354,7 +354,7 @@ function MemberQualification({
         {history.data && history.data.data.data.items.length === 0 && <p>{t("emptyHistory")}</p>}
         {history.data?.data.data.items.map((a) => (
           <article className="qualification-history" key={a.id}>
-            <strong>{levels.find((l) => l.id === a.levelId)?.name ?? a.levelId}</strong>
+            <strong>{a.levelName}</strong>
             {manage && "purpose" in a && (
               <>
                 <p>

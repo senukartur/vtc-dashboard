@@ -2,9 +2,11 @@ import { AccountFailure } from "../account/transport.js";
 import { type DTO, type Game, schema } from "./transport.js";
 
 export type CommandOwner =
+  | { kind: "ladder"; game: Game }
   | { kind: "level"; id: string; game: Game }
   | { kind: "member"; id: string; game: Game; rolePromotionLevelId: string | null };
 export type Change =
+  | { kind: "ladder"; game: Game }
   | { kind: "level"; id: string; game: Game }
   | { kind: "member"; id: string; game: Game; levelId: string; roleChange: boolean };
 const uncertain = () => new AccountFailure("uncertain");
@@ -16,6 +18,17 @@ export function commandChange(
 ): Change | null {
   if (path === "/admin/qualification-rule-previews" && method === "POST" && !owner) return null;
   if (!owner || !body || typeof body !== "object") throw uncertain();
+  if (owner.kind === "ladder") {
+    const root = `/admin/qualification-ladders/${owner.game}`;
+    if (
+      (method === "PATCH" && path === `${root}/order`) ||
+      (method === "POST" &&
+        (path === `${root}/levels` ||
+          (path.startsWith(`${root}/levels/`) && path.endsWith("/archive"))))
+    )
+      return { kind: "ladder", game: owner.game };
+    throw uncertain();
+  }
   if (
     owner.kind === "level" &&
     ((path === `/admin/qualification-levels/${owner.id}` && method === "PATCH") ||
@@ -59,6 +72,16 @@ export function validateChangedResult(change: Change | null, name: keyof DTO, va
       throw uncertain();
     return level;
   }
+  if (change.kind === "ladder") {
+    const parsed = schema("EnvelopeQualificationLadderRevision").safeParse(value);
+    if (
+      name !== "EnvelopeQualificationLadderRevision" ||
+      !parsed.success ||
+      parsed.data.data.game !== change.game
+    )
+      throw uncertain();
+    return undefined;
+  }
   const parsed = schema("EnvelopeAssignment").safeParse(value),
     assignment = parsed.success ? parsed.data.data : undefined;
   if (
@@ -79,6 +102,13 @@ export function affectedRead(
 ) {
   const url = new URL(path, "https://qualification.invalid"),
     game = url.searchParams.get("game");
+  if (url.pathname === `/admin/qualification-ladders/${change.game}`) return true;
+  if (change.kind === "ladder")
+    return (
+      game === change.game &&
+      (url.pathname === "/qualification-levels" ||
+        /\/qualification-(?:progress|assignments|action-history)$/.test(url.pathname))
+    );
   if (change.kind === "level")
     return (
       (url.pathname === "/qualification-levels" && game === change.game) ||

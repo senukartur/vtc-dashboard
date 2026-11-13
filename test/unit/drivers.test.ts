@@ -157,21 +157,18 @@ describe("driver profile model", () => {
   describe("level ladder", () => {
     const all: Level[] = [...levelsFixture("ets2").data.items, ...levelsFixture("ats").data.items];
 
-    it("orders one game's levels by code and ignores the other game", () => {
-      expect(ladderFor(all, "ets2").map((level) => level.code)).toEqual([
-        "trainee",
-        "driver_iii",
-        "driver_ii",
-        "driver_i",
-      ]);
+    it("orders one game's levels by position and ignores the other game", () => {
+      expect(ladderFor(all, "ets2").map((level) => level.position)).toEqual([1, 2, 3, 4]);
       expect(ladderFor(all, "ats").every((level) => level.game === "ats")).toBe(true);
     });
 
     it("resolves the next level, the top level and unknown levels", () => {
       const ladder = ladderFor(all, "ets2");
       const next = nextLevel(ladder, levelId("ets2", "driver_ii"));
-      expect(next !== "top" && next?.code).toBe("driver_i");
-      expect(nextLevel(ladder, levelId("ets2", "trainee"))).toMatchObject({ code: "driver_iii" });
+      expect(next !== "top" && next?.id).toBe(levelId("ets2", "driver_i"));
+      expect(nextLevel(ladder, levelId("ets2", "trainee"))).toMatchObject({
+        id: levelId("ets2", "driver_iii"),
+      });
       expect(nextLevel(ladder, levelId("ets2", "driver_i"))).toBe("top");
       expect(nextLevel(ladder, levelId("ats", "driver_ii"))).toBeNull();
       expect(nextLevel([], levelId("ets2", "trainee"))).toBeNull();

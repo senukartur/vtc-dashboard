@@ -1,16 +1,11 @@
 // Pure presentation helpers for the qualification levels table. They only summarize server data;
 // qualification decisions and limits stay on the server.
-import { type DTO, levelOrder } from "./transport.js";
+import type { DTO } from "./transport.js";
 
 type Level = DTO["QualificationLevel"];
 
-/** Levels in fixed progression order (Trainee → Driver I); unknown codes keep their place last. */
 export function sortLevels(levels: readonly Level[]): Level[] {
-  const rank = (level: Level) => {
-    const index = levelOrder.indexOf(level.code);
-    return index < 0 ? levelOrder.length : index;
-  };
-  return [...levels].sort((a, b) => rank(a) - rank(b));
+  return [...levels].sort((a, b) => a.position - b.position);
 }
 
 /** The row selected when nothing (or a level no longer listed) is selected. */
@@ -58,8 +53,7 @@ export type ThresholdSummary =
   | { kind: "terminal" }
   | { kind: "value"; trips: number | null; distanceM: string | null };
 
-/** Promotion threshold of a level; Driver I is terminal. Null parts on configured levels have no minimum. */
 export function thresholdSummary(level: Level): ThresholdSummary {
-  if (level.code === "driver_i") return { kind: "terminal" };
+  if (level.terminal) return { kind: "terminal" };
   return { kind: "value", trips: level.requiredTrips, distanceM: level.requiredDistanceM };
 }

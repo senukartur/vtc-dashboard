@@ -267,7 +267,9 @@ export function makeQualificationLevelsFixture(game: "ets2" | "ats") {
         {
           id: game === "ets2" ? levelIdEts2 : levelIdAts,
           game,
-          code: game === "ets2" ? "driver_ii" : "driver_iii",
+          position: game === "ets2" ? 3 : 2,
+          terminal: false,
+          promotionConfigured: false,
           name: game === "ets2" ? "European Driver II" : "Pacific Driver III",
           version: 1,
           ruleVersionId: null,

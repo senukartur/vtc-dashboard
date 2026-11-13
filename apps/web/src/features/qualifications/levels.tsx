@@ -4,7 +4,7 @@ import { formatQuantity, type Locale } from "../../shared/formatting.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
 import { RuleHistory, RulesView, State } from "./components.js";
 import { LevelEditor } from "./editor.js";
-import { type AllowlistSummary, ruleSummary, type RuleSummary, thresholdSummary } from "./model.js";
+import { type AllowlistSummary, type RuleSummary, ruleSummary, thresholdSummary } from "./model.js";
 import { useQualificationQuery } from "./queries.js";
 import type { DTO } from "./transport.js";
 
@@ -149,7 +149,7 @@ function LevelRow({
         {label("colThreshold")}
         {threshold.kind === "terminal"
           ? t("topLevel")
-          : !configured
+          : !level.promotionConfigured
             ? unset
             : thresholdText(
                 t("thresholdValue", {
@@ -212,7 +212,7 @@ export function LevelPanel({
         {level.name} · {level.game.toUpperCase()}
       </h2>
       <p className="qualification-panel-meta">
-        {t("stage")}: {t(level.code)}
+        {t("stage")} {level.position}
       </p>
       <p>
         {t("version")}: {level.version}

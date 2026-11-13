@@ -173,8 +173,9 @@ export function useQualificationCommand(
             url = new URL(path, "https://qualification.invalid");
           // State-bound history cursors are reset by the owner before refresh, never replayed after a write.
           if (
-            change.kind === "member" &&
-            /\/qualification-(?:assignments|action-history)$/.test(url.pathname) &&
+            (change.kind === "member" || change.kind === "ladder") &&
+            (url.pathname === "/qualification-levels" ||
+              /\/qualification-(?:assignments|action-history)$/.test(url.pathname)) &&
             url.searchParams.has("cursor")
           )
             return false;
@@ -184,6 +185,19 @@ export function useQualificationCommand(
       // Older reads were fenced above; only another post-commit read may be coalesced here.
       { cancelRefetch: false },
     );
+    if (change.kind === "ladder") {
+      const game = change.game;
+      await client.invalidateQueries({
+        predicate: ({ queryKey }) =>
+          (queryKey[0] === "administration" &&
+            pathOf(queryKey) === "/admin/reinstatement-options") ||
+          (queryKey[0] === "driver-progress" &&
+            queryKey.some(
+              (key) =>
+                typeof key === "string" && key.endsWith(`/qualification-progress?game=${game}`),
+            )),
+      });
+    }
   }
   async function run<K extends keyof DTO>(
     path: string,
@@ -241,6 +255,11 @@ export function useQualificationCommand(
       if (![200, 201, 202].includes(response.status)) fail(response);
       const parsed = schema(name).safeParse(await response.json());
       if (!parsed.success) throw new AccountFailure("uncertain");
+      if (change?.kind === "ladder") {
+        const receipt = schema("EnvelopeQualificationLadderRevision").safeParse(parsed.data);
+        if (!receipt.success || response.headers.get("ETag") !== `"v${receipt.data.data.revision}"`)
+          throw new AccountFailure("uncertain");
+      }
       const level = validateChangedResult(change, name, parsed.data);
       attempt.current = null;
       request.current = null;

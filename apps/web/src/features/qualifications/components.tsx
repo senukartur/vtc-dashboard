@@ -25,7 +25,7 @@ export function LevelContext({ level }: { level: DTO["QualificationLevel"] | und
   return level ? (
     <p className="qualification-command-context">
       <strong>
-        {level.game.toUpperCase()} · {t("stage")}: {t(level.code)}
+        {level.game.toUpperCase()} · {t("stage")} {level.position}
       </strong>
       <span>{level.name}</span>
       <code>{level.id}</code>

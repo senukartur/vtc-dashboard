@@ -15,9 +15,9 @@ import {
 import { useQualificationCommand } from "./queries.js";
 import {
   countInput,
+  type DTO,
   distanceForEditor,
   distanceInput,
-  type DTO,
   exactInput,
   type Game,
   utcInput,
@@ -26,9 +26,11 @@ import {
 export function LevelEditor({
   level,
   current,
+  allowRenameReason = false,
 }: {
   level: DTO["QualificationLevel"];
   current: DTO["QualificationRuleVersion"] | undefined;
+  allowRenameReason?: boolean;
 }) {
   const { t, i18n } = useTranslation("qualifications");
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
@@ -50,10 +52,11 @@ export function LevelEditor({
   const [name, setName] = useState(level.name),
     [rules, setRules] = useState<DTO["Rule"][]>(current?.rules ?? []),
     [mass, setMass] = useState(current?.rules.find((r) => r.type === "max_mass")?.maxKg ?? ""),
-    [count, setCount] = useState(current?.requiredTrips?.toString() ?? ""),
-    [initialDistanceM] = useState(current?.requiredDistanceM ?? null),
+    [count, setCount] = useState(level.requiredTrips?.toString() ?? ""),
+    [initialDistanceM] = useState(level.requiredDistanceM),
     [distanceDraft, setDistance] = useState<string>(),
     [reason, setReason] = useState(""),
+    [renameReason, setRenameReason] = useState(""),
     [schedule, setSchedule] = useState(false),
     [time, setTime] = useState(""),
     [sample, setSample] = useState<DTO["QualificationPreviewInput"]["sample"]>({
@@ -70,8 +73,8 @@ export function LevelEditor({
     [success, setSuccess] = useState(false);
   const distance = distanceDraft ?? distanceForEditor(initialDistanceM, locale);
   const max = exactInput(mass),
-    requiredTrips = countInput(count),
-    requiredDistanceM = distanceInput(distance),
+    requiredTrips = level.terminal ? null : countInput(count),
+    requiredDistanceM = level.terminal ? null : distanceInput(distance),
     effectiveAt = schedule ? utcInput(time) : undefined;
   const draft = rules.map((r) => (r.type === "max_mass" ? { ...r, maxKg: max ?? mass } : r));
   const nameInvalid = !name.trim();
@@ -87,6 +90,10 @@ export function LevelEditor({
     requiredDistanceM: requiredDistanceM ?? null,
     ...(reason.trim() ? { reason } : {}),
     ...(effectiveAt ? { effectiveAt } : {}),
+  };
+  const renameInput: DTO["LevelInput"] = {
+    name,
+    ...(allowRenameReason && renameReason.trim() ? { reason: renameReason } : {}),
   };
   const guard = JSON.stringify([
     level.id,
@@ -119,7 +126,7 @@ export function LevelEditor({
         current.game === level.game),
     renamePath = `/admin/qualification-levels/${level.id}`,
     publishPath = `${renamePath}/rule-versions`,
-    renameReplay = command.matchesPending(renamePath, { name }, "PATCH"),
+    renameReplay = command.matchesPending(renamePath, renameInput, "PATCH"),
     publishReplay = command.matchesPending(publishPath, input);
   function toggle(type: DTO["Rule"]["type"], enabled: boolean) {
     setRules((old) =>
@@ -151,10 +158,12 @@ export function LevelEditor({
             level.ruleVersionId && current ? (
               <>
                 <RulesView rules={current.rules} game={level.game} />
-                <Thresholds
-                  requiredTrips={current.requiredTrips}
-                  requiredDistanceM={current.requiredDistanceM}
-                />
+                {level.promotionConfigured && (
+                  <Thresholds
+                    requiredTrips={level.requiredTrips}
+                    requiredDistanceM={level.requiredDistanceM}
+                  />
+                )}
               </>
             ) : (
               <p>{t("noRules")}</p>
@@ -190,9 +199,26 @@ export function LevelEditor({
         <FieldError id={`error-level-name-${level.id}`}>
           {nameInvalid ? t("nameRequired") : undefined}
         </FieldError>
+        {allowRenameReason && (
+          <>
+            <Label htmlFor={`rename-reason-${level.id}`}>{t("ladderOptionalReason")}</Label>
+            <Input
+              id={`rename-reason-${level.id}`}
+              maxLength={2048}
+              value={renameReason}
+              onChange={(event) => setRenameReason(event.target.value)}
+            />
+          </>
+        )}
         <Confirm
           label={t("saveName")}
-          guard={JSON.stringify([level.id, level.version, level.ruleVersionId, baseline, name])}
+          guard={JSON.stringify([
+            level.id,
+            level.version,
+            level.ruleVersionId,
+            baseline,
+            renameInput,
+          ])}
           disabled={
             nameInvalid ||
             (name === level.name && !renameReplay) ||
@@ -204,7 +230,7 @@ export function LevelEditor({
           onConfirm={async () => {
             const result = await command.run(
               renamePath,
-              { name },
+              renameInput,
               "EnvelopeQualificationLevel",
               `"v${baseline.version}"`,
               "PATCH",
@@ -217,6 +243,7 @@ export function LevelEditor({
           <p>
             {level.name} → {name}
           </p>
+          {renameInput.reason && <p>{renameInput.reason}</p>}
         </Confirm>
         {(["max_mass", "allowed_trailer_types", "allowed_adr_categories"] as const).map((type) => {
           const rule = rules.find((r) => r.type === type);
@@ -269,30 +296,36 @@ export function LevelEditor({
             </fieldset>
           );
         })}
-        <Label htmlFor={`count-${level.id}`}>{t("requiredTrips")}</Label>
-        <Input
-          id={`count-${level.id}`}
-          inputMode="numeric"
-          value={count}
-          onChange={(e) => setCount(e.target.value)}
-          aria-invalid={tripsInvalid}
-          aria-describedby={tripsInvalid ? `error-count-${level.id}` : undefined}
-        />
-        <FieldError id={`error-count-${level.id}`}>
-          {tripsInvalid ? t("tripsInvalid") : undefined}
-        </FieldError>
-        <Label htmlFor={`distance-${level.id}`}>{t("requiredDistance")}</Label>
-        <Input
-          id={`distance-${level.id}`}
-          inputMode="decimal"
-          value={distance}
-          onChange={(e) => setDistance(e.target.value)}
-          aria-invalid={distanceInvalid}
-          aria-describedby={distanceInvalid ? `error-distance-${level.id}` : undefined}
-        />
-        <FieldError id={`error-distance-${level.id}`}>
-          {distanceInvalid ? t("distanceInvalid") : undefined}
-        </FieldError>
+        {level.terminal ? (
+          <p>{t("terminal")}</p>
+        ) : (
+          <>
+            <Label htmlFor={`count-${level.id}`}>{t("requiredTrips")}</Label>
+            <Input
+              id={`count-${level.id}`}
+              inputMode="numeric"
+              value={count}
+              onChange={(e) => setCount(e.target.value)}
+              aria-invalid={tripsInvalid}
+              aria-describedby={tripsInvalid ? `error-count-${level.id}` : undefined}
+            />
+            <FieldError id={`error-count-${level.id}`}>
+              {tripsInvalid ? t("tripsInvalid") : undefined}
+            </FieldError>
+            <Label htmlFor={`distance-${level.id}`}>{t("requiredDistance")}</Label>
+            <Input
+              id={`distance-${level.id}`}
+              inputMode="decimal"
+              value={distance}
+              onChange={(e) => setDistance(e.target.value)}
+              aria-invalid={distanceInvalid}
+              aria-describedby={distanceInvalid ? `error-distance-${level.id}` : undefined}
+            />
+            <FieldError id={`error-distance-${level.id}`}>
+              {distanceInvalid ? t("distanceInvalid") : undefined}
+            </FieldError>
+          </>
+        )}
         <Label htmlFor={`reason-${level.id}`}>{t("publicationReason")}</Label>
         <Input
           id={`reason-${level.id}`}
@@ -361,10 +394,12 @@ export function LevelEditor({
           {t("effective")}: {schedule ? effectiveAt : t("immediate")}
         </p>
         <RulesView rules={draft} game={level.game} />
-        <Thresholds
-          requiredTrips={input.requiredTrips}
-          requiredDistanceM={input.requiredDistanceM}
-        />
+        {!level.terminal && (
+          <Thresholds
+            requiredTrips={input.requiredTrips}
+            requiredDistanceM={input.requiredDistanceM}
+          />
+        )}
         {input.reason && <p>{input.reason}</p>}
         <p>{t("effectiveHelp")}</p>
       </Confirm>

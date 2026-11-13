@@ -75,8 +75,8 @@ test(
       for (const level of (await q.levels(fixture.staff, "ets2")).items)
         await q.publish(fixture.staff, level.id, randomUUID(), level.version, {
           rules: [{ type: "max_mass", maxKg: "20000" }],
-          requiredTrips: 2,
-          requiredDistanceM: "100",
+          requiredTrips: level.terminal ? null : 2,
+          requiredDistanceM: level.terminal ? null : "100",
           reason: "Fictional four-level configuration",
         });
       expect(

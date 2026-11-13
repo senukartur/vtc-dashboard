@@ -25,7 +25,6 @@ import {
   type Game,
   type GameFilter,
   initial,
-  LEVEL_ORDER,
   type Level,
   ladderFor,
   monthLabel,
@@ -380,7 +379,7 @@ export function QualificationCard({
         <ol className="driver-ladder" aria-label={t("qualification.ladder")}>
           {ladder.map((level, index) => {
             const current = level.id === resolved.id;
-            const passed = LEVEL_ORDER.indexOf(level.code) < LEVEL_ORDER.indexOf(resolved.code);
+            const passed = level.position < resolved.position;
             return (
               <li
                 key={level.id}

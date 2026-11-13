@@ -26,7 +26,7 @@ export function levelId(game: Game, code: (typeof codes)[number]) {
 }
 
 export function levelsFixture(game: Game): DTO["EnvelopeListQualificationLevel"] {
-  // Deliberately unsorted: the profile orders the ladder by code.
+  // Deliberately unsorted: the profile orders the ladder by position.
   const order = [2, 0, 3, 1];
   return {
     data: {
@@ -35,7 +35,9 @@ export function levelsFixture(game: Game): DTO["EnvelopeListQualificationLevel"]
         return {
           id: levelId(game, code),
           game,
-          code,
+          position: index + 1,
+          terminal: index === 3,
+          promotionConfigured: index !== 3,
           name: levelNames[game][index] ?? code,
           version: 1,
           ruleVersionId: null,

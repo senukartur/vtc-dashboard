@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Card, Input, Label } from "../../shared/ui/primitives.js";
 import { Confirm, Failure, LevelContext, MemberContext, Recovery } from "./components.js";
 import { useQualificationCommand } from "./queries.js";
-import { type DTO, type Game, levelOrder, utcInput } from "./transport.js";
+import { type DTO, type Game, utcInput } from "./transport.js";
 
 export function AssignmentEditor({
   game,
@@ -30,7 +30,7 @@ export function AssignmentEditor({
         kind: "member",
         id: memberId,
         game,
-        rolePromotionLevelId: levels.find((level) => level.code === "driver_iii")?.id ?? null,
+        rolePromotionLevelId: levels.find((level) => level.position === 2)?.id ?? null,
       },
       onRefresh,
     );
@@ -44,9 +44,7 @@ export function AssignmentEditor({
     assignedAt = utcInput(start),
     endedAt = utcInput(end),
     current = levels.find((l) => l.id === progress?.assignment.levelId),
-    next = levels.find(
-      (l) => levelOrder.indexOf(l.code) === levelOrder.indexOf(current?.code ?? "driver_i") + 1,
-    );
+    next = current && levels.find((l) => l.position === current.position + 1);
   const ready =
     !!etag &&
     !!levelId &&
@@ -116,10 +114,10 @@ export function AssignmentEditor({
         >
           <option value="">—</option>
           {[...levels]
-            .sort((a, b) => levelOrder.indexOf(a.code) - levelOrder.indexOf(b.code))
+            .sort((a, b) => a.position - b.position)
             .map((l) => (
               <option key={l.id} value={l.id}>
-                {l.name === t(l.code) ? l.name : `${t(l.code)} · ${l.name}`}
+                {l.name}
               </option>
             ))}
         </select>
@@ -194,8 +192,7 @@ export function AssignmentEditor({
           <MemberContext name={memberName} id={memberId} />
           <LevelContext level={next} />
           <p>
-            {current ? t(current.code) : t("unknown")} ({current?.name}) →{" "}
-            {next ? t(next.code) : t("unknown")} ({next?.name})
+            {current?.name ?? t("unknown")} → {next?.name ?? t("unknown")}
           </p>
           <p>{t("promoteHelp")}</p>
           <p>{reason}</p>

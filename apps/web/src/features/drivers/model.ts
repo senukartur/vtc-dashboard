@@ -10,13 +10,6 @@ export type Assignment = DTO["Assignment"];
 export type TripSummary = DTO["TripSummary"];
 
 export const GAMES: readonly Game[] = ["ets2", "ats"];
-/** Ladder order by canonical level code; display names come from the server. */
-export const LEVEL_ORDER: readonly Level["code"][] = [
-  "trainee",
-  "driver_iii",
-  "driver_ii",
-  "driver_i",
-];
 const RECENT_TRIPS_LIMIT = 10;
 
 /**
@@ -49,11 +42,9 @@ export function monthLabel(date: string, locale: Locale, style: "short" | "long"
   }).format(value);
 }
 
-/** Levels of one game in ladder order; unknown codes are dropped. */
+/** Levels of one game in current ladder order. */
 export function ladderFor(levels: readonly Level[], game: Game): Level[] {
-  return levels
-    .filter((level) => level.game === game && LEVEL_ORDER.includes(level.code))
-    .sort((a, b) => LEVEL_ORDER.indexOf(a.code) - LEVEL_ORDER.indexOf(b.code));
+  return levels.filter((level) => level.game === game).sort((a, b) => a.position - b.position);
 }
 
 /** The next ladder step, "top" for the highest level, or null when it cannot be resolved. */
@@ -61,7 +52,7 @@ export function nextLevel(ladder: readonly Level[], levelId: string): Level | "t
   const index = ladder.findIndex((level) => level.id === levelId);
   const current = ladder[index];
   if (!current) return null;
-  if (current.code === "driver_i") return "top";
+  if (current.terminal) return "top";
   return ladder[index + 1] ?? null;
 }
 

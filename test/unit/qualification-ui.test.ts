@@ -17,11 +17,14 @@ const ids = [
   "e3400000-0000-4000-8000-000000000002",
   "e3400000-0000-4000-8000-000000000003",
 ];
-const level = (code: Level["code"], overrides: Partial<Level> = {}): Level => ({
-  id: `e3400000-0000-4000-8000-0000000000${String(["trainee", "driver_iii", "driver_ii", "driver_i"].indexOf(code) + 10)}`,
+const positions = { trainee: 1, driver_iii: 2, driver_ii: 3, driver_i: 4 };
+const level = (code: keyof typeof positions, overrides: Partial<Level> = {}): Level => ({
+  id: `e3400000-0000-4000-8000-0000000000${String(positions[code] + 9)}`,
   version: 1,
   game: "ets2",
-  code,
+  position: positions[code],
+  terminal: code === "driver_i",
+  promotionConfigured: code !== "driver_i",
   name: `Fictional ${code}`,
   ruleVersionId: "e3300000-0000-4000-8000-000000000001",
   configured: true,
@@ -33,14 +36,9 @@ const level = (code: Level["code"], overrides: Partial<Level> = {}): Level => ({
 describe("qualification levels model", () => {
   test("sorts levels in progression order without mutating the input", () => {
     const input = [level("driver_i"), level("trainee"), level("driver_ii"), level("driver_iii")];
-    const before = input.map((l) => l.code);
-    expect(sortLevels(input).map((l) => l.code)).toEqual([
-      "trainee",
-      "driver_iii",
-      "driver_ii",
-      "driver_i",
-    ]);
-    expect(input.map((l) => l.code)).toEqual(before);
+    const before = input.map((l) => l.id);
+    expect(sortLevels(input).map((l) => l.position)).toEqual([1, 2, 3, 4]);
+    expect(input.map((l) => l.id)).toEqual(before);
   });
 
   test("defaults the selection to the first progression level, or null without levels", () => {
@@ -140,7 +138,11 @@ describe("qualification translations", () => {
   test("RU and EN expose the same keys, including every compact-layout key", () => {
     const en = qualificationTranslations.en,
       ru = qualificationTranslations.ru;
-    expect(Object.keys(ru).sort()).toEqual(Object.keys(en).sort());
+    expect(
+      Object.keys(ru)
+        .filter((key) => !/^ladderDriverCount_(?:few|many)$/.test(key))
+        .sort(),
+    ).toEqual(Object.keys(en).sort());
     for (const key of added) {
       expect(en[key]).toBeTruthy();
       expect(ru[key]).toBeTruthy();
