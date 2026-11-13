@@ -287,3 +287,7 @@
   margin-inline-start: 0;
   white-space: pre-wrap;
 }
+
+.dialog-content.event-dialog.event-editor-dialog {
+  width: min(76rem, calc(100vw - 2rem));
+}

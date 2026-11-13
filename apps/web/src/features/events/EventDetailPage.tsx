@@ -44,7 +44,7 @@ import {
 import { EventGallery, EventPublicCover } from "./EventDetailGallery.js";
 import { useMemberDetailRead, usePublicDetailRead } from "./EventDetailReads.js";
 import { EventRoster } from "./EventDetailRoster.js";
-import { EventEditor } from "./EventEditor.js";
+import { EventEditor, Stage2EventEditor } from "./EventEditor.js";
 import { type DTO, eventTime, responseInput } from "./model.js";
 import { useEventCommand, useEventQuery } from "./queries.js";
 import { useEventStage2Command } from "./stage-2-queries.js";
@@ -281,13 +281,26 @@ function MemberDetail({ id, stage2Enabled: staged }: { id: string; stage2Enabled
                     <div className="events-actions">
                       {event.status !== "cancelled" && (
                         <>
-                          {legacyEditable(member) && (
+                          {legacyEditable(member) ? (
                             <LegacyEdit
                               member={member}
                               etag={etag}
                               staged={staged}
                               refreshDetail={query.refetch}
                             />
+                          ) : (
+                            staged &&
+                            member.responseCounts &&
+                            event.requiredDlcs && (
+                              <StructuredEdit
+                                member={{
+                                  ...member,
+                                  responseCounts: member.responseCounts,
+                                  event: { ...event, requiredDlcs: event.requiredDlcs },
+                                }}
+                                etag={etag}
+                              />
+                            )
                           )}
                           <CancelEvent
                             id={id}
@@ -377,6 +390,34 @@ function legacyEditable({ event, organizerMemberId }: DetailMember) {
     !!event.description &&
     !!event.route &&
     !!event.meetingLocation
+  );
+}
+
+function StructuredEdit({
+  member,
+  etag,
+}: {
+  member: DTO["EventStage2Member"];
+  etag: string | null;
+}) {
+  const { t } = useTranslation("events");
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" disabled={!etag}>
+          {t("edit")}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="event-dialog event-editor-dialog">
+        <DialogTitle>{t("edit")}</DialogTitle>
+        <DialogDescription>{member.event.title}</DialogDescription>
+        <Stage2EventEditor
+          source={{ kind: "published", member, etag }}
+          onCancel={() => setOpen(false)}
+        />
+      </DialogContent>
+    </Dialog>
   );
 }
 

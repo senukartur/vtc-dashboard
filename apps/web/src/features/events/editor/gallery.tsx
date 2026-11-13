@@ -27,13 +27,17 @@ type Snapshot = { eventId: string; gallery: Gallery; etag: string };
 export function useEditorGallery(
   eventId: string | null,
   ensureDraft: () => Promise<string | null>,
+  enabled: boolean,
 ) {
   const session = useSession();
-  const readPolicy = !!session.self?.capabilities.includes("trips.submit_own");
+  const readPolicy = enabled && !!session.self?.capabilities.includes("trips.submit_own");
   const policy = useTripQuery("/me/upload-policy", "EnvelopeUploadPolicy", readPolicy);
   const maxBytes = policy.data?.data.data.enabled ? policy.data.data.data.maxFileBytes : null;
   const policyPending = readPolicy && policy.isPending;
-  const query = useEventStage2Query(eventStage2Reads.adminMedia(eventId ?? ""), !!eventId);
+  const query = useEventStage2Query(
+    eventStage2Reads.adminMedia(eventId ?? ""),
+    enabled && !!eventId,
+  );
   const { refetch } = query;
   const writes = useEditorCommands<GalleryEnvelope>();
   const [committed, setCommitted] = useState<Snapshot | null>(null);
@@ -99,14 +103,14 @@ export function useEditorGallery(
 
   useEffect(() => () => firstRead.current?.abort(), []);
   useEffect(() => {
-    if (!processing || query.isError) return;
+    if (!enabled || !processing || query.isError) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible" && navigator.onLine) {
         void refetch({ cancelRefetch: false });
       }
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [processing, query.isError, refetch]);
+  }, [enabled, processing, query.isError, refetch]);
 
   function choose(value: File | null) {
     if (locked) return;
@@ -117,7 +121,8 @@ export function useEditorGallery(
   }
 
   async function upload() {
-    if (!file || locked || firstRead.current || policyPending || (eventId && !snapshot)) return;
+    if (!enabled || !file || locked || firstRead.current || policyPending || (eventId && !snapshot))
+      return;
     if (fileError) return;
     setStatus(false);
     setPrepareError(null);
@@ -182,7 +187,7 @@ export function useEditorGallery(
   }
 
   function update(mediaId: string, value: MediaEdit | null, onSaved?: () => void) {
-    if (locked || !snapshot || !eventId) return;
+    if (!enabled || locked || !snapshot || !eventId) return;
     setStatus(false);
     setOperation("edit");
     setLastUpload(null);
@@ -210,7 +215,7 @@ export function useEditorGallery(
   }
 
   async function refresh() {
-    if (!eventId) return;
+    if (!enabled || !eventId) return;
     const fresh = await refetch({ cancelRefetch: false });
     if (!fresh.isError && eventRevisionTag(fresh.data?.etag)) {
       if (terminal) {

@@ -25,7 +25,7 @@ export function EditorPreview({
   trailer: string | undefined;
   eventId: string | null;
   cover: DTO["EventStage2Media"] | null;
-  coverState: "loading" | "unavailable" | "empty";
+  coverState: "loading" | "unavailable" | "empty" | null;
 }) {
   const id = useId();
   const { text, locale } = useEditorText();
@@ -51,23 +51,25 @@ export function EditorPreview({
     <aside className="event-editor-preview" aria-labelledby={id}>
       <h2 id={id}>{text.preview}</h2>
       <article className="card event-editor-preview-card">
-        <div className="event-editor-preview-cover">
-          {eventId && cover ? (
-            <GalleryImage eventId={eventId} media={cover} />
-          ) : (
-            <span>
-              {
-                text[
-                  coverState === "loading"
-                    ? "galleryLoading"
-                    : coverState === "unavailable"
-                      ? "imageUnavailable"
-                      : "noCover"
-                ]
-              }
-            </span>
-          )}
-        </div>
+        {coverState !== null && (
+          <div className="event-editor-preview-cover">
+            {eventId && cover ? (
+              <GalleryImage eventId={eventId} media={cover} />
+            ) : (
+              <span>
+                {
+                  text[
+                    coverState === "loading"
+                      ? "galleryLoading"
+                      : coverState === "unavailable"
+                        ? "imageUnavailable"
+                        : "noCover"
+                  ]
+                }
+              </span>
+            )}
+          </div>
+        )}
         <div className="event-editor-preview-body">
           <header className="stack">
             <div className="event-editor-inline">

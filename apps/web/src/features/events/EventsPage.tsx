@@ -1,14 +1,14 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { uuid } from "../../shared/catalog-selectors/contracts.js";
 import { Badge, Button, Card } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { publicContent, publicPath } from "../landing/content.js";
 import { EventState, KeepFocusButton, useEventTimezone } from "./components.js";
-import { EventEditor } from "./EventEditor.js";
-import { DraftEventEditor, useDraftText } from "./editor/draft.js";
+import { EventEditor, Stage2EventEditor } from "./EventEditor.js";
+import { useDraftText } from "./editor/draft.js";
 import { type DTO, periodFrom } from "./model.js";
 import { useEventQuery } from "./queries.js";
 import { compactTime, dateTile, timezoneLabel } from "./view-model.js";
@@ -155,7 +155,12 @@ export function CreateEventPage() {
   const { t } = useTranslation("events"),
     session = useSession(),
     draftText = useDraftText(),
+    navigate = useNavigate(),
     [search] = useSearchParams();
+  const close = () => navigate("/account/events");
+  const openPublished = (member: DTO["EventStage2Member"]) =>
+    navigate(`/account/events/${member.event.id}`, { replace: true });
+  const manager = session.self?.capabilities.includes("events.manage");
   const draftIds = search.getAll("draftId");
   if (draftIds.length) {
     const id = draftIds.length === 1 ? draftIds[0] : undefined;
@@ -172,7 +177,11 @@ export function CreateEventPage() {
           ) : session.state === "checking" ? (
             <p role="status">{t("loading")}</p>
           ) : session.eventsDraftsEnabled ? (
-            <DraftEventEditor id={id} />
+            <Stage2EventEditor
+              source={{ kind: "draft", id }}
+              onCancel={close}
+              onPublished={openPublished}
+            />
           ) : (
             <p role="alert" className="field-error">
               {draftText.unavailable}
@@ -187,8 +196,16 @@ export function CreateEventPage() {
       <Link to="/account/events">{t("back")}</Link>
       <h1>{t("create")}</h1>
       <Card>
-        {session.self?.capabilities.includes("events.manage") ? (
-          <EventEditor />
+        {manager ? (
+          session.eventsStage2Enabled ? (
+            <Stage2EventEditor
+              source={{ kind: "new" }}
+              onCancel={close}
+              onPublished={openPublished}
+            />
+          ) : (
+            <EventEditor />
+          )
         ) : (
           <p>{t("forbidden")}</p>
         )}

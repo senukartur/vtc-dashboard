@@ -1,13 +1,14 @@
 import { useQueries } from "@tanstack/react-query";
-import { type ComponentType, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   type CatalogItem,
   type CatalogList,
   catalogParams,
+  depotListSchema,
   itemSchema,
   listSchema,
 } from "../../../shared/catalog-selectors/contracts.js";
-import { CatalogSelector } from "../../../shared/catalog-selectors/index.js";
+import { CatalogSelector, DepotSelector } from "../../../shared/catalog-selectors/index.js";
 import {
   useCatalogAccess,
   useCatalogPages,
@@ -16,28 +17,13 @@ import {
 import { Button, Input, Label, Select } from "../../../shared/ui/primitives.js";
 import { CompanyLogo } from "../../catalogs/CompanyLogo.js";
 import type { DTO } from "../model.js";
-import { schema } from "../transport.js";
 import {
-  type DepotOption,
   type EditorEndpoint,
   type EditorForm,
   eventEditorDlcs,
   resolveDepotChoice,
 } from "./model.js";
 import { useEditorText } from "./text.js";
-
-/** Compatible with the shared VTC-151 company picker until it offers canonical depot IDs. */
-export type EventDepotSelector = ComponentType<{
-  id?: string | undefined;
-  label: string;
-  game: NonNullable<DTO["EventStage2DraftInput"]["game"]>;
-  cityId: string | undefined;
-  value: string | null;
-  selected: DepotOption | undefined;
-  selectedPending?: boolean | undefined;
-  onChange: (value: string | null) => void;
-  describedBy?: string | undefined;
-}>;
 
 export function useEditorCatalogItem(list: CatalogList, id: string | null, locale: "en" | "ru") {
   const query = useCatalogQuery(
@@ -53,22 +39,21 @@ export function useEditorCatalogItem(list: CatalogList, id: string | null, local
 export function useRetainedDepot(
   game: EditorForm["game"],
   endpoint: EditorEndpoint,
-  hint: DTO["EventStage2CanonicalCatalogOption"] | null | undefined,
+  locale: "en" | "ru",
 ) {
-  const code = hint?.id === endpoint.depotId ? hint.code : undefined;
-  const path = `/catalogs/depots?${catalogParams({ game, cityId: endpoint.cityId, locale: "en", search: code, includeHidden: "true", limit: 25 })}`;
+  const { cityId, depotId, depot } = endpoint;
+  const path = `/catalogs/depots?${catalogParams({ game, cityId, depotId, includeHidden: "true", locale, limit: 1 })}`;
   const retained = useCatalogQuery(
     ["event-editor", path],
     path,
-    schema("CatalogDepotList"),
-    !!(game && endpoint.cityId && code && !endpoint.depot),
+    depotListSchema,
+    !!(game && cityId && depotId && !depot),
   );
+  const rows = retained.data?.data.data;
+  const found = rows?.total === 1 && rows.items.length === 1 ? rows.items[0] : undefined;
   return (
-    endpoint.depot ??
-    retained.data?.data.data.items.find(
-      (depot) =>
-        depot.id === endpoint.depotId && depot.city.id === endpoint.cityId && depot.game === game,
-    )
+    depot ??
+    (found?.id === depotId && found.game === game && found.city.id === cityId ? found : undefined)
   );
 }
 
@@ -79,7 +64,6 @@ export function DepotField({
   endpoint,
   resolved,
   hint,
-  picker: Picker,
   onChange,
   onBlocked,
   errorId,
@@ -90,12 +74,11 @@ export function DepotField({
   endpoint: EditorEndpoint;
   resolved: DTO["CatalogDepot"] | undefined;
   hint: DTO["EventStage2CanonicalCatalogOption"] | null | undefined;
-  picker: EventDepotSelector | undefined;
   onChange: (value: DTO["CatalogDepot"] | null) => void;
   onBlocked: (blocked: boolean) => void;
   errorId: string | undefined;
 }) {
-  const { text } = useEditorText();
+  const { text, locale } = useEditorText();
   const catalog = useCatalogAccess();
   const [candidate, setCandidate] = useState<{ id: string; pending: boolean } | null>(null);
   const controller = useRef<AbortController | null>(null);
@@ -120,10 +103,10 @@ export function DepotField({
     onBlocked(true);
     setCandidate({ id: companyId, pending: true });
     try {
-      const query = catalogParams({ game, cityId, companyId, locale: "en", limit: 1 });
+      const query = catalogParams({ game, cityId, companyId, locale, limit: 1 });
       const response = await catalog.read(
         `/catalogs/depots?${query}`,
-        schema("CatalogDepotList"),
+        depotListSchema,
         request.signal,
       );
       if (request.signal.aborted) return;
@@ -154,8 +137,8 @@ export function DepotField({
   const retainedName = kept && hint?.id === endpoint.depotId ? hint : undefined;
   return (
     <div className="stack event-editor-depot">
-      {Picker && game ? (
-        <Picker
+      {game ? (
+        <DepotSelector
           id={id}
           label={label}
           game={game}
@@ -169,10 +152,10 @@ export function DepotField({
       ) : (
         <>
           <Label htmlFor={id}>{label}</Label>
-          <Input id={id} disabled placeholder={text.unavailableDepot} aria-describedby={errorId} />
+          <Input id={id} disabled placeholder={text.chooseGame} aria-describedby={errorId} />
         </>
       )}
-      {Picker && game && !endpoint.cityId && <p className="muted">{text.chooseCity}</p>}
+      {game && !endpoint.cityId && <p className="muted">{text.chooseCity}</p>}
       {resolved && (
         <div className="event-editor-depot-logo">
           <CompanyLogo companyId={resolved.company.id} logo={resolved.company.logo} />

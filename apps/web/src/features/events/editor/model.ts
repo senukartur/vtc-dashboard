@@ -5,7 +5,6 @@ import { schema } from "../transport.js";
 type DraftFields = DTO["EventStage2DraftInput"];
 type CompleteFields = DTO["EventStage2Input"];
 
-export type DepotOption = { id: string; label: string; code: string };
 export type EditorEndpoint = {
   cityId: string | null;
   depotId: string | null;

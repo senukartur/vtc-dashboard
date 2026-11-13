@@ -1,4 +1,6 @@
 import { useId, useState } from "react";
+import { flushSync } from "react-dom";
+import { useSession } from "../../../app/Session.js";
 import { Button } from "../../../shared/ui/primitives.js";
 import { EventFailureView } from "../components.js";
 import type { DTO } from "../model.js";
@@ -6,7 +8,6 @@ import {
   DepotField,
   DlcField,
   EditorCatalogSelector,
-  type EventDepotSelector,
   useEditorCatalogItem,
   useEditorDlcs,
   useRetainedDepot,
@@ -47,7 +48,6 @@ export type Stage2EventEditorProps = {
   source: EditorSource;
   onCancel: () => void;
   onPublished?: ((member: DTO["EventStage2Member"], etag: string) => void) | undefined;
-  DepotSelector?: EventDepotSelector | undefined;
 };
 
 export function Stage2EventEditor({ source, ...props }: Stage2EventEditorProps) {
@@ -56,15 +56,11 @@ export function Stage2EventEditor({ source, ...props }: Stage2EventEditorProps) 
       {(scope) => {
         if (source.kind === "draft") {
           return (
-            // Publication invalidates reads before the receipt returns. Stop watching the draft
-            // after opening so its transition to published cannot unmount the editor mid-command.
-            <EventDraftRead
-              id={source.id}
-              observeAfterOpening={false}
+            <DraftEditor
               key={JSON.stringify([scope, source.kind, source.id])}
-            >
-              {(draft) => <EventEditorForm source={draft} {...props} />}
-            </EventDraftRead>
+              id={source.id}
+              {...props}
+            />
           );
         }
         const id = source.kind === "published" ? source.member.event.id : null;
@@ -77,6 +73,27 @@ export function Stage2EventEditor({ source, ...props }: Stage2EventEditorProps) 
         );
       }}
     </EditorAccess>
+  );
+}
+
+type EditorCallbacks = Omit<Stage2EventEditorProps, "source">;
+
+function DraftEditor({ id, ...props }: EditorCallbacks & { id: string }) {
+  const [publishing, setPublishing] = useState(false);
+  return (
+    <EventDraftRead id={id} observeAfterOpening={!publishing}>
+      {(draft) => (
+        <EventEditorForm
+          source={draft}
+          onDraftPublication={(active) => {
+            // The next command can complete before a batched state update reaches the observer.
+            if (active) flushSync(() => setPublishing(true));
+            else setPublishing(false);
+          }}
+          {...props}
+        />
+      )}
+    </EventDraftRead>
   );
 }
 
@@ -134,9 +151,10 @@ function EventEditorForm({
   source,
   onCancel,
   onPublished,
-  DepotSelector,
-}: Omit<Stage2EventEditorProps, "source"> & { source: EditorDefinition }) {
+  onDraftPublication,
+}: EditorCallbacks & { source: EditorDefinition; onDraftPublication?: (active: boolean) => void }) {
   const { text, locale } = useEditorText();
+  const draftsEnabled = useSession().eventsDraftsEnabled;
   const id = useId();
   const [form, setForm] = useState(() =>
     initialEventEditor(definitionFields(source), source.kind !== "new"),
@@ -145,7 +163,7 @@ function EventEditorForm({
   const [blockedDepots, setBlockedDepots] = useState(clearDepots);
   const [organizer, setOrganizer] = useState<DTO["MemberSummary"] | null>(null);
   const [formVersion, setFormVersion] = useState(0);
-  const actions = useDefinitionActions(source, onPublished);
+  const actions = useDefinitionActions(source, onPublished, onDraftPublication);
   const { definition, eventId } = actions;
   const member = definition.kind === "published" ? definition.member : null;
   const event = member?.event;
@@ -160,8 +178,8 @@ function EventEditorForm({
 
   const origin = useEditorCatalogItem("cities", form.origin.cityId, locale);
   const destination = useEditorCatalogItem("cities", form.destination.cityId, locale);
-  const originDepot = useRetainedDepot(form.game, form.origin, event?.originDepot);
-  const destinationDepot = useRetainedDepot(form.game, form.destination, event?.destinationDepot);
+  const originDepot = useRetainedDepot(form.game, form.origin, locale);
+  const destinationDepot = useRetainedDepot(form.game, form.destination, locale);
   const cargo = useEditorCatalogItem("cargoes", form.prescribedCargoId, locale);
   const trailer = useEditorCatalogItem("trailers", form.prescribedTrailerTypeId, locale);
   const originHint = event?.origin?.entityId === form.origin.cityId ? event?.origin : null;
@@ -216,7 +234,12 @@ function EventEditorForm({
       : attempt === "draft"
         ? validation.draftErrors
         : {};
-  const gallery = useEditorGallery(actions.accessFailure ? null : eventId, ensureDraft);
+  const galleryEnabled = draftsEnabled || definition.kind === "published";
+  const gallery = useEditorGallery(
+    actions.accessFailure ? null : eventId,
+    ensureDraft,
+    galleryEnabled && !actions.accessFailure,
+  );
   const disableForm = actions.locked || gallery.busy;
   const saving = actions.pending || gallery.busy;
 
@@ -253,6 +276,7 @@ function EventEditorForm({
   }
 
   async function ensureDraft() {
+    if (!draftsEnabled) return null;
     if (eventId) return eventId;
     if (!validation.draft) {
       showErrors("draft", validation.draftErrors);
@@ -262,7 +286,7 @@ function EventEditorForm({
   }
 
   function saveDraft() {
-    if (disableForm) return;
+    if (!draftsEnabled || disableForm) return;
     if (!validation.draft) {
       showErrors("draft", validation.draftErrors);
       return;
@@ -365,7 +389,6 @@ function EventEditorForm({
                             endpoint={form[end]}
                             resolved={depot}
                             hint={hint}
-                            picker={DepotSelector}
                             errorId={errorId}
                             onChange={(value) => changeDepot(end, value)}
                             onBlocked={(value) =>
@@ -430,7 +453,9 @@ function EventEditorForm({
               </div>
             </fieldset>
           </fieldset>
-          <EditorGallery eventId={eventId} gallery={gallery} disabled={actions.locked} />
+          {galleryEnabled && (
+            <EditorGallery eventId={eventId} gallery={gallery} disabled={actions.locked} />
+          )}
           <fieldset className="event-editor-controls" disabled={disableForm}>
             <OrganizerField
               base={id}
@@ -455,7 +480,7 @@ function EventEditorForm({
               <Button type="button" disabled={disableForm} onClick={publish}>
                 {text[definition.kind === "published" ? "save" : "publish"]}
               </Button>
-              {definition.kind !== "published" && (
+              {draftsEnabled && definition.kind !== "published" && (
                 <Button type="button" variant="outline" disabled={disableForm} onClick={saveDraft}>
                   {text.draft}
                 </Button>
@@ -485,7 +510,15 @@ function EventEditorForm({
           }
           eventId={eventId}
           cover={gallery.cover}
-          coverState={gallery.loading ? "loading" : gallery.readError ? "unavailable" : "empty"}
+          coverState={
+            !galleryEnabled
+              ? null
+              : gallery.loading
+                ? "loading"
+                : gallery.readError
+                  ? "unavailable"
+                  : "empty"
+          }
         />
       </div>
     </div>

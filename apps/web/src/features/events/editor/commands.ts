@@ -9,6 +9,7 @@ type Receipt<K extends EventStage2Envelope> = { data: DTO[K]; etag: string };
 export type EditorStep<K extends EventStage2Envelope> = {
   request: EventStage2Command<K>;
   commit: (receipt: Receipt<K>) => EditorStep<K> | undefined;
+  onRejected?: () => void;
 };
 
 export function eventEditorAccessLost(error: unknown) {
@@ -56,7 +57,7 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
       ) {
         setRetry(current);
         if (reason.retryAfter) setWaitUntil(Date.now() + 1000 * reason.retryAfter);
-      }
+      } else current?.onRejected?.();
     } finally {
       running.current = false;
       setPending(false);

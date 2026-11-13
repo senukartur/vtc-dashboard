@@ -1,4 +1,7 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useSession } from "../../../app/Session.js";
+import { refreshWorkspaceSummary } from "../../../app/workspace-summary.js";
 import { Button } from "../../../shared/ui/primitives.js";
 import { AccountFailure } from "../../account/transport.js";
 import { EventFailureView } from "../components.js";
@@ -32,8 +35,14 @@ export function definitionFields(source: EditorDefinition): DraftFields | undefi
   return { ...eventDefinitionSeed(source.member), meetingLocation, route };
 }
 
-export function useDefinitionActions(source: EditorDefinition, onPublished?: Publication) {
+export function useDefinitionActions(
+  source: EditorDefinition,
+  onPublished?: Publication,
+  onDraftPublication?: (active: boolean) => void,
+) {
   const { locale } = useEditorText();
+  const client = useQueryClient();
+  const session = useSession();
   const writes = useEditorCommands<DefinitionEnvelope>();
   const [definition, setDefinition] = useState(source);
   const [latest, setLatest] = useState<SavedDefinition | null>(null);
@@ -106,15 +115,34 @@ export function useDefinitionActions(source: EditorDefinition, onPublished?: Pub
         throw new AccountFailure("uncertain");
       setDefinition({ kind: "published", member: data, etag });
       setStatus(mode === "published" ? "saved" : "published");
+      void refreshWorkspaceSummary(client, session).catch(() => undefined);
+      // Legacy list and upcoming readers remain live alongside the staged editor.
+      void client
+        .invalidateQueries({
+          predicate: ({ queryKey: key }) =>
+            key[0] === "dashboard-upcoming-event" ||
+            (key[0] === "events" &&
+              key[1] === session.self?.member.id &&
+              key[2] === session.generation &&
+              /^\/events(?:\?|$)/.test(String(key.at(-2)))) ||
+            (key[0] === "public-events" && /^\/public\/events(?:\?|$)/.test(String(key.at(-2)))),
+        })
+        .catch(() => undefined);
       onPublished?.(data, etag);
       return undefined;
     };
     if (definition.kind === "draft") {
       await writes.run(
-        draftStep(fields, ({ id, etag }) => ({
-          request: eventStage2Commands.publishDraft(id, etag, locale),
-          commit: finish,
-        })),
+        draftStep(fields, ({ id, etag }) => {
+          // Publishing removes the draft read while the command invalidates active queries.
+          // Suspend that observer through exact retries until the outcome is authoritative.
+          onDraftPublication?.(true);
+          return {
+            request: eventStage2Commands.publishDraft(id, etag, locale),
+            commit: finish,
+            onRejected: () => onDraftPublication?.(false),
+          };
+        }),
       );
     } else if (definition.kind === "published") {
       if (!definition.etag) return;
