@@ -37,6 +37,12 @@ export const addLabels: Record<CatalogTab, string> = {
   cargoes: "addCargoes",
   trailers: "addTrailers",
 };
+/**
+ * Tabs whose rows carry a Russian translation. DLCs, companies and depots use only the canonical
+ * name, so they show no Russian column, field, fallback mark or untranslated filter.
+ */
+export const translatableTabs: readonly CatalogTab[] = ["regions", "cities", "cargoes", "trailers"];
+export const isTranslatable = (tab: CatalogTab) => translatableTabs.includes(tab);
 export type MaintenanceMode = "all" | "hidden" | "untranslated" | "missingLogo";
 export interface CatalogFilters {
   game: Game;
@@ -59,7 +65,8 @@ export function parseFilters(params: URLSearchParams): CatalogFilters {
   let maintenance: MaintenanceMode | null = null;
   if (params.get("hidden") === "only") maintenance = "hidden";
   else if (tab === "companies" && params.get("logo") === "missing") maintenance = "missingLogo";
-  else if (params.get("untranslated") === "true") maintenance = "untranslated";
+  else if (isTranslatable(tab) && params.get("untranslated") === "true")
+    maintenance = "untranslated";
   else if (params.get("hidden") === "true") maintenance = "all";
   return {
     game: params.get("game") === "ats" ? "ats" : "ets2",
@@ -87,7 +94,8 @@ export function filterParams(filters: CatalogFilters): URLSearchParams {
   if (filters.tab === "depots" && filters.city) next.set("city", filters.city);
   if (filters.maintenance === "all") next.set("hidden", "true");
   if (filters.maintenance === "hidden") next.set("hidden", "only");
-  if (filters.maintenance === "untranslated") next.set("untranslated", "true");
+  if (filters.maintenance === "untranslated" && isTranslatable(filters.tab))
+    next.set("untranslated", "true");
   if (filters.maintenance === "missingLogo" && filters.tab === "companies")
     next.set("logo", "missing");
   return next;
@@ -100,7 +108,7 @@ export function catalogListParams(filters: CatalogFilters, locale: "ru" | "en") 
     search: q || undefined,
     includeHidden: maintenance === "all" ? "true" : undefined,
     hidden: maintenance === "hidden" ? "only" : undefined,
-    untranslated: maintenance === "untranslated" ? "true" : undefined,
+    untranslated: maintenance === "untranslated" && isTranslatable(tab) ? "true" : undefined,
     logo: maintenance === "missingLogo" && tab === "companies" ? "missing" : undefined,
     dlc: tab !== "dlcs" ? dlc || undefined : undefined,
     regionId: tab === "cities" ? region || undefined : undefined,
@@ -111,7 +119,9 @@ export function catalogListParams(filters: CatalogFilters, locale: "ru" | "en") 
   };
 }
 
-export const fallbackBadge = (item: CatalogItem) => item.display.englishFallback;
+/** The "EN · no translation" mark; canonical lists never get one. */
+export const fallbackBadge = (list: CatalogList, item: CatalogItem) =>
+  isTranslatable(list) && item.display.englishFallback;
 
 const importFieldKeys = new Map([
   ["code", "fieldCode"],
@@ -200,10 +210,10 @@ export function importLinesFromDetails(details: unknown): CatalogDTO["CatalogImp
 }
 
 export const importColumns: Record<CatalogTab, readonly string[]> = {
-  dlcs: ["game", "code", "name_en", "name_ru", "steam_app_id"],
+  dlcs: ["game", "code", "name_en", "steam_app_id"],
   regions: ["game", "code", "name_en", "name_ru", "dlc_code"],
   cities: ["game", "code", "name_en", "name_ru", "region_code", "dlc_code", "name_native"],
-  companies: ["game", "code", "name_en", "name_ru", "dlc_code"],
+  companies: ["game", "code", "name_en", "dlc_code"],
   depots: ["game", "company_code", "city_code", "dlc_code"],
   cargoes: ["game", "code", "name_en", "name_ru", "adr_class", "dlc_code"],
   trailers: ["game", "code", "name_en", "name_ru", "dlc_code"],

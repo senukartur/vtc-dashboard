@@ -168,7 +168,7 @@
             {
               "name": "locale",
               "in": "query",
-              "required": false,
+              "required": true,
               "schema": {
                 "type": "string",
                 "enum": [
@@ -2513,7 +2513,7 @@
               "type": "boolean",
               "const": true
             },
-            "description": "Select rows missing a Russian name. English remains required."
+            "description": "Select rows missing a Russian name. English remains required. Not offered on the dlcs and companies lists, which use only their canonical name (422)."
           },
           {
             "name": "logo",
@@ -2996,6 +2996,17 @@
             }
           },
           {
+            "name": "depotId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "description": "Exact depot row ID for restoring a saved selection. Requires cityId (422 if missing). The game, city and visibility filters still apply. Returns zero or one row with a null nextCursor."
+            }
+          },
+          {
             "name": "search",
             "in": "query",
             "schema": {
@@ -3052,19 +3063,9 @@
               ]
             },
             "description": "Select rows with their own hidden flag. Takes precedence over includeHidden."
-          },
-          {
-            "name": "untranslated",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "const": true
-            },
-            "description": "Select depots whose linked company or city lacks a Russian name."
           }
         ],
-        "description": "Company and city depots of one game. companyId lists the cities of a company (ordered by city name), cityId the companies in a city, both narrow to one depot; otherwise ordered by company name. Rows hidden by the depot, its company or its city are excluded unless includeHidden is true. Explicit hidden=only selects the depot's own hidden flag and takes precedence over includeHidden. Apply filters before paging and bind them into the cursor.",
+        "description": "Company and city depots of one game. companyId lists the cities of a company (ordered by city name), cityId the companies in a city, both narrow to one depot; otherwise ordered by the company's canonical name. With cityId a search matches the company name or code; with only companyId it matches the city names or code; otherwise any of them. Rows hidden by the depot, its company or its city are excluded unless includeHidden is true. Explicit hidden=only selects the depot's own hidden flag and takes precedence over includeHidden. Apply filters before paging and bind them into the cursor.",
         "x-contract-stage": "VTC-123 Step 1"
       }
     },
@@ -6502,7 +6503,7 @@
             {
               "name": "locale",
               "in": "query",
-              "required": false,
+              "required": true,
               "schema": {
                 "type": "string",
                 "enum": [
@@ -6970,7 +6971,7 @@
             {
               "name": "locale",
               "in": "query",
-              "required": false,
+              "required": true,
               "schema": {
                 "type": "string",
                 "enum": [
@@ -7684,6 +7685,18 @@
             },
             {
               "$ref": "#/components/parameters/Cursor"
+            },
+            {
+              "name": "view",
+              "in": "query",
+              "required": true,
+              "description": "Selects the Stage 2 attendance projection.",
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "stage2"
+                ]
+              }
             }
           ],
           "responses": {
@@ -9006,9 +9019,22 @@
               ]
             },
             "description": "Limit the list to editing drafts. Omission preserves the existing list."
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ru"
+              ]
+            },
+            "description": "Optional override of the authenticated owner's saved locale for the returned catalog labels, with English fallback for each missing translation. Ordering and the cursor do not depend on it."
           }
         ],
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. Optional state=editing narrows the owner's list. Optional editingCount counts the owner's editing drafts before cursor pagination.",
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. Optional state=editing narrows the owner's list. Optional editingCount counts the owner's editing drafts before cursor pagination. Optional locale chooses the label language; omission uses the account locale.",
         "x-contract-stage": "VTC-123 Step 1"
       },
       "post": {
@@ -10971,6 +10997,12 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           },
           "429": {
@@ -13206,7 +13238,8 @@
             ]
           },
           "englishFallback": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "True when a requested Russian name is missing and English is shown. Always false on DLC and company labels, which use only their canonical name."
           },
           "hidden": {
             "type": "boolean"
@@ -20637,7 +20670,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Always null on the dlcs and companies lists, which use only their canonical name; a stored Russian name is kept but never returned."
           },
           "nameNative": {
             "anyOf": [
@@ -20765,7 +20799,7 @@
           "dlc"
         ],
         "additionalProperties": false,
-        "description": "One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes, logo (null without an uploaded image) only on companies. On the trailers list, code is the telemetry body type."
+        "description": "One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes, logo (null without an uploaded image) only on companies. On the trailers list, code is the telemetry body type. DLC and company labels always show the canonical name."
       },
       "CatalogLogo": {
         "type": "object",
@@ -20847,12 +20881,6 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
-                  },
-                  "untranslated": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991,
-                    "description": "Default-visible rows in this game missing a Russian name."
                   }
                 },
                 "required": [
@@ -20926,12 +20954,6 @@
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
-                  "untranslated": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991,
-                    "description": "Default-visible rows in this game missing a Russian name."
-                  },
                   "missingLogo": {
                     "type": "integer",
                     "minimum": 0,
@@ -20957,12 +20979,6 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
-                  },
-                  "untranslated": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991,
-                    "description": "Default-visible depots in this game whose company or city lacks a Russian name."
                   }
                 },
                 "required": [
@@ -21064,17 +21080,6 @@
             "minLength": 1,
             "maxLength": 256,
             "pattern": "\\S"
-          },
-          "nameRu": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 256
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "steamAppId": {
             "anyOf": [
@@ -21376,17 +21381,6 @@
             "maxLength": 256,
             "pattern": "\\S"
           },
-          "nameRu": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 256
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "dlcId": {
             "anyOf": [
               {
@@ -21432,7 +21426,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Rejected on the dlcs and companies lists."
           },
           "nameNative": {
             "anyOf": [
@@ -21631,7 +21626,7 @@
           "city"
         ],
         "additionalProperties": false,
-        "description": "A company operating in a city. hidden is the depot's own flag; the company and city labels carry theirs. A depot is listed by default only when all three are visible."
+        "description": "A company operating in a city. hidden is the depot's own flag; the company and city labels carry theirs. A depot is listed by default only when all three are visible. The company label is the company's canonical name."
       },
       "CatalogDepotList": {
         "type": "object",
@@ -23775,6 +23770,19 @@
               }
             ]
           },
+          "myResponseVersion": {
+            "description": "Current own RSVP version for If-Match. Starts at 1 when an eligible member has no RSVP row. Null exactly when myResponse is null.",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "responseCounts": {
             "$ref": "#/components/schemas/EventResponseCounts"
           }
@@ -23784,10 +23792,43 @@
           "organizerMemberId",
           "visibility",
           "myResponse",
+          "myResponseVersion",
           "responseCounts"
         ],
         "additionalProperties": false,
-        "description": "Null own response indicates unavailable; unanswered is a known absence of a response. Counts exclude unanswered and contain no identities or reasons."
+        "description": "Null own response indicates unavailable. Unanswered is a known absence of an answer. Counts exclude unanswered and contain no identities or reasons.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "myResponse": {
+                "type": "null"
+              },
+              "myResponseVersion": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "myResponse",
+              "myResponseVersion"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "myResponse": {
+                "type": "string"
+              },
+              "myResponseVersion": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "myResponse",
+              "myResponseVersion"
+            ]
+          }
+        ]
       },
       "EventStage2Member": {
         "type": "object",
@@ -23920,13 +23961,59 @@
                 "type": "null"
               }
             ]
+          },
+          "myResponseVersion": {
+            "description": "Current own RSVP version for If-Match. Starts at 1 when an eligible member has no RSVP row. Null exactly when myResponse is null.",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "event",
-          "myResponse"
+          "myResponse",
+          "myResponseVersion"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "myResponse": {
+                "type": "null"
+              },
+              "myResponseVersion": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "myResponse",
+              "myResponseVersion"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "myResponse": {
+                "type": "string"
+              },
+              "myResponseVersion": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "myResponse",
+              "myResponseVersion"
+            ]
+          }
+        ]
       },
       "EventStage2AdminPublished": {
         "type": "object",

@@ -11,10 +11,13 @@ import struct
 
 STAGE_PROFILE = 'stage-features.json'
 STAGE_GRANTS_STATE = 'state/stage-grants-installed.json'
+ACTIVATION_TARGET_HASHES = {'candidate': 'candidateHash', 'previous': 'previousHash', 'shared': 'sharedHash'}
 # Written out rather than read from the profile: a partly copied control update must still import.
 # test_activation.py keeps these equal to the profile.
-STAGE_FLAGS = {'EXTERNAL_IDENTITIES_ENABLED', 'CATALOGS_ENABLED', 'TRIPS_ENABLED', 'QUALIFICATIONS_ENABLED',
-               'TELEMETRY_ENABLED', 'MANUAL_REPORTS_ENABLED', 'EVENTS_ENABLED', 'RECONCILIATION_ENABLED',
+EVENTS_DRAFTS_FLAG = 'EVENTS_DRAFTS_ENABLED'
+STAGE_FLAGS = {EVENTS_DRAFTS_FLAG, 'EXTERNAL_IDENTITIES_ENABLED', 'CATALOGS_ENABLED', 'TRIPS_ENABLED', 'QUALIFICATIONS_ENABLED',
+               'TELEMETRY_ENABLED', 'MANUAL_REPORTS_ENABLED', 'EVENTS_ENABLED', 'EVENTS_ROUTE_ENABLED',
+               'RECONCILIATION_ENABLED',
                'TRIP_DECISIONS_ENABLED', 'ANALYTICS_ENABLED', 'NOTIFICATIONS_ENABLED'}
 STAGE_SETTINGS = {'TELEMETRY_IP_PER_MINUTE', 'TELEMETRY_GLOBAL_PER_MINUTE',
                   'MANUAL_MAX_FILES_PER_REPORT', 'MANUAL_POLICY_REVISION', 'MANUAL_ORPHAN_GRACE_MS',
@@ -170,10 +173,20 @@ def module_flags(path):
     return {flag: 'true' for flag in STAGE_FLAGS if f'{flag}=true' in lines}
 
 
-def stage_grants(o):
-    """Reviewed module supplement installed by the control update; absent on older installations."""
+def stage_grants(o, values):
+    """The reviewed supplement, with draft privileges only for the opt-in API."""
     path = o.BASE / STAGE_PROFILE
-    return json.loads(path.read_text())['grants'] if path.exists() else {}
+    if not path.exists():
+        return {}
+    profile = json.loads(path.read_text())
+    grants = profile['grants']
+    if values.get(EVENTS_DRAFTS_FLAG) == 'true':
+        o.require(values.get('EVENTS_ROUTE_ENABLED') == 'true' and profile.get('eventsDraftsGrants'),
+                  'EVENTS_DRAFTS_PROFILE_REQUIRED')
+        o.require(not (grants['runtime'].keys() & profile['eventsDraftsGrants'].keys()),
+                  'EVENTS_DRAFTS_PROFILE_INVALID')
+        grants['runtime'].update(profile['eventsDraftsGrants'])
+    return grants
 
 
 def matrix(o, values=None):
@@ -181,7 +194,7 @@ def matrix(o, values=None):
     base = json.loads((o.BASE / 'activation-grants.json').read_text())
     if values is None or not stage_enabled(values):
         return base
-    supplement = stage_grants(o)
+    supplement = stage_grants(o, values)
     o.require(supplement, 'STAGE_PROFILE_REQUIRED')
     for role, tables in supplement.items():
         for table, permissions in tables.items():
@@ -281,7 +294,7 @@ def grants(o, revision, values=None):
         # Recorded before the nontransactional DDL, so a partial install stays explained.
         # A union, because GRANT never revokes what an earlier profile installed.
         o.atomic_json(o.BASE / STAGE_GRANTS_STATE, {'revision': revision, 'privileges': sorted(
-            installed_stage_rows(o) | privilege_rows(stage_grants(o)))})
+            installed_stage_rows(o) | privilege_rows(stage_grants(o, values)))})
     o.compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf'],
               revision=revision, data=statement.encode())
     check_privileges(o, privileges(o, revision), complete=True, values=values)
@@ -324,7 +337,7 @@ def retire_previous(o, shared, previous, intent_path, candidate):
         return
     o.require(intent_path.exists(), 'ACTIVATION_BACKUP_STATE_INVALID')
     intent = json.loads(intent_path.read_text())
-    settled = intent.get('previousHash' if intent.get('target') == 'previous' else 'candidateHash')
+    settled = intent.get(ACTIVATION_TARGET_HASHES[intent.get('target', 'candidate')])
     o.require(intent.get('pending') is False and o.digest(shared) == settled,
               'ACTIVATION_BACKUP_STATE_INVALID')
     # An unchanged candidate has nothing new to back up: rollback must still reach the older file.
@@ -376,6 +389,54 @@ def validate(o, revision, image_id, path):
         o.require(result == b'', 'CONFIGURATION_VALIDATION_INVALID')
 
 
+def legacy_only_events(values):
+    return values.get('EVENTS_ENABLED') == 'true' and values.get('EVENTS_ROUTE_ENABLED') != 'true'
+
+
+def has_published_route_history(o, revision, image_id, *, fenced=False):
+    def exists(statement):
+        result = o.compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf',
+                            '-N', '-B'], revision=revision, image_id=image_id, data=statement).strip()
+        o.require(result in [b'0', b'1'], 'EVENT_ROUTE_HISTORY_PROBE_INVALID')
+        return result == b'1'
+
+    # The controls also support an installed image whose migration history predates 0028.
+    if not exists(b"SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE "
+                  b"TABLE_SCHEMA='vtc' AND TABLE_NAME='event_revision_details');"):
+        return False
+    if fenced:
+        # Wait for an unacknowledged final writer commit on the empty-to-nonempty boundary.
+        return exists(b"START TRANSACTION; SELECT EXISTS(SELECT revision_id FROM "
+                      b"vtc.event_revision_details LIMIT 1 FOR SHARE); COMMIT;")
+    return exists(b"SELECT EXISTS(SELECT 1 FROM vtc.event_revision_details);")
+
+
+def route_target_compatible(o, revision, image_id, path, *, fenced=False):
+    return (not legacy_only_events(module_flags(path)) or
+            not has_published_route_history(o, revision, image_id, fenced=fenced))
+
+
+def retain_route_recovery_target(o, intent_path, targets):
+    intent = json.loads(intent_path.read_text())
+    # A normal refusal happens before the live file is replaced. A pre-existing interruption
+    # may instead need the already-bound candidate or previous file.
+    for name in ['shared', 'candidate', 'previous']:
+        path = targets[name]
+        try:
+            if legacy_only_events(private_values(o, path, SHARED_KEYS)):
+                continue
+            digest = o.digest(path)
+        except (OSError, RuntimeError):
+            continue
+        field = ACTIVATION_TARGET_HASHES[name]
+        if name != 'shared' and digest != intent.get(field):
+            continue
+        intent.update(target=name)
+        intent[field] = digest
+        o.atomic_json(intent_path, intent)
+        return
+
+
 def config_operation(o, revision, image_id, mode):
     o.require(mode in ['prepare-stage', 'validate', 'apply', 'recover', 'rollback', 'inspect'], 'ACTIVATION_MODE_INVALID')
     if mode == 'prepare-stage':
@@ -384,13 +445,13 @@ def config_operation(o, revision, image_id, mode):
     shared = o.BASE / 'private/identity-mail.env'
     previous = o.BASE / 'private/identity-mail.previous.env'
     intent_path = o.BASE / 'state/activation-intent.json'
-    candidate = previous if mode == 'rollback' else o.BASE / 'private/activation-input.env'
+    targets = {'candidate': o.BASE / 'private/activation-input.env', 'previous': previous, 'shared': shared}
+    candidate = previous if mode == 'rollback' else targets['candidate']
     if mode == 'recover':
         interrupted = json.loads(intent_path.read_text())
-        o.require(interrupted.get('pending') is True and interrupted.get('target') in
-                  ['candidate', 'previous'], 'ACTIVATION_RECOVERY_OWNERSHIP_INVALID')
-        if interrupted['target'] == 'previous':
-            candidate = previous
+        o.require(interrupted.get('pending') is True and interrupted.get('target') in targets,
+                  'ACTIVATION_RECOVERY_OWNERSHIP_INVALID')
+        candidate = targets[interrupted['target']]
     o.require(not (o.BASE / 'state/identity-acceptance').exists() and
               not (o.BASE / 'state/jobs-acceptance').exists() and
               not (o.BASE / 'state/ingress-check.json').exists() and
@@ -409,6 +470,7 @@ def config_operation(o, revision, image_id, mode):
         owned_controls = controls_pending(o, revision, image_id)
         o.require(owned_controls or (not (o.BASE / 'private/maintenance/enabled').exists() and
                   not (o.BASE / 'state/recovery-required').exists()), 'ACTIVATION_FENCED')
+        o.require(route_target_compatible(o, revision, image_id, candidate), 'EVENT_ROUTE_HISTORY_REQUIRES_STAGE2')
         retire_previous(o, shared, previous, intent_path, candidate)
         o.atomic_json(intent_path, {'revision': revision, 'imageId': image_id,
                                    'candidateHash': o.digest(candidate),
@@ -422,26 +484,36 @@ def config_operation(o, revision, image_id, mode):
         o.require(intent.get('revision') == revision and intent.get('imageId') == image_id and
                   previous_hash == intent.get('previousHash') and
                   (previous.exists() or (mode == 'recover' and intent.get('target') == 'candidate')) and
-                  (mode == 'rollback' or o.digest(candidate) == intent.get(
-                      'previousHash' if intent.get('target') == 'previous' else 'candidateHash')),
+                  (mode == 'rollback' or o.digest(candidate) ==
+                   intent.get(ACTIVATION_TARGET_HASHES[intent['target']])),
                   'ACTIVATION_RECOVERY_OWNERSHIP_INVALID')
         o.require(not (o.BASE / 'state/recovery-required').exists() or intent.get('pending') is True,
                   'ACTIVATION_UNRELATED_RECOVERY')
         o.require(not (o.BASE / 'private/maintenance/enabled').exists() or intent.get('pending') is True,
                   'ACTIVATION_FENCED')
         if mode == 'rollback':
+            if intent.get('pending') is False:
+                o.require(route_target_compatible(o, revision, image_id, candidate),
+                          'EVENT_ROUTE_HISTORY_REQUIRES_STAGE2')
             intent.update(pending=True, target='previous')
             o.atomic_json(intent_path, intent)
     # DDL grants are nontransactional. Keep durable recovery intent across every partial failure.
     o.fenced(revision, image_id)
     o.recovery_intent()
+    intent = json.loads(intent_path.read_text())
+    target_hash = intent.get(ACTIVATION_TARGET_HASHES[intent['target']])
+    o.require(o.digest(candidate) == target_hash, 'ACTIVATION_RECOVERY_OWNERSHIP_INVALID')
     if not previous.exists():
-        intent = json.loads(intent_path.read_text())
         o.require(o.digest(shared) == intent.get('previousHash'), 'ACTIVATION_BACKUP_SOURCE_INVALID')
         private_copy(shared, previous)
         o.require(o.digest(previous) == intent.get('previousHash'), 'ACTIVATION_BACKUP_STATE_INVALID')
+    if not route_target_compatible(o, revision, image_id, candidate, fenced=True):
+        retain_route_recovery_target(o, intent_path, targets)
+        raise RuntimeError('EVENT_ROUTE_HISTORY_REQUIRES_STAGE2')
     grants(o, revision, module_flags(candidate))
-    private_copy(candidate, shared)
+    if candidate != shared:
+        private_copy(candidate, shared)
+    o.require(o.digest(shared) == target_hash, 'ACTIVATION_RECOVERY_OWNERSHIP_INVALID')
     o.compose(['up', '-d', '--force-recreate', '--no-deps', 'app', 'probe', 'proxy'],
               revision=revision, image_id=image_id)
     o.ready(revision, image_id)

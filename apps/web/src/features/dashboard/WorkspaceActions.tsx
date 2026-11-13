@@ -1,4 +1,4 @@
-import { useId, useRef } from "react";
+import { type ReactNode, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
@@ -8,6 +8,7 @@ import { Card } from "../../shared/ui/primitives.js";
 import { KeepFocusButton } from "../events/components.js";
 import { eventTime } from "../events/model.js";
 import { useBlockRetry } from "./blocks.js";
+import { type ActionKey, visibleActionSections } from "./view-model.js";
 
 export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezone: string }) {
   const { t } = useTranslation("dashboard");
@@ -23,11 +24,8 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
   const fixes = summary?.tripsNeedingFixes;
   const drafts = summary?.unfinishedManualDrafts;
   const events = summary?.unansweredUpcomingEvents;
-  const sections = [
-    {
-      key: "fixes",
-      capability: "trips.read_own_private",
-      count: fixes?.count,
+  const details: Record<ActionKey, { destination?: string; preview?: ReactNode[] | undefined }> = {
+    fixes: {
       preview: fixes?.items.map(({ tripId, latestReturnReason }, index, items) => {
         const reasonId = `${id}-reason-${index}`;
         return (
@@ -49,10 +47,7 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
         );
       }),
     },
-    {
-      key: "drafts",
-      capability: "trips.submit_own",
-      count: drafts?.count,
+    drafts: {
       destination: "/account/reports?state=editing",
       preview: drafts?.items.map(({ draftId, updatedAt }) => (
         <li key={draftId}>
@@ -62,10 +57,7 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
         </li>
       )),
     },
-    {
-      key: "events",
-      capability: "events.respond",
-      count: events?.count,
+    events: {
       preview: events?.items.map(({ eventId, title, startsAt }) => (
         <li key={eventId}>
           <Link to={`/account/events/${eventId}`}>{title}</Link>
@@ -75,21 +67,11 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
         </li>
       )),
     },
-    {
-      key: "review",
-      capability: "trips.review",
-      count: summary?.reviewQueue?.count,
-      destination: "/account/review",
-    },
-    {
-      key: "applications",
-      capability: "applications.manage",
-      count: summary?.newApplicationsCount,
-      destination: "/account/admin/applications?status=submitted",
-    },
-  ].filter(({ capability }) => self?.capabilities.includes(capability));
-  const unavailable = sections.filter(({ count }) => count === undefined).length;
-  const actionable = sections.filter(({ count }) => count !== undefined && count > 0);
+    review: { destination: "/account/review" },
+    applications: { destination: "/account/admin/applications?status=submitted" },
+  };
+  // "Unavailable" is only a failed load; an omitted count is not mentioned at all.
+  const actionable = summary ? visibleActionSections(summary, self?.capabilities ?? []) : [];
   const number = new Intl.NumberFormat(locale);
 
   return (
@@ -125,8 +107,9 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
       )}
       {summary && (
         <>
-          {actionable.map(({ key, count, destination, preview }) => {
-            const label = t(`actions.${key}`, { total: number.format(count ?? 0) });
+          {actionable.map(({ key, count }) => {
+            const { destination, preview } = details[key];
+            const label = t(`actions.${key}`, { total: number.format(count) });
             return (
               <div className="dashboard-action-group" key={key}>
                 <h3>{destination ? <Link to={destination}>{label}</Link> : label}</h3>
@@ -134,13 +117,7 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
               </div>
             );
           })}
-          {unavailable > 0 ? (
-            <p className="dashboard-muted">
-              {t(unavailable === sections.length ? "actions.unavailable" : "actions.partial")}
-            </p>
-          ) : actionable.length === 0 ? (
-            <p className="dashboard-muted">{t("actions.empty")}</p>
-          ) : null}
+          {actionable.length === 0 && <p className="dashboard-muted">{t("actions.empty")}</p>}
         </>
       )}
     </Card>

@@ -77,7 +77,12 @@ export function csrfProtection(config: IdentityConfig, now: () => number = Date.
   };
 }
 
-export async function registerIdentityRoutes(app: FastifyInstance, identity: Identity) {
+export async function registerIdentityRoutes(
+  app: FastifyInstance,
+  identity: Identity,
+  eventsStage2Enabled = false,
+  eventsDraftsEnabled = false,
+) {
   const ownedRoute = (route: string) =>
     route.startsWith("/api/v1/auth/") ||
     route === "/api/v1/me" ||
@@ -182,11 +187,23 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
       return envelope({ id: result.id, version: result.version }, request);
     },
   );
-  app.get("/api/v1/me", { schema: schema("EnvelopeSelf") }, async (request, reply) => {
-    const result = await identity.current(await actor(request));
-    reply.header("ETag", `"v${result.version}"`);
-    return envelope(result.data, request);
-  });
+  app.get(
+    "/api/v1/me",
+    {
+      schema: schema("EnvelopeSelf"),
+      onSend: async (request, reply) => {
+        if (request.method === "GET" && reply.statusCode === 200) {
+          if (eventsStage2Enabled) reply.header("X-VTC-Events-Stage2", "1");
+          if (eventsDraftsEnabled) reply.header("X-VTC-Events-Drafts", "1");
+        }
+      },
+    },
+    async (request, reply) => {
+      const result = await identity.current(await actor(request));
+      reply.header("ETag", `"v${result.version}"`);
+      return envelope(result.data, request);
+    },
+  );
   app.post<{ Body: Schemas["PasswordResetRequest"] }>(
     "/api/v1/auth/password-reset-requests",
     { schema: schema("EnvelopeAcknowledged", "PasswordResetRequest", 202) },

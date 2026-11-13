@@ -18,7 +18,14 @@ import {
 } from "../trips/transport.js";
 import { DecisionPanel } from "./DecisionPanel.js";
 import { ReviewQueueTable } from "./ReviewQueueTable.js";
-import { decisions, listQuery, type QueueTab, queueParams, queueSearch } from "./review-model.js";
+import {
+  decisions,
+  listQuery,
+  type QueueTab,
+  queueHeaderState,
+  queueParams,
+  queueSearch,
+} from "./review-model.js";
 import "../trips/trips.css";
 import "../trips/trips-list.css";
 import "./review.css";
@@ -45,7 +52,8 @@ export function ReviewQueuePage() {
     staff = !!session.self?.capabilities.includes("trips.review"),
     timezone = session.self?.preferences.displayTimezone ?? "UTC",
     params = queueParams(search),
-    filterKey = queryString(listQuery(params, null));
+    listLocale = i18n.resolvedLanguage === "en" ? "en" : "ru",
+    filterKey = queryString(listQuery(params, null, listLocale));
   const [page, setPage] = useState<{ key: string; cursor: string | null; cursors: string[] }>({
     key: filterKey,
     cursor: null,
@@ -54,12 +62,11 @@ export function ReviewQueuePage() {
   const { cursor, cursors } = page.key === filterKey ? page : { cursor: null, cursors: [] };
   useEffect(() => setPage({ key: filterKey, cursor: null, cursors: [] }), [filterKey]);
   const query = useTripQuery(
-    `/trips?${queryString(listQuery(params, cursor))}`,
+    `/trips?${queryString(listQuery(params, cursor, listLocale))}`,
     "EnvelopeListTripSummary",
     staff,
   );
   const summary = useWorkspaceSummary();
-  const totals = summary.data?.reviewQueue;
   const locale = i18n.resolvedLanguage ?? "ru";
   // A cursor the server no longer accepts restarts at the first page of the same filters. The
   // reset happens during render, so the rejected page never shows its error.
@@ -135,24 +142,34 @@ export function ReviewQueuePage() {
     );
   const items = query.data?.data.data.items,
     back = queueSearch(search),
-    filtered = !!params.game || !!params.source || !!params.decision || search.has("order");
+    filtered = !!params.game || !!params.source || !!params.decision || search.has("order"),
+    // Own trips on the awaiting page are listed but never counted; the header says so.
+    header = queueHeaderState(
+      summary.data?.reviewQueue,
+      summary.isPending,
+      params.tab === "awaiting" ? items : undefined,
+      session.self?.member.id,
+    );
   return (
     <div className="stack trip-page review-queue">
       <header className="review-queue-header">
         <h1>{t("review")}</h1>
         <p className="review-muted">{t("queueIntro")}</p>
-        {totals ? (
+        {header.kind === "ready" ? (
           <div className="review-queue-totals">
             <strong>
-              {t("queueOverall", { total: new Intl.NumberFormat(locale).format(totals.count) })}
+              {t("queueOverall", { total: new Intl.NumberFormat(locale).format(header.count) })}
             </strong>
             <span className="review-muted">
-              {totals.oldestAgeSeconds === null
+              {header.oldestAgeSeconds === null
                 ? t("queueNoneWaiting")
-                : t("queueOldest", { age: queueAge(totals.oldestAgeSeconds, locale) })}
+                : t("queueOldest", { age: queueAge(header.oldestAgeSeconds, locale) })}
             </span>
+            {header.ownExcluded && (
+              <span className="review-muted review-own-excluded">{t("queueOwnExcluded")}</span>
+            )}
           </div>
-        ) : !summary.isPending ? (
+        ) : header.kind === "unavailable" ? (
           <p className="review-muted">{t("queueTotalsUnavailable")}</p>
         ) : null}
       </header>

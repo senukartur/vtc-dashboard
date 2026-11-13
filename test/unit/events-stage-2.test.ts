@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import { afterEach, expect, test, vi } from "vitest";
+import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import {
   eventStage2ImageQueryPolicy,
   visibleEventStage2Image,
@@ -40,6 +42,97 @@ test("staged queries include effective filters and validate the new response sha
     expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
   );
   await expect(readEventStage2(spec, signal)).rejects.toMatchObject({ kind: "unavailable" });
+});
+
+test("staged public list defaults to English and reads a populated Stage 2 response", async () => {
+  const example = stage2Fixture("listPublicEvents", "structured-and-legacy");
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(example.response));
+  vi.stubGlobal("fetch", fetch);
+  const signal = new AbortController().signal;
+
+  await expect(readEventStage2(eventStage2Reads.publicList(), signal)).resolves.toMatchObject({
+    data: example.response,
+  });
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/v1/public/events?locale=en",
+    expect.objectContaining({ credentials: "omit", cache: "no-store" }),
+  );
+  expect(eventStage2Reads.publicList({ locale: "ru" }).path).toBe("/public/events?locale=ru");
+});
+
+test("browser transport preserves own RSVP versions for member list and upcoming reads", async () => {
+  const list = stage2Fixture("listEvents", "own-response");
+  const upcoming = stage2Fixture("getUpcomingEvent", "own-response");
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(list.response))
+    .mockResolvedValueOnce(Response.json(upcoming.response));
+  vi.stubGlobal("fetch", fetch);
+  const signal = new AbortController().signal;
+  const response = { myResponse: "participating", myResponseVersion: 2 };
+  await expect(readEventStage2(eventStage2Reads.memberList({}), signal)).resolves.toMatchObject({
+    data: { data: { items: [response] } },
+  });
+  await expect(readEventStage2(eventStage2Reads.upcoming(), signal)).resolves.toMatchObject({
+    data: { data: response },
+  });
+});
+
+test("browser transport rejects both mismatched status and version pairs", async () => {
+  const list = stage2Fixture("listEvents", "own-response").response as {
+    data: { items: Record<string, unknown>[] };
+  };
+  const upcoming = stage2Fixture("getUpcomingEvent", "own-response").response as {
+    data: Record<string, unknown>;
+  };
+  const signal = new AbortController().signal;
+  const memberList = eventStage2Reads.memberList();
+  const nearest = eventStage2Reads.upcoming();
+  expect(memberList.path).toBe("/events?locale=en");
+  expect(nearest.path).toBe("/me/upcoming-event?locale=en");
+  for (const pair of [
+    { myResponse: null, myResponseVersion: 2 },
+    { myResponse: "unanswered", myResponseVersion: null },
+  ]) {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({
+            ...list,
+            data: { ...list.data, items: [{ ...list.data.items[0], ...pair }] },
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({
+            ...upcoming,
+            data: { ...upcoming.data, ...pair },
+          }),
+        ),
+    );
+    await expect(readEventStage2(memberList, signal)).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+    await expect(readEventStage2(nearest, signal)).rejects.toMatchObject({ kind: "unavailable" });
+  }
+});
+
+test("staged attendance requests the leadership projection and reads its collection ETag", async () => {
+  const example = stage2Fixture("getEventAttendance", "leadership");
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(example.response, { headers: { ETag: '"v2"' } }));
+  vi.stubGlobal("fetch", fetch);
+  const spec = eventStage2Reads.attendance(stage2EventId, { limit: 2, cursor: "fixture&next" });
+  await expect(readEventStage2(spec, new AbortController().signal)).resolves.toEqual({
+    data: example.response,
+    etag: '"v2"',
+  });
+  expect(fetch).toHaveBeenCalledWith(
+    `/api/v1/admin/events/${stage2EventId}/attendance?limit=2&cursor=fixture%26next&view=stage2`,
+    expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
+  );
 });
 
 test("draft commands use the staged closed request schema and preserve prepared input", () => {
@@ -229,4 +322,92 @@ test("staged JSON and image streams hold their read slots until their bodies fin
     await Promise.allSettled([cover.writer.abort(), detail.writer.abort()]);
     await Promise.allSettled(reads);
   }
+});
+test("published route clients explicitly opt into detail and cancellation with a default locale", () => {
+  expect(eventStage2Reads.publicDetail(stage2EventId).path).toBe(
+    `/public/events/${stage2EventId}?locale=en`,
+  );
+  expect(eventStage2Reads.memberDetail(stage2EventId, "ru").path).toBe(
+    `/events/${stage2EventId}?locale=ru`,
+  );
+  expect(
+    eventStage2Commands.cancel(stage2EventId, { reason: "Fictional cancellation" }, '"v1"').path,
+  ).toBe(`/admin/events/${stage2EventId}/cancellation?locale=en`);
+});
+
+test("published route activation requires Events and Catalogs and keeps baseline grants intact", async () => {
+  const base = {
+    MYSQL_HOST: "127.0.0.1",
+    MYSQL_PORT: "3307",
+    MYSQL_USER: "fixture_user",
+    MYSQL_DATABASE: "fixture_database",
+    MYSQL_PASSWORD: "NONFUNCTIONAL_EXAMPLE_ONLY",
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: "a".repeat(64),
+    IDENTITY_ORIGIN: "http://127.0.0.1:4173",
+    EVENTS_ENABLED: "true",
+    EVENTS_CURSOR_KEY: "b".repeat(64),
+    CATALOGS_ENABLED: "true",
+    CATALOGS_CURSOR_KEY: "c".repeat(64),
+  };
+  expect(readConfig(base).events).toEqual({ cursorKey: base.EVENTS_CURSOR_KEY });
+  expect(readConfig({ ...base, EVENTS_ROUTE_ENABLED: "false" }).events).toEqual(
+    readConfig(base).events,
+  );
+  const enabled = { ...base, EVENTS_ROUTE_ENABLED: "true" };
+  expect(readConfig(enabled).events).toEqual({
+    cursorKey: base.EVENTS_CURSOR_KEY,
+    routeEnabled: true,
+  });
+  for (const fields of [
+    { CATALOGS_ENABLED: "false" },
+    { EVENTS_ENABLED: "false" },
+    { EVENTS_ROUTE_ENABLED: "yes" },
+  ])
+    expect(() => readConfig({ ...enabled, ...fields })).toThrow("EVENTS_ROUTE_ENABLED");
+  expect(readConfig({ ...enabled, EVENTS_DRAFTS_ENABLED: "false" }).events).toEqual(
+    readConfig(enabled).events,
+  );
+  expect(readConfig({ ...enabled, EVENTS_DRAFTS_ENABLED: "true" }).events).toEqual({
+    cursorKey: base.EVENTS_CURSOR_KEY,
+    routeEnabled: true,
+    draftsEnabled: true,
+  });
+  expect(() => readConfig({ ...base, EVENTS_DRAFTS_ENABLED: "true" })).toThrow(
+    "EVENTS_DRAFTS_ENABLED",
+  );
+  expect(() => readConfig({ ...enabled, EVENTS_DRAFTS_ENABLED: "1" })).toThrow(
+    "EVENTS_DRAFTS_ENABLED",
+  );
+  type Grants = { runtime: Record<string, string[]>; jobs: Record<string, string[]> };
+  const activation = new URL("../../deploy/development/", import.meta.url);
+  const baseline = JSON.parse(
+    await readFile(new URL("activation-grants.json", activation), "utf8"),
+  ) as Grants;
+  const stage = JSON.parse(await readFile(new URL("stage-features.json", activation), "utf8")) as {
+    flags: string[];
+    grants: Grants;
+    eventsDraftsGrants: Record<string, string[]>;
+  };
+  expect(stage.flags).toContain("EVENTS_ROUTE_ENABLED");
+  expect(stage.flags).not.toContain("EVENTS_DRAFTS_ENABLED");
+  expect(Object.keys(stage.eventsDraftsGrants).sort()).toEqual([
+    "event_draft_dlcs",
+    "event_drafts",
+    "event_metadata",
+    "event_workflow_commands",
+  ]);
+  for (const table of Object.keys(stage.eventsDraftsGrants)) {
+    expect(baseline.runtime[table]).toBeUndefined();
+    expect(baseline.jobs[table]).toBeUndefined();
+    expect(stage.grants.runtime[table]).toBeUndefined();
+    expect(stage.grants.jobs[table]).toBeUndefined();
+  }
+  for (const table of ["event_revision_details", "event_revision_dlcs"]) {
+    expect(baseline.runtime[table]).toBeUndefined();
+    expect(baseline.jobs[table]).toBeUndefined();
+    expect(stage.grants.runtime[table]).toEqual(["SELECT", "INSERT"]);
+  }
+  expect(stage.grants.jobs.event_revision_details).toEqual(["SELECT"]);
+  expect(stage.grants.jobs.event_revision_dlcs).toBeUndefined();
 });

@@ -8,7 +8,6 @@ import {
   type TxContext,
   type UnitOfWork,
   utcDateTime,
-  utcIso,
 } from "@vtc/db";
 import {
   and,
@@ -29,7 +28,7 @@ import {
   or,
   sql,
 } from "@vtc/db/events-schema";
-import type { SQLWrapper } from "drizzle-orm";
+import { notExists, type SQLWrapper } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
 import { type CompanyEvent, closed, createOutbox } from "../../platform/outbox/events.js";
@@ -37,12 +36,53 @@ import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { ConfirmedEventContext } from "../qualification-rules/contracts.js";
 import { canonicalJson, decimal } from "../sources/contracts/canonical.js";
+import { createEventDrafts } from "./drafts.js";
 import { type Page, pagination } from "./pagination.js";
+import {
+  blankLegacyText,
+  createPublishedRoutes,
+  eventDate as date,
+  definitionFields,
+  type EventLocale,
+  legacyRouteDetails,
+  legacyTextFields,
+  publishedRouteInput,
+  type RouteCatalogs,
+  type RouteDetails,
+  routeChanged,
+  eventText as text,
+} from "./published-route.js";
 
 type S = components["schemas"];
 type Event = Omit<typeof events.$inferSelect, "notificationMaterialPending">;
 type Revision = typeof eventRevisions.$inferSelect;
-type NotificationMaterial = Pick<Revision, "status" | "startsAt" | "route" | "meetingLocation">;
+const publicRevisionFields = {
+  id: eventRevisions.id,
+  eventId: eventRevisions.eventId,
+  version: eventRevisions.version,
+  title: eventRevisions.title,
+  description: eventRevisions.description,
+  game: eventRevisions.game,
+  server: eventRevisions.server,
+  organizer: eventRevisions.organizer,
+  meetingLocation: eventRevisions.meetingLocation,
+  route: eventRevisions.route,
+  meetingAt: eventRevisions.meetingAt,
+  startsAt: eventRevisions.startsAt,
+  endsAt: eventRevisions.endsAt,
+  status: eventRevisions.status,
+  visibility: eventRevisions.visibility,
+  originCityId: eventRevisions.originCityId,
+  destinationCityId: eventRevisions.destinationCityId,
+};
+type PublicRevision = Pick<Revision, keyof typeof publicRevisionFields>;
+type ListOptions = Page & { period?: "upcoming" | "past" };
+type OwnResponse = Pick<S["Rsvp"], "response" | "version">;
+type NotificationMaterial = Pick<
+  Revision,
+  "status" | "startsAt" | "route" | "meetingLocation" | "originCityId" | "destinationCityId"
+>;
+type DepotIds = Pick<RouteDetails, "originDepotId" | "destinationDepotId">;
 type MaterialState = NonNullable<Event["notificationMaterial"]>;
 function materialState(raw: unknown, version: number): MaterialState | null {
   if (raw === null) return null;
@@ -78,6 +118,8 @@ function advanceMaterial(
   state: MaterialState,
   prior: NotificationMaterial,
   next: NotificationMaterial & { version: number },
+  priorDepots: DepotIds | null,
+  nextDepots: DepotIds | null,
 ) {
   if (next.version !== state.throughVersion + 1 || prior.status !== "scheduled")
     throw new Error("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
@@ -88,7 +130,7 @@ function advanceMaterial(
     startVersion:
       statusChanged || prior.startsAt !== next.startsAt ? next.version : state.startVersion,
     routeVersion:
-      statusChanged || prior.route !== next.route || prior.meetingLocation !== next.meetingLocation
+      statusChanged || routeChanged(prior, next, priorDepots, nextDepots)
         ? next.version
         : state.routeVersion,
     statusVersion: statusChanged ? next.version : state.statusVersion,
@@ -114,22 +156,49 @@ type Route = typeof eventCommands.$inferSelect.route;
 type Receipt = typeof eventCommands.$inferSelect.result & {
   responseRevisionId?: string | null;
   attendanceRevisionId?: string | null;
+  responseCounts?: S["EventResponseCounts"];
 };
+type DefinitionCommand =
+  | { legacy: S["EventInput"] }
+  | { published: ReturnType<typeof publishedRouteInput> };
+type MemberProjection<T> = (
+  tx: TxContext,
+  revision: Revision,
+  actor: Actor,
+  receipt: Receipt,
+) => Promise<T>;
+
 export interface EventsConfig {
   cursorKey: string;
+  routeEnabled?: boolean;
+  draftsEnabled?: boolean;
 }
 export function validateEventsConfig(config: EventsConfig) {
-  if (!/^[0-9a-f]{64}$/.test(config.cursorKey)) throw new Error("INVALID_EVENTS_CONFIG");
+  if (!/^[0-9a-f]{64}$/.test(config.cursorKey) || (config.draftsEnabled && !config.routeEnabled))
+    throw new Error("INVALID_EVENTS_CONFIG");
 }
 interface Ports {
   identity: Pick<
     Identity,
-    "eventContextInTransaction" | "eventRosterInTransaction" | "memberSummariesInTransaction"
+    | "eventContextInTransaction"
+    | "eventRosterInTransaction"
+    | "eventRosterCountInTransaction"
+    | "eventEligibleMembersInTransaction"
+    | "memberSummariesInTransaction"
   >;
-  catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction">;
+  catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction"> &
+    Partial<Pick<RouteCatalogs, "eventRouteCatalogInTransaction">>;
   outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
   tripChanged?: (tx: TxContext, eventId: string, generation: number) => Promise<void>;
+  attendanceTripIds?: (
+    tx: TxContext,
+    actor: Actor,
+    eventId: string,
+    game: Event["game"],
+    memberIds: string[],
+  ) => Promise<ReadonlyMap<string, string>>;
   notificationChanged?: (tx: TxContext, eventId: string, memberId: string | null) => Promise<void>;
+  media?: Pick<import("./media.js").EventMedia, "coverIdsInTransaction" | "discardInTransaction">;
 }
 export function createEvents(
   unit: UnitOfWork,
@@ -138,6 +207,16 @@ export function createEvents(
   now = () => new Date(),
 ) {
   validateEventsConfig(config);
+  const catalogs = ports.catalogs;
+  const routeCatalogs = catalogs?.eventRouteCatalogInTransaction
+    ? {
+        labelsInTransaction: catalogs.labelsInTransaction,
+        eventRouteCatalogInTransaction: catalogs.eventRouteCatalogInTransaction,
+      }
+    : null;
+  if (config.routeEnabled && !routeCatalogs) throw new Error("EVENT_ROUTE_CATALOGS_REQUIRED");
+  const publishedRoutes =
+    config.routeEnabled && routeCatalogs ? createPublishedRoutes(unit, routeCatalogs) : null;
   const c = (tx: TxContext) => unit.client(tx),
     run = <T>(command: (tx: TxContext) => Promise<T>) =>
       retryTransaction(unit, command).catch((error) => {
@@ -169,46 +248,21 @@ export function createEvents(
     actor: Actor,
     capability = "company.read",
     targets: string[] = [],
-  ) => ports.identity.eventContextInTransaction(tx, actor, targets, capability);
-  function date(value: string) {
+    organizerId?: string,
+  ) => ports.identity.eventContextInTransaction(tx, actor, targets, capability, organizerId);
+  function legacyInput(raw: S["EventInput"]) {
     try {
-      const normalized = utcIso(utcDateTime(value));
-      if (normalized !== value) throw new Error("NONCANONICAL_EVENT_TIME");
-      return normalized;
+      closed(raw, [...definitionFields, ...legacyTextFields, "organizer"]);
     } catch {
       throw identityError(422);
     }
+    text(raw.organizer, 256);
+    for (const field of legacyTextFields) text(raw[field], field === "description" ? 8000 : 2048);
+    return input(raw);
   }
-  function text(value: unknown, max: number): asserts value is string {
-    if (typeof value !== "string" || !value.trim() || value.length > max) throw identityError(422);
-  }
-  function input(raw: S["EventInput"]) {
-    try {
-      closed(raw, [
-        "title",
-        "description",
-        "game",
-        "server",
-        "organizer",
-        "meetingLocation",
-        "route",
-        "meetingAt",
-        "startsAt",
-        "endsAt",
-        "visibility",
-        "originCityId",
-        "destinationCityId",
-        "prescribedCargoId",
-        "prescribedMassKg",
-        "prescribedTrailerTypeId",
-      ]);
-    } catch {
-      throw identityError(422);
-    }
-    for (const k of ["title", "server", "organizer"] as const) text(raw[k], 256);
-    text(raw.description, 8000);
-    text(raw.meetingLocation, 2048);
-    text(raw.route, 2048);
+  function input<T extends Pick<S["EventInput"], (typeof definitionFields)[number]>>(raw: T) {
+    text(raw.title, 256);
+    text(raw.server, 256);
     if (!["ets2", "ats"].includes(raw.game) || !["public", "members"].includes(raw.visibility))
       throw identityError(422);
     const meetingAt = date(raw.meetingAt),
@@ -344,11 +398,15 @@ export function createEvents(
         .limit(25)
         .for("share");
       if (!rows.length) throw new Error("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
+      const details = await publishedRoutes?.detailsInTransaction(tx, [
+        ...(prior ? [prior.id] : []),
+        ...rows.map((row) => row.id),
+      ]);
       for (const row of rows) {
         if (
           row.version !== (state?.throughVersion ?? 0) + 1 ||
           (!state
-            ? row.category !== "created" || row.status !== "scheduled"
+            ? !["created", "published"].includes(row.category) || row.status !== "scheduled"
             : row.status === "cancelled"
               ? row.category !== "cancelled"
               : row.category !== "updated")
@@ -356,7 +414,13 @@ export function createEvents(
           throw new Error("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
         state =
           state && prior
-            ? advanceMaterial(state, prior, row)
+            ? advanceMaterial(
+                state,
+                prior,
+                row,
+                details?.get(prior.id) ?? null,
+                details?.get(row.id) ?? null,
+              )
             : {
                 schemaVersion: 1,
                 throughVersion: 1,
@@ -377,7 +441,21 @@ export function createEvents(
     };
   }
   /** A hidden row is only acceptable when the previous revision already references it. */
-  async function validateReferences(tx: TxContext, r: S["EventInput"], previous: Revision | null) {
+  async function validateReferences(
+    tx: TxContext,
+    r: Pick<
+      S["EventInput"],
+      | "game"
+      | "originCityId"
+      | "destinationCityId"
+      | "prescribedCargoId"
+      | "prescribedTrailerTypeId"
+    >,
+    previous: Pick<
+      Revision,
+      "originCityId" | "destinationCityId" | "prescribedCargoId" | "prescribedTrailerId"
+    > | null,
+  ) {
     const selections = [
       { kind: "city", id: r.originCityId, current: previous?.originCityId },
       { kind: "city", id: r.destinationCityId, current: previous?.destinationCityId },
@@ -405,7 +483,7 @@ export function createEvents(
         throw identityError(422, "CATALOG_SELECTION_HIDDEN");
     }
   }
-  async function routeLabels(tx: TxContext, revisions: readonly Revision[]) {
+  async function routeLabels(tx: TxContext, revisions: readonly PublicRevision[]) {
     const refs = revisions.flatMap((r) =>
       [r.originCityId, r.destinationCityId].flatMap((id) =>
         id ? [{ kind: "city" as const, id }] : [],
@@ -416,20 +494,26 @@ export function createEvents(
   }
   async function publicDto(
     tx: TxContext,
-    r: Revision,
+    r: PublicRevision,
     knownLabels?: Map<string, S["CatalogLabel"]>,
   ): Promise<S["EventPublic"]> {
     const labels = knownLabels ?? (await routeLabels(tx, [r]));
+    return legacyPublicDto(r, labels);
+  }
+  function legacyPublicDto(
+    r: PublicRevision,
+    labels: Map<string, S["CatalogLabel"]>,
+  ): S["EventPublic"] {
     return {
       id: r.eventId,
       version: r.version,
       title: r.title,
-      description: r.description,
+      description: r.description || blankLegacyText,
       game: r.game,
       server: r.server,
       organizer: r.organizer,
-      meetingLocation: r.meetingLocation,
-      route: r.route,
+      meetingLocation: r.meetingLocation || blankLegacyText,
+      route: r.route || blankLegacyText,
       meetingAt: r.meetingAt,
       startsAt: r.startsAt,
       endsAt: r.endsAt,
@@ -465,7 +549,9 @@ export function createEvents(
       throw new Error("EVENT_RESPONSE_REVISION_MISSING");
     return { row, revision: r };
   }
-  const responseDto = (r: ResponseRevision | null): S["Rsvp"] => ({
+  const responseDto = (
+    r: Pick<ResponseRevision, "version" | "status" | "reason"> | null,
+  ): S["Rsvp"] => ({
     version: r?.version ?? 1,
     response: r?.status ?? "unanswered",
     declineReason: r?.reason ?? null,
@@ -486,12 +572,7 @@ export function createEvents(
       throw new Error("EVENT_ATTENDANCE_REVISION_MISSING");
     return r;
   }
-  async function memberDto(
-    tx: TxContext,
-    r: Revision,
-    actor: Actor,
-    receipt?: Receipt,
-  ): Promise<S["EventMember"]> {
+  async function ownEventState(tx: TxContext, r: Revision, actor: Actor, receipt?: Receipt) {
     let ownResponse: ResponseRevision | null, ownAttendance: AttendanceRevision | null;
     if (receipt) {
       const [rr] = receipt.responseRevisionId
@@ -512,14 +593,385 @@ export function createEvents(
       ownResponse = (await response(tx, r.eventId, actor.userId))?.revision ?? null;
       ownAttendance = await attendance(tx, r.eventId, actor.userId);
     }
+    return eventMemberFacts(r, ownResponse, ownAttendance?.status);
+  }
+
+  function eventMemberFacts(
+    r: Pick<
+      Revision,
+      "visibility" | "prescribedCargoId" | "prescribedMassKg" | "prescribedTrailerId"
+    >,
+    ownResponse: Parameters<typeof responseDto>[0],
+    attendanceStatus: AttendanceRevision["status"] | undefined,
+  ) {
     return {
-      event: await publicDto(tx, r),
       visibility: r.visibility,
       myResponse: responseDto(ownResponse),
-      myAttendance: ownAttendance?.status ?? "unconfirmed",
+      myAttendance: attendanceStatus ?? ("unconfirmed" as const),
       prescribedCargoId: r.prescribedCargoId,
       prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
       prescribedTrailerTypeId: r.prescribedTrailerId,
+    };
+  }
+  async function memberDto(
+    tx: TxContext,
+    r: Revision,
+    actor: Actor,
+    receipt?: Receipt,
+  ): Promise<S["EventMember"]> {
+    const facts = await ownEventState(tx, r, actor, receipt);
+    return { event: await publicDto(tx, r), ...facts };
+  }
+
+  async function listRevisions(tx: TxContext, actor: Actor | null, options: ListOptions) {
+    const period = options.period ?? "upcoming";
+    if (!["upcoming", "past"].includes(period)) throw identityError(422);
+    const p = page(actor, ["list", period, actor ? "member" : "public"], options);
+    const rows = await c(tx)
+      .select({ id: events.id, revisionId: events.currentRevisionId, startsAt: events.startsAt })
+      .from(events)
+      .where(
+        and(
+          actor ? undefined : eq(events.visibility, "public"),
+          period === "upcoming"
+            ? gte(events.startsAt, p.boundary)
+            : lt(events.startsAt, p.boundary),
+          p.after
+            ? or(
+                gt(events.startsAt, p.after.time as string),
+                and(eq(events.startsAt, p.after.time as string), gt(events.id, p.after.id)),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(asc(events.startsAt), asc(events.id))
+      .limit(p.limit + 1);
+    const { items, nextCursor } = p.finish(rows, (r) => ({ id: r.id, time: r.startsAt }));
+    if (!items.length) return { revisions: [], nextCursor };
+    const revisions = await c(tx)
+      .select(publicRevisionFields)
+      .from(eventRevisions)
+      .where(
+        inArray(
+          eventRevisions.id,
+          items.map((e) => e.revisionId as string),
+        ),
+      );
+    const byId = new Map(revisions.map((r) => [r.id, r]));
+    return {
+      nextCursor,
+      revisions: items.map((e) => {
+        const r = byId.get(e.revisionId as string);
+        if (!r) throw new Error("EVENT_REVISION_MISSING");
+        return r;
+      }),
+    };
+  }
+
+  async function nearestRevision(tx: TxContext) {
+    const [e] = await c(tx)
+      .select({ revisionId: events.currentRevisionId })
+      .from(events)
+      .where(and(eq(events.status, "scheduled"), gte(events.startsAt, at())))
+      .orderBy(asc(events.startsAt), asc(events.id))
+      .limit(1);
+    if (!e) return null;
+    const [r] = await c(tx)
+      .select(publicRevisionFields)
+      .from(eventRevisions)
+      .where(eq(eventRevisions.id, applicationId(e.revisionId as string)))
+      .for("share");
+    if (!r) throw new Error("EVENT_REVISION_MISSING");
+    return r;
+  }
+
+  async function responseCountsByEvent(tx: TxContext, ids: string[]) {
+    const counts = new Map(
+      ids.map((id): [string, S["EventResponseCounts"]] => [id, { participating: 0, declined: 0 }]),
+    );
+    if (!ids.length) return counts;
+    const rows = await c(tx)
+      .select({
+        eventId: eventResponses.eventId,
+        status: eventResponses.status,
+        total: sql<number | string>`COUNT(*)`,
+      })
+      .from(eventResponses)
+      .where(
+        and(
+          inArray(eventResponses.eventId, ids),
+          inArray(eventResponses.status, ["participating", "declined"]),
+        ),
+      )
+      .groupBy(eventResponses.eventId, eventResponses.status);
+    for (const row of rows) {
+      const count = counts.get(row.eventId);
+      if (count && row.status !== "unanswered") count[row.status] = Number(row.total);
+    }
+    return counts;
+  }
+
+  async function ownResponses(tx: TxContext, actor: Actor, ids: string[]) {
+    if (!actor.capabilities.includes("events.respond")) return null;
+    const { response, version } = responseDto(null);
+    const initial = { response, version };
+    const responses = new Map<string, OwnResponse>(ids.map((id) => [id, initial]));
+    if (!ids.length) return responses;
+    const rows = await c(tx)
+      .select({
+        eventId: eventResponses.eventId,
+        response: eventResponses.status,
+        version: eventResponses.version,
+      })
+      .from(eventResponses)
+      .where(and(inArray(eventResponses.eventId, ids), eq(eventResponses.memberId, actor.userId)));
+    for (const { eventId, response, version } of rows)
+      responses.set(eventId, { response, version });
+    return responses;
+  }
+
+  async function publishedEventDtos(
+    tx: TxContext,
+    revisions: readonly PublicRevision[],
+    locale: EventLocale,
+    privateRefs: { kind: "cargo" | "trailer"; id: string }[] = [],
+    includeCover = true,
+  ) {
+    if (!publishedRoutes || !routeCatalogs) throw identityError(422);
+    const refs = revisions.flatMap((r) =>
+      [r.originCityId, r.destinationCityId].flatMap((id) =>
+        id ? [{ kind: "city" as const, id }] : [],
+      ),
+    );
+    const labels = await routeCatalogs.labelsInTransaction(tx, [...refs, ...privateRefs], locale);
+    const fields = await publishedRoutes.publicFieldsInTransaction(tx, revisions);
+    const covers = includeCover
+      ? await ports.media?.coverIdsInTransaction(
+          tx,
+          revisions.map((r) => r.eventId),
+        )
+      : undefined;
+    const items = revisions.map((r) => {
+      const route = fields.get(r.id);
+      if (!route) throw new Error("EVENT_ROUTE_PROJECTION_MISSING");
+      const event: S["EventStage2Public"] = {
+        ...legacyPublicDto(r, labels),
+        ...route.public,
+        hasCover: covers?.has(r.eventId) ?? false,
+        description: r.description || null,
+        meetingLocation: r.meetingLocation || null,
+        route: r.route || null,
+      };
+      return { event, organizerMemberId: route.organizerMemberId, visibility: r.visibility };
+    });
+    return { items, labels };
+  }
+
+  async function adminPublishedPage(
+    tx: TxContext,
+    actor: Actor,
+    locale: EventLocale,
+    options: Page,
+  ): Promise<S["EventStage2AdminList"]> {
+    if (!routeCatalogs || !publishedRoutes) throw identityError(422);
+    const p = page(actor, ["admin", "published", locale], options);
+    const rows = await c(tx)
+      .select({ id: events.id, revisionId: events.currentRevisionId, startsAt: events.startsAt })
+      .from(events)
+      .where(
+        p.after
+          ? or(
+              gt(events.startsAt, p.after.time as string),
+              and(eq(events.startsAt, p.after.time as string), gt(events.id, p.after.id)),
+            )
+          : undefined,
+      )
+      .orderBy(asc(events.startsAt), asc(events.id))
+      .limit(p.limit + 1);
+    const { items, nextCursor } = p.finish(rows, (row) => ({ id: row.id, time: row.startsAt }));
+    if (!items.length) return { items: [], nextCursor };
+    const ids = items.map((row) => row.id);
+    const revisions = await c(tx)
+      .select({
+        ...publicRevisionFields,
+        prescribedCargoId: eventRevisions.prescribedCargoId,
+        prescribedMassKg: eventRevisions.prescribedMassKg,
+        prescribedTrailerId: eventRevisions.prescribedTrailerId,
+      })
+      .from(eventRevisions)
+      .where(
+        inArray(
+          eventRevisions.id,
+          items.map((row) => applicationId(row.revisionId as string)),
+        ),
+      );
+    const revisionById = new Map(revisions.map((row) => [row.id, row]));
+    const responses = await c(tx)
+      .select({
+        eventId: eventResponses.eventId,
+        version: eventResponseRevisions.version,
+        status: eventResponseRevisions.status,
+        reason: eventResponseRevisions.reason,
+      })
+      .from(eventResponses)
+      .innerJoin(
+        eventResponseRevisions,
+        and(
+          eq(eventResponseRevisions.id, eventResponses.currentRevisionId),
+          eq(eventResponseRevisions.eventId, eventResponses.eventId),
+          eq(eventResponseRevisions.memberId, eventResponses.memberId),
+        ),
+      )
+      .where(and(inArray(eventResponses.eventId, ids), eq(eventResponses.memberId, actor.userId)));
+    const attendances = await c(tx)
+      .select({ eventId: eventAttendances.eventId, status: eventAttendanceRevisions.status })
+      .from(eventAttendances)
+      .innerJoin(
+        eventAttendanceRevisions,
+        and(
+          eq(eventAttendanceRevisions.id, eventAttendances.currentRevisionId),
+          eq(eventAttendanceRevisions.eventId, eventAttendances.eventId),
+          eq(eventAttendanceRevisions.memberId, eventAttendances.memberId),
+        ),
+      )
+      .where(
+        and(inArray(eventAttendances.eventId, ids), eq(eventAttendances.memberId, actor.userId)),
+      );
+    const ownResponse = new Map(responses.map((row) => [row.eventId, row]));
+    const ownAttendance = new Map(attendances.map((row) => [row.eventId, row.status]));
+    const privateRefs = revisions.flatMap((row) => [
+      ...(row.prescribedCargoId ? [{ kind: "cargo" as const, id: row.prescribedCargoId }] : []),
+      ...(row.prescribedTrailerId
+        ? [{ kind: "trailer" as const, id: row.prescribedTrailerId }]
+        : []),
+    ]);
+    const privateLabels = await routeCatalogs.labelsInTransaction(tx, privateRefs, locale);
+    const { items: projections } = await publishedEventDtos(tx, revisions, locale);
+    const byEvent = new Map(projections.map((row) => [row.event.id, row]));
+    const counts = await responseCountsByEvent(tx, ids);
+    return {
+      nextCursor,
+      items: items.map(({ id, revisionId }) => {
+        const row = revisionById.get(revisionId as string);
+        const projection = byEvent.get(id);
+        const responseCounts = counts.get(id);
+        if (!row || !projection || !responseCounts || row.eventId !== id)
+          throw new Error("EVENT_ADMIN_PROJECTION_MISSING");
+        return {
+          id,
+          lifecycle: "published",
+          definition: {
+            ...projection,
+            ...eventMemberFacts(row, ownResponse.get(id) ?? null, ownAttendance.get(id)),
+            prescribedCargo: privateLabels.get(row.prescribedCargoId ?? "") ?? null,
+            prescribedTrailerType: privateLabels.get(row.prescribedTrailerId ?? "") ?? null,
+            responseCounts,
+          },
+        };
+      }),
+    };
+  }
+
+  function quickResponse(own: OwnResponse | undefined) {
+    return own
+      ? { myResponse: own.response, myResponseVersion: own.version }
+      : { myResponse: null, myResponseVersion: null };
+  }
+
+  async function attendancePage(tx: TxContext, actor: Actor, event: Event, options: Page) {
+    const id = event.id;
+    const p = page(actor, ["attendance", id, event.attendanceVersion], options);
+    const rows = await ports.identity.eventRosterInTransaction(
+      tx,
+      p.after?.id ?? null,
+      p.limit + 1,
+    );
+    const { items, nextCursor } = p.finish(rows, (r) => ({ id: r.id, time: null }));
+    const ids = items.map((r) => r.id);
+    if (!ids.length) return { items: [], nextCursor };
+    const summaries = await ports.identity.memberSummariesInTransaction(tx, ids);
+    const responses = await c(tx)
+      .select({ memberId: eventResponses.memberId, revision: eventResponseRevisions })
+      .from(eventResponses)
+      .innerJoin(
+        eventResponseRevisions,
+        eq(eventResponseRevisions.id, eventResponses.currentRevisionId),
+      )
+      .where(and(eq(eventResponses.eventId, id), inArray(eventResponses.memberId, ids)));
+    const attendances = await c(tx)
+      .select({ memberId: eventAttendances.memberId, revision: eventAttendanceRevisions })
+      .from(eventAttendances)
+      .innerJoin(
+        eventAttendanceRevisions,
+        eq(eventAttendanceRevisions.id, eventAttendances.currentRevisionId),
+      )
+      .where(and(eq(eventAttendances.eventId, id), inArray(eventAttendances.memberId, ids)));
+    const responseByMember = new Map(
+      responses.map(({ memberId, revision }) => [memberId, revision]),
+    );
+    const attendanceByMember = new Map(
+      attendances.map(({ memberId, revision }) => [memberId, revision]),
+    );
+    return {
+      items: items.map(({ id }) => {
+        const a = attendanceByMember.get(id);
+        return {
+          member: summaries.get(id) as S["MemberSummary"],
+          response: responseDto(responseByMember.get(id) ?? null),
+          attendance: a?.status ?? ("unconfirmed" as const),
+          note: a?.note ?? null,
+        };
+      }),
+      nextCursor,
+    };
+  }
+
+  async function attendanceTotals(tx: TxContext, id: string) {
+    // Current attendance rows reference the same all-member roster as the page.
+    const total = await ports.identity.eventRosterCountInTransaction(tx);
+    const rows = await c(tx)
+      .select({ status: eventAttendanceRevisions.status, count: sql<number | string>`COUNT(*)` })
+      .from(eventAttendances)
+      .innerJoin(
+        eventAttendanceRevisions,
+        eq(eventAttendanceRevisions.id, eventAttendances.currentRevisionId),
+      )
+      .where(eq(eventAttendances.eventId, id))
+      .groupBy(eventAttendanceRevisions.status);
+    const attended = Number(rows.find((row) => row.status === "attended")?.count ?? 0);
+    const notAttended = Number(rows.find((row) => row.status === "not_attended")?.count ?? 0);
+    return { total, attended, notAttended, unconfirmed: total - attended - notAttended };
+  }
+
+  async function readResponseCounts(
+    tx: TxContext,
+    eventId: string,
+  ): Promise<S["EventResponseCounts"]> {
+    return (await responseCountsByEvent(tx, [eventId])).get(eventId) as S["EventResponseCounts"];
+  }
+  async function publishedDto(
+    tx: TxContext,
+    r: Revision,
+    locale: EventLocale,
+    actor: Actor | null,
+    receipt?: Receipt,
+    includeCover = receipt === undefined,
+  ): Promise<S["EventStage2Public"] | S["EventStage2Member"]> {
+    const refs: { kind: "cargo" | "trailer"; id: string }[] = [];
+    if (actor && r.prescribedCargoId) refs.push({ kind: "cargo", id: r.prescribedCargoId });
+    if (actor && r.prescribedTrailerId) refs.push({ kind: "trailer", id: r.prescribedTrailerId });
+    const {
+      items: [projection],
+      labels,
+    } = await publishedEventDtos(tx, [r], locale, refs, includeCover);
+    if (!projection) throw new Error("EVENT_ROUTE_PROJECTION_MISSING");
+    if (!actor) return projection.event;
+    return {
+      ...projection,
+      ...(await ownEventState(tx, r, actor, receipt)),
+      prescribedCargo: labels.get(r.prescribedCargoId ?? "") ?? null,
+      prescribedTrailerType: labels.get(r.prescribedTrailerId ?? "") ?? null,
+      responseCounts: receipt?.responseCounts ?? (await readResponseCounts(tx, r.eventId)),
     };
   }
   function fingerprint(actor: Actor, route: Route, target: string, key: string, value: unknown) {
@@ -536,6 +988,7 @@ export function createEvents(
     key: string,
     value: unknown,
     command: () => Promise<Receipt>,
+    captureCounts = false,
   ) {
     applicationId(key);
     const hash = fingerprint(actor, route, target, key, value);
@@ -565,6 +1018,9 @@ export function createEvents(
               (await response(tx, rawResult.eventId, actor.userId))?.revision.id ?? null,
             attendanceRevisionId:
               (await attendance(tx, rawResult.eventId, actor.userId))?.id ?? null,
+            ...(captureCounts
+              ? { responseCounts: await readResponseCounts(tx, rawResult.eventId) }
+              : {}),
           }
         : rawResult;
     await c(tx).insert(eventCommands).values({
@@ -659,33 +1115,33 @@ export function createEvents(
     actor: Actor,
     e: Event,
     value: S["EventInput"],
-    category: "created" | "updated" | "cancelled",
+    category: Revision["category"],
+    previous: Revision | null,
+    details: RouteDetails | null,
+    priorDetails: RouteDetails | null,
     reason: string | null = null,
   ) {
     const id = newId();
-    if (category !== "cancelled")
-      await validateReferences(
-        tx,
-        value,
-        category === "created" ? null : await revision(tx, e.currentRevisionId as string),
-      );
-    const version = category === "created" ? 1 : e.version + 1,
-      sequence = category === "created" ? 1 : e.changeSequence + 1;
-    let notificationMaterial =
-      category === "created"
-        ? {
-            schemaVersion: 1 as const,
-            throughVersion: 1,
-            startVersion: 1,
-            routeVersion: 1,
-            statusVersion: 1,
-          }
-        : materialState(e.notificationMaterial, e.version);
-    if (category !== "created" && notificationMaterial?.throughVersion === e.version)
+    if (category !== "cancelled") await validateReferences(tx, value, previous);
+    const first = category === "created" || category === "published";
+    const version = first ? 1 : e.version + 1,
+      sequence = first ? 1 : e.changeSequence + 1;
+    let notificationMaterial = first
+      ? {
+          schemaVersion: 1 as const,
+          throughVersion: 1,
+          startVersion: 1,
+          routeVersion: 1,
+          statusVersion: 1,
+        }
+      : materialState(e.notificationMaterial, e.version);
+    if (previous && notificationMaterial?.throughVersion === e.version)
       notificationMaterial = advanceMaterial(
         notificationMaterial,
-        await revision(tx, e.currentRevisionId as string),
+        previous,
         { ...value, version, status: category === "cancelled" ? "cancelled" : "scheduled" },
+        priorDetails,
+        details,
       );
     await c(tx)
       .insert(eventRevisions)
@@ -716,6 +1172,7 @@ export function createEvents(
         prescribedTrailerId: value.prescribedTrailerTypeId,
         privateReason: reason,
       });
+    if (details) await publishedRoutes?.insert(tx, id, value.game, details);
     const next = {
       ...e,
       version,
@@ -747,13 +1204,13 @@ export function createEvents(
       "event.changed",
       id,
       version,
-      category,
+      category === "published" ? "created" : category,
       null,
       e.startsAt !== next.startsAt || e.status !== next.status,
     );
     return { eventId: e.id, revisionId: id, version };
   }
-  async function revisionInput(_tx: TxContext, r: Revision): Promise<S["EventInput"]> {
+  function revisionInput(r: Revision): S["EventInput"] {
     return {
       title: r.title,
       description: r.description,
@@ -776,6 +1233,284 @@ export function createEvents(
   const checkVersion = (actual: number, expected: number) => {
     if (actual !== expected) throw identityError(412, "VERSION_CONFLICT");
   };
+  function stagedProjection(locale: EventLocale): MemberProjection<S["EventStage2Member"]> {
+    if (!publishedRoutes) throw identityError(422);
+    return async (tx, r, actor, receipt) => {
+      const data = await publishedDto(tx, r, locale, actor, receipt);
+      if (!("event" in data)) throw new Error("EVENT_MEMBER_PROJECTION_MISSING");
+      return data;
+    };
+  }
+  async function writeDefinition(
+    tx: TxContext,
+    actor: Actor,
+    e: Event,
+    command: DefinitionCommand,
+    organizer: string | null,
+    prior: Revision | null,
+    category: "created" | "updated" | "published" = prior ? "updated" : "created",
+  ) {
+    const priorDetails = prior ? ((await publishedRoutes?.get(tx, prior.id)) ?? null) : null;
+    if ("legacy" in command) {
+      const value = { ...command.legacy };
+      if (prior && publishedRoutes) {
+        for (const field of legacyTextFields)
+          if (prior[field] === "" && value[field] === blankLegacyText) value[field] = "";
+      }
+      const details = publishedRoutes ? legacyRouteDetails(value, prior, priorDetails) : null;
+      return writeRevision(tx, actor, e, value, category, prior, details, priorDetails);
+    }
+    if (!publishedRoutes || organizer === null) throw identityError(422);
+    text(organizer, 256);
+    const {
+      platform,
+      organizerMemberId,
+      originDepotId,
+      destinationDepotId,
+      distanceKm,
+      requiredDlcIds,
+      ...input
+    } = command.published;
+    const details = {
+      platform,
+      organizerMemberId,
+      originDepotId,
+      destinationDepotId,
+      distanceKm,
+      requiredDlcIds,
+    };
+    await publishedRoutes.validate(tx, input, details, priorDetails);
+    const value = {
+      ...input,
+      organizer,
+      description:
+        input.description === undefined ? (prior?.description ?? "") : (input.description ?? ""),
+      meetingLocation:
+        input.meetingLocation === undefined
+          ? (prior?.meetingLocation ?? "")
+          : (input.meetingLocation ?? ""),
+      route: input.route === undefined ? (prior?.route ?? "") : (input.route ?? ""),
+    };
+    return writeRevision(tx, actor, e, value, category, prior, details, priorDetails);
+  }
+  function definitionFingerprint(command: DefinitionCommand) {
+    return "legacy" in command ? command.legacy : ["published_route", command.published];
+  }
+  async function insertDefinition(
+    tx: TxContext,
+    id: string,
+    input: Pick<S["EventInput"], "game" | "visibility" | "startsAt">,
+  ) {
+    const event: Event = {
+      id,
+      version: 1,
+      changeSequence: 1,
+      tripAssessmentPending: false,
+      notificationPending: true,
+      notificationMaterial: null,
+      tripAssessmentGeneration: 0,
+      attendanceVersion: 1,
+      currentRevisionId: null,
+      game: input.game,
+      visibility: input.visibility,
+      status: "scheduled",
+      startsAt: input.startsAt,
+      createdAt: at(),
+    };
+    await c(tx).insert(events).values(event);
+    return event;
+  }
+  const drafts =
+    config.draftsEnabled && publishedRoutes
+      ? createEventDrafts(unit, config.cursorKey, now, {
+          run,
+          authorize: (tx, actor, organizerId) =>
+            authorize(tx, actor, "events.manage", [], organizerId),
+          ...(ports.media ? { discardMedia: ports.media.discardInTransaction } : {}),
+          async validate(tx, next, prior) {
+            if (!next.row.game) return;
+            const route = { ...next.row, game: next.row.game };
+            await validateReferences(
+              tx,
+              route,
+              prior
+                ? {
+                    ...prior.row,
+                    prescribedTrailerId: prior.row.prescribedTrailerTypeId,
+                  }
+                : null,
+            );
+            await publishedRoutes.validate(
+              tx,
+              route,
+              {
+                ...next.row,
+                requiredDlcIds: next.requiredDlcIds,
+              },
+              prior ? { ...prior.row, requiredDlcIds: prior.requiredDlcIds } : null,
+            );
+          },
+          async publish(tx, actor, id, raw, organizer, locale) {
+            const command = { published: input(publishedRouteInput(raw)) };
+            const event = await insertDefinition(tx, id, command.published);
+            const receipt = await writeDefinition(
+              tx,
+              actor,
+              event,
+              command,
+              organizer,
+              null,
+              "published",
+            );
+            // The draft publication receipt stores the full response, including the current cover.
+            const data = await publishedDto(
+              tx,
+              await revision(tx, receipt.revisionId),
+              locale,
+              actor,
+              { ...receipt, responseCounts: { participating: 0, declined: 0 } },
+              true,
+            );
+            if (!("event" in data)) throw new Error("EVENT_MEMBER_PROJECTION_MISSING");
+            return { revisionId: receipt.revisionId, data };
+          },
+        })
+      : null;
+  function createDefinition<T>(
+    actor: Actor,
+    key: string,
+    command: DefinitionCommand,
+    project: MemberProjection<T>,
+  ) {
+    const input = "legacy" in command ? command.legacy : command.published;
+    return run(async (tx) => {
+      const { organizer } = await authorize(
+        tx,
+        actor,
+        "events.manage",
+        [],
+        "published" in command ? command.published.organizerMemberId : undefined,
+      );
+      // The command key is the stable target for a create before the event ID exists.
+      const target = applicationId(key);
+      await drafts?.rejectDraftCreateKey(tx, actor, key);
+      const result = await once(
+        tx,
+        actor,
+        "create",
+        target,
+        key,
+        definitionFingerprint(command),
+        async () => {
+          const e = await insertDefinition(tx, newId(), input);
+          return writeDefinition(tx, actor, e, command, organizer, null);
+        },
+        "published" in command,
+      );
+      return {
+        data: await project(tx, await revision(tx, result.revisionId), actor, result),
+        version: result.version,
+      };
+    });
+  }
+  function updateDefinition<T>(
+    actor: Actor,
+    id: string,
+    key: string,
+    expected: number,
+    command: DefinitionCommand,
+    project: MemberProjection<T>,
+  ) {
+    return run(async (tx) => {
+      const { organizer } = await authorize(
+        tx,
+        actor,
+        "events.manage",
+        [],
+        "published" in command ? command.published.organizerMemberId : undefined,
+      );
+      const e = await lock(tx, id);
+      const result = await once(
+        tx,
+        actor,
+        "update",
+        id,
+        key,
+        [expected, definitionFingerprint(command)],
+        async () => {
+          checkVersion(e.version, expected);
+          if (e.status === "cancelled") throw identityError(409);
+          const prior = await revision(tx, e.currentRevisionId as string);
+          return writeDefinition(tx, actor, e, command, organizer, prior);
+        },
+        "published" in command,
+      );
+      return {
+        data: await project(tx, await revision(tx, result.revisionId), actor, result),
+        version: result.version,
+      };
+    });
+  }
+  function cancelDefinition<T>(
+    actor: Actor,
+    id: string,
+    key: string,
+    expected: number,
+    reason: string,
+    project: MemberProjection<T>,
+  ) {
+    text(reason, 2048);
+    return run(async (tx) => {
+      await authorize(tx, actor, "events.manage");
+      const e = await lock(tx, id);
+      const result = await once(
+        tx,
+        actor,
+        "cancel",
+        id,
+        key,
+        [expected, reason],
+        async () => {
+          checkVersion(e.version, expected);
+          if (e.status === "cancelled") throw identityError(409);
+          const prior = await revision(tx, e.currentRevisionId as string);
+          const priorDetails = (await publishedRoutes?.get(tx, prior.id)) ?? null;
+          const value = revisionInput(prior);
+          const details = publishedRoutes
+            ? (priorDetails ?? legacyRouteDetails(value, prior, null))
+            : null;
+          return writeRevision(
+            tx,
+            actor,
+            e,
+            value,
+            "cancelled",
+            prior,
+            details,
+            priorDetails,
+            reason,
+          );
+        },
+        publishedRoutes !== null,
+      );
+      return {
+        data: await project(tx, await revision(tx, result.revisionId), actor, result),
+        version: result.version,
+      };
+    });
+  }
+  function readDefinition<T>(
+    actor: Actor | null,
+    id: string,
+    project: (tx: TxContext, r: Revision) => Promise<T>,
+  ) {
+    return run(async (tx) => {
+      if (actor) await authorize(tx, actor);
+      const e = await lock(tx, id, !actor);
+      const r = await revision(tx, e.currentRevisionId as string);
+      return { data: await project(tx, r), version: e.version };
+    });
+  }
   async function association(
     tx: TxContext,
     input: {
@@ -862,137 +1597,142 @@ export function createEvents(
       run(async (tx) => {
         await authorize(tx, actor, manage ? "events.manage" : "company.read");
       }),
+    publishedRoutesEnabled: publishedRoutes !== null,
+    drafts,
     async create(actor: Actor, key: string, raw: S["EventInput"]) {
-      const value = input(raw);
-      return run(async (tx) => {
-        await authorize(tx, actor, "events.manage"); // Stable create target is its idempotency key, serialized by the company lock.
-        const target = applicationId(key);
-        const result = await once(tx, actor, "create", target, key, value, async () => {
-          const e: Event = {
-            id: newId(),
-            version: 1,
-            changeSequence: 1,
-            tripAssessmentPending: false,
-            notificationPending: true,
-            notificationMaterial: null,
-            tripAssessmentGeneration: 0,
-            attendanceVersion: 1,
-            currentRevisionId: null,
-            game: value.game,
-            visibility: value.visibility,
-            status: "scheduled",
-            startsAt: value.startsAt,
-            createdAt: at(),
-          };
-          await c(tx).insert(events).values(e);
-          return writeRevision(tx, actor, e, value, "created");
-        });
-        return {
-          data: await memberDto(tx, await revision(tx, result.revisionId), actor, result),
-          version: result.version,
-        };
-      });
+      return createDefinition(actor, key, { legacy: legacyInput(raw) }, memberDto);
+    },
+    async createPublished(
+      actor: Actor,
+      key: string,
+      raw: S["EventStage2Input"],
+      locale: EventLocale,
+    ) {
+      return createDefinition(
+        actor,
+        key,
+        { published: input(publishedRouteInput(raw)) },
+        stagedProjection(locale),
+      );
     },
     async update(actor: Actor, id: string, key: string, expected: number, raw: S["EventInput"]) {
-      const value = input(raw);
-      return run(async (tx) => {
-        await authorize(tx, actor, "events.manage");
-        const e = await lock(tx, id);
-        const result = await once(tx, actor, "update", id, key, [expected, value], async () => {
-          checkVersion(e.version, expected);
-          if (e.status === "cancelled") throw identityError(409);
-          return writeRevision(tx, actor, e, value, "updated");
-        });
-        return {
-          data: await memberDto(tx, await revision(tx, result.revisionId), actor, result),
-          version: result.version,
-        };
-      });
+      return updateDefinition(actor, id, key, expected, { legacy: legacyInput(raw) }, memberDto);
+    },
+    async updatePublished(
+      actor: Actor,
+      id: string,
+      key: string,
+      expected: number,
+      raw: S["EventStage2Input"],
+      locale: EventLocale,
+    ) {
+      return updateDefinition(
+        actor,
+        id,
+        key,
+        expected,
+        { published: input(publishedRouteInput(raw)) },
+        stagedProjection(locale),
+      );
     },
     async cancel(actor: Actor, id: string, key: string, expected: number, reason: string) {
-      text(reason, 2048);
-      return run(async (tx) => {
-        await authorize(tx, actor, "events.manage");
-        const e = await lock(tx, id);
-        const result = await once(tx, actor, "cancel", id, key, [expected, reason], async () => {
-          checkVersion(e.version, expected);
-          if (e.status === "cancelled") throw identityError(409);
-          const r = await revision(tx, e.currentRevisionId as string);
-          return writeRevision(tx, actor, e, await revisionInput(tx, r), "cancelled", reason);
-        });
-        return {
-          data: await memberDto(tx, await revision(tx, result.revisionId), actor, result),
-          version: result.version,
-        };
-      });
+      return cancelDefinition(actor, id, key, expected, reason, memberDto);
+    },
+    async cancelPublished(
+      actor: Actor,
+      id: string,
+      key: string,
+      expected: number,
+      reason: string,
+      locale: EventLocale,
+    ) {
+      return cancelDefinition(actor, id, key, expected, reason, stagedProjection(locale));
     },
     async get(actor: Actor | null, id: string) {
+      return readDefinition<S["EventMember"] | S["EventPublic"]>(actor, id, (tx, r) =>
+        actor ? memberDto(tx, r, actor) : publicDto(tx, r),
+      );
+    },
+    async getPublished(actor: Actor | null, id: string, locale: EventLocale) {
+      return readDefinition(actor, id, (tx, r) => publishedDto(tx, r, locale, actor));
+    },
+    async list(actor: Actor | null, options: ListOptions = {}) {
       return run(async (tx) => {
         if (actor) await authorize(tx, actor);
-        const e = await lock(tx, id, !actor),
-          r = await revision(tx, e.currentRevisionId as string);
+        const { revisions, nextCursor } = await listRevisions(tx, actor, options);
+        const labels = await routeLabels(tx, revisions);
         return {
-          data: actor ? await memberDto(tx, r, actor) : await publicDto(tx, r),
-          version: e.version,
+          items: await Promise.all(revisions.map((r) => publicDto(tx, r, labels))),
+          nextCursor,
         };
       });
     },
-    async list(actor: Actor | null, options: Page & { period?: "upcoming" | "past" } = {}) {
+    async listPublishedPublic(
+      locale: EventLocale,
+      options: ListOptions = {},
+    ): Promise<S["EventStage2PublicList"]> {
       return run(async (tx) => {
-        if (actor) await authorize(tx, actor);
-        const period = options.period ?? "upcoming";
-        if (!["upcoming", "past"].includes(period)) throw identityError(422);
-        const p = page(actor, ["list", period, actor ? "member" : "public"], options);
-        const rows = await c(tx)
-          .select()
-          .from(events)
-          .where(
-            and(
-              actor ? undefined : eq(events.visibility, "public"),
-              period === "upcoming"
-                ? gte(events.startsAt, p.boundary)
-                : lt(events.startsAt, p.boundary),
-              p.after
-                ? or(
-                    gt(events.startsAt, p.after.time as string),
-                    and(eq(events.startsAt, p.after.time as string), gt(events.id, p.after.id)),
-                  )
-                : undefined,
-            ),
-          )
-          .orderBy(asc(events.startsAt), asc(events.id))
-          .limit(p.limit + 1);
-        const result = p.finish(rows, (r) => ({ id: r.id, time: r.startsAt }));
-        const ids = result.items.map((e) => e.currentRevisionId as string);
-        if (!ids.length) return { ...result, items: [] };
-        const revisions = await c(tx)
-          .select()
-          .from(eventRevisions)
-          .where(inArray(eventRevisions.id, ids));
-        const labels = await routeLabels(tx, revisions);
-        const byId = new Map(revisions.map((r) => [r.id, r]));
-        return {
-          ...result,
-          items: await Promise.all(
-            result.items.map((e) => {
-              const r = byId.get(e.currentRevisionId as string);
-              if (!r) throw new Error("EVENT_REVISION_MISSING");
-              return publicDto(tx, r, labels);
-            }),
-          ),
-        };
+        const { revisions, nextCursor } = await listRevisions(tx, null, options);
+        const { items } = await publishedEventDtos(tx, revisions, locale);
+        return { items: items.map(({ event }) => event), nextCursor };
       });
     },
     async nearest(actor: Actor) {
       return run(async (tx) => {
         await authorize(tx, actor);
-        const [e] = await c(tx)
-          .select()
-          .from(events)
-          .where(and(eq(events.status, "scheduled"), gte(events.startsAt, at())))
-          .orderBy(asc(events.startsAt), asc(events.id))
-          .limit(1);
-        return e ? publicDto(tx, await revision(tx, e.currentRevisionId as string)) : null;
+        const r = await nearestRevision(tx);
+        return r ? publicDto(tx, r) : null;
+      });
+    },
+    async listAdmin(
+      actor: Actor,
+      options: Page & { period?: "published" | "drafts"; locale?: EventLocale } = {},
+    ): Promise<S["EventStage2AdminList"]> {
+      if (options.period === "drafts") {
+        if (!drafts) throw identityError(404);
+        return drafts.list(actor, options);
+      }
+      return run(async (tx) => {
+        await authorize(tx, actor, "events.manage");
+        return adminPublishedPage(tx, actor, options.locale ?? "en", options);
+      });
+    },
+    async listStage2(
+      actor: Actor,
+      locale: EventLocale,
+      options: ListOptions = {},
+    ): Promise<S["EventStage2MemberList"]> {
+      return run(async (tx) => {
+        await authorize(tx, actor);
+        const { revisions, nextCursor } = await listRevisions(tx, actor, options);
+        const ids = revisions.map((r) => r.eventId);
+        const counts = await responseCountsByEvent(tx, ids);
+        const own = await ownResponses(tx, actor, ids);
+        const { items } = await publishedEventDtos(tx, revisions, locale);
+        return {
+          items: items.map((item) => ({
+            ...item,
+            ...quickResponse(own?.get(item.event.id)),
+            responseCounts: counts.get(item.event.id) as S["EventResponseCounts"],
+          })),
+          nextCursor,
+        };
+      });
+    },
+    async nearestStage2(
+      actor: Actor,
+      locale: EventLocale,
+    ): Promise<S["EventStage2Upcoming"] | null> {
+      return run(async (tx) => {
+        await authorize(tx, actor);
+        const r = await nearestRevision(tx);
+        if (!r) return null;
+        const {
+          items: [projection],
+        } = await publishedEventDtos(tx, [r], locale);
+        if (!projection) throw new Error("EVENT_ROUTE_PROJECTION_MISSING");
+        const own = (await ownResponses(tx, actor, [r.eventId]))?.get(r.eventId);
+        return { event: projection.event, ...quickResponse(own) };
       });
     },
     async myResponse(actor: Actor, id: string) {
@@ -1091,68 +1831,80 @@ export function createEvents(
       return run(async (tx) => {
         await authorize(tx, actor);
         await lock(tx, id);
-        const rows = await c(tx)
-          .select({ status: eventResponses.status, total: sql<number | string>`COUNT(*)` })
-          .from(eventResponses)
-          .where(
-            and(
-              eq(eventResponses.eventId, id),
-              inArray(eventResponses.status, ["participating", "declined"]),
-            ),
-          )
-          .groupBy(eventResponses.status);
-        const total = (status: "participating" | "declined") =>
-          Number(rows.find((r) => r.status === status)?.total ?? 0);
         // Counts only: no unanswered total, identities or reasons leave this read.
-        return { participating: total("participating"), declined: total("declined") };
+        return (await responseCountsByEvent(tx, [id])).get(id) as S["EventResponseCounts"];
+      });
+    },
+    async nonresponders(
+      actor: Actor,
+      id: string,
+      options: Page = {},
+    ): Promise<S["EventStage2Nonresponders"]> {
+      return run(async (tx) => {
+        await authorize(tx, actor, "events.manage");
+        await lock(tx, id, false, "share");
+        const p = page(actor, ["nonresponders", id], options);
+        const rows = await ports.identity.eventEligibleMembersInTransaction(
+          tx,
+          p.after?.id ?? null,
+          p.limit + 1,
+          (memberId) =>
+            notExists(
+              c(tx)
+                .select({ id: eventResponses.id })
+                .from(eventResponses)
+                .where(
+                  and(
+                    eq(eventResponses.eventId, id),
+                    eq(eventResponses.memberId, memberId),
+                    inArray(eventResponses.status, ["participating", "declined"]),
+                  ),
+                ),
+            ),
+        );
+        const { items, nextCursor } = p.finish(rows, (r) => ({ id: r.id, time: null }));
+        const summaries = await ports.identity.memberSummariesInTransaction(
+          tx,
+          items.map((r) => r.id),
+        );
+        return {
+          items: items.map((r) => summaries.get(r.id) as S["MemberSummary"]),
+          nextCursor,
+        };
       });
     },
     async attendance(actor: Actor, id: string, options: Page = {}) {
       return run(async (tx) => {
         await authorize(tx, actor, "events.manage");
-        const e = await lock(tx, id),
-          p = page(actor, ["attendance", id, e.attendanceVersion], options),
-          rows = await ports.identity.eventRosterInTransaction(
-            tx,
-            p.after?.id ?? null,
-            p.limit + 1,
-          ),
-          result = p.finish(rows, (r) => ({ id: r.id, time: null })),
-          summaries = await ports.identity.memberSummariesInTransaction(
-            tx,
-            result.items.map((r) => r.id),
-          );
-        const ids = result.items.map((r) => r.id);
-        const responses = ids.length
-          ? await c(tx)
-              .select({ memberId: eventResponses.memberId, revision: eventResponseRevisions })
-              .from(eventResponses)
-              .innerJoin(
-                eventResponseRevisions,
-                eq(eventResponseRevisions.id, eventResponses.currentRevisionId),
-              )
-              .where(and(eq(eventResponses.eventId, id), inArray(eventResponses.memberId, ids)))
-          : [];
-        const attendances = ids.length
-          ? await c(tx)
-              .select({ memberId: eventAttendances.memberId, revision: eventAttendanceRevisions })
-              .from(eventAttendances)
-              .innerJoin(
-                eventAttendanceRevisions,
-                eq(eventAttendanceRevisions.id, eventAttendances.currentRevisionId),
-              )
-              .where(and(eq(eventAttendances.eventId, id), inArray(eventAttendances.memberId, ids)))
-          : [];
-        const items = result.items.map((r) => {
-          const a = attendances.find((a) => a.memberId === r.id)?.revision;
-          return {
-            member: summaries.get(r.id) as S["MemberSummary"],
-            response: responseDto(responses.find((a) => a.memberId === r.id)?.revision ?? null),
-            attendance: a?.status ?? ("unconfirmed" as const),
-            note: a?.note ?? null,
-          };
-        });
-        return { data: { items, nextCursor: result.nextCursor }, version: e.attendanceVersion };
+        const e = await lock(tx, id);
+        return { data: await attendancePage(tx, actor, e, options), version: e.attendanceVersion };
+      });
+    },
+    async attendanceStage2(
+      actor: Actor,
+      id: string,
+      options: Page = {},
+    ): Promise<{ data: S["EventStage2Attendance"]; version: number }> {
+      return run(async (tx) => {
+        await authorize(tx, actor, "events.manage");
+        const e = await lock(tx, id, false, "share");
+        const { items, nextCursor } = await attendancePage(tx, actor, e, options);
+        const totals = await attendanceTotals(tx, e.id);
+        const trips = await ports.attendanceTripIds?.(
+          tx,
+          actor,
+          e.id,
+          e.game,
+          items.map((item) => item.member.id),
+        );
+        return {
+          data: {
+            items: items.map((item) => ({ ...item, tripId: trips?.get(item.member.id) ?? null })),
+            nextCursor,
+            totals,
+          },
+          version: e.attendanceVersion,
+        };
       });
     },
     async setAttendance(
@@ -1384,12 +2136,17 @@ export function createEvents(
               )
               .for("share")
           : [];
+      const details =
+        prior && r.status !== "cancelled" && prior.startsAt === r.startsAt
+          ? await publishedRoutes?.detailsInTransaction(tx, [prior.id, r.id])
+          : undefined;
       const changed =
         r.status === "cancelled"
           ? "event.cancelled"
           : prior && prior.startsAt !== r.startsAt
             ? "event.start_changed"
-            : prior && (prior.route !== r.route || prior.meetingLocation !== r.meetingLocation)
+            : prior &&
+                routeChanged(prior, r, details?.get(prior.id) ?? null, details?.get(r.id) ?? null)
               ? "event.route_changed"
               : null;
       const current =

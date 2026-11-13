@@ -20,6 +20,8 @@ Rows are matched to telemetry by exact `(game, code)`. Trailers are identified b
 
 The owner approved an explicit English-name fallback when a Russian translation is missing; complete Russian translation is not a launch prerequisite. Mark the fallback visibly.
 
+On 2026-11-12 the owner decided that DLCs, companies and therefore depots use only their canonical name: no Russian name, translation filter or fallback mark. A company option shows the name on the left and the code on the right, like the city picker, so same-name companies stay distinct.
+
 ### Catalog source use basis
 
 On 2026-10-20 the owner selected closed, non-commercial use of game-derived catalog metadata for this VTC, from the owner-authorized game/DLC installations. A separate SCS permission reply is not a prerequisite for this selected delivery scope. This records the owner's project decision; it does not claim a provider permission grant or authorize public bulk redistribution of extracted definitions, label/localization corpora or game assets. Preserve attribution, exact private provenance and independent dataset review. Public Git contains original machinery, fictional fixtures and aggregate evidence. Production deployment and activation remain separate operational gates.
@@ -145,6 +147,9 @@ For the agreed initial restriction types, the prescribed-load exception covers o
 
 ## Event responses, reminders, and privacy
 
+- The director and deputies can save incomplete event drafts, return to edit them, and discard or publish them. Publication validates the full definition and retains the event ID and attached gallery.
+- Drafts are visible only to event managers and have no RSVP, attendance, event-trip eligibility or notifications. These workflows become available after publication according to the event's visibility and timing.
+
 - Members may change their participation response until the event starts. A decline requires a reason.
 - After the event starts, the director records actual attendance separately from the member's prior response. The previously agreed director confirmation is used for event-trip participation.
 - Send an in-app reminder one hour before the event starts to members whose response is Participating. Notifications are delivered while the website is open; Web Push remains deferred.
@@ -155,6 +160,8 @@ For the agreed initial restriction types, the prescribed-load exception covers o
 Response and actual attendance are distinct facts. Participation is voluntary in the MVP: members may leave an event unanswered, and the system imposes no automatic penalty for declining or not attending. The director can view responses and actual attendance, subject to the confirmed privacy rules.
 
 Notify signed-up participants inside the website when the start time or route changes or the event is cancelled. A time change reschedules the one-hour reminder; cancellation removes scheduled reminders. Keep the participation response when an event changes, and allow members to change it until the revised start time.
+
+Only the director and deputies manage event screenshots. Each event holds at most ten ready or processing PNG/JPEG screenshots. Managers can caption, reorder, remove and select one ready screenshot as the cover. Current company members may view ready screenshots for published events. Draft images are restricted to managers. Anonymous visitors can view only the current cover thumbnail of a public published event. Galleries stay with published or cancelled events. A duplicate starts with an empty gallery, and discarding a draft revokes image access and schedules storage cleanup.
 
 ## Membership application fields
 

@@ -251,7 +251,7 @@ export function useRecentCompanyTrips(
   const session = useSession();
   const client = useQueryClient();
   const { i18n } = useTranslation();
-  const path = recentTripsPath(game);
+  const path = recentTripsPath(game, i18n.resolvedLanguage === "en" ? "en" : "ru");
 
   return useQuery({
     queryKey: [
@@ -280,38 +280,6 @@ export function useRecentCompanyTrips(
             });
             await session.refresh();
           }
-        }
-        throw error;
-      }
-    },
-  });
-}
-
-export function useReviewQueueTrips(options?: { enabled?: boolean | undefined }) {
-  const session = useSession();
-  const { i18n } = useTranslation();
-  const path = "/trips?scope=review&decision=pending_review&limit=5";
-
-  return useQuery({
-    queryKey: [
-      "dashboard-review-queue",
-      session.self?.member.id,
-      session.generation,
-      session.self?.identityEpoch,
-      session.self?.capabilities.join(","),
-      i18n.resolvedLanguage,
-      path,
-    ],
-    meta: { private: true },
-    enabled: options?.enabled !== false && !!session.self?.capabilities.includes("trips.review"),
-    retry: false,
-    staleTime: 15000,
-    queryFn: async ({ signal }) => {
-      try {
-        return (await dashboardRead(path, "EnvelopeListTripSummary", signal)).data.data;
-      } catch (error) {
-        if (error instanceof AccountFailure && !signal.aborted) {
-          if (error.kind === "unauthorized") await session.confirmSessionLoss(signal);
         }
         throw error;
       }

@@ -21,7 +21,6 @@ import "./dashboard.css";
 type AnalyticsData = DTO["Analytics"];
 type LeaderboardData = DTO["ListLeaderboardEntry"];
 type ProgressData = DTO["Progress"];
-type ReviewListData = DTO["ListTripSummary"];
 
 /** Decorative placeholder; the page status line or the block itself announces loading. */
 export function Skeleton({ className }: { className?: string }) {
@@ -517,33 +516,35 @@ export function MyQualificationWidget({
   );
 }
 
+/**
+ * The overview's review queue count. It is the workspace summary's exact count of trips the viewer
+ * can decide, without the viewer's own, so it always agrees with the dispatch header and the menu.
+ * A summary without the queue (no access) hides the card.
+ */
 export function ReviewerQueueWidget({
-  query,
+  summary,
   locale,
 }: {
-  query: QueryView<ReviewListData>;
+  summary: { data: DTO["WorkspaceSummary"] | undefined; isError: boolean };
   locale: Locale;
 }) {
   const { t } = useTranslation("dashboard");
   const headingId = useId();
-  const review = query.data;
-  // The queue request is limited to five items; a next page means "more than shown".
-  const count = review
-    ? `${formatDecimal(String(review.items.length), locale)}${review.nextCursor ? "+" : ""}`
-    : "";
+  const queue = summary.data?.reviewQueue;
+  if (summary.data && !queue) return null;
 
   return (
     <Card className="dashboard-side-card" aria-labelledby={headingId}>
       <div className="dashboard-card-head">
         <h2 id={headingId}>{t("reviewQueue.title")}</h2>
       </div>
-      {review ? (
+      {queue ? (
         <p className="dashboard-muted">
-          {review.items.length > 0
-            ? `${t("reviewQueue.pendingCount")}: ${count}`
+          {queue.count > 0
+            ? `${t("reviewQueue.pendingCount")}: ${formatDecimal(String(queue.count), locale)}`
             : t("reviewQueue.noPending")}
         </p>
-      ) : query.isError ? (
+      ) : summary.isError ? (
         <p className="dashboard-muted">{t("reviewQueue.error")}</p>
       ) : (
         <Skeleton className="dashboard-skeleton-line" />

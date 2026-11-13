@@ -216,6 +216,34 @@ Watch a jobs tick and memory afterwards. With every module on, a jobs pass needs
 
 `activation rollback` restores the previous configuration, and routes answer 404 again. It keeps the module grants, which the privilege check accepts only because `apply` recorded the exact rights it installed in `state/stage-grants-installed.json`; a host without that record must match the baseline exactly. It does not remove seeded rows, and no operation does: `restore` proves an export in isolated volumes and never switches active data. Removing them is a separate owner-run recovery from the export whose ID `stage-seed` printed.
 
+### Published event route activation
+
+VTC-124 uses the already-published `0028_faulty_caretaker` migration and starts with `EVENTS_ROUTE_ENABLED` off. An ordinary release keeps the current control files and private settings. A separately authorized activation uses the reviewed controls and staged profile. Verify migration `0028` is applied, then use the [staged module activation commands](#stage-product-modules-and-synthetic-data) to install and read back the prepared grants. The profile enables `EVENTS_ROUTE_ENABLED` alongside Events and Catalogs through the shared API and jobs environment. Runtime needs SELECT and INSERT on `event_revision_details` and `event_revision_dlcs`. Jobs needs SELECT on `event_revision_details` for material classification and repair. These additions grant no history UPDATE or DELETE. Keep the stable Events key.
+
+For a local Compose checkout, stop any separate jobs invocation and use `node scripts/setup-local.mjs` if the private `.env` is absent. Set `IDENTITY_ENABLED=true`, `EVENTS_ENABLED=true`, `CATALOGS_ENABLED=true` and `EVENTS_ROUTE_ENABLED=true` in that file. Configure distinct valid `IDENTITY_SECRET`, `EVENTS_CURSOR_KEY` and `CATALOGS_CURSOR_KEY`. From the same checkout run:
+
+```sh
+docker compose stop app
+docker compose up -d --wait db
+docker compose build app
+docker compose run --rm --no-deps app pnpm db:migrate
+docker compose up -d --wait app
+```
+
+For notification verification, keep the existing Notifications prerequisites configured in the same file. Invoke a local worker from the same Compose image and environment with `docker compose run --rm --no-deps app sh -c "pnpm build && pnpm jobs run"`. If using Compose Watch, restart it after recreating the app. An existing local account with the default full schema permissions already covers these tables. Restricted accounts need the reviewed grants listed above.
+
+Drain old workers before enabling the setting and run the same compatible release and setting on the API and jobs runner. Before the first marked revision, activation can restore a configuration with Events on and published routes off. Once a marked revision exists, activation refuses that target and reports that published event route history requires Stage 2. The check still applies if Events was disabled in the meantime. Applying, recovering or rolling back to a compatible configuration remains supported.
+
+For a target with Events on and published routes off, an ordinary apply or rollback checks route history before changing its intent or stopping services. It checks again with writers and jobs fenced before replacing the live configuration or applying grants. If the final check refuses the target, services stay fenced and the recovery intent identifies a compatible configuration by hash when one is available. Run `activation recover` to resume that exact configuration. If compatible retained bytes are unavailable, keep the fence and use the reviewed restore or forward recovery procedure. A flag change alone does not undo committed revisions. Old binaries can misread new route alerts or fail to serialize newly absent text.
+
+### Event draft activation
+
+The draft API uses migration `0028_faulty_caretaker` and starts with `EVENTS_DRAFTS_ENABLED` off. A normal release keeps the live settings. For separately authorized activation, use the same [staged module commands](#stage-product-modules-and-synthetic-data) and reviewed controls. After `activation prepare-stage`, set `EVENTS_DRAFTS_ENABLED=true` in the private activation candidate alongside the Events, Catalogs and published route settings. Retain the existing Events key. Run `activation validate`, `apply` and `inspect` to install and read back the conditional grants. Local Compose accepts the same flag in the private `.env` after the published route prerequisites are met.
+
+The conditional runtime supplement grants SELECT and INSERT on event metadata, drafts, draft DLCs and workflow receipts. It also grants UPDATE on the metadata publication pointer and mutable draft columns, and DELETE on draft DLCs for replacement. Jobs keeps the published route grants and has no draft privileges. The [Events guide](../development/events.md#drafts-and-publication-vtc-125) describes the API and session signal.
+
+Use a compatible API and jobs release before activation. After the first draft publication, the jobs release must recognize `published` as an initial scheduled revision when repairing notification material. Turning the draft flag off closes draft operations while published events remain available with the route flag on. Recover to a compatible release and keep the published route settings and grants. Committed drafts, receipts and publications are retained.
+
 ### Stage catalogs
 
 A trip from a real telemetry client stays in review until staff supply the missing facts, and those selections need catalog rows. Rows live in the database and are maintained with the [catalog administration page](../development/catalog-ui.md). The repository carries no game-derived data, and there is no trust record or evidence file to configure.

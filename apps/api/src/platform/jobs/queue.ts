@@ -357,6 +357,9 @@ export function createQueue(
   }
   return {
     enqueue,
+    async checkLease(tx: TxContext, claim: Claim): Promise<void> {
+      await fence(tx, claim);
+    },
     async effectState(tx: TxContext, consumer: string, effectKey: string) {
       const [row] = await unit
         .client(tx)
