@@ -33,13 +33,15 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "e
     summaryStatus: 200,
     summaryReads: 0,
     summary: { computedAt } as Summary,
+    stagedDispatch: false,
     summaryGate: undefined as Promise<void> | undefined,
     onSummary: undefined as (() => void) | undefined,
   };
   await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);
     if (notification) return notification;
-    const path = new URL(route.request().url()).pathname;
+    const url = new URL(route.request().url());
+    const path = url.pathname;
     if (path === "/api/v1/auth/csrf")
       return route.fulfill({ json: { data: { token: "NONFUNCTIONAL_FIXTURE" }, meta } });
     if (path === "/api/v1/me")
@@ -51,10 +53,24 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "e
     if (path === summaryPath) {
       state.summaryReads += 1;
       const { reviewQueue, ...sections } = state.summary;
+      const dispatch =
+        state.stagedDispatch && reviewQueue
+          ? {
+              reviewQueue: {
+                computedAt,
+                waitingCount: reviewQueue.count,
+                oldestQueuedAt: computedAt,
+                oldestAgeSeconds: reviewQueue.oldestAgeSeconds,
+                duplicateCount: 0,
+              },
+            }
+          : { legacyReviewQueue: reviewQueue };
       const response =
-        state.summaryStatus === 200
-          ? { json: { data: { ...sections, legacyReviewQueue: reviewQueue }, meta } }
-          : error(state.summaryStatus);
+        url.searchParams.get("view") !== "stage3"
+          ? error(422)
+          : state.summaryStatus === 200
+            ? { json: { data: { ...sections, ...dispatch }, meta } }
+            : error(state.summaryStatus);
       state.onSummary?.();
       await state.summaryGate;
       return route.fulfill(response);
@@ -77,6 +93,34 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "e
   });
   return state;
 }
+
+test(
+  "the reconciliation alias belongs to Dispatch when the staged summary selects it",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    const state = await mockWorkspace(page, ["dispatcher"]);
+    state.stagedDispatch = true;
+    state.summary = { computedAt, reviewQueue: { count: 2, oldestAgeSeconds: 0 } };
+    await page.goto("/account/review/reconciliation");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    if (phone(page)) {
+      const dispatch = bottomBar(page).getByRole("link", { name: /^Dispatch/ });
+      await expect(dispatch).toHaveAttribute("aria-current", "true");
+      await inNavigation(page, async (nav) => {
+        await expect(nav.getByRole("link", { name: "Reconciliation", exact: true })).toHaveCount(0);
+      });
+    } else {
+      await inNavigation(page, async (nav) => {
+        await expect(nav.getByRole("link", { name: /^Dispatch/ })).toHaveAttribute(
+          "aria-current",
+          "true",
+        );
+        await expect(nav.getByRole("link", { name: "Reconciliation", exact: true })).toHaveCount(0);
+      });
+    }
+    expect(state.summaryReads).toBe(1);
+  },
+);
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) > 1050;
 const mainNavigation = (page: Page) =>
   page.getByRole("navigation", { name: /^(Main navigation|Основная навигация)$/ });

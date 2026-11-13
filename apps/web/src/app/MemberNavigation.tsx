@@ -67,7 +67,8 @@ export function MemberNavLinks({
   }
   if (!session.self) return null;
   const capabilities = session.self.capabilities;
-  const current = matchRouteMeta(location.pathname);
+  const stagedDispatch = attention?.dispatch === "stage3";
+  const current = matchRouteMeta(location.pathname, stagedDispatch);
   const report = t("nav.newReport");
   const sheet = variant === "sheet";
   return (
@@ -81,7 +82,10 @@ export function MemberNavLinks({
         </Button>
       )}
       <nav className="sidebar-navigation member-navigation" aria-label={t("nav.primary")}>
-        {(sheet ? moreGroups(capabilities) : visibleGroups(capabilities)).map((group) => {
+        {(sheet
+          ? moreGroups(capabilities, stagedDispatch)
+          : visibleGroups(capabilities, stagedDispatch)
+        ).map((group) => {
           const titleId = `${prefix}-${group.id}`;
           return (
             <div key={group.id} className="nav-group">
@@ -132,10 +136,10 @@ export function MemberNavLinks({
   );
 }
 
-export function Breadcrumb() {
+export function Breadcrumb({ attention }: { attention?: WorkspaceSummary | undefined }) {
   const { t } = useTranslation("core");
   const { pathname } = useLocation();
-  const meta = matchRouteMeta(pathname);
+  const meta = matchRouteMeta(pathname, attention?.dispatch === "stage3");
   if (!meta) return null;
   const parent = meta.item ? navItem(meta.item) : undefined;
   return (

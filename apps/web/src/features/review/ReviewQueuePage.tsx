@@ -17,6 +17,8 @@ import {
   tripSources,
 } from "../trips/transport.js";
 import { DecisionPanel } from "./DecisionPanel.js";
+import { DispatchReviewPage } from "./DispatchReviewPage.js";
+import { ReviewAccessState } from "./ReviewAccessState.js";
 import { ReviewQueueTable } from "./ReviewQueueTable.js";
 import {
   decisions,
@@ -37,19 +39,34 @@ function queueAge(seconds: number, locale: string) {
   return formatter.format(-seconds, "second");
 }
 
+export function ReviewQueuePage() {
+  const { t } = useTranslation("trips");
+  const session = useSession();
+  const summary = useWorkspaceSummary();
+  if (!session.self?.capabilities.includes("trips.review"))
+    return (
+      <Card>
+        <h1>{t("review")}</h1>
+        <p>{t("forbidden")}</p>
+      </Card>
+    );
+  if (summary.data?.dispatch === "stage3") return <DispatchReviewPage />;
+  if (summary.data?.dispatch === "legacy") return <LegacyReviewQueuePage />;
+  return <ReviewAccessState summary={summary} />;
+}
+
 /**
  * Dispatch review queue (VTC-059): Awaiting (held, oldest first) and Decided tabs, game, source
  * (VTC-077), decision and order filters, cursor pages and, from 1200px, a decision panel beside the
  * queue selected by `?trip=`. Narrower screens open the full review page instead. A filter change
  * restarts paging and closes the panel; switching tabs keeps the game and source.
  */
-export function ReviewQueuePage() {
+function LegacyReviewQueuePage() {
   const { t, i18n } = useTranslation("trips"),
     session = useSession(),
     location = useLocation(),
     wide = useWideLayout(),
     [search, setSearch] = useSearchParams(),
-    staff = !!session.self?.capabilities.includes("trips.review"),
     timezone = session.self?.preferences.displayTimezone ?? "UTC",
     params = queueParams(search),
     listLocale = i18n.resolvedLanguage === "en" ? "en" : "ru",
@@ -64,7 +81,6 @@ export function ReviewQueuePage() {
   const query = useTripQuery(
     `/trips?${queryString(listQuery(params, cursor, listLocale))}`,
     "EnvelopeListTripSummary",
-    staff,
   );
   const summary = useWorkspaceSummary();
   const locale = i18n.resolvedLanguage ?? "ru";
@@ -131,15 +147,6 @@ export function ReviewQueuePage() {
     next.delete("trip");
     setSearch(next);
   }
-  if (!staff)
-    return (
-      <div className="stack trip-page review-queue">
-        <Card>
-          <h1>{t("review")}</h1>
-          <p>{t("forbidden")}</p>
-        </Card>
-      </div>
-    );
   const items = query.data?.data.data.items,
     back = queueSearch(search),
     filtered = !!params.game || !!params.source || !!params.decision || search.has("order"),

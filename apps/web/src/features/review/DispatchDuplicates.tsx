@@ -9,7 +9,7 @@ import { CatalogName, DecisionBadge, GameChip } from "../trips/TripTable.js";
 import { type DTO, queryString, rejectedCursor } from "../trips/transport.js";
 import { ReviewReasonList } from "./DispatchQueueTable.js";
 import type { dispatchParams } from "./dispatch-model.js";
-import { MergePair } from "./ReconciliationPage.js";
+import { MergePair } from "./reconciliation-parts.js";
 import { pageSize, reasonLimit } from "./review-model.js";
 
 type Duplicate = DTO["TripStage3Duplicate"];
@@ -191,9 +191,6 @@ export function DispatchDuplicates({
           <option value="waiting">{t("dispatchOpenDuplicates")}</option>
           <option value="dismissed">{t("dispatchDismissedDuplicates")}</option>
         </Select>
-        <Button asChild size="sm" variant="outline">
-          <Link to="/account/review/reconciliation">{t("dispatchManageReconciliations")}</Link>
-        </Button>
       </div>
       <State
         query={query}

@@ -15,6 +15,222 @@ import {
 } from "./support/review-ui.ts";
 import { countInsertedAlerts } from "./support/trip-ui.ts";
 
+for (const locale of ["en", "ru"] as const)
+  test(
+    `Stage 3 queue compares independent sources and keeps the 1200px detail breakpoint (${locale})`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mockReview(page, { staged: true, locale, defensiveOwn: true });
+      const labels =
+        locale === "en"
+          ? {
+              compare: "Report and telemetry",
+              distance: "Actual driven distance",
+              damage: "Cargo damage",
+              difference: "Different",
+              unavailable: "Comparison unavailable",
+              back: "Back to queue",
+            }
+          : {
+              compare: "Отчёт и телеметрия",
+              distance: "Фактический пробег",
+              damage: "Ущерб грузу",
+              difference: "Отличается",
+              unavailable: "Сравнение недоступно",
+              back: "К очереди",
+            };
+      const widths =
+        info.project.name === "desktop-chromium"
+          ? [1200, 1280]
+          : [page.viewportSize()?.width ?? 390];
+      for (const width of widths) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto("/account/review?game=ets2");
+        await catalogLanguage(page, locale);
+        await expect(rowOf(page, reviewIds.own)).toHaveCount(0);
+        await expect(rowOf(page, reviewIds.late)).toBeVisible();
+        const link = page.locator(`#trip-link-${reviewIds.late}`);
+        await link.focus();
+        await page.keyboard.press("Enter");
+        await expect(panel(page).getByRole("heading", { name: labels.compare })).toBeVisible();
+        const comparison = panel(page).locator(".dispatch-comparison");
+        const distance = comparison.getByRole("row", { name: new RegExp(labels.distance) });
+        await expect(distance.getByRole("rowheader")).toContainText(labels.difference);
+        await expect(distance.getByRole("cell").nth(1)).toContainText(
+          locale === "en" ? "702.3 km" : "702,3 км",
+        );
+        await expect(
+          comparison.getByRole("row", { name: new RegExp(labels.damage) }),
+        ).toContainText("0%");
+        await expect(
+          comparison.getByRole("row", { name: new RegExp(labels.damage) }).getByRole("rowheader"),
+        ).toContainText(labels.unavailable);
+        const overflows = () =>
+          page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+        await expect.poll(overflows).toBe(false);
+        if (width >= 1200) {
+          await expect(page).toHaveURL(new RegExp(`[?&]trip=${reviewIds.late}$`));
+          await expect(panel(page).getByRole("heading", { level: 2 })).toBeFocused();
+          await page.keyboard.press("Escape");
+          await expect(link).toBeFocused();
+          await expect(panel(page)).toHaveCount(0);
+          await expect.poll(overflows).toBe(false);
+        } else {
+          await expect(page).toHaveURL(
+            new RegExp(`/account/review/${reviewIds.late}\\?game=ets2$`),
+          );
+          await expect(page.getByRole("link", { name: labels.back })).toHaveAttribute(
+            "href",
+            "/account/review?game=ets2",
+          );
+        }
+      }
+    },
+  );
+
+test(
+  "Stage 3 filters preserve the selected trip and cursor recovery, and Resolved uses decision time",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { staged: true, paged: true });
+    await page.goto("/account/review");
+    await expect(page.getByText("Waiting (4)", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Next page" }).click();
+    await expect.poll(() => mock.lists.at(-1)?.get("cursor")).toBeTruthy();
+    mock.expire();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect.poll(() => mock.lists.at(-1)?.has("cursor")).toBe(false);
+    await page.locator(`#trip-link-${reviewIds.late}`).click();
+    await expect(panel(page).getByRole("heading", { name: "Report and telemetry" })).toBeVisible();
+    await page.getByRole("button", { name: "All drivers" }).click();
+    await page.getByLabel("Find a driver on this page").fill("NordWind");
+    const driver = page.getByRole("combobox", { name: "Driver", exact: true });
+    await driver.selectOption({ label: "Fictional_NordWind" });
+    const owner = mock.states.over.summary.owner.id;
+    await expect.poll(() => mock.lists.at(-1)?.get("ownerId")).toBe(owner);
+    await expect(driver).toBeFocused();
+    await expect(page).toHaveURL(new RegExp(`trip=${reviewIds.late}.*ownerId=${owner}`));
+    await expect(panel(page)).toBeVisible();
+    await page.getByRole("button", { name: /^Driver: Fictional_NordWind/ }).click();
+    const reasons = page.getByRole("combobox", { name: "Reason", exact: true });
+    await reasons.selectOption("rule_mass_exceeded");
+    await expect.poll(() => mock.lists.at(-1)?.get("reasonCode")).toBe("rule_mass_exceeded");
+    await expect(reasons).toBeFocused();
+    await expect(page.getByText("Waiting (4)", { exact: true })).toBeVisible();
+    await page.goto("/account/review?tab=decided&order=asc");
+    await expect(page.getByRole("button", { name: "Resolved", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect.poll(() => mock.lists.at(-1)?.get("order")).toBe("desc");
+    await expect(table(page).locator("tbody tr").first()).toContainText("Needs fixes");
+    await expect(table(page).locator("tbody tr").first().locator("time")).toHaveAttribute(
+      "datetime",
+      "2026-10-30T21:40:00.000Z",
+    );
+    await expect(page.getByRole("combobox", { name: "Sort order", exact: true })).toHaveCount(0);
+  },
+);
+
+test(
+  "Stage 3 direct Accept omits a blank reason and Return requires a reason",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { staged: true });
+    await page.goto(`/account/review/${reviewIds.resubmission}`);
+    const decision = form(page);
+    await decision.locator("#review-choice-reject").click();
+    const reason = decision.getByRole("textbox", { name: "Reason for return" });
+    await reason.fill("  \n  ");
+    await expect(reason).toHaveAttribute("aria-invalid", "true");
+    await expect(decision.getByRole("alert")).toHaveText(
+      "Enter a reason before returning the trip.",
+    );
+    await expect(
+      decision.getByRole("button", { name: "Return for fixes", exact: true }).last(),
+    ).toBeDisabled();
+    await decision.locator("#review-choice-accept").click();
+    await expect(decision.getByRole("textbox", { name: "Note (optional)" })).toBeVisible();
+    await decision.getByRole("button", { name: "Accept", exact: true }).last().click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect.poll(() => mock.posts.length).toBe(1);
+    expect(mock.posts[0]).toMatchObject({
+      path: `/api/v1/trips/${reviewIds.resubmission}/decisions?view=stage3`,
+      headers: { "if-match": '"v1"' },
+      body: {
+        decision: "accept",
+        proposalId: null,
+        reviewedRevisionId: mock.states.resubmission.review.trip.manualRevision?.id,
+      },
+    });
+    expect(mock.posts[0]?.body).not.toHaveProperty("reason");
+    expect(mock.posts[0]?.headers["idempotency-key"]).toMatch(uuid);
+    expect(mock.posts[0]?.headers["x-csrf-token"]).toBeTruthy();
+  },
+);
+
+test(
+  "Stage 3 duplicate dismissal and undo preserve the current version and old URL",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { staged: true });
+    await page.goto("/account/review/reconciliation?game=ats");
+    await expect(page.getByRole("button", { name: "Duplicates (1)" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.getByText("No duplicates are waiting for review.")).toBeVisible();
+    await page.getByRole("combobox", { name: "Game", exact: true }).selectOption("ets2");
+    await expect.poll(() => mock.duplicateLists.at(-1)?.get("game")).toBe("ets2");
+    await expect(page.getByRole("link", { name: /#104$/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /#207$/ })).toBeVisible();
+    await page.getByRole("button", { name: "Dismiss duplicate", exact: true }).click();
+    const action = page.locator(".dispatch-duplicate-action");
+    await expect(
+      action.getByRole("button", { name: "Dismiss duplicate", exact: true }),
+    ).toBeDisabled();
+    await action
+      .getByRole("textbox", { name: "Reason for dismissal" })
+      .fill("  Fictional separate deliveries.  ");
+    await action.getByRole("button", { name: "Dismiss duplicate", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(page.getByText("Duplicate dismissed.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Duplicates (0)" })).toBeVisible();
+    const status = page.getByRole("combobox", { name: "State", exact: true });
+    await status.selectOption("dismissed");
+    await page.getByRole("button", { name: "Undo dismissal", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Reviewed pair", exact: true })).toHaveCount(0);
+    await action.getByRole("button", { name: "Undo dismissal", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(page.getByText("Duplicate restored to the queue.", { exact: true })).toBeVisible();
+    expect(mock.posts.map(({ headers, body }) => [headers["if-match"], body])).toEqual([
+      ['"v1"', { reason: "Fictional separate deliveries." }],
+      ['"v2"', {}],
+    ]);
+    await status.selectOption("waiting");
+    await expect(page.getByRole("link", { name: /#104$/ })).toBeVisible();
+  },
+);
+
+for (const defensiveOwn of [false, true])
+  test(
+    `Stage 3 direct own review exposes no decision, evidence or ancillary reads (defensive fixture=${defensiveOwn})`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const mock = await mockReview(page, { staged: true, defensiveOwn });
+      const detail = `/api/v1/trips/${reviewIds.own}/review?view=stage3`;
+      await page.goto(`/account/review/${reviewIds.own}`);
+      await expect.poll(() => mock.details).toEqual([detail]);
+      await expect(
+        panel(page).getByText(defensiveOwn ? /cannot review your own manual report/ : /not found/i),
+      ).toBeVisible();
+      await expect(form(page)).toHaveCount(0);
+      await expect(panel(page).getByText("Reconciliation history", { exact: true })).toHaveCount(0);
+      await expect(panel(page).getByText("fictional-results-screen.png")).toHaveCount(0);
+      expect(mock.workspaceReads.map((params) => params.toString())).toEqual(["view=stage3"]);
+    },
+  );
+
 test(
   "overall review totals stay independent of filters and distinguish zero age from an empty queue",
   browserCase(["@functional"]),

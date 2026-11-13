@@ -58,7 +58,8 @@ export const defaultOrder = (tab: QueueTab): QueueOrder => (tab === "awaiting" ?
  * means any source and is never sent.
  */
 export function queueParams(search: URLSearchParams): QueueParams {
-  const tab: QueueTab = search.get("tab") === "decided" ? "decided" : "awaiting",
+  const view = search.get("tab"),
+    tab: QueueTab = view === "decided" || view === "resolved" ? "decided" : "awaiting",
     game = search.get("game"),
     source = search.get("source"),
     decision = search.get("decision"),

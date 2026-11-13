@@ -235,7 +235,7 @@ export const rejection = "Fictional mass on the screenshot\ndiffers from the rep
 const decision = (
   n: number,
   outcome: "accepted" | "rejected",
-  reason: string,
+  reason: string | null,
   decidedAt: string,
   overLimits = false,
 ): S["Decision"] => {
@@ -430,6 +430,8 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
 
 export type ReviewMockOptions = {
   locale?: "en" | "ru";
+  staged?: boolean;
+  defensiveOwn?: boolean;
   /** Awaiting list replaced by an empty page, only the viewer's own trip or an HTTP failure. */
   awaiting?: "empty" | "own" | number;
   /** Status of the first decision POST (later ones succeed). */
@@ -444,6 +446,9 @@ export type ReviewMockOptions = {
 };
 export type ReviewMock = {
   lists: URLSearchParams[];
+  duplicateLists: URLSearchParams[];
+  workspaceReads: URLSearchParams[];
+  details: string[];
   posts: { path: string; headers: Record<string, string>; body: Record<string, unknown> }[];
   states: Record<ReviewTrip, ReviewState>;
   /** Makes the awaiting list answer normally again. */
@@ -452,6 +457,55 @@ export type ReviewMock = {
   expire: () => void;
 };
 const order: ReviewTrip[] = ["late", "over", "telemetry", "own", "resubmission"];
+const computedAt = "2026-11-12T08:00:00.000Z";
+
+function stagedTrip(summary: S["TripSummary"], version: number): S["TripStage3ReviewQueueTrip"] {
+  const { review, ...trip } = summary;
+  return {
+    ...trip,
+    createdAt: summary.createdAt ?? computedAt,
+    number: summary.number ?? 1,
+    version,
+    submittedAt: review?.manualRevision?.submittedAt ?? null,
+  };
+}
+
+function stagedDetail(state: ReviewState, kind: ReviewTrip): S["TripStage3Review"] {
+  const { trip, facts: _facts, ...guard } = state.review;
+  const {
+    manualRevision,
+    evidence,
+    effectiveFacts,
+    decisions,
+    pendingProposalId,
+    reviewReasonCodes,
+  } = trip;
+  const source =
+    effectiveFacts?.provider === "ets2telemetry"
+      ? {
+          facts: [],
+          normalizedFacts: {
+            ...effectiveFacts,
+            provider: "ets2telemetry" as const,
+            sourceRecordId: uuid("47800000", 50),
+            factRevisionId: uuid("47800000", 51),
+            cargoDamagePercent: 0,
+          },
+        }
+      : null;
+  return {
+    ...guard,
+    summary: stagedTrip(state.summary, state.version),
+    effectiveFacts:
+      kind === "late" && effectiveFacts
+        ? { ...effectiveFacts, provider: "manual", actualDistanceM: "919000" }
+        : (effectiveFacts ?? null),
+    decisions,
+    pendingProposalId,
+    reviewReasonCodes,
+    sources: { manual: manualRevision ? { manualRevision, evidence } : null, telemetry: source },
+  };
+}
 
 /** Mocks the review queue, review reads, revisions, catalog labels, evidence and decisions. */
 export async function mockReview(page: Page, options: ReviewMockOptions = {}): Promise<ReviewMock> {
@@ -463,8 +517,26 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
   >;
   let awaiting = options.awaiting,
     expired = false;
+  const duplicateList = example("listReconciliationCandidates:stage-3-waiting")
+    .data as S["TripStage3DuplicateList"];
+  const candidate = duplicateList.items[0];
+  if (!candidate) throw new Error("SYNTHETIC_DUPLICATE_REQUIRED");
+  for (const [summary, source, number] of [
+    [candidate.primaryTrip, states.late.summary, 104],
+    [candidate.secondaryTrip, states.over.summary, 207],
+  ] as const) {
+    summary.id = source.id;
+    summary.number = number;
+    summary.origin = source.origin;
+    summary.destination = source.destination;
+    summary.cargo = source.cargo;
+    summary.owner = owners.late;
+  }
   const mock: ReviewMock = {
     lists: [],
+    duplicateLists: [],
+    workspaceReads: [],
+    details: [],
     posts: [],
     states,
     recover: () => {
@@ -475,6 +547,20 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
     },
   };
   const keyOf = (id: string) => order.find((key) => reviewIds[key] === id);
+  const stagedSummary = (): S["TripStage3ReviewSummary"] => {
+    const waiting = order.filter((key) => key !== "own" && states[key].summary.review?.hold);
+    const oldest = waiting.map((key) => states[key].summary.review?.createdAt).sort()[0] ?? null;
+    return {
+      computedAt,
+      waitingCount: waiting.length,
+      oldestQueuedAt: oldest,
+      oldestAgeSeconds: oldest
+        ? Math.floor((Date.parse(computedAt) - Date.parse(oldest)) / 1000)
+        : null,
+      duplicateCount: candidate.dismissed ? 0 : 1,
+    };
+  };
+  const error = (status: number) => ({ status, json: { error: { code: "PRIVATE_SENTINEL" } } });
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request(),
       url = new URL(request.url()),
@@ -485,15 +571,130 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
       if (!options.forbidden) self.data.capabilities.push("trips.review");
       return route.fulfill({ json: self });
     }
-    if (path === "/api/v1/me/workspace-summary" && url.searchParams.get("view") === "stage3")
+    const staged = url.searchParams.get("view") === "stage3";
+    if (path === "/api/v1/me/workspace-summary" && staged) {
+      mock.workspaceReads.push(url.searchParams);
       return route.fulfill({
         json: envelope({
-          computedAt: "2026-11-12T08:00:00.000Z",
-          ...(!options.forbidden && { legacyReviewQueue: { count: 4, oldestAgeSeconds: 7200 } }),
+          computedAt,
+          ...(!options.forbidden &&
+            (options.staged
+              ? { reviewQueue: stagedSummary() }
+              : { legacyReviewQueue: { count: 4, oldestAgeSeconds: 7200 } })),
         }),
       });
+    }
+    if (path === "/api/v1/trips/review-summary")
+      return route.fulfill(options.forbidden ? error(403) : { json: envelope(stagedSummary()) });
+    if (path === "/api/v1/members") return route.fulfill({ json: list(Object.values(owners)) });
+    if (path.startsWith("/api/v1/members/")) {
+      const owner = Object.values(owners).find(({ id }) => path.endsWith(id));
+      return route.fulfill(
+        owner ? { json: envelope({ member: owner, qualifications: [] }) } : error(404),
+      );
+    }
+    if (path === "/api/v1/reconciliation-candidates" && staged) {
+      mock.duplicateLists.push(url.searchParams);
+      const status = url.searchParams.get("status");
+      const game = url.searchParams.get("game");
+      const items =
+        (status === "dismissed") === candidate.dismissed && (!game || game === candidate.game)
+          ? [candidate]
+          : [];
+      return route.fulfill({ json: envelope({ items, total: items.length, nextCursor: null }) });
+    }
+    const dismissal = new RegExp(
+      `^/api/v1/reconciliation-candidates/${candidate.id}/(dismissals|dismissal-reversals)$`,
+    ).exec(path);
+    if (dismissal && request.method() === "POST") {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      mock.posts.push({ path, headers: request.headers(), body });
+      if (request.headers()["if-match"] !== `"v${candidate.version}"`)
+        return route.fulfill(error(409));
+      const dismiss = dismissal[1] === "dismissals";
+      if (dismiss === candidate.dismissed || (dismiss && !String(body.reason ?? "").trim()))
+        return route.fulfill(error(422));
+      candidate.dismissed = dismiss;
+      candidate.version++;
+      const result: S["TripStage3DuplicateDismissal"] = {
+        candidateId: candidate.id,
+        dismissed: dismiss,
+        dismissedAt: computedAt,
+        undoneAt: dismiss ? null : computedAt,
+        version: candidate.version,
+      };
+      return route.fulfill({
+        json: envelope(result),
+        status: 200,
+        headers: { ETag: `"v${result.version}"` },
+      });
+    }
     if (path === "/api/v1/trips") {
       mock.lists.push(url.searchParams);
+      if (staged) {
+        const resolved = url.searchParams.get("status") === "resolved";
+        const game = url.searchParams.get("game");
+        const ownerId = url.searchParams.get("ownerId");
+        const reason = url.searchParams.get("reasonCode");
+        const source = url.searchParams.get("source");
+        const cursor = url.searchParams.get("cursor");
+        const bound = `stage3.${[resolved, game, ownerId, reason, source].join(".")}`;
+        if (cursor && (expired || cursor !== bound)) return route.fulfill(error(409));
+        if (!resolved && typeof awaiting === "number") return route.fulfill(error(awaiting));
+        const items: S["TripStage3ReviewItem"][] = [];
+        for (const key of order) {
+          const state = states[key];
+          const { review: entry } = state.summary;
+          const trip = stagedTrip(state.summary, state.version);
+          if (
+            !entry ||
+            (key === "own" && !options.defensiveOwn) ||
+            (game && game !== trip.game) ||
+            (ownerId && ownerId !== trip.owner.id) ||
+            (source && !trip.sourceKinds.some((value) => value === source))
+          )
+            continue;
+          const latest = state.review.trip.decisions[0];
+          if (
+            resolved &&
+            latest &&
+            (latest.outcome === "accepted" || latest.outcome === "rejected")
+          ) {
+            const reasonCodes = latest.reasonCodes;
+            if (!reason || reasonCodes.includes(reason))
+              items.push({
+                state: "resolved",
+                trip,
+                reasonCodes,
+                decidedAt: latest.decidedAt,
+                outcome: latest.outcome,
+              });
+          } else if (!resolved && awaiting !== "empty" && entry.hold) {
+            const reasonCodes = entry.reasonCodes.length
+              ? entry.reasonCodes
+              : ["manual_review_required"];
+            if (!reason || reasonCodes.includes(reason))
+              items.push({
+                state: "waiting",
+                trip,
+                reasonCodes,
+                queuedAt: entry.createdAt,
+                manualRevision: entry.manualRevision,
+              });
+          }
+        }
+        const date = (item: S["TripStage3ReviewItem"]) =>
+          item.state === "resolved" ? item.decidedAt : item.queuedAt;
+        items.sort((left, right) => date(left).localeCompare(date(right)));
+        if (resolved || url.searchParams.get("order") === "desc") items.reverse();
+        return route.fulfill({
+          json: envelope({
+            items: options.paged ? (cursor ? items.slice(2) : items.slice(0, 2)) : items,
+            total: items.length,
+            nextCursor: options.paged && !cursor && items.length > 2 ? bound : null,
+          }),
+        });
+      }
       const hold = url.searchParams.get("hold") === "true",
         game = url.searchParams.get("game"),
         source = url.searchParams.get("source"),
@@ -527,17 +728,21 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
         return route.fulfill({ status: 404, json: { error: { code: "PRIVATE_SENTINEL" } } });
       const state = states[key],
         rest = match[2] ?? "";
-      if (rest === "/review")
+      if (rest === "/review") {
+        mock.details.push(path + url.search);
+        if (staged && key === "own" && !options.defensiveOwn) return route.fulfill(error(404));
         return route.fulfill({
-          json: envelope(state.review),
+          json: envelope(staged ? stagedDetail(state, key) : state.review),
           headers: { ETag: `"v${state.version}"` },
         });
+      }
+      mock.details.push(path + url.search);
       if (rest === "/manual-revisions") return route.fulfill({ json: list(revisions[key]) });
       if (rest === "/proposals" || rest === "/correction-requests" || rest === "/reconciliations")
         return route.fulfill({ json: list([]) });
       if (rest === "/decisions" && request.method() === "POST") {
         const body = request.postDataJSON() as Record<string, unknown>;
-        mock.posts.push({ path, headers: request.headers(), body });
+        mock.posts.push({ path: path + url.search, headers: request.headers(), body });
         if (mock.posts.length === 1 && options.firstDecision) {
           state.version++;
           return route.fulfill({
@@ -549,7 +754,7 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
           made = decision(
             10 + mock.posts.length,
             outcome,
-            String(body.reason),
+            typeof body.reason === "string" ? body.reason : null,
             "2026-11-01T12:00:00.000Z",
             body.confirmOverLimits === true,
           );

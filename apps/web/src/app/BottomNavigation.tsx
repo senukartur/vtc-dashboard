@@ -65,7 +65,7 @@ export function BottomNavigation({
   const self = session.self;
   if (!self) return null;
   const capabilities = self.capabilities;
-  const meta = matchRouteMeta(location.pathname);
+  const meta = matchRouteMeta(location.pathname, attention?.dispatch === "stage3");
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const role = primaryRole(self.member.roles);
   function choose(event: MouseEvent<HTMLAnchorElement>) {

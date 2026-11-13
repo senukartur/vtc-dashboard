@@ -1,6 +1,6 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { isPlainSelfClick } from "../../app/Navigation.js";
 import { useSession } from "../../app/Session.js";
 import { Button, Label, Select } from "../../shared/ui/primitives.js";
@@ -27,20 +27,28 @@ import {
   queueAge,
   reviewReasons,
 } from "./dispatch-model.js";
+import { ReconciliationHistory } from "./reconciliation-parts.js";
+import { selfReviewCode } from "./review-model.js";
 import "../trips/trips.css";
 import "../trips/trips-list.css";
 import "./review.css";
 
-export function DispatchReviewPage() {
+export function DispatchReviewPage({
+  reconciliationAlias = false,
+}: {
+  reconciliationAlias?: boolean;
+}) {
   const { t, i18n } = useTranslation("trips");
   const session = useSession();
   const memberId = session.self?.member.id;
   const timezone = session.self?.preferences.displayTimezone ?? "UTC";
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const location = useLocation();
+  const navigate = useNavigate();
   const wide = useWideLayout();
   const [search, setSearch] = useSearchParams();
-  const params = dispatchParams(search);
+  const raw = dispatchParams(search);
+  const params = reconciliationAlias ? { ...raw, tab: "duplicates" as const } : raw;
   const duplicates = params.tab === "duplicates";
   const resolved = params.tab === "resolved";
   const key = queryString(dispatchListQuery(params, null, locale));
@@ -69,7 +77,9 @@ export function DispatchReviewPage() {
     focusPanel.current = false;
     heading.current?.focus({ preventScroll: true });
   }, [selected]);
-  const back = dispatchSearch(search);
+  const backParams = new URLSearchParams(search);
+  if (reconciliationAlias) backParams.set("tab", "duplicates");
+  const back = dispatchSearch(backParams);
 
   function change(update: (next: URLSearchParams) => void) {
     const next = new URLSearchParams(window.location.search);
@@ -86,12 +96,17 @@ export function DispatchReviewPage() {
   }
   function tab(value: DispatchTab) {
     if (value === params.tab) return;
-    change((next) => {
+    const update = (next: URLSearchParams) => {
       if (value === "queue") next.delete("tab");
       else next.set("tab", value);
       next.delete("trip");
       next.delete("decision");
-    });
+    };
+    if (reconciliationAlias) {
+      const next = new URLSearchParams(window.location.search);
+      update(next);
+      navigate(`/account/review${dispatchSearch(next)}`);
+    } else change(update);
   }
   function select(event: MouseEvent<HTMLAnchorElement>, id: string) {
     if (!wide || !isPlainSelfClick(event)) return;
@@ -236,14 +251,19 @@ export function DispatchReviewPage() {
         <small className="review-timezone">{t("timesIn", { timezone })}</small>
       </div>
       {duplicates ? (
-        <DispatchDuplicates
-          game={params.game}
-          status={params.duplicateStatus}
-          memberId={memberId}
-          timezone={timezone}
-          changeStatus={(status) => filter("duplicates", status === "dismissed" ? status : "")}
-          back={back}
-        />
+        <>
+          <DispatchDuplicates
+            game={params.game}
+            status={params.duplicateStatus}
+            memberId={memberId}
+            timezone={timezone}
+            changeStatus={(status) => filter("duplicates", status === "dismissed" ? status : "")}
+            back={back}
+          />
+          {reconciliationAlias && raw.trip && (
+            <DispatchReconciliationHistory tripId={raw.trip} memberId={memberId} />
+          )}
+        </>
       ) : (
         <div className="review-layout" data-panel={selected ? "open" : undefined}>
           <div id="dispatch-list" tabIndex={-1} className="review-list-area">
@@ -322,5 +342,26 @@ export function DispatchReviewPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function DispatchReconciliationHistory({
+  tripId,
+  memberId,
+}: {
+  tripId: string;
+  memberId: string | undefined;
+}) {
+  const { t } = useTranslation("trips");
+  const query = useTripQuery(`/trips/${tripId}/review?view=stage3`, "TripStage3ReviewEnvelope");
+  const review = query.data?.data.data;
+  return review &&
+    review.summary.owner.id !== memberId &&
+    !review.blockedReasonCodes.includes(selfReviewCode) ? (
+    <ReconciliationHistory tripId={tripId} />
+  ) : review ? (
+    <p>{t("selfReview")}</p>
+  ) : (
+    <State query={query} />
   );
 }

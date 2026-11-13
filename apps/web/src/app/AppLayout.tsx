@@ -196,7 +196,7 @@ export function AppLayout({
             </Link>
             {live ? (
               <>
-                <Breadcrumb />
+                <Breadcrumb attention={attention} />
                 <div className="topbar-actions">
                   {session.state === "authenticated" &&
                     (session.eventsStage2Enabled ? (
