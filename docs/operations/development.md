@@ -236,6 +236,14 @@ Drain old workers before enabling the setting and run the same compatible releas
 
 For a target with Events on and published routes off, an ordinary apply or rollback checks route history before changing its intent or stopping services. It checks again with writers and jobs fenced before replacing the live configuration or applying grants. If the final check refuses the target, services stay fenced and the recovery intent identifies a compatible configuration by hash when one is available. Run `activation recover` to resume that exact configuration. If compatible retained bytes are unavailable, keep the fence and use the reviewed restore or forward recovery procedure. A flag change alone does not undo committed revisions. Old binaries can misread new route alerts or fail to serialize newly absent text.
 
+### Event draft activation
+
+The draft API uses migration `0028_faulty_caretaker` and starts with `EVENTS_DRAFTS_ENABLED` off. A normal release keeps the live settings. For separately authorized activation, use the same [staged module commands](#stage-product-modules-and-synthetic-data) and reviewed controls. After `activation prepare-stage`, set `EVENTS_DRAFTS_ENABLED=true` in the private activation candidate alongside the Events, Catalogs and published route settings. Retain the existing Events key. Run `activation validate`, `apply` and `inspect` to install and read back the conditional grants. Local Compose accepts the same flag in the private `.env` after the published route prerequisites are met.
+
+The conditional runtime supplement grants SELECT and INSERT on event metadata, drafts, draft DLCs and workflow receipts. It also grants UPDATE on the metadata publication pointer and mutable draft columns, and DELETE on draft DLCs for replacement. Jobs keeps the published route grants and has no draft privileges. The [Events guide](../development/events.md#drafts-and-publication-vtc-125) describes the API and session signal.
+
+Use a compatible API and jobs release before activation. After the first draft publication, the jobs release must recognize `published` as an initial scheduled revision when repairing notification material. Turning the draft flag off closes draft operations while published events remain available with the route flag on. Recover to a compatible release and keep the published route settings and grants. Committed drafts, receipts and publications are retained.
+
 ### Stage catalogs
 
 A trip from a real telemetry client stays in review until staff supply the missing facts, and those selections need catalog rows. Rows live in the database and are maintained with the [catalog administration page](../development/catalog-ui.md). The repository carries no game-derived data, and there is no trust record or evidence file to configure.

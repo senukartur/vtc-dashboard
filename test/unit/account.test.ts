@@ -1,36 +1,37 @@
 import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
 import { resolve } from "node:path";
-import { createApp } from "../../apps/api/src/app.ts";
+import { runInNewContext } from "node:vm";
 import { browserSchemaDocument, browserSchemaRef } from "@vtc/contracts/runtime";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { afterEach, expect, test, vi } from "vitest";
-import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
-import {
-  attemptFor,
-  command,
-  read,
-  readSelf,
-  selfEnvelope,
-  operations,
-} from "../../apps/web/src/features/account/transport.ts";
+import { createApp } from "../../apps/api/src/app.ts";
 import { clearPrivateQueries, createAppQueryClient } from "../../apps/web/src/app/session-cache.ts";
+import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import {
   legacyAccountSection,
   timezoneOptions,
   timezoneValid,
   visibleAccountSections,
 } from "../../apps/web/src/features/account/settings.ts";
+import { accountTranslations } from "../../apps/web/src/features/account/translations.ts";
+import {
+  attemptFor,
+  command,
+  operations,
+  read,
+  readSelf,
+  selfEnvelope,
+} from "../../apps/web/src/features/account/transport.ts";
+import { publicContent } from "../../apps/web/src/features/landing/content.ts";
 import {
   localeStorageKey,
   readStoredLocale,
-  writeStoredLocale,
   resolveInitialLocale,
+  writeStoredLocale,
 } from "../../apps/web/src/shared/i18n.ts";
-import { accountTranslations } from "../../apps/web/src/features/account/translations.ts";
-import { publicContent } from "../../apps/web/src/features/landing/content.ts";
 import { renderSessionProbe } from "../../apps/web/test/session-probe.mjs";
+
 const meta = { requestId: "synthetic-request" };
 const receipt = { data: { id: fixtureId, version: 1 }, meta };
 const csrf = { data: { token: "NONFUNCTIONAL_FIXTURE" }, meta };
@@ -190,18 +191,24 @@ test.each([
   ).rejects.toMatchObject({ kind });
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
-test("the real session provider exposes Stage 2 from one validated current self response", async () => {
+test("the session provider reads both independent Events capabilities from the validated current self response", async () => {
   const signal = new AbortController().signal;
   const self = accountFixture();
-  await expect(renderSessionProbe()).resolves.toBe("<output>checking:false</output>");
-  for (const [status, value, expected] of [
-    [200, "1", "authenticated:true"],
-    [200, null, "authenticated:false"],
-    [200, "true", "authenticated:false"],
-    [401, "1", "anonymous:false"],
-    [503, "1", "unavailable:false"],
+  await expect(renderSessionProbe()).resolves.toBe("<output>checking:false:false</output>");
+  for (const [status, stage2, drafts, expected] of [
+    [200, "1", "1", "authenticated:true:true"],
+    [200, "1", null, "authenticated:true:false"],
+    [200, null, "1", "authenticated:false:true"],
+    [200, null, null, "authenticated:false:false"],
+    [200, "true", "true", "authenticated:false:false"],
+    [401, "1", "1", "anonymous:false:false"],
+    [503, "1", "1", "unavailable:false:false"],
   ] as const) {
-    const headers = { ETag: '"v1"', ...(value === null ? {} : { "X-VTC-Events-Stage2": value }) };
+    const headers = {
+      ETag: '"v1"',
+      ...(stage2 === null ? {} : { "X-VTC-Events-Stage2": stage2 }),
+      ...(drafts === null ? {} : { "X-VTC-Events-Drafts": drafts }),
+    };
     const fetcher = vi
       .fn()
       .mockImplementation(async () => Response.json(self, { status, headers }));
@@ -226,6 +233,7 @@ test("the real session provider exposes Stage 2 from one validated current self 
     data: self,
     etag: '"v1"',
     eventsStage2Enabled: true,
+    eventsDraftsEnabled: false,
   });
   await expect(read("/me", selfEnvelope, signal)).resolves.toEqual({ data: self, etag: '"v1"' });
 });

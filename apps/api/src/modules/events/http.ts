@@ -10,7 +10,7 @@ import type { Events } from "./service.js";
 
 type S = components["schemas"];
 type LocaleQuery = { locale?: EventLocale };
-type CreationInput = S["EventInput"] | S["EventStage2PublishedCreationInput"];
+type CreationInput = S["EventInput"] | S["EventStage2CreationInput"];
 type UpdateInput = S["EventInput"] | S["EventStage2Input"];
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -37,6 +37,7 @@ export async function registerEventRoutes(
   const actors = new WeakMap<FastifyRequest, Actor>(),
     csrf = csrfProtection(identity.config);
   const stage2 = events.publishedRoutesEnabled;
+  const drafts = events.drafts;
   const locale = { type: "string", enum: ["en", "ru"] };
   const localeQuery = object({ locale });
   const localized = stage2 ? localeQuery : object({});
@@ -67,12 +68,24 @@ export async function registerEventRoutes(
     const a = await actor(request);
     await events.authorize(a, p.startsWith("/api/v1/admin/"));
     if (request.method !== "GET") csrf.check(request, a);
+    if (drafts && request.method === "DELETE" && p === "/api/v1/admin/events/:eventId") {
+      if (
+        request.headers["transfer-encoding"] !== undefined ||
+        (request.headers["content-length"] !== undefined &&
+          request.headers["content-length"] !== "0")
+      )
+        throw identityError(422);
+      // Fastify selects a parser from Content-Type even when Content-Length is zero.
+      if (request.headers["content-type"] !== undefined)
+        request.headers = { ...request.headers, "content-type": undefined };
+    }
   });
   app.addHook("preValidation", async (request) => {
     if (
       request.routeOptions.url &&
       owned(request.routeOptions.url) &&
       request.method !== "GET" &&
+      request.method !== "DELETE" &&
       request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json"
     )
       throw identityError(415);
@@ -222,19 +235,44 @@ export async function registerEventRoutes(
     },
     async (r) => envelope(r, await events.responseCounts(await actor(r), r.params.eventId)),
   );
+  if (stage2) {
+    app.get<{ Querystring: Page & LocaleQuery & { period?: "published" | "drafts" } }>(
+      "/api/v1/admin/events",
+      {
+        schema: {
+          querystring: object({
+            ...page,
+            locale,
+            period: { type: "string", enum: ["published", "drafts"] },
+          }),
+          response: { 200: ref("EventStage2EnvelopeAdminList") },
+        },
+      },
+      async (r) => envelope(r, await events.listAdmin(await actor(r), r.query)),
+    );
+  }
   app.post<{ Body: CreationInput; Querystring: LocaleQuery }>(
     "/api/v1/admin/events",
     {
       schema: {
-        body: wire("EventInput", "EventStage2PublishedCreationInput"),
+        body: wire(
+          "EventInput",
+          drafts ? "EventStage2CreationInput" : "EventStage2PublishedCreationInput",
+        ),
         ...(stage2 ? { querystring: localized } : {}),
         response: { 201: wire("EnvelopeEventMember", "EventStage2EnvelopeCreation") },
       },
     },
     async (r, reply) => {
       const current = await actor(r);
-      let result: Awaited<ReturnType<Events["create"] | Events["createPublished"]>>;
-      if ("platform" in r.body) {
+      let result:
+        | Awaited<ReturnType<Events["create"] | Events["createPublished"]>>
+        | { data: S["EventStage2Draft"]; version: number };
+      if ("draft" in r.body && r.body.draft === true) {
+        if (!drafts) throw identityError(422);
+        const { draft: _draft, ...definition } = r.body;
+        result = await drafts.create(current, key(r), definition);
+      } else if ("platform" in r.body) {
         const { draft: _draft, ...definition } = r.body;
         result = await events.createPublished(current, key(r), definition, r.query.locale ?? "en");
       } else {
@@ -244,6 +282,83 @@ export async function registerEventRoutes(
       return envelope(r, result.data);
     },
   );
+  if (drafts) {
+    const draftPath = "/api/v1/admin/events/drafts/:eventId";
+    app.get<{ Params: { eventId: string } }>(
+      draftPath,
+      {
+        schema: {
+          params,
+          querystring: object({}),
+          response: { 200: ref("EventStage2EnvelopeDraft") },
+        },
+      },
+      async (r, reply) => {
+        const result = await drafts.get(await actor(r), r.params.eventId);
+        reply.header("ETag", `"v${result.version}"`);
+        return envelope(r, result.data);
+      },
+    );
+    app.patch<{ Params: { eventId: string }; Body: S["EventStage2DraftInput"] }>(
+      draftPath,
+      {
+        schema: {
+          params,
+          querystring: object({}),
+          body: ref("EventStage2DraftInput"),
+          response: { 200: ref("EventStage2EnvelopeDraft") },
+        },
+      },
+      async (r, reply) => {
+        const result = await drafts.update(
+          await actor(r),
+          r.params.eventId,
+          key(r),
+          expected(r),
+          r.body,
+        );
+        reply.header("ETag", `"v${result.version}"`);
+        return envelope(r, result.data);
+      },
+    );
+    app.delete<{ Params: { eventId: string } }>(
+      "/api/v1/admin/events/:eventId",
+      {
+        schema: {
+          params,
+          querystring: object({}),
+          response: { 200: ref("EventStage2EnvelopeDraftDeletion") },
+        },
+      },
+      async (r, reply) => {
+        const result = await drafts.discard(await actor(r), r.params.eventId, key(r), expected(r));
+        reply.header("ETag", `"v${result.version}"`);
+        return envelope(r, result.data);
+      },
+    );
+    app.post<{ Params: { eventId: string }; Querystring: LocaleQuery }>(
+      "/api/v1/admin/events/:eventId/publication",
+      {
+        schema: {
+          params,
+          querystring: localeQuery,
+          body: ref("EventStage2PublicationInput"),
+          response: { 200: ref("EventStage2EnvelopeMember") },
+        },
+      },
+      async (r, reply) => {
+        const result = await drafts.publish(
+          await actor(r),
+          r.params.eventId,
+          key(r),
+          expected(r),
+          r.query.locale ?? "en",
+        );
+        reply.header("ETag", `"v${result.version}"`);
+        return envelope(r, result.data);
+      },
+    );
+  }
   app.patch<{ Params: { eventId: string }; Body: UpdateInput; Querystring: LocaleQuery }>(
     "/api/v1/admin/events/:eventId",
     {

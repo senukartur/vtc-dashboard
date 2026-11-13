@@ -81,6 +81,7 @@ export async function registerIdentityRoutes(
   app: FastifyInstance,
   identity: Identity,
   eventsStage2Enabled = false,
+  eventsDraftsEnabled = false,
 ) {
   const ownedRoute = (route: string) =>
     route.startsWith("/api/v1/auth/") ||
@@ -191,8 +192,10 @@ export async function registerIdentityRoutes(
     {
       schema: schema("EnvelopeSelf"),
       onSend: async (request, reply) => {
-        if (eventsStage2Enabled && request.method === "GET" && reply.statusCode === 200)
-          reply.header("X-VTC-Events-Stage2", "1");
+        if (request.method === "GET" && reply.statusCode === 200) {
+          if (eventsStage2Enabled) reply.header("X-VTC-Events-Stage2", "1");
+          if (eventsDraftsEnabled) reply.header("X-VTC-Events-Drafts", "1");
+        }
       },
     },
     async (request, reply) => {
