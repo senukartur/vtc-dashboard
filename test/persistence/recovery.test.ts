@@ -2264,6 +2264,23 @@ await recoveryTest(
     const read = (sql: string) => connection.query<RowDataPacket[]>(sql).then(([rows]) => rows);
     const history = () =>
       read("SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version");
+    const receiptKey = id(9);
+    const fingerprint = Buffer.alloc(32, 0xab);
+    const writeReceipt = (operation: string, result: object) =>
+      connection.execute(
+        "INSERT INTO reconciliation_commands (actor_id,operation,`key`,fingerprint,result,created_at) VALUES (?,?,?,?,?,?)",
+        [actor, operation, receiptKey, fingerprint, JSON.stringify(result), createdAt],
+      );
+    const receipts = async () => {
+      const rows = await read(
+        "SELECT operation,operation+0 ordinal,CAST(`key` AS CHAR) receiptKey,HEX(fingerprint) fingerprint,result FROM reconciliation_commands ORDER BY ordinal",
+      );
+      return rows.map((row) => ({ ...row, ordinal: Number(row.ordinal) }));
+    };
+    const legacyReceipts = [
+      { operation: "merge", result: { data: { id: root }, version: 4 } },
+      { operation: "reverse", result: { data: { id: root }, version: 5 } },
+    ];
     async function seedPrefix() {
       for (const [userId, email] of [
         [owner, "owner@example.invalid"],
@@ -2307,6 +2324,7 @@ await recoveryTest(
         "INSERT INTO audit_entries (id,actor_kind,actor_id,operation,subject_kind,subject_id,occurred_at,reason) VALUES (?,'user',?,'report.reviewed','trip',?,?,'staff_review')",
         [id(8), actor, root, createdAt],
       );
+      for (const { operation, result } of legacyReceipts) await writeReceipt(operation, result);
     }
     async function backfilled() {
       const queue = await read(
@@ -2333,6 +2351,16 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 29);
       await seedPrefix();
       const prefix = await history();
+      const legacy = await receipts();
+      assert.deepEqual(
+        legacy,
+        legacyReceipts.map((receipt, index) => ({
+          ...receipt,
+          ordinal: index + 1,
+          receiptKey,
+          fingerprint: fingerprint.toString("hex").toUpperCase(),
+        })),
+      );
 
       assert.equal(await runMigrations(settings), 1);
       assert.equal(await runMigrations(settings), 0);
@@ -2390,27 +2418,67 @@ await recoveryTest(
           [candidateId, actor, createdAt, reason, version, undoneBy, undoneAt],
         );
       for (const result of [
-        () => dismiss(candidate, "  \t", 1),
+        () => dismiss(candidate, "  \t", 2),
         () => dismiss(candidate, "Fictional reason", 0),
-        () => dismiss(candidate, "Fictional reason", 1, actor),
-        () => dismiss(candidate, "Fictional reason", 1, null, later),
-        () => dismiss(candidate, "Fictional reason", 1, actor, "2026-01-01 00:00:00.000"),
+        () => dismiss(candidate, "Fictional reason", 1),
+        () => dismiss(candidate, "Fictional reason", 2, actor),
+        () => dismiss(candidate, "Fictional reason", 2, null, later),
+        () => dismiss(candidate, "Fictional reason", 2, actor, "2026-01-01 00:00:00.000"),
       ])
         await assert.rejects(result(), hasCode("ER_CHECK_CONSTRAINT_VIOLATED"));
       await assert.rejects(
-        dismiss(id(99), "Fictional reason", 1),
+        dismiss(id(99), "Fictional reason", 2),
         hasCode("ER_NO_REFERENCED_ROW_2"),
       );
-      await dismiss(candidate, "Fictional reason", 1);
-      await assert.rejects(dismiss(candidate, "Fictional reason", 1), hasCode("ER_DUP_ENTRY"));
+      await dismiss(candidate, "Fictional reason", 2);
+      const dismissal = {
+        data: {
+          candidateId: candidate,
+          version: 2,
+          dismissed: true,
+          dismissedAt: "2026-01-02T00:00:00.123Z",
+          undoneAt: null,
+        },
+        version: 2,
+      };
+      await writeReceipt("dismiss", dismissal);
+      await assert.rejects(writeReceipt("dismiss", dismissal), hasCode("ER_DUP_ENTRY"));
+      await assert.rejects(dismiss(candidate, "Fictional reason", 2), hasCode("ER_DUP_ENTRY"));
       await assert.rejects(
         connection.execute("DELETE FROM reconciliation_candidates WHERE id=?", [candidate]),
         hasCode("ER_ROW_IS_REFERENCED_2"),
       );
       await connection.execute(
-        "UPDATE reconciliation_candidate_dismissals SET undone_by=?,undone_at=?,version=2 WHERE candidate_id=?",
+        "UPDATE reconciliation_candidate_dismissals SET undone_by=?,undone_at=?,version=3 WHERE candidate_id=?",
         [owner, later, candidate],
       );
+      const undo = {
+        data: {
+          ...dismissal.data,
+          version: 3,
+          dismissed: false,
+          undoneAt: "2026-01-03T00:00:00.456Z",
+        },
+        version: 3,
+      };
+      await writeReceipt("undo_dismissal", undo);
+      assert.deepEqual(await receipts(), [
+        ...legacy,
+        {
+          operation: "dismiss",
+          ordinal: 3,
+          receiptKey,
+          fingerprint: fingerprint.toString("hex").toUpperCase(),
+          result: dismissal,
+        },
+        {
+          operation: "undo_dismissal",
+          ordinal: 4,
+          receiptKey,
+          fingerprint: fingerprint.toString("hex").toUpperCase(),
+          result: undo,
+        },
+      ]);
       await assert.rejects(
         connection.execute(
           "UPDATE reconciliation_candidate_dismissals SET undone_by=? WHERE candidate_id=?",

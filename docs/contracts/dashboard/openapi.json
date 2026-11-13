@@ -12484,7 +12484,7 @@
           "trips"
         ],
         "summary": "Dismiss the current reconciliation candidate snapshot",
-        "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections.",
+        "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections. Before the first dismissal the implicit version is 1. The first stored dismissal returns version 2 and undo advances it. An identical retry rechecks current authority and returns the stored result and its ETag even after dismissal state changes. Reusing the key with a different fingerprint returns 409 IDEMPOTENCY_CONFLICT.",
         "security": [
           {
             "sessionCookie": [],
@@ -12565,7 +12565,7 @@
           "trips"
         ],
         "summary": "Undo the current reconciliation candidate dismissal",
-        "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections.",
+        "description": "Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections. Before the first dismissal the implicit version is 1. The first stored dismissal returns version 2 and undo advances it. An identical retry rechecks current authority and returns the stored result and its ETag even after dismissal state changes. Reusing the key with a different fingerprint returns 409 IDEMPOTENCY_CONFLICT.",
         "security": [
           {
             "sessionCookie": [],
@@ -26615,17 +26615,219 @@
         ],
         "additionalProperties": false
       },
+      "TripStage3TelemetryNormalizedFacts": {
+        "type": "object",
+        "properties": {
+          "factRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "provider": {
+            "type": "string",
+            "const": "ets2telemetry"
+          },
+          "actualStartAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actualCompletedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actualDistanceM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plannedDistanceM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cargoMassKg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveCatalogPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveCatalogPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cargo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveCatalogPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trailers": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/EffectiveCatalogPin"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 10
+          },
+          "trailersComplete": {
+            "type": "boolean"
+          },
+          "wholeTripDistanceSupported": {
+            "type": "boolean"
+          },
+          "ruleContextComplete": {
+            "type": "boolean"
+          },
+          "recordedTelemetry": {
+            "description": "Recorded classifications for this telemetry source fact.",
+            "type": "object",
+            "properties": {
+              "jobType": {
+                "type": "string",
+                "enum": [
+                  "quick-job",
+                  "freight-market",
+                  "cargo-market",
+                  "world-of-trucks",
+                  "unknown"
+                ]
+              },
+              "gameMode": {
+                "type": "string",
+                "enum": [
+                  "single-player",
+                  "truckersmp",
+                  "haulmp",
+                  "unknown"
+                ]
+              },
+              "hardModeResult": {
+                "type": "string",
+                "enum": [
+                  "qualified",
+                  "not-qualified",
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "jobType",
+              "gameMode",
+              "hardModeResult"
+            ],
+            "additionalProperties": false
+          },
+          "sourceRecordId": {
+            "$ref": "#/components/schemas/Id",
+            "description": "Internal source evidence record ID for this normalized fact revision."
+          },
+          "cargoDamagePercent": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Percentage from normalized telemetry damage fraction. Null when the value is unavailable or invalid."
+          }
+        },
+        "required": [
+          "factRevisionId",
+          "provider",
+          "actualStartAt",
+          "actualCompletedAt",
+          "actualDistanceM",
+          "plannedDistanceM",
+          "cargoMassKg",
+          "origin",
+          "destination",
+          "cargo",
+          "trailers",
+          "trailersComplete",
+          "wholeTripDistanceSupported",
+          "ruleContextComplete",
+          "sourceRecordId",
+          "cargoDamagePercent"
+        ],
+        "additionalProperties": false,
+        "description": "Comparable normalized fields from the selected telemetry source fact revision. Null denotes an unavailable value. This source provides no normalized depots or companies."
+      },
       "TripStage3TelemetryReview": {
         "type": "object",
         "properties": {
+          "normalizedFacts": {
+            "$ref": "#/components/schemas/TripStage3TelemetryNormalizedFacts"
+          },
           "facts": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SafeSourceFact"
-            }
+            },
+            "description": "Safe per-field provenance for the selected telemetry source fact revision."
           }
         },
         "required": [
+          "normalizedFacts",
           "facts"
         ],
         "additionalProperties": false
@@ -27129,7 +27331,7 @@
           },
           "version": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 2,
             "maximum": 4294967295
           },
           "dismissed": {

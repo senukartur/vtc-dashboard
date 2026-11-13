@@ -9730,16 +9730,16 @@
             "origin": null,
             "destination": null,
             "cargo": null,
-            "actualDistanceM": "12500.5",
-            "reportingAt": null,
+            "actualDistanceM": "12900.75",
+            "reportingAt": "2026-10-20T10:05:00.000Z",
             "sourceKinds": [
               "ets2telemetry"
             ],
-            "reportingBasis": "unknown",
+            "reportingBasis": "actual_completion",
             "number": 36,
             "createdAt": "2026-01-04T12:00:00.125Z"
           },
-          "factRevisionId": "41000000-0000-4000-8000-000000000001",
+          "factRevisionId": "e1390000-0000-4000-8000-000000000041",
           "evaluation": {
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": null,
@@ -9768,10 +9768,108 @@
           "sources": {
             "manual": null,
             "telemetry": {
-              "facts": []
+              "normalizedFacts": {
+                "factRevisionId": "e1390000-0000-4000-8000-000000000041",
+                "provider": "ets2telemetry",
+                "sourceRecordId": "e1390000-0000-4000-8000-000000000042",
+                "actualStartAt": "2026-10-20T09:07:00.000Z",
+                "actualCompletedAt": "2026-10-20T10:05:00.000Z",
+                "actualDistanceM": "12900.75",
+                "plannedDistanceM": null,
+                "cargoMassKg": "7250.5",
+                "origin": {
+                  "entityId": "51000000-0000-4000-8000-000000000001"
+                },
+                "destination": {
+                  "entityId": "51000000-0000-4000-8000-000000000003"
+                },
+                "cargo": {
+                  "entityId": "e1390000-0000-4000-8000-000000000044"
+                },
+                "trailers": [
+                  {
+                    "entityId": "51000000-0000-4000-8000-000000000004"
+                  }
+                ],
+                "trailersComplete": true,
+                "wholeTripDistanceSupported": true,
+                "ruleContextComplete": true,
+                "cargoDamagePercent": null
+              },
+              "facts": [
+                {
+                  "field": "actual_start",
+                  "sourceValue": "2026-10-20T09:07:00.000Z",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "actual_completion",
+                  "sourceValue": "2026-10-20T10:05:00.000Z",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "actual_distance",
+                  "sourceValue": "12900.75",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "cargo_mass",
+                  "sourceValue": "7250.5",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                }
+              ]
             }
           },
-          "effectiveFacts": null
+          "effectiveFacts": {
+            "factRevisionId": "e1390000-0000-4000-8000-000000000041",
+            "provider": "ets2telemetry",
+            "actualStartAt": "2026-10-20T09:07:00.000Z",
+            "actualCompletedAt": "2026-10-20T10:05:00.000Z",
+            "actualDistanceM": "12900.75",
+            "plannedDistanceM": null,
+            "cargoMassKg": "7250.5",
+            "origin": {
+              "entityId": "51000000-0000-4000-8000-000000000001"
+            },
+            "destination": {
+              "entityId": "51000000-0000-4000-8000-000000000003"
+            },
+            "cargo": {
+              "entityId": "e1390000-0000-4000-8000-000000000044"
+            },
+            "trailers": [
+              {
+                "entityId": "51000000-0000-4000-8000-000000000004"
+              }
+            ],
+            "trailersComplete": true,
+            "wholeTripDistanceSupported": true,
+            "ruleContextComplete": true
+          }
         },
         "meta": {
           "requestId": "synthetic-stage-3"
@@ -9886,10 +9984,106 @@
               "evidence": []
             },
             "telemetry": {
-              "facts": []
+              "normalizedFacts": {
+                "factRevisionId": "e1390000-0000-4000-8000-000000000041",
+                "provider": "ets2telemetry",
+                "sourceRecordId": "e1390000-0000-4000-8000-000000000042",
+                "actualStartAt": "2026-10-20T09:07:00.000Z",
+                "actualCompletedAt": "2026-10-20T10:05:00.000Z",
+                "actualDistanceM": "12900.75",
+                "plannedDistanceM": null,
+                "cargoMassKg": "7250.5",
+                "origin": {
+                  "entityId": "51000000-0000-4000-8000-000000000001"
+                },
+                "destination": {
+                  "entityId": "51000000-0000-4000-8000-000000000003"
+                },
+                "cargo": {
+                  "entityId": "e1390000-0000-4000-8000-000000000044"
+                },
+                "trailers": [
+                  {
+                    "entityId": "51000000-0000-4000-8000-000000000004"
+                  }
+                ],
+                "trailersComplete": true,
+                "wholeTripDistanceSupported": true,
+                "ruleContextComplete": true,
+                "cargoDamagePercent": 0
+              },
+              "facts": [
+                {
+                  "field": "actual_start",
+                  "sourceValue": "2026-10-20T09:07:00.000Z",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "actual_completion",
+                  "sourceValue": "2026-10-20T10:05:00.000Z",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "actual_distance",
+                  "sourceValue": "12900.75",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                },
+                {
+                  "field": "cargo_mass",
+                  "sourceValue": "7250.5",
+                  "sourceId": null,
+                  "sourceLocale": null,
+                  "mapNamespace": null,
+                  "evidenceBasis": "event",
+                  "evidenceRecordId": "e1390000-0000-4000-8000-000000000042",
+                  "reasonCode": null,
+                  "candidateEntityIds": []
+                }
+              ]
             }
           },
-          "effectiveFacts": null
+          "effectiveFacts": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "provider": "manual",
+            "actualStartAt": null,
+            "actualCompletedAt": null,
+            "actualDistanceM": "12500.5",
+            "plannedDistanceM": null,
+            "cargoMassKg": "0",
+            "origin": {
+              "entityId": "51000000-0000-4000-8000-000000000001"
+            },
+            "destination": {
+              "entityId": "51000000-0000-4000-8000-000000000002"
+            },
+            "cargo": null,
+            "trailers": [
+              {
+                "entityId": "51000000-0000-4000-8000-000000000004"
+              }
+            ],
+            "trailersComplete": true,
+            "wholeTripDistanceSupported": true,
+            "ruleContextComplete": false
+          }
         },
         "meta": {
           "requestId": "synthetic-stage-3"

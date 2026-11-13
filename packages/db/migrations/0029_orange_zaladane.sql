@@ -13,7 +13,7 @@ CREATE TABLE `reconciliation_candidate_dismissals` (
 	`undone_by` binary(36),
 	`undone_at` datetime(3),
 	CONSTRAINT `reconciliation_candidate_dismissals_candidate_id` PRIMARY KEY(`candidate_id`),
-	CONSTRAINT `recon_dismissal_version_positive` CHECK(`reconciliation_candidate_dismissals`.`version` > 0),
+	CONSTRAINT `recon_dismissal_persisted_version` CHECK(`reconciliation_candidate_dismissals`.`version` > 1),
 	CONSTRAINT `recon_dismissal_reason_present` CHECK(REGEXP_LIKE(`reconciliation_candidate_dismissals`.`reason`, '[^[:space:]]')),
 	CONSTRAINT `recon_dismissal_undo_pair` CHECK((`reconciliation_candidate_dismissals`.`undone_by` IS NULL) = (`reconciliation_candidate_dismissals`.`undone_at` IS NULL)),
 	CONSTRAINT `recon_dismissal_undo_time` CHECK(`reconciliation_candidate_dismissals`.`undone_at` >= `reconciliation_candidate_dismissals`.`dismissed_at`)
@@ -23,6 +23,7 @@ ALTER TABLE `audit_entries` MODIFY COLUMN `subject_kind` enum('company','user','
 ALTER TABLE `audit_entries` ADD `details` json;--> statement-breakpoint
 ALTER TABLE `qualification_states` ADD `eligible_since` datetime(3);--> statement-breakpoint
 ALTER TABLE `trips` ADD `queued_at` datetime(3);--> statement-breakpoint
+ALTER TABLE `reconciliation_commands` MODIFY COLUMN `operation` enum('merge','reverse','dismiss','undo_dismissal') NOT NULL;--> statement-breakpoint
 ALTER TABLE `trip_review_reasons` ADD CONSTRAINT `trip_review_reasons_trip_id_trips_id_fk` FOREIGN KEY (`trip_id`) REFERENCES `trips`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `reconciliation_candidate_dismissals` ADD CONSTRAINT `recon_dismissal_candidate_fk` FOREIGN KEY (`candidate_id`) REFERENCES `reconciliation_candidates`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `reconciliation_candidate_dismissals` ADD CONSTRAINT `recon_dismissal_actor_fk` FOREIGN KEY (`dismissed_by`) REFERENCES `identity_memberships`(`user_id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint

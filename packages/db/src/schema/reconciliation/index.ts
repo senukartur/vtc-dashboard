@@ -96,7 +96,7 @@ export const reconciliationCandidateDismissals = mysqlTable(
       columns: [t.undoneBy],
       foreignColumns: [membership.userId],
     }),
-    check("recon_dismissal_version_positive", sql`${t.version} > 0`),
+    check("recon_dismissal_persisted_version", sql`${t.version} > 1`),
     check("recon_dismissal_reason_present", sql`REGEXP_LIKE(${t.reason}, '[^[:space:]]')`),
     check("recon_dismissal_undo_pair", sql`(${t.undoneBy} IS NULL) = (${t.undoneAt} IS NULL)`),
     check("recon_dismissal_undo_time", sql`${t.undoneAt} >= ${t.dismissedAt}`),
@@ -157,7 +157,7 @@ export const reconciliationCommands = mysqlTable(
     actorId: idColumn("actor_id")
       .notNull()
       .references(() => membership.userId, { onDelete: "restrict" }),
-    operation: mysqlEnum("operation", ["merge", "reverse"]).notNull(),
+    operation: mysqlEnum("operation", ["merge", "reverse", "dismiss", "undo_dismissal"]).notNull(),
     key: idColumn("key").notNull(),
     fingerprint: opaqueColumn("fingerprint", { length: 32 }).notNull(),
     result: json("result").$type<unknown>().notNull(),

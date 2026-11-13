@@ -254,6 +254,50 @@ test("Stage 3 review compares independently present manual and telemetry sources
       review({ ...response, data: { ...response.data, sources: { ...sources, rawPayload: {} } } }),
     ).toBe(false);
     if (sources.telemetry) {
+      const { normalizedFacts, facts } = sources.telemetry;
+      expect(normalizedFacts.provider).toBe("ets2telemetry");
+      expect(normalizedFacts.plannedDistanceM).toBeNull();
+      expect(facts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "actual_distance",
+            evidenceRecordId: normalizedFacts.sourceRecordId,
+          }),
+        ]),
+      );
+      if (kind === "mixed") {
+        expect(response.data.effectiveFacts.provider).toBe("manual");
+        expect(normalizedFacts.factRevisionId).not.toBe(
+          response.data.effectiveFacts.factRevisionId,
+        );
+        expect(normalizedFacts.actualDistanceM).not.toBe(
+          sources.manual.manualRevision.fields.actualDistanceM,
+        );
+        expect(normalizedFacts.destination.entityId).not.toBe(
+          sources.manual.manualRevision.fields.destination.entityId,
+        );
+        expect(normalizedFacts.cargoDamagePercent).toBe(0);
+      } else {
+        expect(normalizedFacts.cargoDamagePercent).toBeNull();
+      }
+      const normalized = validate.compile({
+        $ref: "urn:vtc:browser:v1#/$defs/TripStage3TelemetryNormalizedFacts",
+      });
+      for (const patch of [
+        { provider: "manual" },
+        { sourceRecordId: "raw-provider-id" },
+        { origin: { ...normalizedFacts.origin, rawPayload: {} } },
+        { cargoDamagePercent: -1 },
+        { cargoDamagePercent: 101 },
+        { cargoDamagePercent: "10" },
+        { originCompanyId: newId() },
+        { rawPayload: {} },
+      ])
+        expect(normalized({ ...normalizedFacts, ...patch })).toBe(false);
+      const checkSource = validate.compile({
+        $ref: "urn:vtc:browser:v1#/$defs/TripStage3TelemetryReview",
+      });
+      expect(checkSource({ facts })).toBe(false);
       expect(
         review({
           ...response,

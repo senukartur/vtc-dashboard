@@ -2394,7 +2394,7 @@ export interface paths {
         put?: never;
         /**
          * Undo the current reconciliation candidate dismissal
-         * @description Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections.
+         * @description Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections. Before the first dismissal the implicit version is 1. The first stored dismissal returns version 2 and undo advances it. An identical retry rechecks current authority and returns the stored result and its ETag even after dismissal state changes. Reusing the key with a different fingerprint returns 409 IDEMPOTENCY_CONFLICT.
          */
         post: operations["undoReconciliationCandidateDismissal"];
         delete?: never;
@@ -2414,7 +2414,7 @@ export interface paths {
         put?: never;
         /**
          * Dismiss the current reconciliation candidate snapshot
-         * @description Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections.
+         * @description Require current trips.review and exclude the reviewer's own trips before filtering, counts, keyset paging or commands. Verify both trip versions and the candidate and dismissal state in the command transaction. The If-Match value versions this candidate's dismissal state; a new snapshot has its own identity and initial version. A dismissal never applies to a different snapshot. The private reason is not in audit or candidate projections. Before the first dismissal the implicit version is 1. The first stored dismissal returns version 2 and undo advances it. An identical retry rechecks current authority and returns the stored result and its ETag even after dismissal state changes. Reusing the key with a different fingerprint returns 409 IDEMPOTENCY_CONFLICT.
          */
         post: operations["dismissReconciliationCandidate"];
         delete?: never;
@@ -5952,8 +5952,42 @@ export interface components {
             data: components["schemas"]["TripStage3ReviewSummary"];
             meta: components["schemas"]["Meta"];
         };
+        /** @description Comparable normalized fields from the selected telemetry source fact revision. Null denotes an unavailable value. This source provides no normalized depots or companies. */
+        TripStage3TelemetryNormalizedFacts: {
+            actualCompletedAt: string | null;
+            actualDistanceM: components["schemas"]["Decimal"] | null;
+            actualStartAt: string | null;
+            cargo: components["schemas"]["EffectiveCatalogPin"] | null;
+            /** @description Percentage from normalized telemetry damage fraction. Null when the value is unavailable or invalid. */
+            cargoDamagePercent: number | null;
+            cargoMassKg: components["schemas"]["Decimal"] | null;
+            destination: components["schemas"]["EffectiveCatalogPin"] | null;
+            /** Format: uuid */
+            factRevisionId: string;
+            origin: components["schemas"]["EffectiveCatalogPin"] | null;
+            plannedDistanceM: components["schemas"]["Decimal"] | null;
+            /** @constant */
+            provider: "ets2telemetry";
+            /** @description Recorded classifications for this telemetry source fact. */
+            recordedTelemetry?: {
+                /** @enum {string} */
+                gameMode: "single-player" | "truckersmp" | "haulmp" | "unknown";
+                /** @enum {string} */
+                hardModeResult: "qualified" | "not-qualified" | "unknown";
+                /** @enum {string} */
+                jobType: "quick-job" | "freight-market" | "cargo-market" | "world-of-trucks" | "unknown";
+            };
+            ruleContextComplete: boolean;
+            /** @description Internal source evidence record ID for this normalized fact revision. */
+            sourceRecordId: components["schemas"]["Id"];
+            trailers: (components["schemas"]["EffectiveCatalogPin"] | null)[];
+            trailersComplete: boolean;
+            wholeTripDistanceSupported: boolean;
+        };
         TripStage3TelemetryReview: {
+            /** @description Safe per-field provenance for the selected telemetry source fact revision. */
             facts: components["schemas"]["SafeSourceFact"][];
+            normalizedFacts: components["schemas"]["TripStage3TelemetryNormalizedFacts"];
         };
         TripStage3WaitingReviewItem: {
             manualRevision: components["schemas"]["TripReviewRevision"] | null;

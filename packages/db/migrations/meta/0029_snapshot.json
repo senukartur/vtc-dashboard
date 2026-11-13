@@ -8966,9 +8966,9 @@
       },
       "uniqueConstraints": {},
       "checkConstraint": {
-        "recon_dismissal_version_positive": {
-          "name": "recon_dismissal_version_positive",
-          "value": "`reconciliation_candidate_dismissals`.`version` > 0"
+        "recon_dismissal_persisted_version": {
+          "name": "recon_dismissal_persisted_version",
+          "value": "`reconciliation_candidate_dismissals`.`version` > 1"
         },
         "recon_dismissal_reason_present": {
           "name": "recon_dismissal_reason_present",
@@ -9167,7 +9167,7 @@
         },
         "operation": {
           "name": "operation",
-          "type": "enum('merge','reverse')",
+          "type": "enum('merge','reverse','dismiss','undo_dismissal')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
