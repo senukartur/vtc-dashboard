@@ -89,7 +89,7 @@
   min-height: var(--target-min);
   justify-content: flex-start;
   color: var(--foreground);
-  font-weight: 600;
+  font-weight: var(--button-font-weight);
   text-align: left;
   white-space: normal;
 }

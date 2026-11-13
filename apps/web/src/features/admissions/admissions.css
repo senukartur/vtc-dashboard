@@ -38,7 +38,7 @@
   background: var(--landing-amber, var(--accent));
   color: var(--landing-on-amber, white);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--button-font-weight);
 }
 .landing .application-card form > .button-primary:hover:not(:disabled) {
   background: var(--landing-amber-hover, var(--accent));

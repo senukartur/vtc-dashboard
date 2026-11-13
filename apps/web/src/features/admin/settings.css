@@ -312,7 +312,7 @@
   border-color: var(--destructive);
   background: var(--rejected-surface);
   color: var(--destructive);
-  font-weight: 700;
+  font-weight: var(--button-font-weight);
 }
 .dialog-content:has(.settings-dialog) .settings-danger-solid:hover:not(:disabled) {
   background: var(--surface-active);

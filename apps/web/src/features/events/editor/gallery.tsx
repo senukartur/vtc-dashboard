@@ -514,13 +514,25 @@ function ReadyScreenshot({
     <li className="event-editor-media-row">
       <div className="event-editor-gallery-thumb">
         <GalleryImage eventId={eventId} media={media} />
+        {media.isCover && (
+          <span className="event-editor-cover-tag event-editor-tag">{text.cover}</span>
+        )}
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="event-editor-remove-image"
+          aria-label={`${text.delete} ${media.position + 1}`}
+          onClick={() => void update(media.id, null, onRemoved)}
+        >
+          ×
+        </Button>
       </div>
       <div className="stack">
         <div className="event-editor-inline">
           <strong>
             {text.screenshot} {media.position + 1}
           </strong>
-          {media.isCover && <span className="event-editor-tag">{text.cover}</span>}
         </div>
         <div className="event-editor-inline">
           <div className="event-editor-caption">
@@ -574,14 +586,6 @@ function ReadyScreenshot({
               {text.moveLater}
             </Button>
           )}
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => void update(media.id, null, onRemoved)}
-          >
-            {text.delete}
-          </Button>
         </div>
       </div>
     </li>
@@ -618,9 +622,12 @@ export function EditorGallery({
   return (
     <fieldset className="event-editor-section">
       <legend ref={heading} tabIndex={-1}>
-        {text.screenshots}
+        {text.screenshots}{" "}
+        <span aria-hidden="true" className="muted">
+          {text.optional}
+        </span>
       </legend>
-      <p id={helpId} className="muted">
+      <p id={helpId} className="visually-hidden">
         {text.galleryHelp}{" "}
         {gallery.maxBytes && (
           <>
@@ -680,12 +687,18 @@ export function EditorGallery({
           </ul>
         )}
         <div className="event-editor-inline">
-          <div className="event-editor-caption">
-            <Label htmlFor={id}>{text.chooseFile}</Label>
+          <div className="event-editor-file">
+            <Label htmlFor={id} className="event-editor-add-image">
+              <span aria-hidden="true">+</span>
+              <strong>{text.add}</strong>
+              <small className="muted">{text.imageFormats}</small>
+            </Label>
             <Input
               key={gallery.fileVersion}
               id={id}
               type="file"
+              className="visually-hidden"
+              aria-label={text.chooseFile}
               accept={eventScreenshotAccept}
               aria-describedby={gallery.fileError || full ? `${helpId} ${id}-file-error` : helpId}
               aria-invalid={!!gallery.fileError}
@@ -693,20 +706,23 @@ export function EditorGallery({
               onChange={(event) => gallery.choose(event.target.files?.[0] ?? null)}
             />
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={
-              !gallery.file ||
-              !gallery.canUpload ||
-              full ||
-              !!gallery.fileError ||
-              gallery.policyPending
-            }
-            onClick={() => void gallery.upload()}
-          >
-            {text.upload}
-          </Button>
+          {gallery.file && <span>{gallery.file.name}</span>}
+          {gallery.file && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                !gallery.file ||
+                !gallery.canUpload ||
+                full ||
+                !!gallery.fileError ||
+                gallery.policyPending
+              }
+              onClick={() => void gallery.upload()}
+            >
+              {text.upload}
+            </Button>
+          )}
         </div>
       </fieldset>
       {(gallery.fileError || full) && (

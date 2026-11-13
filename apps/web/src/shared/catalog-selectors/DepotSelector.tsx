@@ -1,4 +1,12 @@
-import { type KeyboardEvent, type MouseEvent, useEffect, useId, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Input, Label } from "../ui/primitives.js";
 import {
@@ -24,11 +32,13 @@ const keepFocus = (event: MouseEvent) => event.preventDefault();
 export function DepotSelector({
   id: givenId,
   label,
+  caption,
   game,
   cityId,
   value,
   selected,
   selectedPending = false,
+  selectedPrefix,
   onChange,
   disabled = false,
   describedBy: callerDescription,
@@ -37,6 +47,7 @@ export function DepotSelector({
   /** The input ID, for a caller that refers to the field. */
   id?: string | undefined;
   label: string;
+  caption?: string | undefined;
   game: Game;
   /** No city means no company can be offered; the field stays disabled. */
   cityId: string | undefined;
@@ -44,6 +55,7 @@ export function DepotSelector({
   /** The resolved chosen company, when the caller has confirmed it. */
   selected: DepotCompanyOption | undefined;
   selectedPending?: boolean | undefined;
+  selectedPrefix?: ReactNode;
   onChange: (value: string | null) => void;
   disabled?: boolean | undefined;
   describedBy?: string | undefined;
@@ -184,12 +196,18 @@ export function DepotSelector({
 
   return (
     <div className="stack catalog-selector depot-selector">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}>{caption ?? label}</Label>
       <div className="catalog-combobox">
+        {draft === null && current && selectedPrefix && (
+          <span className="catalog-selected-prefix" aria-hidden="true">
+            {selectedPrefix}
+          </span>
+        )}
         <Input
           ref={inputRef}
           id={id}
           role="combobox"
+          aria-label={caption ? label : undefined}
           className="catalog-input"
           autoComplete="off"
           maxLength={128}
@@ -201,6 +219,7 @@ export function DepotSelector({
           aria-busy={selectedPending || undefined}
           aria-describedby={callerDescription}
           data-clear={canClear || undefined}
+          data-prefix={(draft === null && !!current && !!selectedPrefix) || undefined}
           placeholder={value && selectedPending ? t("loading") : t("choose")}
           title={draft === null && current ? depotOptionText(current) : undefined}
           value={shown}
