@@ -180,6 +180,7 @@ test(
       await page.context().addCookies((await staff.storageState()).cookies);
       await resetAccountLimits();
       await page.goto(`${path}&game=ats`);
+      await catalogLanguage(page, "en");
       await panel.getByRole("button", { name: `Edit ${original.name}`, exact: true }).click();
       await page.route(`**/api/v1${editPath}`, async (route) => {
         const request = route.request();
@@ -273,6 +274,7 @@ test(
       await page.context().addCookies((await staff.storageState()).cookies);
       await resetAccountLimits();
       await page.goto("/account/admin/settings?game=ats");
+      await catalogLanguage(page, "en");
       await expect(general).toHaveAttribute("aria-selected", "true");
       await expect(page.getByLabel("Company reporting timezone", { exact: true })).toBeVisible();
       expect(reads).toEqual([]);
