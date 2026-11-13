@@ -11,6 +11,7 @@ import {
   isOwn,
   listQuery,
   previousRevision,
+  queueHeaderState,
   queueParams,
   queueSearch,
   queueType,
@@ -116,6 +117,15 @@ describe("queue parameters", () => {
       "scope=review&hold=true&order=asc&limit=25",
     );
   });
+  test("list queries carry the interface language and bind it into the filter key", () => {
+    const awaiting = queueParams(new URLSearchParams());
+    expect(queryString(listQuery(awaiting, null, "ru"))).toBe(
+      "scope=review&hold=true&order=asc&locale=ru&limit=25",
+    );
+    expect(queryString(listQuery(awaiting, null, "en"))).not.toBe(
+      queryString(listQuery(awaiting, null, "ru")),
+    );
+  });
   test("back links keep validated non-default filters only", () => {
     expect(queueSearch(new URLSearchParams(`trip=${trip}&cursor=x&order=asc`))).toBe("");
     expect(queueSearch(new URLSearchParams("tab=decided&game=ats&order=asc&secret=1"))).toBe(
@@ -162,6 +172,44 @@ describe("queue rows", () => {
     expect(submittedAt(entry)).toBe("2026-10-17T12:00:00.000Z");
     expect(shortDate("2026-10-17T12:00:00.000Z", "en", "UTC")).toMatch(/17 Oct/);
     expect(shortDate(null, "ru", "UTC")).toBeNull();
+  });
+});
+
+describe("queue header", () => {
+  const ownRow = () => queueEntry();
+  test("uses the summary count and explains listed own trips instead of saying none wait", () => {
+    const own = ownRow();
+    const other = {
+      ...queueEntry(),
+      owner: { ...own.owner, id: "42000000-0000-4000-8000-000000000099" },
+    };
+    const empty = { count: 0, oldestAgeSeconds: null };
+    // Only own trips listed: the header keeps the summary's zero and says why they are not counted.
+    expect(queueHeaderState(empty, false, [own, own], own.owner.id)).toEqual({
+      kind: "ready",
+      count: 0,
+      oldestAgeSeconds: null,
+      ownExcluded: true,
+    });
+    expect(
+      queueHeaderState({ count: 3, oldestAgeSeconds: 60 }, false, [other], own.owner.id),
+    ).toEqual({ kind: "ready", count: 3, oldestAgeSeconds: 60, ownExcluded: false });
+    // The decided tab passes no rows, so no note appears there.
+    expect(queueHeaderState(empty, false, undefined, own.owner.id)).toMatchObject({
+      ownExcluded: false,
+    });
+    expect(queueHeaderState(undefined, true, [own], own.owner.id)).toEqual({ kind: "pending" });
+    expect(queueHeaderState(undefined, false, [own], own.owner.id)).toEqual({
+      kind: "unavailable",
+    });
+  });
+  test("header copy names other drivers' trips and the own-trip note in both languages", () => {
+    expect(tripTranslations.ru.queueNoneWaiting).toBe(
+      "Нет рейсов других водителей, ожидающих решения.",
+    );
+    expect(tripTranslations.en.queueNoneWaiting).toBe("No other drivers' trips are waiting.");
+    expect(tripTranslations.ru.queueOwnExcluded).toMatch(/не учитываются/);
+    expect(tripTranslations.en.queueOwnExcluded).toMatch(/not counted/);
   });
 });
 

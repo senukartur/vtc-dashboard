@@ -5981,6 +5981,12 @@
       "id": "listCatalogDepots:success",
       "operationId": "listCatalogDepots",
       "status": 200,
+      "query": {
+        "game": "ets2",
+        "cityId": "41000000-0000-4000-8000-000000000001",
+        "depotId": "41000000-0000-4000-8000-000000000021",
+        "locale": "en"
+      },
       "response": {
         "data": {
           "items": [
@@ -7763,8 +7769,7 @@
           "lists": {
             "dlcs": {
               "visible": 1,
-              "hidden": 0,
-              "untranslated": 1
+              "hidden": 0
             },
             "regions": {
               "visible": 1,
@@ -7779,13 +7784,11 @@
             "companies": {
               "visible": 1,
               "hidden": 0,
-              "untranslated": 1,
               "missingLogo": 1
             },
             "depots": {
               "visible": 1,
-              "hidden": 0,
-              "untranslated": 1
+              "hidden": 0
             },
             "cargoes": {
               "visible": 1,
@@ -8064,14 +8067,13 @@
       }
     },
     {
-      "id": "listCatalogDepots:hidden-untranslated",
+      "id": "listCatalogDepots:hidden-canonical-company",
       "operationId": "listCatalogDepots",
       "status": 200,
       "query": {
         "game": "ets2",
         "hidden": "only",
         "includeHidden": false,
-        "untranslated": true,
         "locale": "ru"
       },
       "response": {
@@ -8091,7 +8093,7 @@
                   "label": "Synthetic Freight",
                   "requestedLocale": "ru",
                   "renderedLocale": "en",
-                  "englishFallback": true,
+                  "englishFallback": false,
                   "hidden": false
                 },
                 "logo": {
@@ -8309,6 +8311,9 @@
       "operationId": "listEvents",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "locale": "ru"
+      },
       "response": {
         "data": {
           "items": [
@@ -8369,6 +8374,7 @@
               "organizerMemberId": "e1320000-0000-4000-8000-000000000002",
               "visibility": "public",
               "myResponse": "participating",
+              "myResponseVersion": 2,
               "responseCounts": {
                 "participating": 1,
                 "declined": 0
@@ -8484,6 +8490,9 @@
       "operationId": "getUpcomingEvent",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "locale": "ru"
+      },
       "response": {
         "data": {
           "event": {
@@ -8539,7 +8548,8 @@
             ],
             "hasCover": true
           },
-          "myResponse": "participating"
+          "myResponse": "participating",
+          "myResponseVersion": 2
         },
         "meta": {
           "requestId": "synthetic-event-stage-2"
@@ -8551,6 +8561,9 @@
       "operationId": "getUpcomingEvent",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "locale": "en"
+      },
       "response": {
         "data": null,
         "meta": {
@@ -8823,6 +8836,9 @@
       "operationId": "getEventAttendance",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "view": "stage2"
+      },
       "response": {
         "data": {
           "items": [

@@ -1,11 +1,30 @@
 import { type CatalogItem, compatibleSelection, type Game } from "./contracts.js";
 
 /** One row of the open list; `key` is stable across pages and identifies its DOM option. */
-export type ComboboxRow =
-  | { kind: "item"; key: string; item: CatalogItem }
+export type ComboboxRow<T = CatalogItem> =
+  | { kind: "item"; key: string; item: T }
   | { kind: "more"; key: "more" }
   | { kind: "refresh"; key: "refresh" }
   | { kind: "extra"; key: "extra" };
+
+/** A picker option that is not a plain catalog row: its stable ID, shown name and code. */
+export interface ComboboxOption {
+  id: string;
+  label: string;
+  code: string;
+}
+
+/** Option rows keyed by ID, then load more or refresh (a failed read offers only refresh). */
+export function optionRows<T extends { id: string }>(
+  items: readonly T[],
+  { hasMore, failed, extra = false }: { hasMore: boolean; failed: boolean; extra?: boolean },
+): ComboboxRow<T>[] {
+  const rows: ComboboxRow<T>[] = items.map((item) => ({ kind: "item", key: item.id, item }));
+  if (failed) rows.push({ kind: "refresh", key: "refresh" });
+  else if (hasMore) rows.push({ kind: "more", key: "more" });
+  if (extra) rows.push({ kind: "extra", key: "extra" });
+  return rows;
+}
 
 /**
  * Catalog rows first, then load more or refresh (a failed read offers only refresh), then the
@@ -26,13 +45,10 @@ export function comboboxRows({
   failed: boolean;
   extra: boolean;
 }): ComboboxRow[] {
-  const rows: ComboboxRow[] = items
-    .filter((item) => compatibleSelection(item, game, regionId))
-    .map((item) => ({ kind: "item", key: item.id, item }));
-  if (failed) rows.push({ kind: "refresh", key: "refresh" });
-  else if (hasMore) rows.push({ kind: "more", key: "more" });
-  if (extra) rows.push({ kind: "extra", key: "extra" });
-  return rows;
+  return optionRows(
+    items.filter((item) => compatibleSelection(item, game, regionId)),
+    { hasMore, failed, extra },
+  );
 }
 
 /**

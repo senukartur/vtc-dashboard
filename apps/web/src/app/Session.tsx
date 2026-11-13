@@ -18,6 +18,7 @@ import i18n, { readStoredLocale, writeStoredLocale } from "../shared/i18n.js";
 type Session = {
   state: "checking" | "authenticated" | "anonymous" | "unavailable";
   self: DTO["Self"] | null;
+  eventsStage2Enabled: boolean;
   etag: string | null;
   generation: number;
   refresh: () => Promise<void>;
@@ -132,6 +133,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       value={{
         state,
         self,
+        eventsStage2Enabled: state === "authenticated" && query.data?.eventsStage2Enabled === true,
         etag: self ? (query.data?.etag ?? null) : null,
         generation,
         refresh: async () => {

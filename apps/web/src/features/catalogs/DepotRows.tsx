@@ -15,18 +15,11 @@ interface RowActions extends CatalogRowFormat {
   onToggleHidden: (depot: Depot) => void;
 }
 
-/** Badges for the depot itself and for a hidden company or city it points at. */
+/** The hidden badge for the depot itself or a hidden company or city it points at. */
 function DepotBadges({ depot }: { depot: Depot }) {
   const { t } = useTranslation("catalogs");
   const hidden = depot.hidden || depot.company.label.hidden || depot.city.label.hidden;
-  return (
-    <>
-      {hidden && <span className="catalog-badge">{t("hidden")}</span>}
-      {depot.company.label.englishFallback && (
-        <span className="catalog-badge">{t("rowFallback")}</span>
-      )}
-    </>
-  );
+  return <>{hidden && <span className="catalog-badge">{t("hidden")}</span>}</>;
 }
 
 const rowHidden = (depot: Depot) =>
@@ -72,12 +65,12 @@ export function DepotTable({
                 {depot.city.label.label}
                 <CatalogNativeName value={depot.city.label} />
               </td>
-              <td>{depot.dlc?.label ?? t("baseGame")}</td>
+              <td className="catalog-source">{depot.dlc?.label ?? t("baseGame")}</td>
               <td className="catalog-updated">
                 <CatalogUpdatedAt value={depot.updatedAt} locale={locale} timezone={timezone} />
               </td>
               {staff && (
-                <td>
+                <td className="catalog-actions-cell">
                   <div className="catalog-row-actions">
                     <Button type="button" size="xs" variant="ghost" onClick={() => onEdit(depot)}>
                       {t("edit")}

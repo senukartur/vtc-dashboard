@@ -10,7 +10,9 @@ import { accountFixture, fixtureId } from "../../apps/web/src/features/account/f
 import {
   attemptFor,
   command,
+  read,
   readSelf,
+  selfEnvelope,
   operations,
 } from "../../apps/web/src/features/account/transport.ts";
 import { clearPrivateQueries, createAppQueryClient } from "../../apps/web/src/app/session-cache.ts";
@@ -28,6 +30,7 @@ import {
 } from "../../apps/web/src/shared/i18n.ts";
 import { accountTranslations } from "../../apps/web/src/features/account/translations.ts";
 import { publicContent } from "../../apps/web/src/features/landing/content.ts";
+import { renderSessionProbe } from "../../apps/web/test/session-probe.mjs";
 const meta = { requestId: "synthetic-request" };
 const receipt = { data: { id: fixtureId, version: 1 }, meta };
 const csrf = { data: { token: "NONFUNCTIONAL_FIXTURE" }, meta };
@@ -187,10 +190,57 @@ test.each([
   ).rejects.toMatchObject({ kind });
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
+test("the real session provider exposes Stage 2 from one validated current self response", async () => {
+  const signal = new AbortController().signal;
+  const self = accountFixture();
+  await expect(renderSessionProbe()).resolves.toBe("<output>checking:false</output>");
+  for (const [status, value, expected] of [
+    [200, "1", "authenticated:true"],
+    [200, null, "authenticated:false"],
+    [200, "true", "authenticated:false"],
+    [401, "1", "anonymous:false"],
+    [503, "1", "unavailable:false"],
+  ] as const) {
+    const headers = { ETag: '"v1"', ...(value === null ? {} : { "X-VTC-Events-Stage2": value }) };
+    const fetcher = vi
+      .fn()
+      .mockImplementation(async () => Response.json(self, { status, headers }));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(renderSessionProbe(() => readSelf(signal))).resolves.toBe(
+      `<output>${expected}</output>`,
+    );
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(
+      "/api/v1/me",
+      expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
+    );
+  }
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation(async () =>
+      Response.json(self, {
+        headers: { ETag: '"v1"', "X-VTC-Events-Stage2": "1" },
+      }),
+    ),
+  );
+  await expect(readSelf(signal)).resolves.toEqual({
+    data: self,
+    etag: '"v1"',
+    eventsStage2Enabled: true,
+  });
+  await expect(read("/me", selfEnvelope, signal)).resolves.toEqual({ data: self, etag: '"v1"' });
+});
+
 test("invalid and unavailable session responses never become a valid self DTO", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(Response.json({ ...accountFixture(), private: "PRIVATE_SENTINEL" })),
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { ...accountFixture(), private: "PRIVATE_SENTINEL" },
+          { headers: { "X-VTC-Events-Stage2": "1" } },
+        ),
+      ),
   );
   await expect(readSelf(new AbortController().signal)).rejects.toMatchObject({
     kind: "unavailable",

@@ -1,44 +1,48 @@
 import { randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import type { components } from "@vtc/contracts";
+import { browserSchemaRef } from "@vtc/contracts/runtime";
 import {
   createUnitOfWork,
+  dedicatedConnection,
   newId,
   runMigrations,
   TransactionCommitOutcomeUnknownError,
-  type UnitOfWork,
   type TxContext,
+  type UnitOfWork,
 } from "@vtc/db";
-import { catalogCities } from "@vtc/db/catalogs-schema";
+import { catalogCities, catalogCompanies, catalogCompanyCities } from "@vtc/db/catalogs-schema";
 import { eq, membership } from "@vtc/db/identity-schema";
-import type { components } from "@vtc/contracts";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { beforeEach, expect, test, afterAll as after, beforeAll as before } from "vitest";
-import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
-import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
-import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
-import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
+import { afterAll as after, beforeAll as before, beforeEach, expect, test } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
-import {
-  createIdentity,
-  type Actor,
-  type Identity,
-} from "../../apps/api/src/modules/identity/service.ts";
+import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import { createEvents, type Events } from "../../apps/api/src/modules/events/service.ts";
 import { createEventWorkspace } from "../../apps/api/src/modules/events/workspace.ts";
+import {
+  type Actor,
+  createIdentity,
+  type Identity,
+} from "../../apps/api/src/modules/identity/service.ts";
+import { matchEventPrescribedLoad } from "../../apps/api/src/modules/qualification-rules/index.ts";
+import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
+import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
+import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
+import {
+  createSyntheticTripEvidence,
+  knownFact,
+} from "../fixtures/qualification-rules/fixtures.ts";
 import {
   guardedSettings,
   reset,
   SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
-import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
-import { matchEventPrescribedLoad } from "../../apps/api/src/modules/qualification-rules/index.ts";
-import {
-  createSyntheticTripEvidence,
-  knownFact,
-} from "../fixtures/qualification-rules/fixtures.ts";
 import { deferred } from "../support/concurrency.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
 const { beforeAll, afterAll } = schemaLifecycleHooks(before, after);
 let control: Connection,
   unit: UnitOfWork,
@@ -99,6 +103,8 @@ const create = (extra: Partial<components["schemas"]["EventInput"]> = {}) =>
 async function count(table: string) {
   const allowed = [
     "events",
+    "event_revision_dlcs",
+    "event_revision_details",
     "event_revisions",
     "event_responses",
     "event_response_revisions",
@@ -145,6 +151,10 @@ beforeEach(async () => {
     "event_attendances",
     "event_attendance_revisions",
     "event_response_revisions",
+    "event_revision_dlcs",
+    "event_revision_details",
+    "event_drafts",
+    "event_metadata",
     "event_revisions",
     "events",
     "outbox_events",
@@ -185,6 +195,358 @@ test("Director/Deputy manage, additive Driver/trainee respond, dispatcher denied
   await expect(service.attendance(dispatcher, id)).rejects.toMatchObject({ statusCode: 403 });
   expect((await service.nearest(trainee))?.id).toBe(id);
 });
+
+test("staged member list, detail and upcoming share safe organizer and current own response facts", async () => {
+  await control.query("DELETE FROM identity_limits");
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const routes = createEvents(unit, { ...config, routeEnabled: true }, { identity, catalogs }, now);
+  const legacy = await create({
+    title: "Fictional legacy event",
+    visibility: "public",
+    startsAt: "2026-10-22T14:00:00.000Z",
+  });
+  const created = await create({ title: "Fictional upcoming event" });
+  const id = created.data.event.id;
+  const organizer = "Fictional Event Member";
+  await routes.updatePublished(
+    director,
+    id,
+    newId(),
+    1,
+    stagedInput({
+      organizerMemberId: deputy.userId,
+      description: null,
+      route: null,
+      meetingLocation: null,
+    }),
+    "en",
+  );
+  const draftId = newId();
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db.insert(eventMetadata).values({ id: draftId, createdAt: now().toISOString() });
+    await db.insert(eventDrafts).values({
+      eventId: draftId,
+      version: 1,
+      updatedBy: director.userId,
+      updatedAt: now().toISOString(),
+      title: "Fictional unpublished event",
+      startsAt: "2026-10-22T12:15:00.000Z",
+    });
+  });
+  const otherReason = "Fictional confidential reason for another member";
+  await service.respond(driver, id, newId(), 1, { response: "declined", reason: otherReason });
+  await service.respond(driver, legacy.data.event.id, newId(), 1, { response: "participating" });
+
+  const first = await routes.listStage2(trainee, "ru", { limit: 1 });
+  expect(first.items).toHaveLength(1);
+  expect(first.items[0]).toMatchObject({
+    event: {
+      id,
+      version: 2,
+      organizer,
+      description: null,
+      meetingLocation: null,
+      route: null,
+    },
+    organizerMemberId: deputy.userId,
+    visibility: "members",
+    myResponse: "unanswered",
+    myResponseVersion: 1,
+    responseCounts: { participating: 0, declined: 1 },
+  });
+  expect(first.items[0]?.event).not.toHaveProperty("organizerMemberId");
+  expect(first.nextCursor).toBeTruthy();
+  const next = await routes.listStage2(trainee, "ru", {
+    limit: 1,
+    cursor: first.nextCursor as string,
+  });
+  expect(next.items).toHaveLength(1);
+  expect(next.items[0]).toMatchObject({
+    event: { id: legacy.data.event.id, organizer: legacy.data.event.organizer },
+    organizerMemberId: null,
+    myResponse: "unanswered",
+    myResponseVersion: 1,
+    responseCounts: { participating: 1, declined: 0 },
+  });
+  expect(next.nextCursor).toBeNull();
+  const unavailable = { ...dispatcher, capabilities: ["events.respond"] };
+  expect((await routes.listStage2(unavailable, "ru")).items[0]).toMatchObject({
+    myResponse: null,
+    myResponseVersion: null,
+  });
+  expect(await routes.nearestStage2(unavailable, "ru")).toMatchObject({
+    event: { id },
+    myResponse: null,
+    myResponseVersion: null,
+  });
+  expect(await routes.nearestStage2(trainee, "ru")).toMatchObject({
+    event: { id },
+    myResponse: "unanswered",
+    myResponseVersion: 1,
+  });
+  await expect(routes.getPublished(trainee, draftId, "en")).rejects.toMatchObject({
+    statusCode: 404,
+  });
+  await expect(service.get(null, id)).rejects.toMatchObject({ statusCode: 404 });
+  expect((await service.list(null)).items).toEqual([legacy.data.event]);
+
+  const app = await createApp({ identity, events: routes, checkReadiness: async () => true });
+  const ownReason = "Fictional confidential reason for the current member";
+  try {
+    const cookie = { cookie: traineeCookie };
+    const list = await app.inject({ url: "/api/v1/events?locale=ru&limit=1", headers: cookie });
+    expect(list.statusCode).toBe(200);
+    expect(list.headers["cache-control"]).toBe("no-store");
+    const listData = list.json().data as components["schemas"]["EventStage2MemberList"];
+    expect(listData).toEqual(first);
+    const upcoming = await app.inject({
+      url: "/api/v1/me/upcoming-event?locale=en",
+      headers: cookie,
+    });
+    expect(upcoming.statusCode).toBe(200);
+    expect(upcoming.json().data).toMatchObject({
+      event: { id },
+      myResponse: "unanswered",
+      myResponseVersion: 1,
+    });
+
+    for (const path of ["/api/v1/events", "/api/v1/me/upcoming-event"]) {
+      const legacyRead = await app.inject({ url: path, headers: cookie });
+      expect(legacyRead.statusCode).toBe(200);
+      const data = legacyRead.json().data;
+      const event = data.items?.[0] ?? data;
+      expect(event).toMatchObject({ id, description: "\u2014" });
+      expect(event).not.toHaveProperty("myResponseVersion");
+      expect((await app.inject({ url: `${path}?locale=fr`, headers: cookie })).statusCode).toBe(
+        422,
+      );
+    }
+    for (const query of ["?period=past", "?locale=ru&period=past"]) {
+      const empty = await app.inject({ url: `/api/v1/events${query}`, headers: cookie });
+      expect(empty.statusCode).toBe(200);
+      expect(empty.json().data).toEqual({ items: [], nextCursor: null });
+    }
+    const csrf = (
+      await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie: traineeCookie } })
+    ).json().data.token;
+    const decline = await app.inject({
+      method: "PUT",
+      url: `/api/v1/events/${id}/my-response`,
+      headers: {
+        cookie: traineeCookie,
+        origin,
+        "x-csrf-token": csrf,
+        "idempotency-key": newId(),
+        "if-match": `"v${listData.items[0]?.myResponseVersion}"`,
+      },
+      payload: { response: "declined", reason: ownReason },
+    });
+    expect(decline.statusCode).toBe(200);
+    expect(decline.headers.etag).toBe('"v2"');
+    const nearest = await routes.nearestStage2(trainee, "ru");
+    expect(nearest).toMatchObject({
+      event: { id },
+      myResponse: "declined",
+      myResponseVersion: 2,
+    });
+    const detail = await routes.getPublished(trainee, id, "ru");
+    expect(detail).toMatchObject({
+      version: 2,
+      data: {
+        myResponse: { response: "declined", declineReason: ownReason, version: 2 },
+        responseCounts: { participating: 0, declined: 2 },
+      },
+    });
+    expect(JSON.stringify(detail)).not.toContain(otherReason);
+    expect(JSON.stringify(nearest)).not.toContain(ownReason);
+    const cleared = await app.inject({
+      method: "PUT",
+      url: `/api/v1/events/${id}/my-response`,
+      headers: {
+        cookie: traineeCookie,
+        origin,
+        "x-csrf-token": csrf,
+        "idempotency-key": newId(),
+        "if-match": `"v${nearest?.myResponseVersion}"`,
+      },
+      payload: { response: "unanswered" },
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.headers.etag).toBe('"v3"');
+    expect(await routes.nearestStage2(trainee, "ru")).toMatchObject({
+      event: { id },
+      myResponse: "unanswered",
+      myResponseVersion: 3,
+    });
+    const refreshed = await routes.listStage2(trainee, "ru");
+    expect(refreshed.items[0]).toMatchObject({
+      myResponse: "unanswered",
+      myResponseVersion: 3,
+      responseCounts: { participating: 0, declined: 1 },
+    });
+    expect(JSON.stringify(refreshed)).not.toContain("confidential reason");
+    instant = Date.parse("2026-10-22T14:30:00.000Z");
+    for (const query of ["", "?locale=en"]) {
+      const empty = await app.inject({ url: `/api/v1/me/upcoming-event${query}`, headers: cookie });
+      expect(empty.statusCode).toBe(200);
+      expect(empty.json().data).toBeNull();
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("leadership nonresponders filter current response eligibility before paging", async () => {
+  await control.query("DELETE FROM identity_limits");
+  const extra = [
+    (await member(["driver"])).actor,
+    (await member(["trainee", "dispatcher"])).actor,
+    (await member(["trainee"])).actor,
+    (await member(["driver", "deputy_director"])).actor,
+  ].sort((a, b) => a.userId.localeCompare(b.userId));
+  const [participating, declined, cleared, silent] = extra;
+  if (!participating || !declined || !cleared || !silent)
+    throw new Error("SYNTHETIC_ROSTER_MISSING");
+  const inactive = (await member(["driver"])).actor;
+  // Retained inactive memberships stay in actual attendance's roster, but cannot RSVP.
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(membership)
+      .set({ status: "inactive" })
+      .where(eq(membership.userId, inactive.userId)),
+  );
+  const id = (await create()).data.event.id;
+  const otherId = (await create()).data.event.id;
+  for (const actor of [participating, director, trainee, driver, cleared])
+    await service.respond(actor, id, newId(), 1, { response: "participating" });
+  await service.respond(cleared, id, newId(), 2, { response: "unanswered" });
+  await service.respond(declined, id, newId(), 1, {
+    response: "declined",
+    reason: "Fictional confidential nonresponders test",
+  });
+  const [plan] = await control.query<RowDataPacket[]>(
+    `EXPLAIN SELECT m.user_id FROM identity_memberships m
+      WHERE m.user_id>? AND m.status='active'
+        AND EXISTS (SELECT r.user_id FROM identity_roles r
+          WHERE r.user_id=m.user_id AND r.role IN ('trainee','driver'))
+        AND NOT EXISTS (SELECT er.id FROM event_responses er
+          WHERE er.event_id=? AND er.member_id=m.user_id
+            AND er.status IN ('participating','declined'))
+      ORDER BY m.user_id LIMIT 2`,
+    [participating.userId, id],
+  );
+  const answerPlan = plan.find((row) => row.table === "er");
+  expect(String(answerPlan?.possible_keys)).toContain("event_response_member");
+  console.log(
+    JSON.stringify({
+      event: "events_query_plan",
+      shape: "nonresponders",
+      indexes: plan.map((row) => ({ access: row.type, index: row.key, estimatedRows: row.rows })),
+    }),
+  );
+  const app = await createApp({ identity, events: service, checkReadiness: async () => true });
+  const url = `/api/v1/admin/events/${id}/nonresponders?limit=1`;
+  try {
+    expect((await app.inject({ url })).statusCode).toBe(401);
+    expect((await app.inject({ url, headers: { cookie: traineeCookie } })).statusCode).toBe(403);
+    await expect(service.nonresponders(dispatcher, id)).rejects.toMatchObject({ statusCode: 403 });
+    const allowed = await app.inject({ url, headers: { cookie: directorCookie } });
+    expect(allowed.statusCode).toBe(200);
+    expect(allowed.headers["cache-control"]).toBe("no-store");
+    const { items, nextCursor } = allowed.json().data;
+    expect(items).toEqual([expect.objectContaining({ id: cleared.userId, formerMember: false })]);
+    expect(allowed.body).not.toContain("confidential");
+    expect(nextCursor).toBeTruthy();
+    const invalidPage = await app.inject({
+      url: `/api/v1/admin/events/${id}/nonresponders?limit=0`,
+      headers: { cookie: directorCookie },
+    });
+    expect(invalidPage.statusCode).toBe(422);
+    expect(invalidPage.json().error.code).toBe("INVALID_PAYLOAD");
+    const invalidCursor = await app.inject({
+      url: `${url}&cursor=tampered`,
+      headers: { cookie: directorCookie },
+    });
+    expect(invalidCursor.statusCode).toBe(409);
+    expect(invalidCursor.json().error.code).toBe("VERSION_CONFLICT");
+    const next = await app.inject({
+      url: `${url}&cursor=${encodeURIComponent(nextCursor)}`,
+      headers: { cookie: directorCookie },
+    });
+    expect(next.statusCode).toBe(200);
+    expect(next.json().data).toEqual({
+      items: [expect.objectContaining({ id: silent.userId, formerMember: false })],
+      nextCursor: null,
+    });
+    expect((await service.nonresponders(deputy, id)).items.map((m) => m.id)).toEqual([
+      cleared.userId,
+      silent.userId,
+    ]);
+    for (const request of [
+      () => service.nonresponders(deputy, id, { cursor: nextCursor }),
+      () => service.nonresponders(director, otherId, { cursor: nextCursor }),
+      () => service.participants(director, id, { cursor: nextCursor }),
+      () => service.attendance(director, id, { cursor: nextCursor }),
+    ])
+      await expect(request()).rejects.toMatchObject({ statusCode: 409 });
+    await expect(service.nonresponders(director, newId())).rejects.toMatchObject({
+      statusCode: 404,
+    });
+
+    instant = Date.parse(input().startsAt);
+    await service.setAttendance(director, id, newId(), 1, {
+      members: [
+        { memberId: inactive.userId, attendance: "attended", note: null },
+        { memberId: cleared.userId, attendance: "not_attended", note: null },
+      ],
+    });
+    const attendanceUrl = `/api/v1/admin/events/${id}/attendance`;
+    const headers = { cookie: directorCookie };
+    const legacy = await app.inject({ url: `${attendanceUrl}?limit=1`, headers });
+    const staged = await app.inject({ url: `${attendanceUrl}?view=stage2&limit=1`, headers });
+    expect(legacy.statusCode).toBe(200);
+    expect(staged.statusCode).toBe(200);
+    expect(legacy.headers.etag).toBe('"v2"');
+    expect(staged.headers.etag).toBe(legacy.headers.etag);
+    expect(staged.headers["cache-control"]).toBe("no-store");
+    const totals = { total: 10, attended: 1, notAttended: 1, unconfirmed: 8 };
+    const legacyPage = legacy.json().data as components["schemas"]["ListAttendance"];
+    const stagedPage = staged.json().data as components["schemas"]["EventStage2Attendance"];
+    expect(legacyPage).toEqual(
+      await service.attendance(director, id, { limit: 1 }).then((r) => r.data),
+    );
+    expect(stagedPage).toEqual({
+      ...legacyPage,
+      items: legacyPage.items.map((item) => ({ ...item, tripId: null })),
+      totals,
+    });
+    expect(legacyPage).not.toHaveProperty("totals");
+    expect(legacyPage.items[0]).not.toHaveProperty("tripId");
+    expect(stagedPage.nextCursor).toBeTruthy();
+    const stagedNext = await app.inject({
+      url: `${attendanceUrl}?view=stage2&limit=1&cursor=${encodeURIComponent(stagedPage.nextCursor as string)}`,
+      headers,
+    });
+    expect(stagedNext.statusCode).toBe(200);
+    expect(stagedNext.json().data.totals).toEqual(totals);
+    expect((await app.inject({ url: `${attendanceUrl}?view=other`, headers })).statusCode).toBe(
+      422,
+    );
+    expect(
+      (
+        await app.inject({
+          url: `${attendanceUrl}?view=stage2`,
+          headers: { cookie: traineeCookie },
+        })
+      ).statusCode,
+    ).toBe(403);
+  } finally {
+    await app.close();
+  }
+});
+
 test("independent event/own response/attendance versions and equivalent responses have no effects", async () => {
   const e = await create(),
     id = e.data.event.id;
@@ -734,6 +1096,9 @@ test("validation rejects blank reasons, invalid UTC/calendar/decimal and unavail
     denied.create(director, newId(), input({ originCityId: newId() })),
   ).rejects.toMatchObject({ statusCode: 422 });
 });
+const eventsStage2Header = "x-vtc-events-stage2";
+const eventWireValidator = createSchemaValidator();
+
 test("HTTP actual composition enforces auth, CSRF, strong separate ETags and closed responses", async () => {
   // All tests share one fixed clock window; start this request budget from zero.
   await control.query("DELETE FROM identity_limits");
@@ -762,15 +1127,13 @@ test("HTTP actual composition enforces auth, CSRF, strong separate ETags and clo
     expect(created.statusCode).toBe(201);
     const id = created.json().data.event.id;
 
-    // Stage 2 additions are documented for downstream work but this app still
-    // serves the old request and response contracts.
+    // Other Stage 2 paths remain unmounted and existing paths still serve their legacy shapes.
     const stagedEndpoints = [
       ["GET", "/api/v1/admin/events?period=drafts"],
       ["GET", `/api/v1/admin/events/drafts/${id}`],
       ["PATCH", `/api/v1/admin/events/drafts/${id}`],
       ["DELETE", `/api/v1/admin/events/${id}`],
       ["POST", `/api/v1/admin/events/${id}/publication`],
-      ["GET", `/api/v1/admin/events/${id}/nonresponders`],
       ["GET", `/api/v1/admin/events/${id}/media`],
       ["POST", `/api/v1/admin/events/${id}/media`],
       ["PATCH", `/api/v1/admin/events/${id}/media/${id}`],
@@ -796,6 +1159,29 @@ test("HTTP actual composition enforces auth, CSRF, strong separate ETags and clo
     const pub = await app.inject({ url: `/api/v1/public/events/${id}` });
     expect(pub.statusCode).toBe(200);
     expect(pub.json().data).not.toHaveProperty("myResponse");
+    for (const locale of ["en", "ru"]) {
+      const localized = await app.inject({ url: `/api/v1/public/events/${id}?locale=${locale}` });
+      expect(localized.statusCode).toBe(200);
+      expect(
+        eventWireValidator.validate(browserSchemaRef("EnvelopeEventPublic"), localized.json()),
+      ).toBe(true);
+      expect(localized.json().data).toEqual(pub.json().data);
+    }
+    expect((await app.inject({ url: `/api/v1/public/events/${id}?locale=fr` })).statusCode).toBe(
+      422,
+    );
+    const self = await app.inject({ url: "/api/v1/me", headers: { cookie: traineeCookie } });
+    expect(self.statusCode).toBe(200);
+    expect(eventWireValidator.validate(browserSchemaRef("EnvelopeSelf"), self.json())).toBe(true);
+    expect(self.headers[eventsStage2Header]).toBeUndefined();
+    for (const path of ["/api/v1/events", "/api/v1/me/upcoming-event"]) {
+      const headers = { cookie: traineeCookie };
+      const normal = await app.inject({ url: path, headers });
+      expect(normal.statusCode).toBe(200);
+      const data = normal.json().data;
+      expect(data.items?.[0] ?? data).toMatchObject({ id });
+      expect((await app.inject({ url: `${path}?locale=en`, headers })).statusCode).toBe(422);
+    }
     const own = await app.inject({
       url: `/api/v1/events/${id}/my-response`,
       headers: { cookie: traineeCookie },
@@ -1119,14 +1505,18 @@ test("current role and session revocation precede both saved-command replay and 
   });
   await expect(service.history(current, id)).rejects.toMatchObject({ statusCode: 403 });
 });
+
 import {
   asc,
-  events,
-  eventRevisions,
-  eventResponseRevisions,
-  eventAttendances,
   eventAttendanceRevisions,
+  eventAttendances,
+  eventDrafts,
+  eventMetadata,
+  eventResponseRevisions,
+  eventRevisions,
+  events,
 } from "@vtc/db/events-schema";
+
 test("representative mixed event histories expose an ordered selective public-page index", async () => {
   const original = await create({ visibility: "public" }),
     id = original.data.event.id;
@@ -1257,4 +1647,578 @@ test("members read decliners and response counts without reasons or unanswered m
   await service.cancel(director, id, newId(), 1, "Fictional cancellation note");
   expect(ids(await service.decliners(driver, id))).toEqual([staff.userId]);
   expect(await service.responseCounts(driver, id)).toEqual({ participating: 2, declined: 1 });
+});
+type Stage2Input = components["schemas"]["EventStage2Input"];
+
+function stagedInput(extra: Partial<Stage2Input> = {}): Stage2Input {
+  const {
+    organizer: _organizer,
+    route: _route,
+    meetingLocation: _meeting,
+    description: _description,
+    ...core
+  } = input();
+  return {
+    ...core,
+    organizerMemberId: trainee.userId,
+    platform: "haulmp",
+    requiredDlcIds: [],
+    ...extra,
+  };
+}
+
+async function convoyCatalog() {
+  const { id } = await seedCatalog(unit, "ets2", {
+    dlcs: [
+      {
+        code: "stage2_city_dlc",
+        nameEn: "Fictional City DLC",
+        nameRu: "Fictional translated city DLC",
+      },
+      { code: "stage2_depot_dlc", nameEn: "Fictional Depot DLC" },
+      { code: "stage2_manual_dlc", nameEn: "Fictional Manual DLC" },
+    ],
+    cities: [
+      {
+        code: "stage2_origin",
+        nameEn: "Fictional Origin",
+        nameRu: "Fictional translated origin",
+        dlcCode: "stage2_city_dlc",
+      },
+      { code: "stage2_destination", nameEn: "Fictional Destination" },
+    ],
+    cargoes: [
+      { code: "stage2_cargo", nameEn: "Fictional Cargo", nameRu: "Fictional translated cargo" },
+    ],
+    trailers: [{ code: "stage2_trailer", nameEn: "Fictional Trailer" }],
+  });
+  const ats = await seedCatalog(unit, "ats", {
+    dlcs: ["stage2_city_dlc"],
+    cities: ["stage2_origin"],
+  });
+  const companyId = newId(),
+    originDepot = newId(),
+    destinationDepot = newId(),
+    atsDepot = newId();
+  await unit.run(async (tx) => {
+    const c = unit.client(tx),
+      atsCompany = newId();
+    await c.insert(catalogCompanies).values([
+      {
+        id: companyId,
+        game: "ets2",
+        code: Buffer.from("fictional_freight"),
+        nameEn: "Fictional Freight",
+        nameRu: "Fictional translated company",
+      },
+      {
+        id: atsCompany,
+        game: "ats",
+        code: Buffer.from("fictional_freight"),
+        nameEn: "Fictional American Freight",
+      },
+    ]);
+    await c.insert(catalogCompanyCities).values([
+      {
+        id: originDepot,
+        game: "ets2",
+        cityId: id("stage2_origin"),
+        companyId,
+        dlcId: id("stage2_depot_dlc"),
+      },
+      { id: destinationDepot, game: "ets2", cityId: id("stage2_destination"), companyId },
+      { id: atsDepot, game: "ats", cityId: ats.id("stage2_origin"), companyId: atsCompany },
+    ]);
+  });
+  return { id, ats: ats.id, companyId, originDepot, destinationDepot, atsDepot };
+}
+
+test("opted-in published route HTTP serves localized canonical selections and preserves the live wire", async () => {
+  await control.query("DELETE FROM identity_limits");
+  const { id, ats, companyId, originDepot, destinationDepot, atsDepot } = await convoyCatalog();
+  const catalogService = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const lookedUpGames: string[] = [];
+  const catalogs = {
+    ...catalogService,
+    eventRouteCatalogInTransaction: (
+      ...args: Parameters<typeof catalogService.eventRouteCatalogInTransaction>
+    ) => {
+      lookedUpGames.push(args[1]);
+      return catalogService.eventRouteCatalogInTransaction(...args);
+    },
+  };
+  const routes = createEvents(unit, { ...config, routeEnabled: true }, { identity, catalogs }, now);
+  const app = await createApp({ identity, events: routes, checkReadiness: async () => true });
+  const value = stagedInput({
+    visibility: "public",
+    originCityId: id("stage2_origin"),
+    destinationCityId: id("stage2_destination"),
+    originDepotId: originDepot,
+    destinationDepotId: destinationDepot,
+    prescribedCargoId: id("stage2_cargo"),
+    prescribedTrailerTypeId: id("stage2_trailer"),
+    requiredDlcIds: [id("stage2_manual_dlc"), id("stage2_city_dlc")],
+    distanceKm: "99999999999999999999.000000000000000001",
+  });
+  try {
+    const csrf = (
+      await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie: directorCookie } })
+    ).json().data.token;
+    const write = (
+      method: "POST" | "PATCH",
+      url: string,
+      payload: object,
+      key = newId(),
+      match?: string,
+    ) =>
+      app.inject({
+        method,
+        url,
+        payload,
+        headers: {
+          cookie: directorCookie,
+          origin,
+          "x-csrf-token": csrf,
+          "idempotency-key": key,
+          ...(match === undefined ? {} : { "if-match": match }),
+        },
+      });
+    const createPath = "/api/v1/admin/events";
+    for (const bad of [
+      { ...value, draft: true },
+      { ...value, organizer: "Fictional arbitrary organizer" },
+      { ...value, organizerMemberId: newId() },
+      { ...value, originDepotId: destinationDepot },
+      { ...value, originDepotId: atsDepot },
+      { ...value, originCityId: null },
+      { ...value, requiredDlcIds: [ats("stage2_city_dlc")] },
+      { ...value, requiredDlcIds: [newId()] },
+      { ...value, requiredDlcIds: [id("stage2_city_dlc"), id("stage2_city_dlc")] },
+      { ...value, distanceKm: 0 },
+      { ...value, distanceKm: "-1" },
+      { ...value, distanceKm: "0.00" },
+    ]) {
+      expect((await write("POST", createPath, bad)).statusCode).toBe(422);
+    }
+    expect(await count("events")).toBe(0);
+    const createKey = newId();
+    const created = await write(
+      "POST",
+      `${createPath}?locale=ru`,
+      { ...value, draft: false },
+      createKey,
+    );
+    expect(created.statusCode, created.body).toBe(201);
+    expect(created.headers.etag).toBe('"v1"');
+    const member = created.json().data;
+    const eventId = member.event.id;
+    const publicPath = `/api/v1/public/events/${eventId}`;
+    const memberPath = `/api/v1/events/${eventId}`;
+    const updatePath = `${createPath}/${eventId}`;
+    expect(member).toMatchObject({
+      organizerMemberId: trainee.userId,
+      prescribedCargo: { label: "Fictional translated cargo", renderedLocale: "ru" },
+      prescribedTrailerType: { label: "Fictional Trailer", englishFallback: true },
+      responseCounts: { participating: 0, declined: 0 },
+      event: {
+        organizer: "Fictional Event Member",
+        platform: "haulmp",
+        origin: { label: "Fictional translated origin", requestedLocale: "ru" },
+        destination: { label: "Fictional Destination", englishFallback: true },
+        originDepot: { id: originDepot, name: "Fictional Freight", code: "fictional_freight" },
+        destinationDepot: {
+          id: destinationDepot,
+          name: "Fictional Freight",
+          code: "fictional_freight",
+        },
+        description: null,
+        route: null,
+        meetingLocation: null,
+        distanceKm: value.distanceKm,
+        hasCover: false,
+      },
+    });
+    expect(member.event.requiredDlcs).toEqual(
+      [
+        {
+          id: id("stage2_city_dlc"),
+          name: "Fictional City DLC",
+          code: "stage2_city_dlc",
+          sources: ["from_city", "manual"],
+        },
+        {
+          id: id("stage2_depot_dlc"),
+          name: "Fictional Depot DLC",
+          code: "stage2_depot_dlc",
+          sources: ["from_city"],
+        },
+        {
+          id: id("stage2_manual_dlc"),
+          name: "Fictional Manual DLC",
+          code: "stage2_manual_dlc",
+          sources: ["manual"],
+        },
+      ].sort((a, b) => a.id.localeCompare(b.id, "en")),
+    );
+    const publicDetail = await app.inject({ url: `${publicPath}?locale=en` });
+    expect(publicDetail.statusCode).toBe(200);
+    expect(
+      eventWireValidator.validate(
+        browserSchemaRef("EventStage2EnvelopePublic"),
+        publicDetail.json(),
+      ),
+    ).toBe(true);
+    expect((await app.inject({ url: `${publicPath}?locale=fr` })).statusCode).toBe(422);
+    const russianDetail = await app.inject({ url: `${publicPath}?locale=ru` });
+    expect(russianDetail.statusCode).toBe(200);
+    expect(
+      eventWireValidator.validate(
+        browserSchemaRef("EventStage2EnvelopePublic"),
+        russianDetail.json(),
+      ),
+    ).toBe(true);
+    expect(russianDetail.json().data.origin).toMatchObject({
+      label: "Fictional translated origin",
+      requestedLocale: "ru",
+    });
+    const legacyDetail = await app.inject({ url: publicPath });
+    expect(legacyDetail.statusCode).toBe(200);
+    expect(
+      eventWireValidator.validate(browserSchemaRef("EnvelopeEventPublic"), legacyDetail.json()),
+    ).toBe(true);
+    const self = await app.inject({ url: "/api/v1/me", headers: { cookie: traineeCookie } });
+    expect(self.statusCode).toBe(200);
+    expect(eventWireValidator.validate(browserSchemaRef("EnvelopeSelf"), self.json())).toBe(true);
+    expect(self.headers[eventsStage2Header]).toBe("1");
+    const anonymousSelf = await app.inject({ url: "/api/v1/me" });
+    expect(anonymousSelf.statusCode).toBe(401);
+    expect(anonymousSelf.headers[eventsStage2Header]).toBeUndefined();
+    expect(publicDetail.headers[eventsStage2Header]).toBeUndefined();
+    expect(publicDetail.json().data.origin).toMatchObject({
+      label: "Fictional Origin",
+      requestedLocale: "en",
+    });
+    for (const privateValue of [
+      trainee.userId,
+      id("stage2_cargo"),
+      id("stage2_trailer"),
+      "responseCounts",
+      "companyLogo",
+      "logo",
+      "organizerMemberId",
+    ])
+      expect(publicDetail.body).not.toContain(privateValue);
+    expect((await app.inject({ url: `${memberPath}?locale=en` })).statusCode).toBe(401);
+    expect((await app.inject({ url: `${publicPath}?locale=ru&locale=en` })).statusCode).toBe(422);
+    expect((await app.inject({ url: publicPath })).json().data).toMatchObject({
+      description: "\u2014",
+      route: "\u2014",
+      meetingLocation: "\u2014",
+    });
+    expect(
+      (await app.inject({ url: "/api/v1/public/events" })).json().data.items[0],
+    ).not.toHaveProperty("platform");
+
+    await control.query("UPDATE catalog_companies SET hidden=1 WHERE id=?", [companyId]);
+    const description = "Fictional updated convoy description";
+    const zero = await write(
+      "PATCH",
+      updatePath,
+      {
+        ...value,
+        distanceKm: "0",
+        description,
+        route: "Fictional legacy route",
+        meetingLocation: "Fictional meeting text",
+      },
+      newId(),
+      '"v1"',
+    );
+    expect(zero.statusCode, zero.body).toBe(200);
+    expect(zero.json().data.event).toMatchObject({ distanceKm: "0", description });
+    const later = await routes.createPublished(
+      director,
+      newId(),
+      stagedInput({
+        startsAt: "2026-10-22T14:00:00.000Z",
+        originCityId: id("stage2_destination"),
+        requiredDlcIds: [id("stage2_manual_dlc")],
+      }),
+      "en",
+    );
+    const american = await routes.createPublished(
+      director,
+      newId(),
+      stagedInput({
+        game: "ats",
+        startsAt: "2026-10-22T15:00:00.000Z",
+        originCityId: ats("stage2_origin"),
+        originDepotId: atsDepot,
+        requiredDlcIds: [ats("stage2_city_dlc")],
+      }),
+      "en",
+    );
+    lookedUpGames.length = 0;
+    const headers = { cookie: traineeCookie };
+    const list = await app.inject({ url: "/api/v1/events?locale=ru", headers });
+    expect(list.statusCode).toBe(200);
+    expect(lookedUpGames).toHaveLength(2);
+    expect(new Set(lookedUpGames)).toEqual(new Set(["ats", "ets2"]));
+    const [first, second, third] = list.json().data.items;
+    expect(first).toMatchObject({
+      event: {
+        id: eventId,
+        platform: "haulmp",
+        distanceKm: "0",
+        requiredDlcs: member.event.requiredDlcs,
+        origin: { label: "Fictional translated origin", requestedLocale: "ru" },
+        originDepot: member.event.originDepot,
+      },
+      organizerMemberId: trainee.userId,
+    });
+    expect(second.event).toMatchObject({
+      id: later.data.event.id,
+      requiredDlcs: [{ id: id("stage2_manual_dlc"), sources: ["manual"] }],
+    });
+    expect(third.event).toMatchObject({
+      id: american.data.event.id,
+      originDepot: { id: atsDepot, name: "Fictional American Freight" },
+      requiredDlcs: [{ id: ats("stage2_city_dlc"), sources: ["manual"] }],
+    });
+    const nearest = await app.inject({ url: "/api/v1/me/upcoming-event?locale=en", headers });
+    expect(nearest.statusCode).toBe(200);
+    expect(nearest.json().data).toMatchObject({
+      event: {
+        id: eventId,
+        distanceKm: "0",
+        requiredDlcs: member.event.requiredDlcs,
+        origin: { label: "Fictional Origin", requestedLocale: "en" },
+      },
+      myResponse: "unanswered",
+      myResponseVersion: 1,
+    });
+    const withoutOriginDepot = {
+      ...value,
+      originDepotId: null,
+      distanceKm: null,
+      meetingLocation: null,
+      visibility: "members",
+    };
+    const removed = await write("PATCH", updatePath, withoutOriginDepot, newId(), '"v2"');
+    expect(removed.statusCode, removed.body).toBe(200);
+    expect(removed.json().data.event).toMatchObject({
+      originDepot: null,
+      distanceKm: null,
+      description,
+      route: "Fictional legacy route",
+      meetingLocation: null,
+    });
+    const hidden = await write("PATCH", updatePath, value, newId(), '"v3"');
+    expect(hidden.statusCode).toBe(422);
+    expect(hidden.json().error.code).toBe("CATALOG_SELECTION_HIDDEN");
+    expect((await app.inject({ url: `${publicPath}?locale=en` })).statusCode).toBe(404);
+
+    const clearKey = newId();
+    const cleared = await write(
+      "PATCH",
+      updatePath,
+      { ...withoutOriginDepot, description: null },
+      clearKey,
+      '"v3"',
+    );
+    expect(cleared.statusCode, cleared.body).toBe(200);
+    expect(cleared.headers.etag).toBe('"v4"');
+    expect(cleared.json().data.event.description).toBeNull();
+    const conflictingOmission = await write(
+      "PATCH",
+      updatePath,
+      withoutOriginDepot,
+      clearKey,
+      '"v3"',
+    );
+    expect(conflictingOmission.statusCode).toBe(409);
+    expect(conflictingOmission.json().error.code).toBe("IDEMPOTENCY_CONFLICT");
+
+    await routes.respond(driver, eventId, newId(), 1, {
+      response: "declined",
+      reason: "Fictional private decline",
+    });
+    const memberRead = await app.inject({
+      url: `${memberPath}?locale=ru`,
+      headers: { cookie: traineeCookie },
+    });
+    expect(memberRead.json().data.responseCounts).toEqual({ participating: 0, declined: 1 });
+    expect(memberRead.body).not.toContain("Fictional private decline");
+    const replay = await write("POST", `${createPath}?locale=ru`, value, createKey);
+    expect(replay.statusCode, replay.body).toBe(201);
+    expect(replay.headers.etag).toBe('"v1"');
+    expect(replay.json().data).toEqual(member);
+    expect((await write("POST", createPath, input(), createKey)).statusCode).toBe(409);
+    await control.query("DELETE FROM identity_limits");
+    const reason = { reason: "Fictional private cancellation" };
+    const cancelPath = `${updatePath}/cancellation`;
+    const cancelKey = newId();
+    const cancelled = await write("POST", `${cancelPath}?locale=ru`, reason, cancelKey, '"v4"');
+    expect(cancelled.statusCode, cancelled.body).toBe(200);
+    expect(cancelled.headers.etag).toBe('"v5"');
+    expect(cancelled.json().data.event).toMatchObject({
+      status: "cancelled",
+      destinationDepot: member.event.destinationDepot,
+    });
+    expect(cancelled.body).not.toContain(reason.reason);
+    const legacyCancelReplay = await write("POST", cancelPath, reason, cancelKey, '"v4"');
+    expect(legacyCancelReplay.headers.etag).toBe('"v5"');
+    expect(legacyCancelReplay.json().data.event).not.toHaveProperty("platform");
+    const headSelf = await app.inject({
+      method: "HEAD",
+      url: "/api/v1/me",
+      headers: { cookie: traineeCookie },
+    });
+    expect(headSelf.statusCode).toBe(200);
+    expect(headSelf.headers[eventsStage2Header]).toBeUndefined();
+  } finally {
+    await app.close();
+  }
+});
+
+test("legacy writers carry compatible route details and staged failures leave no partial rows", async () => {
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const enabled = { ...config, routeEnabled: true };
+  const routes = createEvents(unit, enabled, { identity, catalogs }, now);
+  const { id } = await seedCatalog(unit, "ets2", {
+    cities: ["legacy_route_city"],
+    dlcs: ["legacy_manual_dlc"],
+  });
+  const value = stagedInput({
+    originCityId: id("legacy_route_city"),
+    requiredDlcIds: [id("legacy_manual_dlc")],
+    distanceKm: "12.75",
+  });
+  await expect(
+    routes.createPublished(director, newId(), { ...value, distanceKm: "-1" }, "en"),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  const old = await create();
+  expect((await routes.getPublished(trainee, old.data.event.id, "ru")).data).toMatchObject({
+    organizerMemberId: null,
+    event: { platform: null, distanceKm: null, requiredDlcs: [] },
+  });
+  const commandKey = newId(),
+    outbox = createOutbox(unit);
+  const broken = createEvents(
+    unit,
+    enabled,
+    {
+      identity,
+      catalogs,
+      outbox: {
+        async append(tx, event) {
+          await outbox.append(tx, event);
+          throw Error("FICTIONAL_ROUTE_EFFECT_FAILURE");
+        },
+      },
+    },
+    now,
+  );
+  const affected = [
+    "events",
+    "event_revisions",
+    "event_revision_details",
+    "event_revision_dlcs",
+    "event_commands",
+    "outbox_events",
+    "audit_entries",
+  ];
+  const baseline = await Promise.all(affected.map(count));
+  await expect(broken.createPublished(director, commandKey, value, "en")).rejects.toThrow(
+    "FICTIONAL_ROUTE_EFFECT_FAILURE",
+  );
+  expect(await Promise.all(affected.map(count))).toEqual(baseline);
+  const [created, replay] = await Promise.all([
+    routes.createPublished(director, commandKey, value, "en"),
+    routes.createPublished(director, commandKey, value, "en"),
+  ]);
+  expect(replay).toEqual(created);
+  expect(await count("event_revision_details")).toBe(1);
+  expect(await count("event_revision_dlcs")).toBe(1);
+  const eventId = created.data.event.id;
+  const legacy = input({
+    organizer: created.data.event.organizer,
+    route: "\u2014",
+    meetingLocation: "\u2014",
+    description: "\u2014",
+    originCityId: value.originCityId,
+  });
+  await routes.update(director, eventId, newId(), 1, legacy);
+  expect((await routes.getPublished(trainee, eventId, "en")).data).toMatchObject({
+    organizerMemberId: trainee.userId,
+    event: {
+      platform: "haulmp",
+      distanceKm: "12.75",
+      requiredDlcs: [{ id: id("legacy_manual_dlc") }],
+      route: null,
+      meetingLocation: null,
+      description: null,
+    },
+  });
+  await routes.update(director, eventId, newId(), 2, {
+    ...legacy,
+    game: "ats",
+    originCityId: null,
+    organizer: "Fictional replacement organizer",
+  });
+  expect((await routes.getPublished(trainee, eventId, "en")).data).toMatchObject({
+    organizerMemberId: null,
+    event: {
+      organizer: "Fictional replacement organizer",
+      platform: "haulmp",
+      distanceKm: null,
+      requiredDlcs: [],
+    },
+  });
+});
+
+test("the fenced route-history probe observes the first committed marker after an earlier empty read", async () => {
+  const event = await create();
+  const guard = await dedicatedConnection(guardedSettings());
+  try {
+    await guard.beginTransaction();
+    const [early] = await guard.query<RowDataPacket[]>(
+      "SELECT EXISTS(SELECT 1 FROM event_revision_details) AS present",
+    );
+    expect(Number(early[0]?.present)).toBe(0);
+    await control.execute(
+      "INSERT INTO event_revision_details (revision_id) SELECT current_revision_id FROM events WHERE id=?",
+      [event.data.event.id],
+    );
+    const [fenced] = await guard.query<RowDataPacket[]>(
+      "SELECT EXISTS(SELECT revision_id FROM event_revision_details LIMIT 1 FOR SHARE) AS present",
+    );
+    expect(Number(fenced[0]?.present)).toBe(1);
+  } finally {
+    try {
+      await guard.rollback();
+    } finally {
+      await guard.end();
+    }
+  }
+});
+
+test("a newly inactive organizer blocks selection while a committed command still replays", async () => {
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const routes = createEvents(unit, { ...config, routeEnabled: true }, { identity, catalogs }, now);
+  const { actor: organizer } = await member(["driver"]);
+  const value = stagedInput({ organizerMemberId: organizer.userId });
+  const key = newId();
+  const created = await routes.createPublished(director, key, value, "en");
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(membership)
+      .set({ status: "inactive" })
+      .where(eq(membership.userId, organizer.userId)),
+  );
+  await expect(routes.createPublished(director, newId(), value, "en")).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  await expect(routes.createPublished(director, key, value, "en")).resolves.toEqual(created);
 });

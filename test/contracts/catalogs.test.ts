@@ -167,9 +167,19 @@ test("company input and patch follow the plain-list shape", () => {
   const base = { game: "ets2", code: "fictional_freight", nameEn: "Fictional Freight" };
   const input = validate("CatalogCompanyInput");
   expect(input(base)).toBe(true);
-  expect(input({ ...base, nameRu: null, dlcId: id })).toBe(true);
-  for (const extra of [{ regionId }, { adrClass: "3" }, { nameNative: "x" }, { logo: null }])
+  expect(input({ ...base, dlcId: id })).toBe(true);
+  // Companies and DLCs use only their canonical name: no Russian name is written.
+  for (const extra of [
+    { regionId },
+    { adrClass: "3" },
+    { nameNative: "x" },
+    { logo: null },
+    { nameRu: null },
+    { nameRu: "Пример" },
+  ])
     expect(input({ ...base, ...extra })).toBe(false);
+  expect(validate("CatalogDlcInput")({ ...base, nameRu: null })).toBe(false);
+  expect(validate("CatalogCityInput")({ ...base, nameRu: "Пример" })).toBe(true);
   expect(input({ ...base, code: "a b" })).toBe(false);
   expect(input({ game: "ets2", code: "fictional_freight" })).toBe(false);
   expect(validate("CatalogItemPatch")({ dlcId: null, hidden: true })).toBe(true);
@@ -288,11 +298,16 @@ test("staged catalog filter examples follow the list-specific query parameters",
   const hidden = stageFixture("listCatalogItems:updated-dlcs");
   const company = stageFixture("listCatalogItems:updated-companies");
   const untranslated = stageFixture("listCatalogItems:updated-cities");
-  const depot = stageFixture("listCatalogDepots:hidden-untranslated");
+  const depot = stageFixture("listCatalogDepots:hidden-canonical-company");
   expect(hidden.query).toEqual({ game: "ets2", hidden: "only", includeHidden: false });
   expect(company).toMatchObject({ path: { list: "companies" }, query: { logo: "missing" } });
   expect(untranslated.query).toEqual({ game: "ets2", untranslated: true });
-  expect(depot.query).toMatchObject({ hidden: "only", includeHidden: false, untranslated: true });
+  expect(depot.query).toEqual({ game: "ets2", hidden: "only", includeHidden: false, locale: "ru" });
+  // Depots have no translation of their own, so their read offers no untranslated filter.
+  expect(depotQuery({ ...depot.query, untranslated: true })).toBe(false);
+  expect(
+    items.parameters.find((p: { name?: string }) => p.name === "untranslated").description,
+  ).toMatch(/Not offered on the dlcs and companies lists/);
   expect(itemQuery(hidden.query)).toBe(true);
   expect(itemQuery(company.query)).toBe(true);
   expect(itemQuery(untranslated.query)).toBe(true);
@@ -320,6 +335,15 @@ test("catalog row timestamps and summary counters are additive and bounded", () 
   expect(validate("CatalogSummary")(data)).toBe(true);
   expect(data.lists.trailers.untranslated).toBe(0);
   expect(data.lists.companies.missingLogo).toBe(1);
+  for (const canonical of ["dlcs", "companies", "depots"]) {
+    expect(data.lists[canonical]).not.toHaveProperty("untranslated");
+    expect(
+      validate("CatalogSummary")({
+        ...data,
+        lists: { ...data.lists, [canonical]: { ...data.lists[canonical], untranslated: 0 } },
+      }),
+    ).toBe(false);
+  }
   expect(
     validate("CatalogSummary")({
       ...data,
@@ -347,16 +371,20 @@ test("catalog row timestamps and summary counters are additive and bounded", () 
       expect(row).not.toHaveProperty("depotCount");
     }
   }
-  const example = stageFixture("listCatalogDepots:hidden-untranslated");
+  const example = stageFixture("listCatalogDepots:hidden-canonical-company");
   const [depot] = example.response.data.items;
   expect(validate("CatalogDepot")(depot)).toBe(true);
-  for (const label of [depot.company.label, depot.city.label]) {
-    expect(label).toMatchObject({
-      requestedLocale: example.query.locale,
-      renderedLocale: "en",
-      englishFallback: true,
-    });
-  }
+  // A Russian read shows the company's canonical name without a fallback mark; the city has one.
+  expect(depot.company.label).toMatchObject({
+    requestedLocale: example.query.locale,
+    renderedLocale: "en",
+    englishFallback: false,
+  });
+  expect(depot.city.label).toMatchObject({
+    requestedLocale: example.query.locale,
+    renderedLocale: "en",
+    englishFallback: true,
+  });
   expect(depot.updatedAt).toMatch(/\.\d{3}Z$/);
   expect(validate("CatalogDepot")({ ...depot, updatedAt: "2026-10-21T12:00:00.000+00:00" })).toBe(
     false,

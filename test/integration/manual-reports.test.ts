@@ -2314,6 +2314,21 @@ test("draft labels follow current member locale and only matching catalog game a
       ...emptyLabels,
       origin: current.labels?.origin,
     });
+    // An explicit interface language overrides the saved English account language for the list.
+    const russianList = await app.inject({
+      url: "/api/v1/me/manual-drafts?state=editing&locale=ru",
+      headers,
+    });
+    expect(russianList.statusCode).toBe(200);
+    const russianItems = (russianList.json() as S["EnvelopeListManualDraft"]).data.items;
+    expect(russianItems.find(({ id }) => id === draft.id)?.labels).toEqual(russian.labels);
+    // And the other way round: a Russian account can ask for English labels.
+    await setLocale("ru");
+    const explicitEnglish = await manual.listDrafts(owner, { state: "editing", locale: "en" });
+    expect(explicitEnglish.items.find(({ id }) => id === draft.id)?.labels).toEqual(current.labels);
+    expect(
+      (await app.inject({ url: "/api/v1/me/manual-drafts?locale=de", headers })).statusCode,
+    ).toBe(422);
   } finally {
     await setLocale("ru");
     await app.close();

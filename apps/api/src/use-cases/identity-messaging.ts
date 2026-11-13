@@ -269,6 +269,16 @@ export function composeIdentity(
                 if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
                 await tripDecisions.eventChangedInTransaction(tx, eventId, generation);
               },
+              attendanceTripIds: (tx, actor, eventId, game, memberIds) => {
+                if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                return tripDecisions.eventAttendanceTripIdsInTransaction(
+                  tx,
+                  actor,
+                  eventId,
+                  game,
+                  memberIds,
+                );
+              },
             }
           : {}),
       })

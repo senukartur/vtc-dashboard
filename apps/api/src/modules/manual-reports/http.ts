@@ -149,7 +149,7 @@ export async function registerManualRoutes(
     (a, r) => manual.listDrafts(a, r.query),
     undefined,
     200,
-    { state: { type: "string", const: "editing" } },
+    { state: { type: "string", const: "editing" }, locale: { type: "string", enum: ["en", "ru"] } },
   );
   route(
     "POST",

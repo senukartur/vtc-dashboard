@@ -414,6 +414,7 @@ def core():
         compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
     with rehearsal_phase('core-production-codec-grants'):
         notification_account_cleanup_proof(ops, revision, image_id)
+        assert not ops.activation.has_published_route_history(ops, revision, image_id, fenced=True)
         ops.jobs_grants_locked(revision)
         # Exercise the known existing-installation SELECT revocation, not only fresh setup.
         sql("GRANT SELECT ON vtc.* TO 'vtc_runtime'@'%';")
@@ -440,6 +441,68 @@ def core():
         runtime_admissions_limits = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});try{await c.beginTransaction();await c.query('INSERT INTO admissions_limits(bucket,`window`,count) VALUES ?',[Array.from({length:256},(_,i)=>['staff_read:rehearsal'+i,0,1])]);const [deleted]=await c.execute('DELETE FROM admissions_limits WHERE bucket LIKE ? AND `window`<? LIMIT 100',['staff_read:rehearsal%',1]);const [remaining]=await c.query('SELECT COUNT(*) n FROM admissions_limits WHERE bucket LIKE ?',['staff_read:rehearsal%']);if(deleted.affectedRows!==100||Number(remaining[0].n)!==156)throw Error('ADMISSIONS_RUNTIME_LIMIT_CLEANUP_FAILED');}finally{await c.rollback();await c.end();}"""
         compose(['exec', '-T', 'app', 'node', '--input-type=module', '-e', runtime_admissions_limits], revision=revision)
         print('Admissions restricted runtime: rate-row insert/read and bounded100-row deletion passed with rollback', flush=True)
+        # Exercise the exact route supplement with each restricted account on the owned database.
+        stage_grants = json.loads((base / ops.activation.STAGE_PROFILE).read_text())['grants']
+        route_grants = {
+            'runtime': {table: stage_grants['runtime'][table]
+                        for table in ['event_revision_details', 'event_revision_dlcs']},
+            'jobs': {'event_revision_details': stage_grants['jobs']['event_revision_details']},
+        }
+        assert route_grants == {
+            'runtime': {'event_revision_details': ['SELECT', 'INSERT'],
+                        'event_revision_dlcs': ['SELECT', 'INSERT']},
+            'jobs': {'event_revision_details': ['SELECT']},
+        }
+        granted = []
+        try:
+            for role, tables in route_grants.items():
+                for table, permissions in tables.items():
+                    sql(f"GRANT {','.join(permissions)} ON vtc.{table} TO 'vtc_{role}'@'%';")
+                    granted.append((role, table, permissions))
+            route_probe = """
+                import { createRequire } from 'node:module';
+                const mysql = createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');
+                const { MYSQL_HOST: host, MYSQL_USER: user, MYSQL_PASSWORD: password } = process.env;
+                const c = await mysql.createConnection({ host, user, password, database: 'vtc' });
+                async function denied(statement) {
+                  try { await c.query(statement); }
+                  catch (error) {
+                    if ([1044, 1142, 1143, 1227].includes(error.errno)) return;
+                    throw Error('EVENT_ROUTE_GRANT_PROBE_UNEXPECTED_ERROR');
+                  }
+                  throw Error('EVENT_ROUTE_GRANT_PROBE_UNEXPECTED_PERMISSION');
+                }
+                const insertDetails = 'INSERT INTO event_revision_details (revision_id) SELECT id FROM event_revisions WHERE FALSE';
+                const insertDlcs = "INSERT INTO event_revision_dlcs (revision_id, dlc_id, game) SELECT revision_id, revision_id, 'ets2' FROM event_revision_details WHERE FALSE";
+                try {
+                  await c.beginTransaction();
+                  await c.query('SELECT revision_id, origin_depot_id FROM event_revision_details WHERE FALSE FOR SHARE');
+                  if (user === 'vtc_runtime') {
+                    await c.query('SELECT dlc_id FROM event_revision_dlcs WHERE FALSE FOR SHARE');
+                    await c.query(insertDetails);
+                    await c.query(insertDlcs);
+                    await denied('UPDATE event_revision_dlcs SET game=game WHERE FALSE');
+                    await denied('DELETE FROM event_revision_dlcs WHERE FALSE');
+                  } else if (user === 'vtc_jobs') {
+                    await denied('INSERT INTO event_revision_details (revision_id) SELECT revision_id FROM event_revision_details WHERE FALSE');
+                    await denied('SELECT dlc_id FROM event_revision_dlcs WHERE FALSE');
+                  } else {
+                    throw Error('EVENT_ROUTE_GRANT_PROBE_WRONG_ACCOUNT');
+                  }
+                  await denied('UPDATE event_revision_details SET distance_km=NULL WHERE FALSE');
+                  await denied('DELETE FROM event_revision_details WHERE FALSE');
+                } finally {
+                  await c.rollback();
+                  await c.end();
+                }
+            """
+            command = ['node', '--input-type=module', '-e', route_probe]
+            compose(['exec', '-T', 'app', *command], revision=revision)
+            compose(['run', '--rm', '--no-deps', 'jobs', *command], revision=revision)
+        finally:
+            for role, table, permissions in reversed(granted):
+                sql(f"REVOKE {','.join(permissions)} ON vtc.{table} FROM 'vtc_{role}'@'%';")
+        print('Events route grants: restricted runtime shared reads and inserts, jobs shared detail reads, denied history mutation and jobs DLC reads', flush=True)
     with rehearsal_phase('core-identity-ingress-acceptance'):
         ops.maintenance(False)
         ops.run(['docker', 'network', 'connect', f'{project}_frontend', os.environ['HOSTNAME']])

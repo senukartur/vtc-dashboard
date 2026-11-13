@@ -20,6 +20,8 @@ Rows are matched to telemetry by exact `(game, code)`. Trailers are identified b
 
 The owner approved an explicit English-name fallback when a Russian translation is missing; complete Russian translation is not a launch prerequisite. Mark the fallback visibly.
 
+On 2026-11-12 the owner decided that DLCs, companies and therefore depots use only their canonical name: no Russian name, translation filter or fallback mark. A company option shows the name on the left and the code on the right, like the city picker, so same-name companies stay distinct.
+
 ### Catalog source use basis
 
 On 2026-10-20 the owner selected closed, non-commercial use of game-derived catalog metadata for this VTC, from the owner-authorized game/DLC installations. A separate SCS permission reply is not a prerequisite for this selected delivery scope. This records the owner's project decision; it does not claim a provider permission grant or authorize public bulk redistribution of extracted definitions, label/localization corpora or game assets. Preserve attribution, exact private provenance and independent dataset review. Public Git contains original machinery, fictional fixtures and aggregate evidence. Production deployment and activation remain separate operational gates.
