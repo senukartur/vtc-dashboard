@@ -14,6 +14,8 @@ GET never redeems. Missing, duplicated or malformed tokens get an unavailable sc
 
 ## Session, transport and private state
 
+The sign-in form offers an unchecked Remember me checkbox. Selecting it keeps the new session for up to 30 days from sign-in. The standard session lasts up to 24 hours. Both choices survive reopening the same browser profile and remain subject to revocation.
+
 The app owns one TanStack Query session boundary with checking, authenticated, anonymous/ended and unavailable states. Account entry, relevant commands, focus and online recovery revalidate the real `/me`. Initial public landing/previews do not initiate identity requests. `/me` and pending-email reads have a 15-second client deadline and external cancellation. Network/dependency failures hide account data and offer retry without asserting logout.
 
 Private queries include the access generation; logout, identity switching, confirmed `/me` unauthorized and credential completion advance it, cancel private reads, remove all private DTOs and clear mutation history. Obsolete requests cannot restore another identity's data. Protected forms are disposed with the boundary. A wrong login/code 401 is handled locally, with a separate current-session check for protected commands; it never itself establishes session loss.

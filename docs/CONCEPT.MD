@@ -23,7 +23,7 @@ Roles are additive and separate from ETS2/ATS qualifications. Nobody may approve
 
 - **Public site**: landing page with current-month company totals, public convoys and a membership application (nickname, email, Steam profile, games; Discord and introduction optional).
 - **Admissions**: approve, or reject with a reason that is emailed to the applicant; a one-time invitation link valid for seven days, sent by email on staff request or copied for manual delivery.
-- **Accounts**: email/password sign-in, linked Steam and basic TruckersMP. Staff replace a Steam link on request with an audit trail. Leaving deactivates the account but keeps its history; a returning member gets the same account without old privileges.
+- **Accounts**: email/password sign-in with Remember me, linked Steam and basic TruckersMP. Staff audit Steam link replacements on request. Leaving deactivates the account. Returning members keep their account and history, with privileges reassigned.
 - **Telemetry**: a revocable personal token for durable desktop uploads of all retained trips, then new ones. Private details show job type, game mode (including HaulMP) and recorded Hard Mode result.
 - **Manual reports**: game, cities, cargo, mass, trailer, actual distance, reference start and completion, and a screenshot. Damage and depot companies are optional. A different reviewer checks the report. Edits create revisions. Screenshots stay for a year or longer after the latest decision. Over-limit acceptance requires explicit confirmation.
 - **Trip history** is searchable by stable number or localized labels. Replays, revisions and overlaps preserve one trip and its credit. Late telemetry changes to confirmed trips need review.

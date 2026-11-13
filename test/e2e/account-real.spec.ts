@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { Page } from "@playwright/test";
+import { mkdtempDisposable } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium, type Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
+import { assertLocalOrigin } from "../support/environment.ts";
 import {
   accountSecret,
   approveInvitation,
@@ -68,11 +72,12 @@ async function redeem(page: Page, link: string, password: string, uncertain = fa
   }
   await expect(page.getByRole("heading", { name: "Account created", exact: true })).toBeVisible();
 }
-async function login(page: Page, email: string, password: string) {
+async function login(page: Page, email: string, password: string, rememberMe = false) {
   await page.goto("/login");
   await english(page);
   await page.getByLabel("Email", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
+  if (rememberMe) await page.getByRole("checkbox", { name: "Remember me", exact: true }).check();
   const response = page.waitForResponse(
     (result) => result.url().endsWith("/api/v1/auth/login") && result.request().method() === "POST",
   );
@@ -102,6 +107,79 @@ async function verify(page: Page, userId: string) {
   await form.getByRole("button", { name: "Confirm code", exact: true }).click();
   await expect(page.getByText("Your current email is verified.", { exact: true })).toBeVisible();
 }
+test(
+  "real remembered sign-in survives reopening the same Chromium profile and ends on logout",
+  browserCase(["@real"]),
+  async ({ context }) => {
+    test.setTimeout(60000);
+    // This private temporary profile contains synthetic session cookies. Dispose it even on failure.
+    await using profile = await mkdtempDisposable(join(tmpdir(), "vtc-account-profile-"));
+    const blocked: string[] = [];
+    const openProfile = async () => {
+      const browser = await chromium.launchPersistentContext(profile.path, {
+        baseURL: origin,
+        locale: "en-GB",
+        timezoneId: "UTC",
+        serviceWorkers: "block",
+        viewport: { width: 1280, height: 800 },
+      });
+      await browser.route("**/*", async (route) => {
+        try {
+          assertLocalOrigin(route.request().url());
+          await route.continue();
+        } catch {
+          blocked.push("unexpected origin");
+          await route.abort("blockedbyclient");
+        }
+      });
+      return browser;
+    };
+    const staff = await staffContext();
+    let phase = "START";
+    try {
+      const invited = await createInvitation(context.request, staff);
+      const password = accountSecret("password");
+      phase = "SIGN_IN";
+      const first = await openProfile();
+      let userId: string;
+      try {
+        const page = await first.newPage();
+        await redeem(page, invited.link, password);
+        userId = (await login(page, invited.email, password, true)).member.id;
+      } finally {
+        await first.close();
+      }
+
+      phase = "REOPEN";
+      const reopened = await openProfile();
+      try {
+        const page = await reopened.newPage();
+        await page.goto("/account/security");
+        await expect(
+          page.getByRole("heading", { level: 1, name: /^(Security|Безопасность)$/, exact: true }),
+        ).toBeVisible();
+        const current = await reopened.request.get("/api/v1/me");
+        expect(current.status()).toBe(200);
+        expect((await current.json()).data.member.id === userId).toBe(true);
+        phase = "LOGOUT";
+        await signOutFromMenu(page);
+        await expect(
+          page.getByRole("heading", {
+            name: /^(Sign in to open your account|Войдите, чтобы открыть аккаунт)$/,
+          }),
+        ).toBeVisible();
+        expect((await reopened.request.get("/api/v1/me")).status()).toBe(401);
+      } finally {
+        await reopened.close();
+      }
+      expect(blocked).toEqual([]);
+    } catch {
+      throw new Error(`ACCOUNT_REMEMBER_ME_${phase}_FAILED`);
+    } finally {
+      await staff.dispose();
+    }
+  },
+);
 test(
   "real rendered application, invitation, login, wrong verification code, preferences and logout",
   browserCase(["@real"]),

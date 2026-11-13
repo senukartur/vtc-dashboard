@@ -11984,6 +11984,10 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 1024
+          },
+          "rememberMe": {
+            "type": "boolean",
+            "description": "Selects a fixed 30-day session when true. Omission or false selects the fixed 24-hour session."
           }
         },
         "required": [

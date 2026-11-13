@@ -21,6 +21,7 @@ export function AuthPage({ kind, handoff }: { kind: AuthKind; handoff?: LinkHand
     if (handoff) handoff.token = null;
   }, [handoff]);
   const [success, setSuccess] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const linked = kind === "reset" || kind === "invitation";
   const unavailable =
     !success &&
@@ -100,6 +101,7 @@ export function AuthPage({ kind, handoff }: { kind: AuthKind; handoff?: LinkHand
                   ? await request.run("login", {
                       email: values.email ?? "",
                       password: values.password ?? "",
+                      rememberMe,
                     })
                   : kind === "recovery"
                     ? await request.run("recovery", { email: values.email ?? "" })
@@ -122,7 +124,19 @@ export function AuthPage({ kind, handoff }: { kind: AuthKind; handoff?: LinkHand
                 setSuccess(true);
               }
             }}
-          />
+          >
+            {kind === "login" && (
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  name="rememberMe"
+                  checked={rememberMe}
+                  onChange={(event) => setRememberMe(event.currentTarget.checked)}
+                />
+                {t("rememberMe")}
+              </label>
+            )}
+          </Form>
         )}
         {kind === "invitation" && !unavailable && !success && (
           <div className="auth-steps">
