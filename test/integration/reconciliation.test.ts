@@ -187,6 +187,9 @@ beforeEach(async () => {
   await control.query("UPDATE manual_reports SET current_revision_id=NULL");
   await control.query("UPDATE trips SET alias_of=NULL");
   for (const table of [
+    "trip_event_associations",
+    "trip_decisions",
+    "trip_review_work",
     "job_effect_receipts",
     "durable_jobs",
     "reconciliation_searches",
@@ -354,6 +357,7 @@ async function corrections() {
 function productionComposition(
   reconciliationConfig: ReconciliationConfig = config,
   compositionUnit = unit,
+  decisions = false,
 ) {
   const composed = composeIdentity(
     compositionUnit,
@@ -366,8 +370,9 @@ function productionComposition(
     undefined,
     manualConfig,
     qualConfig,
-    undefined,
+    decisions ? { cursorKey: randomBytes(32).toString("hex") } : undefined,
     reconciliationConfig,
+    decisions ? { key: randomBytes(32).toString("hex") } : undefined,
   );
   const { trips, manualReports, reconciliation, qualifications, jobsQueue } = composed;
   if (!trips || !manualReports || !reconciliation || !qualifications)
@@ -741,6 +746,75 @@ test.each([
     });
     expect(fact?.reasonCodes).toContain(code);
     expect(after?.reviewReasons).toContain(code);
+  },
+);
+
+test.each(["merge", "reversal"] as const)(
+  "a reviewed %s never makes an ingestion-held superset revision current or decides on it",
+  async (scenario) => {
+    const composed = productionComposition(config, unit, true),
+      start = payload("started"),
+      first = await receive(start, owner, composed.trips),
+      opened = await state(first.tripId),
+      duplicate = structuredClone(start);
+    duplicate.eventId = newId();
+    duplicate.source = payload("started").source;
+    const second = await receive(duplicate, owner, composed.trips);
+    const merge = async () =>
+      composed.reconciliation.merge(director, newId(), {
+        primaryTripId: first.tripId,
+        secondaryTripId: second.tripId,
+        primaryVersion: (await state(first.tripId))?.version as number,
+        secondaryVersion: (await state(second.tripId))?.version as number,
+        reason: "Fictional duplicate evidence review",
+      });
+    const applied = scenario === "reversal" ? await merge() : undefined;
+    // Revision 2 is held because it loses known fuel; revision 3 then keeps every value of the
+    // open current fact and adds a terminal outcome, but the held terminal revision holds it too.
+    const delivered = payload();
+    delivered.source = structuredClone(start.source);
+    delivered.snapshot.start = structuredClone(start.snapshot.start);
+    delivered.revision = 2;
+    delivered.snapshot.fuelUsed = {
+      available: false,
+      reason: "not-observed",
+      unit: "L",
+    } as typeof delivered.snapshot.fuelUsed;
+    await receive(delivered, owner, composed.trips);
+    const cancelled = structuredClone(delivered);
+    cancelled.eventId = newId();
+    cancelled.revision = 3;
+    cancelled.type = "trip.cancelled";
+    cancelled.snapshot.outcome = "cancelled";
+    cancelled.snapshot.fuelUsed = structuredClone(start.snapshot.fuelUsed);
+    const stored = await receive(cancelled, owner, composed.trips),
+      held = await unit.run((tx) =>
+        composed.trips.sourceEvidenceInTransaction(tx, stored.sourceRecordId),
+      );
+    expect(held?.reasonCodes).toContain("terminal_outcome_conflict");
+    expect(await state(first.tripId)).toMatchObject({
+      currentFactId: opened?.currentFactId,
+      reviewHold: true,
+    });
+    if (applied) {
+      const current = await composed.reconciliation.get(director, applied.data.id);
+      await composed.reconciliation.reverse(director, applied.data.id, newId(), current.version, {
+        primaryVersion: current.data.primaryVersion,
+        secondaryVersion: current.data.secondaryVersion,
+        reason: "Fictional independent journey review",
+      });
+    } else await merge();
+    const after = await state(first.tripId);
+    expect(after).toMatchObject({
+      aliasOf: null,
+      currentFactId: opened?.currentFactId,
+      outcome: "open",
+      reviewHold: true,
+    });
+    expect(after?.currentFactId).not.toBe(held?.factRevisionId);
+    expect(after?.decision).not.toBe("accepted");
+    expect(after?.decision).not.toBe("rejected");
+    expect(after?.reviewReasons).toContain("terminal_outcome_conflict");
   },
 );
 

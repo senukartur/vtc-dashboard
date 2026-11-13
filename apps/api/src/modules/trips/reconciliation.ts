@@ -19,6 +19,7 @@ import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
+import { ingestionConflictCodes } from "./service.js";
 export interface GroupSnapshot {
   before: TripState[];
   after: TripState[];
@@ -65,6 +66,19 @@ export function tripMatchDiscovery(
     .orderBy(trips.id)
     .limit(limit)
     .for("update");
+}
+// Like the trip decisions worker: a source revision that ingestion held (not current, carrying
+// its conflict codes) is never selected by a merge or reversal; its codes stay review reasons.
+function heldCodes(f: NormalizedTripEvidence, current: readonly (string | null)[]) {
+  return current.includes(f.factRevisionId)
+    ? []
+    : f.reasonCodes.filter((code) => ingestionConflictCodes.has(code));
+}
+function withoutHeld(all: readonly NormalizedTripEvidence[], current: readonly (string | null)[]) {
+  return {
+    selectable: all.filter((f) => !heldCodes(f, current).length),
+    held: [...new Set(all.flatMap((f) => heldCodes(f, current)))],
+  };
 }
 export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
   const c = (tx: TxContext) => unit.client(tx),
@@ -179,7 +193,11 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
         : undefined;
       if (retained && !all.some((f) => f.factRevisionId === retained.factRevisionId))
         all.push(retained);
-      const selected = selectQuality(all, primary.currentFactId);
+      const { selectable, held } = withoutHeld(all, [
+          primary.currentFactId,
+          secondary.currentFactId,
+        ]),
+        selected = selectQuality(selectable, primary.currentFactId);
       if (!selected.selected || !primary.currentFactId || !secondary.currentFactId)
         throw identityError(409);
       const credits = await c(tx)
@@ -200,6 +218,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
           ...primary.reviewReasons,
           ...secondary.reviewReasons,
           ...selected.reasons,
+          ...held,
           ...(primary.decision === "accepted" &&
           selected.selected.factRevisionId !== primary.currentFactId
             ? ["confirmed_facts_require_review"]
@@ -216,11 +235,15 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
               ? {
                   ...change,
                   reviewReasons: reasons,
-                  reviewHold: before.some((t) => t.reviewHold) || selected.reasons.length > 0,
+                  reviewHold:
+                    before.some((t) => t.reviewHold) ||
+                    selected.reasons.length > 0 ||
+                    held.length > 0,
                   correctionPending:
                     primary.correctionPending ||
                     (primary.decision === "accepted" &&
                       (selected.reasons.length > 0 ||
+                        held.length > 0 ||
                         selected.selected.factRevisionId !== primary.currentFactId)),
                 }
               : { aliasOf: primary.id },
@@ -239,7 +262,11 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
                 >),
                 alternatives: all.map((f) => f.factRevisionId).sort(),
               }
-            : selected.provenance,
+            : // Held facts are not selectable but remain recorded alternatives.
+              {
+                ...(selected.provenance as NonNullable<GroupSnapshot["selection"]>),
+                alternatives: all.map((f) => f.factRevisionId).sort(),
+              },
       };
     },
     async reverse(tx: TxContext, snapshot: GroupSnapshot): Promise<TripState[]> {
@@ -304,14 +331,15 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
             members.map((t) => t.id),
           );
         if (all.some((f) => !snapshot.facts.includes(f.factRevisionId))) {
-          const choice = selectQuality(all, root.currentFactId);
+          const { selectable, held } = withoutHeld(all, [root.currentFactId]),
+            choice = selectQuality(selectable, root.currentFactId);
           const patch =
             root.decision === "accepted"
               ? {
                   correctionPending: true,
                   reviewHold: true,
                   reviewReasons: [
-                    ...new Set([...root.reviewReasons, "reversed_group_new_evidence"]),
+                    ...new Set([...root.reviewReasons, ...held, "reversed_group_new_evidence"]),
                   ].sort(),
                 }
               : {
@@ -321,6 +349,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
                     ...new Set([
                       ...root.reviewReasons,
                       ...choice.reasons,
+                      ...held,
                       "reversed_group_new_evidence",
                     ]),
                   ].sort(),
