@@ -22,8 +22,8 @@ export function ReconciliationPage() {
         <p>{t("forbidden")}</p>
       </Card>
     );
-  if (summary.data?.dispatch === "stage3") return <DispatchReviewPage reconciliationAlias />;
-  if (summary.data?.dispatch === "legacy") return <LegacyReconciliationPage />;
+  if (summary.dispatchMode === "stage3") return <DispatchReviewPage reconciliationAlias />;
+  if (summary.dispatchMode === "legacy") return <LegacyReconciliationPage />;
   return <ReviewAccessState summary={summary} />;
 }
 

@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
@@ -62,6 +62,8 @@ function DuplicateAction({
   const { t } = useTranslation("trips");
   const fieldId = useId();
   const command = useTripCommand();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const reasonField = useRef<HTMLTextAreaElement>(null);
   const [reason, setReason] = useState("");
   const undo = candidate.dismissed;
   const title = t(undo ? "dispatchUndoDismissal" : "dispatchDismissDuplicate");
@@ -71,9 +73,14 @@ function DuplicateAction({
   const body: DTO["TripStage3DuplicateUndoInput"] | DTO["TripStage3DuplicateDismissInput"] = undo
     ? {}
     : { reason: trimmed };
+  useEffect(() => {
+    (undo ? heading.current : reasonField.current)?.focus();
+  }, [undo]);
   return (
     <Card className="stack dispatch-duplicate-action">
-      <h2>{title}</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        {title}
+      </h2>
       <p>
         <ReviewReasonList codes={candidate.reasonCodes} />
       </p>
@@ -81,6 +88,7 @@ function DuplicateAction({
         <div className="review-field">
           <Label htmlFor={fieldId}>{t("dispatchDismissReason")}</Label>
           <textarea
+            ref={reasonField}
             id={fieldId}
             className="input"
             required
@@ -169,7 +177,11 @@ export function DispatchDuplicates({
   const canAct =
     !!current &&
     current.dismissed === selected?.candidate.dismissed &&
-    current.version === selected.candidate.version;
+    current.version === selected.candidate.version &&
+    current.primaryTrip.id === selected.candidate.primaryTrip.id &&
+    current.primaryTrip.version === selected.candidate.primaryTrip.version &&
+    current.secondaryTrip.id === selected.candidate.secondaryTrip.id &&
+    current.secondaryTrip.version === selected.candidate.secondaryTrip.version;
   function focusSelection() {
     (
       document.getElementById(`duplicate-${selected?.action}-${selected?.candidate.id}`) ??
@@ -233,6 +245,15 @@ export function DispatchDuplicates({
               pair={{
                 primaryTripId: selected.candidate.primaryTrip.id,
                 secondaryTripId: selected.candidate.secondaryTrip.id,
+              }}
+              expectedVersions={{
+                primary: selected.candidate.primaryTrip.version,
+                secondary: selected.candidate.secondaryTrip.version,
+              }}
+              refreshCandidate={() => {
+                focusSelection();
+                setSelection(null);
+                void query.refetch();
               }}
               onMerged={(id) => {
                 document.getElementById(statusId)?.focus();

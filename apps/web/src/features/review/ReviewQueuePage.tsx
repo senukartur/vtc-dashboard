@@ -50,8 +50,8 @@ export function ReviewQueuePage() {
         <p>{t("forbidden")}</p>
       </Card>
     );
-  if (summary.data?.dispatch === "stage3") return <DispatchReviewPage />;
-  if (summary.data?.dispatch === "legacy") return <LegacyReviewQueuePage />;
+  if (summary.dispatchMode === "stage3") return <DispatchReviewPage />;
+  if (summary.dispatchMode === "legacy") return <LegacyReviewQueuePage />;
   return <ReviewAccessState summary={summary} />;
 }
 

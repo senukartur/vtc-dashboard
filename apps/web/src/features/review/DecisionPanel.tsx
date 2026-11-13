@@ -131,7 +131,11 @@ export function DecisionPanel({
     // resolution), so they show whenever the read has them; a trip without facts or a manual
     // revision still states that its facts are unavailable.
     facts = review && (review.trip.effectiveFacts || !revision) && (
-      <TripFacts facts={review.trip.effectiveFacts} game={review.trip.summary.game} />
+      <TripFacts
+        facts={review.trip.effectiveFacts}
+        game={review.trip.summary.game}
+        showRecordedTelemetry={!staged || !(detail?.sources.manual || detail?.sources.telemetry)}
+      />
     ),
     // Telemetry facts lead on trips with a telemetry source (late telemetry changed them); a
     // manual trip shows its revision diff first.

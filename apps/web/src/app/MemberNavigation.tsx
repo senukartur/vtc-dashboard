@@ -30,11 +30,13 @@ export function MemberNavLinks({
   collapsed = false,
   variant = "sidebar",
   attention,
+  stagedDispatch = false,
 }: {
   onNavigate?: Navigate | undefined;
   collapsed?: boolean;
   variant?: "sidebar" | "sheet";
   attention?: WorkspaceSummary | undefined;
+  stagedDispatch?: boolean;
 }) {
   const { t, i18n } = useTranslation("core");
   const session = useSession();
@@ -67,7 +69,6 @@ export function MemberNavLinks({
   }
   if (!session.self) return null;
   const capabilities = session.self.capabilities;
-  const stagedDispatch = attention?.dispatch === "stage3";
   const current = matchRouteMeta(location.pathname, stagedDispatch);
   const report = t("nav.newReport");
   const sheet = variant === "sheet";
@@ -136,10 +137,10 @@ export function MemberNavLinks({
   );
 }
 
-export function Breadcrumb({ attention }: { attention?: WorkspaceSummary | undefined }) {
+export function Breadcrumb({ stagedDispatch = false }: { stagedDispatch?: boolean }) {
   const { t } = useTranslation("core");
   const { pathname } = useLocation();
-  const meta = matchRouteMeta(pathname, attention?.dispatch === "stage3");
+  const meta = matchRouteMeta(pathname, stagedDispatch);
   if (!meta) return null;
   const parent = meta.item ? navItem(meta.item) : undefined;
   return (
@@ -163,10 +164,12 @@ export function MemberSidebar({
   collapsed,
   onToggle,
   attention,
+  stagedDispatch = false,
 }: {
   collapsed: boolean;
   onToggle: () => void;
   attention?: WorkspaceSummary | undefined;
+  stagedDispatch?: boolean;
 }) {
   const { t } = useTranslation("core");
   const session = useSession();
@@ -196,7 +199,11 @@ export function MemberSidebar({
         )}
       </div>
       {session.state !== "checking" && (
-        <MemberNavLinks collapsed={collapsed} attention={attention} />
+        <MemberNavLinks
+          collapsed={collapsed}
+          attention={attention}
+          stagedDispatch={stagedDispatch}
+        />
       )}
       {session.state === "authenticated" && !signOut.active && (
         <div className="sidebar-footer">

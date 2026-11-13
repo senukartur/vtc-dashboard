@@ -149,9 +149,11 @@ export function HoldReasons({ codes }: { codes: readonly string[] }) {
 export function TripFacts({
   facts,
   game,
+  showRecordedTelemetry = true,
 }: {
   facts: DTO["EffectiveTripFacts"] | null | undefined;
   game: Game;
+  showRecordedTelemetry?: boolean;
 }) {
   const { t } = useTranslation("trips"),
     locale = useLocale(),
@@ -161,9 +163,11 @@ export function TripFacts({
     return (
       <ReviewSection title={t("tripFacts")}>
         <p className="review-muted">{t("partial")}</p>
-        <dl className="review-facts">
-          <RecordedTelemetryFields telemetry={undefined} />
-        </dl>
+        {showRecordedTelemetry && (
+          <dl className="review-facts">
+            <RecordedTelemetryFields telemetry={undefined} />
+          </dl>
+        )}
       </ReviewSection>
     );
   const pin = (value: DTO["EffectiveCatalogPin"] | null, kind: Kind) =>
@@ -200,7 +204,7 @@ export function TripFacts({
             <dd>{value}</dd>
           </div>
         ))}
-        <RecordedTelemetryFields telemetry={facts.recordedTelemetry} />
+        {showRecordedTelemetry && <RecordedTelemetryFields telemetry={facts.recordedTelemetry} />}
       </dl>
       {(!facts.ruleContextComplete ||
         !facts.wholeTripDistanceSupported ||
@@ -719,7 +723,9 @@ export function DecisionForm({
       ? t(
           staged && state.blocker === "choice"
             ? "dispatchChooseDecision"
-            : `blocker_${state.blocker}`,
+            : staged && state.blocker === "unavailable"
+              ? "dispatchAcceptUnavailable"
+              : `blocker_${state.blocker}`,
         )
       : null;
   return (
@@ -753,7 +759,7 @@ export function DecisionForm({
         <div id={unavailableId} className="review-note">
           {state.blockedCodes.length ? (
             <>
-              <p>{t("acceptUnavailable")}</p>
+              <p>{t(staged ? "dispatchAcceptUnavailable" : "acceptUnavailable")}</p>
               <ul>
                 {state.blockedCodes.map((code) => (
                   <li key={code}>
@@ -763,7 +769,7 @@ export function DecisionForm({
               </ul>
             </>
           ) : (
-            <p>{t("blocker_unavailable")}</p>
+            <p>{t(staged ? "dispatchAcceptUnavailable" : "blocker_unavailable")}</p>
           )}
         </div>
       )}

@@ -51,7 +51,8 @@ export function AppLayout({
   const { t, i18n } = useTranslation("core");
   const session = useSession();
   const signOut = useSignOut();
-  const { data: attention } = useWorkspaceSummary({ refreshOnFocus: true });
+  const { data: attention, dispatchMode } = useWorkspaceSummary({ refreshOnFocus: true });
+  const stagedDispatch = dispatchMode === "stage3";
   const [collapsed, setCollapsed] = useState(storedCollapse);
   const home = i18n.resolvedLanguage === "en" ? "/en" : "/";
   const preview = location.pathname.startsWith("/foundation");
@@ -130,6 +131,7 @@ export function AppLayout({
         <MemberSidebar
           collapsed={collapsed}
           attention={attention}
+          stagedDispatch={stagedDispatch}
           onToggle={() => {
             const next = !collapsed;
             setCollapsed(next);
@@ -196,7 +198,7 @@ export function AppLayout({
             </Link>
             {live ? (
               <>
-                <Breadcrumb attention={attention} />
+                <Breadcrumb stagedDispatch={stagedDispatch} />
                 <div className="topbar-actions">
                   {session.state === "authenticated" &&
                     (session.eventsStage2Enabled ? (
@@ -209,6 +211,7 @@ export function AppLayout({
                   <Navigation
                     variant="mobile"
                     attention={attention}
+                    stagedDispatch={stagedDispatch}
                     onMobileNavigate={onMobileNavigate}
                   />
                   {languagePicker}
@@ -228,7 +231,13 @@ export function AppLayout({
           </header>
         </div>
       )}
-      {bar && <BottomNavigation attention={attention} onMobileNavigate={onMobileNavigate} />}
+      {bar && (
+        <BottomNavigation
+          attention={attention}
+          stagedDispatch={stagedDispatch}
+          onMobileNavigate={onMobileNavigate}
+        />
+      )}
       <main id="main-content" tabIndex={-1}>
         {signingOut ? <SignOutStatus /> : children}
       </main>

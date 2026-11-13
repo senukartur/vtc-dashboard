@@ -210,7 +210,7 @@ function ReviewDetail({ tripId }: { tripId: string }) {
   const { t } = useTranslation("trips"),
     location = useLocation(),
     summary = useWorkspaceSummary(),
-    mode = summary.data?.dispatch,
+    mode = summary.dispatchMode,
     staged = mode === "stage3",
     search = new URLSearchParams(location.search),
     back = `/account/review${staged ? dispatchSearch(search) : queueSearch(search)}`;

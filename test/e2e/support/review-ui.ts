@@ -432,6 +432,8 @@ export type ReviewMockOptions = {
   locale?: "en" | "ru";
   staged?: boolean;
   defensiveOwn?: boolean;
+  duplicateDetailChanged?: "version" | "alias";
+  expiredMemberCursor?: boolean;
   /** Awaiting list replaced by an empty page, only the viewer's own trip or an HTTP failure. */
   awaiting?: "empty" | "own" | number;
   /** Status of the first decision POST (later ones succeed). */
@@ -448,6 +450,7 @@ export type ReviewMock = {
   lists: URLSearchParams[];
   duplicateLists: URLSearchParams[];
   workspaceReads: URLSearchParams[];
+  memberReads: URLSearchParams[];
   details: string[];
   posts: { path: string; headers: Record<string, string>; body: Record<string, unknown> }[];
   states: Record<ReviewTrip, ReviewState>;
@@ -490,6 +493,13 @@ function stagedDetail(state: ReviewState, kind: ReviewTrip): S["TripStage3Review
             sourceRecordId: uuid("47800000", 50),
             factRevisionId: uuid("47800000", 51),
             cargoDamagePercent: 0,
+            ...(kind === "late" && {
+              recordedTelemetry: {
+                jobType: "world-of-trucks" as const,
+                gameMode: "truckersmp" as const,
+                hardModeResult: "unknown" as const,
+              },
+            }),
           },
         }
       : null;
@@ -521,6 +531,7 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
     .data as S["TripStage3DuplicateList"];
   const candidate = duplicateList.items[0];
   if (!candidate) throw new Error("SYNTHETIC_DUPLICATE_REQUIRED");
+  let merged = false;
   for (const [summary, source, number] of [
     [candidate.primaryTrip, states.late.summary, 104],
     [candidate.secondaryTrip, states.over.summary, 207],
@@ -536,6 +547,7 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
     lists: [],
     duplicateLists: [],
     workspaceReads: [],
+    memberReads: [],
     details: [],
     posts: [],
     states,
@@ -557,7 +569,7 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
       oldestAgeSeconds: oldest
         ? Math.floor((Date.parse(computedAt) - Date.parse(oldest)) / 1000)
         : null,
-      duplicateCount: candidate.dismissed ? 0 : 1,
+      duplicateCount: candidate.dismissed || merged ? 0 : 1,
     };
   };
   const error = (status: number) => ({ status, json: { error: { code: "PRIVATE_SENTINEL" } } });
@@ -586,7 +598,17 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
     }
     if (path === "/api/v1/trips/review-summary")
       return route.fulfill(options.forbidden ? error(403) : { json: envelope(stagedSummary()) });
-    if (path === "/api/v1/members") return route.fulfill({ json: list(Object.values(owners)) });
+    if (path === "/api/v1/members") {
+      mock.memberReads.push(url.searchParams);
+      if (options.expiredMemberCursor && url.searchParams.has("cursor"))
+        return route.fulfill(error(409));
+      return route.fulfill({
+        json: list(
+          Object.values(owners),
+          options.expiredMemberCursor ? "expired-member-page" : null,
+        ),
+      });
+    }
     if (path.startsWith("/api/v1/members/")) {
       const owner = Object.values(owners).find(({ id }) => path.endsWith(id));
       return route.fulfill(
@@ -598,7 +620,9 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
       const status = url.searchParams.get("status");
       const game = url.searchParams.get("game");
       const items =
-        (status === "dismissed") === candidate.dismissed && (!game || game === candidate.game)
+        !merged &&
+        (status === "dismissed") === candidate.dismissed &&
+        (!game || game === candidate.game)
           ? [candidate]
           : [];
       return route.fulfill({ json: envelope({ items, total: items.length, nextCursor: null }) });
@@ -628,6 +652,21 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
         status: 200,
         headers: { ETag: `"v${result.version}"` },
       });
+    }
+    if (options.staged && path === "/api/v1/reconciliations" && request.method() === "POST") {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      mock.posts.push({ path, headers: request.headers(), body });
+      merged = true;
+      const result: S["Reconciliation"] = {
+        id: candidate.id,
+        primaryTripId: candidate.secondaryTrip.id,
+        primaryVersion: candidate.secondaryTrip.version + 1,
+        secondaryTripId: candidate.primaryTrip.id,
+        secondaryVersion: candidate.primaryTrip.version + 1,
+        state: "applied",
+        version: 1,
+      };
+      return route.fulfill({ status: 201, json: envelope(result), headers: { ETag: '"v1"' } });
     }
     if (path === "/api/v1/trips") {
       mock.lists.push(url.searchParams);
@@ -769,11 +808,21 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
         };
         return route.fulfill({ json: envelope(made), headers: { ETag: `"v${state.version}"` } });
       }
-      if (!rest)
+      if (!rest) {
+        const summary = state.review.trip.summary;
+        const changed = key === "late" ? options.duplicateDetailChanged : undefined;
         return route.fulfill({
-          json: envelope({ ...state.review.trip, summary: state.review.trip.summary }),
+          json: envelope({
+            ...state.review.trip,
+            summary: {
+              ...summary,
+              id: changed === "alias" ? reviewIds.telemetry : summary.id,
+              version: changed === "version" ? state.version + 1 : state.version,
+            },
+          }),
           headers: { ETag: `"v${state.version}"` },
         });
+      }
       return route.fulfill({ status: 404, json: { error: { code: "PRIVATE_SENTINEL" } } });
     }
     const row = /^\/api\/v1\/catalogs\/(?:cities|cargoes|trailers)\/(.+)$/.exec(path);

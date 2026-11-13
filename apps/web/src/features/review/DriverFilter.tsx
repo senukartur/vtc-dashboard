@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { PageNav, State } from "../trips/components.js";
 import { useTripQuery } from "../trips/queries.js";
-import { queryString } from "../trips/transport.js";
+import { queryString, rejectedCursor } from "../trips/transport.js";
 import { pageSize } from "./review-model.js";
 
 export function DriverFilter({
@@ -26,6 +26,7 @@ export function DriverFilter({
     "EnvelopeListMemberSummary",
     open,
   );
+  if (rejectedCursor(cursor ?? null, query.error)) setPage([]);
   const items = query.data?.data.data.items;
   const selected = items?.find((item) => item.id === ownerId);
   const profile = useTripQuery(

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
-import { Card, Label } from "../../shared/ui/primitives.js";
+import { Button, Card, Label } from "../../shared/ui/primitives.js";
 import {
   Confirm,
   EffectiveFacts,
@@ -16,28 +16,50 @@ import type { DTO } from "../trips/transport.js";
 export function MergePair({
   pair,
   onMerged,
+  expectedVersions,
+  refreshCandidate,
 }: {
   pair: Pick<DTO["MergeCandidate"], "primaryTripId" | "secondaryTripId">;
   onMerged: (id: string) => void;
+  expectedVersions?: { primary: number; secondary: number };
+  refreshCandidate?: () => void;
 }) {
   const { t } = useTranslation("trips"),
     session = useSession(),
     command = useTripCommand(),
     a = useTripQuery(`/trips/${pair.primaryTripId}`, "EnvelopeTripView"),
-    b = useTripQuery(`/trips/${pair.secondaryTripId}`, "EnvelopeTripView", !!a.data),
     [primary, setPrimary] = useState(pair.primaryTripId),
     [reason, setReason] = useState("");
+  const heading = useRef<HTMLHeadingElement>(null);
+  const staged = !!expectedVersions;
+  useEffect(() => {
+    if (staged) heading.current?.focus();
+  }, [staged]);
   const av = a.data?.data.data,
-    bv = b.data?.data.data,
-    as = av?.view === "private" ? av.summary : av,
+    as = av?.view === "private" ? av.summary : av;
+  const primaryStale =
+    expectedVersions &&
+    as &&
+    (as.id !== pair.primaryTripId || as.version !== expectedVersions.primary);
+  const b = useTripQuery(
+    `/trips/${pair.secondaryTripId}`,
+    "EnvelopeTripView",
+    !!as && !primaryStale,
+  );
+  const bv = b.data?.data.data,
     bs = bv?.view === "private" ? bv.summary : bv;
+  const stale =
+    primaryStale ||
+    (expectedVersions &&
+      bs &&
+      (bs.id !== pair.secondaryTripId || bs.version !== expectedVersions.secondary));
   const self = [as, bs].some(
     (s) => s && s.owner.id === session.self?.member.id && s.sourceKinds.includes("manual"),
   );
   const p = primary === as?.id ? as : bs,
     s = primary === as?.id ? bs : as,
     body =
-      p && s
+      p && s && !stale
         ? {
             primaryTripId: p.id,
             secondaryTripId: s.id,
@@ -46,9 +68,27 @@ export function MergePair({
             reason: reason.trim(),
           }
         : null;
+  if (stale)
+    return (
+      <Card className="stack">
+        <h2 ref={heading} tabIndex={-1}>
+          {t("mergePair")}
+        </h2>
+        <p role="status">{t("dispatchCandidateChanged")}</p>
+        {refreshCandidate && (
+          <div>
+            <Button type="button" variant="outline" onClick={refreshCandidate}>
+              {t("refresh")}
+            </Button>
+          </div>
+        )}
+      </Card>
+    );
   return (
     <Card className="stack">
-      <h2>{t("mergePair")}</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        {t("mergePair")}
+      </h2>
       <State query={a} />
       <State query={b} />
       <div className="trip-grid">
@@ -91,6 +131,7 @@ export function MergePair({
             pending={command.pending}
             failure={command.failure}
             onConfirm={async () => {
+              if (!body) return;
               const r = await command.run("/reconciliations", body, "EnvelopeReconciliation");
               if (r) onMerged(r.data.data.primaryTripId);
               return r;

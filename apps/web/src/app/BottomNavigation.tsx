@@ -40,9 +40,11 @@ const languages = [
 export function BottomNavigation({
   onMobileNavigate,
   attention,
+  stagedDispatch = false,
 }: {
   onMobileNavigate: MobileNavigate;
   attention?: WorkspaceSummary | undefined;
+  stagedDispatch?: boolean;
 }) {
   const { t, i18n } = useTranslation("core");
   const session = useSession();
@@ -65,7 +67,7 @@ export function BottomNavigation({
   const self = session.self;
   if (!self) return null;
   const capabilities = self.capabilities;
-  const meta = matchRouteMeta(location.pathname, attention?.dispatch === "stage3");
+  const meta = matchRouteMeta(location.pathname, stagedDispatch);
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const role = primaryRole(self.member.roles);
   function choose(event: MouseEvent<HTMLAnchorElement>) {
@@ -133,7 +135,12 @@ export function BottomNavigation({
               <DialogDescription className="visually-hidden">
                 {t("nav.moreDescription")}
               </DialogDescription>
-              <MemberNavLinks variant="sheet" onNavigate={choose} attention={attention} />
+              <MemberNavLinks
+                variant="sheet"
+                onNavigate={choose}
+                attention={attention}
+                stagedDispatch={stagedDispatch}
+              />
               <div className="more-account">
                 <div className="more-identity">
                   <span className="user-avatar" aria-hidden="true">

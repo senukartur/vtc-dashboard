@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { decimalShift, formatQuantity } from "../../shared/formatting.js";
 import { Table } from "../../shared/ui/primitives.js";
 import { formatDamage } from "../manual-reports/model.js";
+import { RecordedTelemetryFields } from "../trips/components.js";
 import { type DTO, revisionFields } from "../trips/transport.js";
 import { EntityLabel, ReviewSection } from "./decision-parts.js";
 
@@ -150,6 +151,12 @@ export function SourceComparison({
           })}
         </tbody>
       </Table>
+      <div className="stack">
+        <h4>{t(telemetry ? "dispatchTelemetryConditions" : "dispatchGameConditions")}</h4>
+        <dl className="review-facts">
+          <RecordedTelemetryFields telemetry={telemetry?.recordedTelemetry} />
+        </dl>
+      </div>
     </ReviewSection>
   );
 }

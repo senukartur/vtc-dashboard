@@ -27,6 +27,8 @@ for (const locale of ["en", "ru"] as const)
               compare: "Report and telemetry",
               distance: "Actual driven distance",
               damage: "Cargo damage",
+              conditions: "Conditions recorded by telemetry",
+              unknown: "Unknown",
               difference: "Different",
               unavailable: "Comparison unavailable",
               back: "Back to queue",
@@ -35,6 +37,8 @@ for (const locale of ["en", "ru"] as const)
               compare: "Отчёт и телеметрия",
               distance: "Фактический пробег",
               damage: "Ущерб грузу",
+              conditions: "Условия, записанные телеметрией",
+              unknown: "Неизвестно",
               difference: "Отличается",
               unavailable: "Сравнение недоступно",
               back: "К очереди",
@@ -66,6 +70,15 @@ for (const locale of ["en", "ru"] as const)
         await expect(
           comparison.getByRole("row", { name: new RegExp(labels.damage) }).getByRole("rowheader"),
         ).toContainText(labels.unavailable);
+        const sourceConditions = panel(page)
+          .getByRole("heading", { name: labels.conditions })
+          .locator("..")
+          .locator("dd");
+        await expect(sourceConditions).toHaveText([
+          "World of Trucks",
+          "TruckersMP",
+          labels.unknown,
+        ]);
         const overflows = () =>
           page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
         await expect.poll(overflows).toBe(false);
@@ -104,7 +117,7 @@ test(
   "Stage 3 filters preserve the selected trip and cursor recovery, and Resolved uses decision time",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const mock = await mockReview(page, { staged: true, paged: true });
+    const mock = await mockReview(page, { staged: true, paged: true, expiredMemberCursor: true });
     await page.goto("/account/review");
     await expect(page.getByText("Waiting (4)", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Next page" })).toBeEnabled();
@@ -116,6 +129,12 @@ test(
     await page.locator(`#trip-link-${reviewIds.late}`).click();
     await expect(panel(page).getByRole("heading", { name: "Report and telemetry" })).toBeVisible();
     await page.getByRole("button", { name: "All drivers" }).click();
+    const driverOptions = page.locator(".dispatch-driver-options");
+    await driverOptions.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect
+      .poll(() => mock.memberReads.slice(-2).map((params) => params.has("cursor")))
+      .toEqual([true, false]);
+    await expect(driverOptions.getByRole("alert")).toHaveCount(0);
     await page.getByLabel("Find a driver on this page").fill("NordWind");
     const driver = page.getByRole("combobox", { name: "Driver", exact: true });
     await driver.focus();
@@ -130,6 +149,12 @@ test(
     const reasons = page.getByRole("combobox", { name: "Reason", exact: true });
     await reasons.focus();
     await expect(reasons).toBeFocused();
+    await expect(
+      reasons.getByRole("option", { name: "A correction proposal is pending" }),
+    ).toHaveAttribute("value", "proposal_pending");
+    await expect(
+      reasons.getByRole("option", { name: "Duplicate search is incomplete" }),
+    ).toHaveAttribute("value", "candidate_search_overflow");
     await reasons.selectOption("rule_mass_exceeded");
     await expect.poll(() => mock.lists.at(-1)?.get("reasonCode")).toBe("rule_mass_exceeded");
     await expect(reasons).toBeFocused();
@@ -155,6 +180,11 @@ test(
   async ({ page }) => {
     const mock = await mockReview(page, { staged: true });
     await page.goto(`/account/review/${reviewIds.resubmission}`);
+    const conditions = panel(page).getByRole("heading", { name: "Game conditions" }).locator("..");
+    await expect(conditions.locator("dd")).toHaveText(["Unknown", "Unknown", "Unknown"]);
+    await expect(
+      panel(page).getByText("No telemetry is available.", { exact: true }),
+    ).toBeVisible();
     const decision = form(page);
     await decision.locator("#review-choice-reject").click();
     const reason = decision.getByRole("textbox", { name: "Reason for return" });
@@ -207,6 +237,7 @@ test(
     await capture(page, info, "stage-3-duplicates-en");
     await page.getByRole("button", { name: "These are different trips", exact: true }).click();
     const action = page.locator(".dispatch-duplicate-action");
+    await expect(action.getByRole("textbox", { name: "Reason for dismissal" })).toBeFocused();
     await expect(
       action.getByRole("button", { name: "These are different trips", exact: true }),
     ).toBeDisabled();
@@ -220,6 +251,9 @@ test(
     const status = page.getByRole("combobox", { name: "State", exact: true });
     await status.selectOption("dismissed");
     await page.getByRole("button", { name: "Undo dismissal", exact: true }).click();
+    await expect(
+      action.getByRole("heading", { name: "Undo dismissal", exact: true }),
+    ).toBeFocused();
     await expect(page.getByRole("button", { name: "Reviewed pair", exact: true })).toHaveCount(0);
     await action.getByRole("button", { name: "Undo dismissal", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
@@ -230,6 +264,57 @@ test(
     ]);
     await status.selectOption("waiting");
     await expect(page.getByRole("link", { name: /#104$/ })).toBeVisible();
+  },
+);
+
+for (const change of ["version", "alias"] as const)
+  test(
+    `Stage 3 duplicate merge blocks a changed detail ${change}`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const mock = await mockReview(page, { staged: true, duplicateDetailChanged: change });
+      await page.goto("/account/review?tab=duplicates");
+      await page.getByRole("button", { name: "Reviewed pair", exact: true }).click();
+      await expect(
+        page.getByRole("status").filter({ hasText: "This pair changed." }),
+      ).toBeVisible();
+      await expect(page.getByRole("button", { name: "Merge trips", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("combobox", { name: "Choose the primary trip" })).toHaveCount(0);
+      expect(mock.posts).toEqual([]);
+      const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+      await cancel.click();
+      await expect(page.getByRole("button", { name: "Reviewed pair", exact: true })).toBeFocused();
+    },
+  );
+
+test(
+  "Stage 3 duplicate merge submits the reviewed root versions after primary selection",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { staged: true });
+    await page.goto("/account/review?tab=duplicates");
+    await page.getByRole("button", { name: "Reviewed pair", exact: true }).click();
+    await page
+      .getByRole("combobox", { name: "Choose the primary trip" })
+      .selectOption(reviewIds.over);
+    await page.locator("#merge-reason").fill(" Fictional same delivery ");
+    await page.getByRole("button", { name: "Merge trips", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Server confirmed the command." }),
+    ).toBeVisible();
+    expect(mock.posts).toMatchObject([
+      {
+        path: "/api/v1/reconciliations",
+        body: {
+          primaryTripId: reviewIds.over,
+          secondaryTripId: reviewIds.late,
+          primaryVersion: 1,
+          secondaryVersion: 1,
+          reason: "Fictional same delivery",
+        },
+      },
+    ]);
   },
 );
 
@@ -253,6 +338,87 @@ for (const defensiveOwn of [false, true])
       await expect(panel(page).getByText("Reconciliation history", { exact: true })).toHaveCount(0);
       await expect(panel(page).getByText("fictional-results-screen.png")).toHaveCount(0);
       expect(mock.workspaceReads.map((params) => params.toString())).toEqual(["view=stage3"]);
+    },
+  );
+
+test(
+  "workspace mode stays closed after a failed first read",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { staged: true });
+    await page.route("**/api/v1/me/workspace-summary?view=stage3", (route) =>
+      route.fulfill({ status: 503, json: { error: { code: "SYNTHETIC_OUTAGE" } } }),
+    );
+    await page.goto(`/account/review/${reviewIds.late}`);
+    await expect(
+      page.getByRole("main").getByRole("button", { name: "Refresh", exact: true }),
+    ).toBeVisible();
+    expect(mock.details).toEqual([]);
+  },
+);
+
+for (const staged of [false, true])
+  test(
+    `workspace refresh preserves a ${staged ? "Stage 3" : "legacy"} draft only through temporary failures`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockReview(page, { staged });
+      const computedAt = "2026-11-12T08:00:00.000Z";
+      let response: "default" | "temporary" | "network" | "malformed" | "omitted" | "forbidden" =
+        "default";
+      await page.route("**/api/v1/me/workspace-summary?view=stage3", (route) => {
+        if (response === "default") return route.fallback();
+        if (response === "network") return route.abort("failed");
+        if (response === "malformed")
+          return route.fulfill({ body: "not JSON", contentType: "application/json" });
+        if (response === "omitted") return route.fulfill({ json: envelope({ computedAt }) });
+        return route.fulfill({
+          status: response === "temporary" ? 503 : 403,
+          json: { error: { code: "SYNTHETIC_OUTAGE" } },
+        });
+      });
+      await page.goto(`/account/review/${reviewIds.resubmission}`);
+      const reason = page.locator("#review-reason");
+      await reason.fill("Fictional draft survives a refresh");
+      const nav = page.locator("#member-sidebar").getByRole("link", { name: /^Dispatch/ });
+      await expect(nav).toHaveAccessibleName(/4 awaiting decision/);
+      const isSummary = (url: string) => new URL(url).pathname === "/api/v1/me/workspace-summary";
+      async function refresh(next: typeof response) {
+        response = next;
+        const settled =
+          next === "network"
+            ? page.waitForEvent("requestfailed", {
+                predicate: (request) => isSummary(request.url()),
+              })
+            : page.waitForResponse((result) => isSummary(result.url()));
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await settled;
+      }
+
+      await refresh(staged ? "temporary" : "network");
+      await expect(nav).toHaveAccessibleName("Dispatch");
+      await expect(reason).toHaveValue("Fictional draft survives a refresh");
+      const endpoint = staged ? /\/review\?view=stage3$/ : /\/review$/;
+      const detail = page.waitForResponse((result) => endpoint.test(result.url()));
+      await panel(page).getByRole("button", { name: "Refresh", exact: true }).click();
+      await detail;
+      await expect(reason).toHaveValue("Fictional draft survives a refresh");
+
+      await refresh(staged ? "malformed" : "forbidden");
+      await expect(panel(page)).toHaveCount(0);
+      await refresh("temporary");
+      await expect(
+        page.getByRole("main").getByRole("button", { name: "Refresh", exact: true }),
+      ).toBeVisible();
+      await expect(panel(page)).toHaveCount(0);
+      await refresh("default");
+      await expect(reason).toBeVisible();
+      await expect(reason).toHaveValue("");
+      await refresh("omitted");
+      await expect(
+        page.getByRole("main").getByText("Overall queue totals are unavailable."),
+      ).toBeVisible();
+      await expect(panel(page)).toHaveCount(0);
     },
   );
 
