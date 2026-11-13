@@ -15,7 +15,7 @@ import {
   chooseCatalogRow,
   envelope,
 } from "./support/catalogs.ts";
-import { fillDateTime } from "./support/date-time.ts";
+import { fillDate, fillDateTime, fillTime } from "./support/date-time.ts";
 import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
 import {
   coverCaption,
@@ -1294,15 +1294,15 @@ test.describe("Stage 2 draft entry", () => {
       await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
       await page.goto("/account/events/new");
       const schedule = page.getByRole("group", { name: "When", exact: true });
-      await schedule.getByRole("textbox", { name: "Date", exact: true }).fill("2099-10-25");
+      await fillDate(schedule, "Date", "2099-10-25");
       await schedule.getByRole("button", { name: "Set a separate meeting date" }).click();
-      await schedule.getByRole("textbox", { name: "Meeting date", exact: true }).fill("2099-10-24");
-      await schedule.getByRole("textbox", { name: "Meeting time", exact: true }).fill("23:30");
-      await schedule.getByRole("textbox", { name: "Start time", exact: true }).fill("01:00");
+      await fillDate(schedule, "Meeting date", "2099-10-24");
+      await fillTime(schedule, "Meeting time", "23:30");
+      await fillTime(schedule, "Start time", "01:00");
       await page.getByRole("button", { name: "+ Set end time", exact: true }).click();
       const end = schedule.getByRole("group", { name: "End time", exact: true });
-      await end.getByRole("textbox", { name: "Date", exact: true }).fill("2099-10-26");
-      await end.getByRole("textbox", { name: "End time", exact: true }).fill("00:15");
+      await fillDate(end, "Date", "2099-10-26");
+      await fillTime(end, "End time", "00:15");
       const preview = page.locator(".event-editor-preview");
       await expect(preview).toContainText("Europe/Warsaw");
       await expect(preview).toContainText(/meeting time Oct 24, 2099/);

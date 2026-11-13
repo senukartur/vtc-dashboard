@@ -1,10 +1,19 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { DateField, TimeField } from "../../../shared/ui/date-time-field.js";
 import { Button, Input, Label, Select } from "../../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../../shared/ui/segmented-control.js";
 import { useMemberProfile, useMembersList } from "../../drivers/queries.js";
-import { type DTO, utcInput } from "../model.js";
+import type { DTO } from "../model.js";
 import type { EditorErrors, EditorForm, FieldName } from "./model.js";
+import {
+  fromMoscow,
+  moveDate,
+  moveSchedule,
+  type Schedule,
+  type ScheduleField,
+  toMoscow,
+} from "./schedule.js";
 import { useEditorText } from "./text.js";
 
 export function EditorField({
@@ -251,17 +260,6 @@ export function RouteBasics({
   );
 }
 
-const scheduleFields = ["meetingAt", "startsAt", "endsAt"] as const;
-const moscowOffsetMs = 3 * 60 * 60 * 1000;
-
-function shiftWallTime(value: string, offset: number) {
-  const iso = utcInput(value);
-  if (!iso || !Number.isFinite(offset)) return "";
-  const shifted = new Date(Date.parse(iso) + offset).toISOString().slice(0, -1);
-  if (!utcInput(shifted)) return "";
-  return shifted.replace(/:00\.000$/, "").replace(/\.000$/, "");
-}
-
 export function TimeFields({
   base,
   form,
@@ -271,40 +269,35 @@ export function TimeFields({
   base: string;
   form: EditorForm;
   errors: EditorErrors;
-  onScheduleChange: (fields: Partial<Pick<EditorForm, (typeof scheduleFields)[number]>>) => void;
+  onScheduleChange: (fields: Partial<Schedule>) => void;
 }) {
   const { text } = useEditorText();
   const helpId = `${base}-moscow`;
   const local = {
-    meetingAt: shiftWallTime(form.meetingAt, moscowOffsetMs),
-    startsAt: shiftWallTime(form.startsAt, moscowOffsetMs),
-    endsAt: shiftWallTime(form.endsAt, moscowOffsetMs),
+    meetingAt: toMoscow(form.meetingAt),
+    startsAt: toMoscow(form.startsAt),
+    endsAt: toMoscow(form.endsAt),
   };
-  const inferred = (local.startsAt || local.meetingAt || local.endsAt).slice(0, 10);
+  const inferred = local.startsAt.date || local.meetingAt.date || local.endsAt.date;
+  // Date states hold the date field's own value, so an incomplete typed date is kept as typed.
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showEnd, setShowEnd] = useState(!!form.endsAt);
   const [meetingDate, setMeetingDate] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
   const date = selectedDate ?? inferred;
   const separateMeetingDate =
-    meetingDate !== null || Boolean(local.meetingAt && local.meetingAt.slice(0, 10) !== date);
+    meetingDate !== null || Boolean(local.meetingAt.date && local.meetingAt.date !== date);
 
   function changeDate(next: string) {
     setSelectedDate(next);
-    const delta = Date.parse(next) - Date.parse(date);
-    setMeetingDate(
-      meetingDate ? shiftWallTime(`${meetingDate}T00:00`, delta).slice(0, 10) || null : null,
-    );
-    setEndDate(endDate ? shiftWallTime(`${endDate}T00:00`, delta).slice(0, 10) || null : null);
-    const schedule = Object.fromEntries(
-      scheduleFields.map((name) => [name, shiftWallTime(form[name], delta)]),
-    );
-    onScheduleChange(next && date ? schedule : { meetingAt: "", startsAt: "", endsAt: "" });
+    setMeetingDate(meetingDate === null ? null : moveDate(meetingDate, date, next));
+    setEndDate(endDate === null ? null : moveDate(endDate, date, next));
+    onScheduleChange(moveSchedule(form, date, next));
   }
 
-  function clock(name: (typeof scheduleFields)[number]) {
+  function clock(name: ScheduleField) {
     const override = name === "meetingAt" ? meetingDate : name === "endsAt" ? endDate : null;
-    const localDate = override ?? (local[name].slice(0, 10) || date);
+    const localDate = override ?? (local[name].date || date);
     const separateDate =
       name === "endsAt" ||
       (name === "meetingAt" && separateMeetingDate) ||
@@ -318,22 +311,21 @@ export function TimeFields({
                 <Label htmlFor={`${id}-date`}>
                   {name === "meetingAt" ? text.meetingDate : text.date}
                 </Label>
-                <Input
+                <DateField
                   id={`${id}-date`}
-                  type="date"
+                  fieldName={
+                    name === "meetingAt" ? text.meetingDate : `${text[name]} · ${text.date}`
+                  }
                   value={localDate}
+                  timeZone="Europe/Moscow"
+                  showZone={false}
                   disabled={!date}
-                  onChange={(event) => {
-                    if (!event.target.value) return;
-                    if (name === "meetingAt") setMeetingDate(event.target.value);
-                    if (name === "endsAt") setEndDate(event.target.value);
-                    if (local[name])
-                      onScheduleChange({
-                        [name]: shiftWallTime(
-                          `${event.target.value}T${local[name].slice(11)}`,
-                          -moscowOffsetMs,
-                        ),
-                      });
+                  aria-describedby={helpId}
+                  onChange={(value) => {
+                    if (name === "meetingAt") setMeetingDate(value);
+                    if (name === "endsAt") setEndDate(value);
+                    const next = form[name] ? fromMoscow(value, local[name].time) : "";
+                    if (next !== form[name]) onScheduleChange({ [name]: next });
                   }}
                 />
               </div>
@@ -343,20 +335,17 @@ export function TimeFields({
                 {text[name]}
                 {name !== "endsAt" && <Required />}
               </Label>
-              <Input
+              <TimeField
                 id={id}
-                type="time"
-                step="any"
-                value={local[name].slice(11)}
+                fieldName={text[name]}
+                value={local[name].time}
+                timeZone="Europe/Moscow"
+                showZone={false}
                 disabled={!date}
                 aria-required={name !== "endsAt"}
-                aria-invalid={!!errorId}
+                invalid={!!errorId}
                 aria-describedby={errorId ? `${helpId} ${errorId}` : helpId}
-                onChange={(event) =>
-                  onScheduleChange({
-                    [name]: shiftWallTime(`${localDate}T${event.target.value}`, -moscowOffsetMs),
-                  })
-                }
+                onChange={(value) => onScheduleChange({ [name]: fromMoscow(localDate, value) })}
               />
             </div>
           </div>
@@ -374,13 +363,15 @@ export function TimeFields({
             {text.date}
             <Required />
           </Label>
-          <Input
+          <DateField
             id={`${base}-date`}
-            type="date"
+            fieldName={text.date}
             value={date}
+            timeZone="Europe/Moscow"
+            showZone={false}
             aria-required="true"
             aria-describedby={helpId}
-            onChange={(event) => changeDate(event.target.value)}
+            onChange={changeDate}
           />
         </div>
         {clock("meetingAt")}
@@ -400,10 +391,8 @@ export function TimeFields({
             return;
           }
           setMeetingDate(null);
-          if (local.meetingAt)
-            onScheduleChange({
-              meetingAt: shiftWallTime(`${date}T${local.meetingAt.slice(11)}`, -moscowOffsetMs),
-            });
+          if (form.meetingAt)
+            onScheduleChange({ meetingAt: fromMoscow(date, local.meetingAt.time) });
         }}
       >
         {separateMeetingDate ? text.useStartDate : text.separateMeetingDate}

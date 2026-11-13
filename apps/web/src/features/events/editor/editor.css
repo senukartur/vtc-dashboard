@@ -80,7 +80,7 @@
   align-items: start;
   gap: 12px;
 }
-.event-stage2-editor .event-editor-clock-row input {
+.event-stage2-editor .event-editor-clock-row .date-time-field {
   inline-size: 100%;
   min-inline-size: 0;
 }

@@ -19,6 +19,11 @@ import {
   incompleteOverlapTime,
   rebaseEventEditor,
 } from "../../apps/web/src/features/events/editor/rebase.ts";
+import {
+  fromMoscow,
+  moveSchedule,
+  toMoscow,
+} from "../../apps/web/src/features/events/editor/schedule.ts";
 import type { DTO } from "../../apps/web/src/features/events/model.ts";
 import {
   eventStage2QueryPrefix,
@@ -441,4 +446,57 @@ test("a sparse draft still checks meeting against end when start is absent", () 
   expect(result.draftErrors).toEqual({ meetingAt: "meetingAfterEnd" });
   expect(result.draft).toBeUndefined();
   expect(validateEventEditor({ ...form, endsAt: form.meetingAt }).draft).toBeDefined();
+});
+
+test("Stage 2 schedule values convert between Moscow field values and UTC wall clocks", () => {
+  expect(toMoscow("2099-10-25T12:00:00.000")).toEqual({ date: "2099-10-25", time: "15:00" });
+  expect(toMoscow("2099-10-25T14:00:30.500")).toEqual({ date: "2099-10-25", time: "17:00:30.500" });
+  expect(fromMoscow("2099-10-25", "01:00")).toBe("2099-10-24T22:00");
+  expect(fromMoscow("2099-10-25", "")).toBe("");
+  expect(fromMoscow("", "")).toBe("");
+  expect(toMoscow("")).toEqual({ date: "", time: "" });
+});
+
+test("incomplete Stage 2 dates and times stay in the form as invalid times and read back", () => {
+  const time = incompleteValue("", { ...emptyTime, hours: "1" });
+  const date = incompleteValue("25.10.20", emptyTime);
+  const timeOnly = fromMoscow("2099-10-25", time);
+  // The time field gets exactly its own value back, so a re-render keeps the typed digits.
+  expect(toMoscow(timeOnly)).toEqual({ date: "2099-10-25", time });
+  const dateOnly = fromMoscow(date, "15:00");
+  expect(toMoscow(dateOnly)).toEqual({ date, time: "15:00" });
+  // A time without a date and a typed date without a time are not silently empty.
+  expect(toMoscow(fromMoscow("", "15:00"))).toEqual({ date: "", time: "15:00" });
+  expect(toMoscow(fromMoscow(date, ""))).toEqual({ date, time: "" });
+  const form = completeForm();
+  for (const startsAt of [timeOnly, dateOnly, fromMoscow("", "15:00")])
+    expect(validateEventEditor({ ...form, startsAt }).draftErrors.startsAt).toBe("invalidTime");
+});
+
+test("moving the Stage 2 shared date shifts complete times and keeps incomplete entries", () => {
+  const schedule = {
+    meetingAt: "2099-10-24T20:30",
+    startsAt: "2099-10-24T22:00",
+    endsAt: "2099-10-25T21:15",
+  };
+  expect(moveSchedule(schedule, "2099-10-25", "2099-10-27")).toEqual({
+    meetingAt: "2099-10-26T20:30",
+    startsAt: "2099-10-26T22:00",
+    endsAt: "2099-10-27T21:15",
+  });
+  // An incomplete shared date keeps the times of the fields on that date as invalid entries.
+  const typed = incompleteValue("27.10", emptyTime);
+  const pending = moveSchedule(schedule, "2099-10-25", typed);
+  expect(pending.meetingAt).toBe(schedule.meetingAt);
+  expect(pending.endsAt).toBe(schedule.endsAt);
+  expect(toMoscow(pending.startsAt)).toEqual({ date: typed, time: "01:00" });
+  expect(moveSchedule(pending, typed, "2099-10-27")).toEqual({
+    meetingAt: schedule.meetingAt,
+    startsAt: "2099-10-26T22:00",
+    endsAt: schedule.endsAt,
+  });
+  // Values on another date do not follow an incomplete shared date and stay byte-identical.
+  const exact = { meetingAt: "2099-10-25T12:00:00.000", startsAt: "", endsAt: "" };
+  expect(moveSchedule(exact, "2099-10-26", typed)).toEqual(exact);
+  expect(moveSchedule(exact, typed, "2099-10-27")).toEqual(exact);
 });
