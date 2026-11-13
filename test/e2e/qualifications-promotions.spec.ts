@@ -3,6 +3,7 @@ import type { components } from "@vtc/contracts";
 import { capabilities, type Role } from "../../apps/api/src/modules/identity/permissions.ts";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { envelope } from "./support/catalogs.ts";
+import { mockDashboardRoutes } from "./support/dashboard-ui.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { openMoreSheet, phone } from "./support/locale.ts";
 import { inertNotifications } from "./support/notifications.ts";
@@ -135,6 +136,7 @@ async function mockPromotions(
     candidateReadsAfterSelfRefresh: 0,
     summaryReadsAfterSelfRefresh: 0,
     selfRefreshed: false,
+    summary: null as ((committed: boolean) => S["WorkspaceStage3Summary"]) | null,
   };
   await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);
@@ -153,7 +155,9 @@ async function mockPromotions(
     if (url.pathname === summaryPath) {
       state.reads.push(url);
       if (state.selfRefreshed) state.summaryReadsAfterSelfRefresh++;
-      return route.fulfill({ json: envelope({ computedAt: instant }) });
+      return route.fulfill({
+        json: envelope(state.summary?.(state.committed) ?? { computedAt: instant }),
+      });
     }
     if (url.pathname === candidatePath) {
       state.reads.push(url);
@@ -263,7 +267,7 @@ async function mockPromotions(
       };
       return route.fulfill({ headers: { ETag: '"v9"' }, json: envelope(body) });
     }
-    return route.fulfill({ status: 503, json: {} });
+    return route.fallback();
   });
   return state;
 }
@@ -668,6 +672,70 @@ test(
       body: { assignmentId: duplicate.assignmentId },
       version: '"v12"',
     });
+  },
+);
+
+test(
+  "One Stage 3 summary feeds the badge and Overview, then refreshes after promotion",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockDashboardRoutes(page);
+    const state = await mockPromotions(page);
+    state.summary = (committed) => ({
+      computedAt: instant,
+      promotionsReady: { ets2: committed ? 0 : 1, ats: 2 },
+      legacyReviewQueue: { count: 3, oldestAgeSeconds: 0 },
+    });
+    await page.goto("/account/dashboard");
+    const navigation = page.getByRole("navigation", { name: "Main navigation" });
+    const actions = page.getByRole("region", { name: "Needs attention" });
+    const stagedReads = () => state.reads.filter((url) => url.pathname === summaryPath);
+    await expect(navigation.getByRole("link", { name: "Promotions (ready: 3)" })).toBeVisible();
+    await expect(
+      navigation.getByRole("link", { name: "Dispatch (3 awaiting decision)" }),
+    ).toBeVisible();
+    const overviewPromotion = actions.getByRole("link", { name: "Ready for promotion (3)" });
+    await expect(overviewPromotion).toHaveAttribute("href", path);
+    await expect(actions.getByRole("link", { name: "Awaiting decision (3)" })).toBeVisible();
+    expect(stagedReads()).toHaveLength(1);
+
+    await overviewPromotion.click();
+    await page.getByRole("button", { name: `Promote ${main.nickname}` }).click();
+    const dialog = confirmDialog(page);
+    await dialog.getByRole("textbox", { name: "Reason" }).fill("Verified progress");
+    await dialog.getByRole("button", { name: "Confirm promotion" }).click();
+    await expect(navigation.getByRole("link", { name: "Promotions (ready: 2)" })).toBeVisible();
+    await expect(page.getByText(`${main.nickname} was promoted in ETS2.`)).toBeVisible();
+    await navigation.getByRole("link", { name: "Overview", exact: true }).click();
+    const atsAction = actions.getByRole("link", { name: "Ready for promotion (2)" });
+    await expect(atsAction).toHaveAttribute("href", `${path}?game=ats`);
+    await expect(actions.getByRole("link", { name: "Awaiting decision (3)" })).toBeVisible();
+    expect(stagedReads()).toHaveLength(2);
+    expect(stagedReads().map((url) => url.searchParams.get("view"))).toEqual(["stage3", "stage3"]);
+    await atsAction.click();
+    await expect(page.getByRole("combobox", { name: "Game" })).toHaveValue("ats");
+    await expect(candidates(page).getByRole("rowheader")).toContainText(ats.nickname);
+  },
+);
+
+test(
+  "A summary readiness field cannot give a dispatcher a promotion action",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockDashboardRoutes(page);
+    const state = await mockPromotions(page, { role: "dispatcher" });
+    state.summary = () => ({
+      computedAt: instant,
+      promotionsReady: { ets2: 1, ats: 1 },
+      legacyReviewQueue: { count: 3, oldestAgeSeconds: 0 },
+    });
+    await page.goto("/account/dashboard");
+    const navigation = page.getByRole("navigation", { name: "Main navigation" });
+    const actions = page.getByRole("region", { name: "Needs attention" });
+    await expect(actions.getByRole("link", { name: "Awaiting decision (3)" })).toBeVisible();
+    await expect(actions.getByRole("link", { name: /Ready for promotion/ })).toHaveCount(0);
+    await expect(navigation.getByRole("link", { name: /^Promotions/ })).toHaveCount(0);
+    expect(state.reads.some((url) => url.pathname === candidatePath)).toBe(false);
   },
 );
 
