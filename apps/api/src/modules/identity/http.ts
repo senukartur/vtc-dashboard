@@ -169,7 +169,8 @@ export async function registerIdentityRoutes(
     { schema: schema("EnvelopeSelf", "LoginInput") },
     async (request, reply) => {
       csrf.check(request, await optionalActor(request));
-      const result = await identity.login(request.body.email, request.body.password);
+      const { email, password, rememberMe } = request.body;
+      const result = await identity.login(email, password, rememberMe);
       reply
         .header("Set-Cookie", [...result.cookies, csrf.clear()])
         .header("ETag", `"v${result.version}"`);

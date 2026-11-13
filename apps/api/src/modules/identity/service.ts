@@ -47,6 +47,7 @@ import { SUCCESSION_WINDOW_MS, successionWindow } from "./succession-limits.js";
 
 type Self = components["schemas"]["Self"];
 type Member = typeof membership.$inferSelect;
+const REMEMBERED_SESSION_SECONDS = 30 * 24 * 60 * 60;
 type AdministrationMemberFilters = { role?: Role | undefined; search?: string | undefined };
 const company = mysqlTable("identity_company", {
   singleton: int("singleton").primaryKey(),
@@ -868,7 +869,7 @@ export function createIdentity(
         return { userId, companyId };
       });
     },
-    async login(email: string, password: string) {
+    async login(email: string, password: string, rememberMe?: boolean) {
       const normalized = normalizedEmail(email);
       const snapshot = await run(async (tx) => {
         const [identity] = await client(tx).select().from(user).where(eq(user.email, normalized));
@@ -956,8 +957,10 @@ export function createIdentity(
           config,
           proof,
           bind(identity, credential, row, current.version),
+          rememberMe === true ? REMEMBERED_SESSION_SECONDS : undefined,
         ).api.signInEmail({
-          body: { email, password },
+          // The native flag controls cookie persistence. Both dashboard lifetimes are persistent.
+          body: { email, password, rememberMe: true },
           asResponse: true,
         });
         if (response.status >= 500) throw identityError(503);

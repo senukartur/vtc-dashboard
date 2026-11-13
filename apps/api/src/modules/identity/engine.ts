@@ -80,6 +80,7 @@ export function engine(
   config: IdentityConfig,
   proof?: CredentialProof,
   binding?: SignInBinding,
+  sessionLifetimeSeconds = 86400,
 ) {
   const secureCookies = secureIdentityCookies(config);
   const verified = proof ? credentialProofs.get(proof) : undefined;
@@ -144,7 +145,7 @@ export function engine(
       },
     },
     session: {
-      expiresIn: 86400,
+      expiresIn: sessionLifetimeSeconds,
       updateAge: 86400,
       cookieCache: { enabled: false },
       additionalFields: {

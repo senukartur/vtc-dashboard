@@ -85,24 +85,28 @@ const cookies = (values: readonly string[]) =>
     .map((value) => value.split(";")[0])
     .filter(Boolean)
     .join("; ");
-async function signIn(email: string, scope?: { role: "member" | "director"; mask?: number }) {
-  const result = scope
+async function signIn(
+  email: string,
+  options: { role?: "member" | "director"; mask?: number; rememberMe?: boolean } = {},
+) {
+  const login = () => safe(identity.login(email, password, options.rememberMe));
+  const result = options.role
     ? await diagnostic.scope(
         {
           caseId: "role_matrix",
-          step: scope.role === "member" ? "member_login" : "director_login",
-          ...(scope.mask === undefined ? {} : { mask: scope.mask }),
+          step: options.role === "member" ? "member_login" : "director_login",
+          ...(options.mask === undefined ? {} : { mask: options.mask }),
         },
-        () => safe(identity.login(email, password)),
+        login,
       )
-    : await safe(identity.login(email, password));
+    : await login();
   const headers = new Headers({ cookie: cookies(result.cookies) });
-  const actor = scope
+  const actor = options.role
     ? await diagnostic.scope(
         {
           caseId: "role_matrix",
-          step: scope.role === "member" ? "member_authentication" : "director_authentication",
-          ...(scope.mask === undefined ? {} : { mask: scope.mask }),
+          step: options.role === "member" ? "member_authentication" : "director_authentication",
+          ...(options.mask === undefined ? {} : { mask: options.mask }),
         },
         () => safe(identity.authenticate(headers)),
       )
@@ -419,11 +423,13 @@ test("deactivation/reinstatement retains identity/history, replaces roles and ma
   );
   const director = await signIn(owner?.email ?? ""),
     member = await addMember(["driver", "dispatcher"]),
-    login = await signIn(member.email);
+    login = await signIn(member.email),
+    remembered = await signIn(member.email, { rememberMe: true });
   await safe(identity.administer(director.actor, member.id, newId(), 1, { kind: "deactivate" }));
-  await expect(safe(identity.authenticate(login.headers))).rejects.toMatchObject({
-    statusCode: 401,
-  });
+  for (const current of [login, remembered])
+    await expect(safe(identity.authenticate(current.headers))).rejects.toMatchObject({
+      statusCode: 401,
+    });
   await expect(safe(identity.login(member.email, password))).rejects.toMatchObject({
     statusCode: 401,
   });
@@ -452,9 +458,10 @@ test("deactivation/reinstatement retains identity/history, replaces roles and ma
   expect(returned.data.member.roles).toEqual(["trainee"]);
   expect(returned.data.identityEpoch).toBe(3);
   expect(returned.actor.accessEpoch).toBe(3);
-  await expect(safe(identity.authenticate(login.headers))).rejects.toMatchObject({
-    statusCode: 401,
-  });
+  for (const current of [login, remembered])
+    await expect(safe(identity.authenticate(current.headers))).rejects.toMatchObject({
+      statusCode: 401,
+    });
   for (const kind of ["roles", "deactivate", "reinstate"] as const)
     await expect(
       safe(
@@ -539,7 +546,8 @@ test("challenge replacement, five wrong attempts, exact ten-minute expiry, purpo
 
 test("reset is current-verified-email bound, one-time, concurrent-safe and revokes password/sessions; exact replay is safe", async () => {
   const m = await addMember(),
-    login = await signIn(m.email);
+    login = await signIn(m.email),
+    remembered = await signIn(m.email, { rememberMe: true });
   await verify(login);
   await safe(identity.requestReset("synthetic-pre-session", newId(), m.email));
   const old = await latestChallenge(m.id, "password_reset");
@@ -564,14 +572,35 @@ test("reset is current-verified-email bound, one-time, concurrent-safe and revok
   await expect(
     safe(identity.resetPassword(...([args[0], key, challenge.code, password] as const))),
   ).rejects.toMatchObject({ statusCode: 409 });
-  await expect(safe(identity.authenticate(login.headers))).rejects.toMatchObject({
-    statusCode: 401,
-  });
+  for (const current of [login, remembered])
+    await expect(safe(identity.authenticate(current.headers))).rejects.toMatchObject({
+      statusCode: 401,
+    });
   await expect(safe(identity.login(m.email, password))).rejects.toMatchObject({ statusCode: 401 });
   expect((await safe(identity.login(m.email, args[3]))).data.member.id).toBe(m.id);
   expect(
     await safe(identity.requestReset("synthetic-pre-session", newId(), "unknown@example.invalid")),
   ).toEqual({ status: "received" });
+});
+
+test("verified password change revokes a separate remembered session", async () => {
+  const member = await addMember();
+  const current = await signIn(member.email);
+  await verify(current);
+  const remembered = await signIn(member.email, { rememberMe: true });
+  await safe(identity.requestChallenge(current.actor, newId(), "password_change"));
+  const challenge = await latestChallenge(member.id, "password_change");
+  await safe(
+    identity.confirmChallenge(current.actor, newId(), {
+      purpose: "password_change",
+      challengeId: challenge.id,
+      code: challenge.code,
+      newPassword: "Synthetic-changed-passphrase-43",
+    }),
+  );
+  await expect(safe(identity.authenticate(remembered.headers))).rejects.toMatchObject({
+    statusCode: 401,
+  });
 });
 
 test("protected email replacement requires both channels before invalidating epochs and verifying the new address", async () => {
@@ -681,11 +710,14 @@ test.each([false, true])(
           cookie: cookies(setCookies(pre)),
           "x-csrf-token": pre.json().data.token,
         },
-        payload: { email: member.email, password },
+        payload: { email: member.email, password, rememberMe: productionMode },
       });
       expect(logged.statusCode).toBe(200);
       expect(Array.isArray(logged.headers["set-cookie"])).toBe(true);
       expect(secureHeader(setCookies(logged), "__Host-vtc_session")).toBe(true);
+      expect(logged.cookies.find((cookie) => cookie.name === "__Host-vtc_session")?.maxAge).toBe(
+        productionMode ? 2592000 : 86400,
+      );
       expect(secureHeader(setCookies(logged), "__Host-vtc_csrf", true)).toBe(true);
       const captured = cookies(setCookies(logged));
       expect(
@@ -1128,7 +1160,9 @@ test("real API enforces structural schemas, current membership, CSRF/origin rota
     ).toBe(403);
     expect((await request(basic, { email: m.email, password, extra: true })).statusCode).toBe(422);
     expect((await request({ ...basic, "content-type": "text/plain" }, "bad")).statusCode).toBe(415);
-    const logged = await request(basic);
+    for (const rememberMe of [null, "true", 1, [], {}])
+      expect((await request(basic, { email: m.email, password, rememberMe })).statusCode).toBe(422);
+    const logged = await request(basic, { email: m.email, password, rememberMe: true });
     expect(logged.statusCode).toBe(200);
     expect(
       logged.cookies.some((cookie) => cookie.name === "vtc_dev_session" && !cookie.secure),
@@ -1164,7 +1198,7 @@ test("real API enforces structural schemas, current membership, CSRF/origin rota
     expect(
       (await app.inject({ url: "/api/v1/me", headers: { cookie: sessionCookie } })).statusCode,
     ).toBe(401);
-    const direct = await signIn(m.email);
+    const direct = await signIn(m.email, { rememberMe: true });
     await safe(
       unit.run((tx) =>
         unit
@@ -1178,6 +1212,82 @@ test("real API enforces structural schemas, current membership, CSRF/origin rota
       statusCode: 401,
     });
   } finally {
+    await app.close();
+  }
+});
+
+test("login keeps omitted and false sessions at 24 hours and true sessions at a fixed 30 days", async () => {
+  const previousInstant = instant;
+  const member = await addMember();
+  const app = await createApp({ checkReadiness: async () => true, identity });
+  const sessionTimes = async (id: string) => {
+    const [times] = await safe(
+      unit.run((tx) =>
+        unit
+          .client(tx)
+          .select({ createdAt: session.createdAt, expiresAt: session.expiresAt })
+          .from(session)
+          .where(eq(session.id, id)),
+      ),
+    );
+    if (!times) throw new Error("SYNTHETIC_SESSION_MISSING");
+    return times;
+  };
+  const login = async (rememberMe: boolean | undefined, lifetimeSeconds: number) => {
+    const pre = await app.inject({ url: "/api/v1/auth/csrf" });
+    expect(pre.statusCode).toBe(200);
+    const result = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      headers: {
+        origin: config.origin,
+        cookie: cookies(pre.cookies.map((cookie) => `${cookie.name}=${cookie.value}`)),
+        "x-csrf-token": pre.json().data.token,
+      },
+      payload: {
+        email: member.email,
+        password,
+        ...(rememberMe === undefined ? {} : { rememberMe }),
+      },
+    });
+    expect(result.statusCode).toBe(200);
+    const cookie = result.cookies.find((entry) => entry.name === "vtc_dev_session");
+    if (!cookie) throw new Error("SYNTHETIC_SESSION_COOKIE_MISSING");
+    expect(cookie.maxAge).toBe(lifetimeSeconds);
+    const headers = { cookie: `${cookie.name}=${cookie.value}` };
+    const actor = await safe(identity.authenticate(new Headers(headers)));
+    const times = await sessionTimes(actor.sessionId);
+    expect(
+      Math.abs(times.expiresAt.getTime() - times.createdAt.getTime() - lifetimeSeconds * 1000),
+    ).toBeLessThan(1000);
+    return { headers, id: actor.sessionId, expiresAt: times.expiresAt.getTime() };
+  };
+  try {
+    instant += 60000;
+    const defaultSession = await login(undefined, 86400);
+    const remembered = await login(true, 2592000);
+    const unchecked = await login(false, 86400);
+    expect((await sessionTimes(defaultSession.id)).expiresAt.getTime()).toBe(
+      defaultSession.expiresAt,
+    );
+    instant = Math.max(defaultSession.expiresAt, unchecked.expiresAt);
+    for (const ordinary of [defaultSession, unchecked])
+      expect((await app.inject({ url: "/api/v1/me", headers: ordinary.headers })).statusCode).toBe(
+        401,
+      );
+
+    instant = remembered.expiresAt - 1;
+    const read = await app.inject({ url: "/api/v1/me", headers: remembered.headers });
+    expect(read.statusCode).toBe(200);
+    expect(read.cookies.some((entry) => entry.name === "vtc_dev_session")).toBe(false);
+    expect((await sessionTimes(remembered.id)).expiresAt.getTime()).toBe(remembered.expiresAt);
+
+    instant = remembered.expiresAt;
+    expect((await app.inject({ url: "/api/v1/me", headers: remembered.headers })).statusCode).toBe(
+      401,
+    );
+  } finally {
+    instant = previousInstant;
     await app.close();
   }
 });
