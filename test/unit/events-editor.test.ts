@@ -15,7 +15,10 @@ import {
   resolveDepotChoice,
   validateEventEditor,
 } from "../../apps/web/src/features/events/editor/model.ts";
-import { rebaseEventEditor } from "../../apps/web/src/features/events/editor/rebase.ts";
+import {
+  incompleteOverlapTime,
+  rebaseEventEditor,
+} from "../../apps/web/src/features/events/editor/rebase.ts";
 import type { DTO } from "../../apps/web/src/features/events/model.ts";
 import {
   eventStage2QueryPrefix,
@@ -28,6 +31,7 @@ import {
   eventStage2Content,
   eventStage2Reads,
 } from "../../apps/web/src/features/events/stage-2-transport.ts";
+import { emptyTime, incompleteValue } from "../../apps/web/src/shared/ui/date-time.ts";
 import { stage2Fixture } from "../fixtures/events-stage-2.ts";
 
 const member = () =>
@@ -319,6 +323,23 @@ test("rebasing a local title preserves the refreshed canonical depot, distance a
     originDepotId: saved.origin.depotId,
     distanceKm: "55",
   });
+});
+
+test("an incomplete local time overlaps as translated text and is kept for Keep my edits", () => {
+  const base = completeForm();
+  const marker = incompleteValue("25.10.20", { ...emptyTime, hours: "14", minutes: "00" });
+  const local = { ...base, startsAt: marker };
+  const saved = { ...base, startsAt: "2099-10-25T16:00:00.000" };
+  const result = rebaseEventEditor(base, local, saved);
+  expect(result.overlaps).toEqual([
+    { field: "startsAt", local: marker, saved: "2099-10-25T16:00:00.000Z" },
+  ]);
+  // Keeping my edits restores the incomplete entry into the field.
+  expect(result.form.startsAt).toBe(marker);
+  expect(incompleteOverlapTime("startsAt", marker)).toBe(true);
+  expect(incompleteOverlapTime("startsAt", "2099-10-25T16:00:00.000Z")).toBe(false);
+  expect(incompleteOverlapTime("startsAt", null)).toBe(false);
+  expect(incompleteOverlapTime("title", marker)).toBe(false);
 });
 
 test("rebasing a depot change against a different saved city preserves the new city and depot", () => {

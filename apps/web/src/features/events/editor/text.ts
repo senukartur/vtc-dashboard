@@ -77,6 +77,7 @@ const en = {
   latestValue: "Latest value",
   localValue: "Your value",
   conflictSelectionUnavailable: "Selection details unavailable",
+  conflictIncompleteTime: "Incomplete or invalid date and time",
   overlapHelp:
     "Review the fields changed in both versions. Keeping your edits will use your values for these fields.",
   reselectHelp:
@@ -208,6 +209,7 @@ const ru: Record<keyof typeof en, string> = {
   latestValue: "Последнее значение",
   localValue: "Ваше значение",
   conflictSelectionUnavailable: "Данные выбора недоступны",
+  conflictIncompleteTime: "Неполные или неверные дата и время",
   overlapHelp:
     "Проверьте поля, изменённые в обеих версиях. Если сохранить ваши правки, в этих полях будут использованы ваши значения.",
   reselectHelp:
