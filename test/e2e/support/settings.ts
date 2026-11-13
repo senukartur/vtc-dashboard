@@ -111,6 +111,9 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     role: options.role ?? "director",
     emailVerified: options.emailVerified ?? true,
     transferred: false,
+    transferResponseGate: null as Promise<void> | null,
+    selfReadsAfterTransfer: 0,
+    auditDeniedAfterTransfer: 0,
     settings: {
       id: ids.company,
       version: 1,
@@ -128,7 +131,7 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     auditEmpty: false,
     auditTotal: undefined as number | undefined,
     auditPageSize: 25,
-    auditStaleCursor: false,
+    auditCursorStatus: 200,
     membersStatus: 200,
     membersEmpty: false,
     challengeStatus: 200,
@@ -166,7 +169,10 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       path = url.pathname.replace("/api/v1", ""),
       method = request.method();
     if (options.delegateQualifications && path.includes("qualification")) return route.fallback();
-    if (path === "/me") return route.fulfill({ json: self(), headers: { ETag: '"me-1"' } });
+    if (path === "/me") {
+      if (state.transferred) state.selfReadsAfterTransfer++;
+      return route.fulfill({ json: self(), headers: { ETag: '"me-1"' } });
+    }
     if (path === "/auth/csrf")
       return route.fulfill({ json: envelope({ token: "NONFUNCTIONAL_FIXTURE" }) });
     if (method === "GET") state.reads.push(`${path}${url.search}`);
@@ -216,14 +222,19 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       });
     }
     if (method === "GET" && path === "/admin/audit") {
+      if (state.transferred) {
+        state.auditDeniedAfterTransfer++;
+        return route.fulfill(failure(403));
+      }
       if (state.auditStatus !== 200) return route.fulfill(failure(state.auditStatus));
       const view = url.searchParams.get("view"),
         action = url.searchParams.get("action"),
         cursor = url.searchParams.get("cursor"),
         limit = url.searchParams.get("limit");
       if (view !== "stage3" || limit !== "25") return route.fulfill(failure(422));
-      if (cursor && (state.auditStaleCursor || cursor !== "synthetic+second/page="))
-        return route.fulfill(failure(409));
+      if (cursor && cursor !== "synthetic+second/page=") return route.fulfill(failure(409));
+      if (cursor && state.auditCursorStatus !== 200)
+        return route.fulfill(failure(state.auditCursorStatus));
       const base = {
         actorId: ids.self,
         actorNickname: "Fictional Director",
@@ -355,6 +366,7 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       }
       state.pending = null;
       state.transferred = true;
+      await state.transferResponseGate;
       return route.fulfill({ json: envelope({ id: ids.company, version: 2 }) });
     }
     state.unexpected.push(`${method} ${path}`);

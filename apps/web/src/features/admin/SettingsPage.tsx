@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import {
   Dialog,
@@ -36,6 +36,10 @@ import { type DTO, useWorkspaceCommand, useWorkspaceQuery } from "./transport.js
 import "./settings.css";
 
 type Command = ReturnType<typeof useWorkspaceCommand>;
+type TransferConfirmation = {
+  command: Command;
+  submit: (challengeId: string, code: string, nickname: string) => Promise<boolean>;
+};
 
 function TimezoneEditor({
   data,
@@ -270,14 +274,17 @@ function successorLabel(
     ? `${member.nickname} · ${member.roles.map((role) => t(role)).join(", ")}`
     : member.nickname;
 }
-function TransferFlow({ visible }: { visible: boolean }) {
+function TransferFlow({
+  visible,
+  transferConfirmation,
+}: {
+  visible: boolean;
+  transferConfirmation: TransferConfirmation;
+}) {
   const { t } = useTranslation("administration"),
     session = useSession(),
-    location = useLocation(),
-    navigate = useNavigate(),
-    currentLocation = useRef(location),
     request = useWorkspaceCommand(),
-    confirm = useWorkspaceCommand(),
+    { command: confirm, submit } = transferConfirmation,
     [cursor, setCursor] = useState<string | null>(null),
     [successorId, setSuccessorId] = useState(""),
     [changing, setChanging] = useState(false),
@@ -320,9 +327,6 @@ function TransferFlow({ visible }: { visible: boolean }) {
     requestSeconds: request.seconds,
     now,
   });
-  useEffect(() => {
-    currentLocation.current = location;
-  }, [location]);
   useEffect(() => {
     if (focusCode) codeInput.current?.focus();
   }, [focusCode]);
@@ -370,27 +374,9 @@ function TransferFlow({ visible }: { visible: boolean }) {
     } else void state.refetch();
   }
   async function transfer() {
-    if (!current) return;
-    const nickname = current.successor.nickname;
-    const result = await confirm.run(
-      "/admin/leadership/transfers",
-      "EnvelopeCommandResult",
-      { challengeId: current.id, code },
-      null,
-      "POST",
-      false,
-    );
-    if (result) {
-      setCode("");
-      setOpen(false);
-      // Only the public nickname is kept in history state for the notice after access changes.
-      const { pathname, search, hash } = currentLocation.current;
-      navigate(
-        { pathname, search, hash },
-        { replace: true, state: { leadershipTransferredTo: nickname } },
-      );
-      session.changed();
-    } else void state.refetch();
+    if (current && !(await submit(current.id, code, current.successor.nickname))) {
+      void state.refetch();
+    }
   }
   const resendDescription =
     view.resendIn > 0 ? (
@@ -595,7 +581,13 @@ function TransferFlow({ visible }: { visible: boolean }) {
   );
 }
 /** Rendered only for the serving director (`leadership.transfer`). */
-function Leadership({ visible }: { visible: boolean }) {
+function Leadership({
+  visible,
+  transferConfirmation,
+}: {
+  visible: boolean;
+  transferConfirmation: TransferConfirmation;
+}) {
   const { t } = useTranslation("administration"),
     session = useSession(),
     verified = !!session.self?.emailVerified;
@@ -612,7 +604,7 @@ function Leadership({ visible }: { visible: boolean }) {
         <p className="muted">{t("settingsUi.deputyAfterTransfer")}</p>
       </div>
       {verified ? (
-        <TransferFlow visible={visible} />
+        <TransferFlow visible={visible} transferConfirmation={transferConfirmation} />
       ) : (
         <div className="settings-step stack">
           <p>{t("verifyEmailFirst")}</p>
@@ -645,9 +637,11 @@ function SettingsRestricted() {
 function SettingsGeneral({
   visible,
   settings,
+  transferConfirmation,
 }: {
   visible: boolean;
   settings: ReturnType<typeof useWorkspaceQuery<"EnvelopeCompanySettings">>;
+  transferConfirmation: TransferConfirmation;
 }) {
   const { t } = useTranslation("administration"),
     session = useSession(),
@@ -688,7 +682,9 @@ function SettingsGeneral({
         )}
       </div>
       {session.self?.capabilities.includes("leadership.transfer") &&
-        session.self.capabilities.includes("members.manage") && <Leadership visible={visible} />}
+        session.self.capabilities.includes("members.manage") && (
+          <Leadership visible={visible} transferConfirmation={transferConfirmation} />
+        )}
     </div>
   );
 }
@@ -702,12 +698,16 @@ function SettingsQualificationLevels() {
   );
 }
 
-function Settings() {
+function Settings({ transferConfirmation }: { transferConfirmation: TransferConfirmation }) {
   const { t } = useTranslation("administration"),
     session = useSession(),
     location = useLocation(),
     navigate = useNavigate(),
+    navigation = useNavigationType(),
     tab = settingsTab(new URLSearchParams(location.search).get("tab")),
+    previousTab = useRef(tab),
+    selectedTab = useRef<HTMLButtonElement>(null),
+    lastFocused = useRef<HTMLElement | null>(null),
     [generalOpened, setGeneralOpened] = useState(tab === "general"),
     canReadAudit = !!session.self?.capabilities.includes("members.manage"),
     settings = useWorkspaceQuery(
@@ -717,9 +717,30 @@ function Settings() {
     );
   // General holds the timezone command and protected transfer flow for this page visit.
   if (tab === "general" && !generalOpened) setGeneralOpened(true);
+  useEffect(() => {
+    const changed = previousTab.current !== tab;
+    previousTab.current = tab;
+    if (!changed || navigation !== "POP") return;
+    const active = document.activeElement;
+    const previous = !active || active === document.body ? lastFocused.current : active;
+    // A React portal (such as a confirmation dialog) also reports focus through the page.
+    if (
+      previous &&
+      (!previous.isConnected ||
+        previous.getClientRects().length === 0 ||
+        previous.closest('[role="dialog"][data-state="closed"]'))
+    ) {
+      selectedTab.current?.focus();
+    }
+  }, [tab, navigation]);
 
   return (
-    <div className="administration-page settings-page stack">
+    <div
+      className="administration-page settings-page stack"
+      onFocusCapture={(event) => {
+        if (event.target instanceof HTMLElement) lastFocused.current = event.target;
+      }}
+    >
       <div className="settings-heading">
         <WorkspaceHeading title={t("settings")} />
       </div>
@@ -735,14 +756,18 @@ function Settings() {
       >
         <TabsList aria-label={t("settings")}>
           {settingsTabs.map((value) => (
-            <TabsTrigger key={value} value={value}>
+            <TabsTrigger key={value} value={value} ref={value === tab ? selectedTab : undefined}>
               {t(`settingsUi.tabs.${value}`)}
             </TabsTrigger>
           ))}
         </TabsList>
         <TabsContent value="general" forceMount hidden={tab !== "general"}>
           {(generalOpened || tab === "general") && (
-            <SettingsGeneral visible={tab === "general"} settings={settings} />
+            <SettingsGeneral
+              visible={tab === "general"}
+              settings={settings}
+              transferConfirmation={transferConfirmation}
+            />
           )}
         </TabsContent>
         <TabsContent value="qualifications">
@@ -769,12 +794,50 @@ function transferredTo(state: unknown): string | null {
 }
 export function SettingsPage() {
   const { t } = useTranslation("administration"),
+    session = useSession(),
     location = useLocation(),
     navigate = useNavigate(),
+    currentLocation = useRef<typeof location | null>(null),
+    confirmation = useWorkspaceCommand(),
     incoming = transferredTo(location.state),
     [nickname, setNickname] = useState(incoming),
     notice = useRef<HTMLParagraphElement>(null);
   if (incoming && incoming !== nickname) setNickname(incoming);
+  useLayoutEffect(() => {
+    currentLocation.current = location;
+    return () => {
+      currentLocation.current = null;
+    };
+  }, [location]);
+  const canTransfer =
+    session.self?.emailVerified &&
+    ["company.configure", "leadership.transfer", "members.manage"].every((capability) =>
+      session.self?.capabilities.includes(capability),
+    );
+  useEffect(() => {
+    if (!canTransfer && confirmation.held && !confirmation.pending) confirmation.dismiss();
+  }, [canTransfer, confirmation]);
+
+  async function submitTransfer(challengeId: string, code: string, nickname: string) {
+    // A committed transfer can remove permissions before its response reaches this page.
+    // ProtectedAccount keeps this owner scoped to the authenticated session generation.
+    const result = await confirmation.run(
+      "/admin/leadership/transfers",
+      "EnvelopeCommandResult",
+      { challengeId, code },
+      null,
+      "POST",
+      false,
+    );
+    if (!result || !currentLocation.current) return false;
+    const { pathname, search, hash } = currentLocation.current;
+    navigate(
+      { pathname, search, hash },
+      { replace: true, state: { leadershipTransferredTo: nickname } },
+    );
+    session.changed();
+    return true;
+  }
   // The transfer ends this member's access, so the notice arrives through router state and
   // survives the session remount. It is shown once: the state is cleared from history so a reload
   // or Back does not repeat it.
@@ -802,7 +865,7 @@ export function SettingsPage() {
         </div>
       )}
       <Permission capability="company.configure">
-        <Settings />
+        <Settings transferConfirmation={{ command: confirmation, submit: submitTransfer }} />
       </Permission>
     </>
   );

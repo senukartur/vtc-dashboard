@@ -619,7 +619,7 @@ test(
         );
         await expect(change.locator("dd").last()).toHaveText(timezone);
         const legacy = audit.getByRole("row").filter({ hasText: `ID ${legacyActor.slice(0, 8)}…` });
-        await expect(legacy).toContainText("Older entry · change details unavailable.");
+        await expect(legacy).toContainText("Change details unavailable.");
         await expect(legacy).not.toContainText(legacyActor);
       }
 

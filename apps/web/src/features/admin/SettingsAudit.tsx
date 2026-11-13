@@ -49,7 +49,7 @@ function AuditChange({ row }: { row: Row }) {
           </dl>
         </>
       ) : (
-        <p className="muted">{t("settingsUi.audit.legacy")}</p>
+        <p className="muted">{t("settingsUi.audit.detailsUnavailable")}</p>
       )}
     </>
   );
@@ -128,7 +128,9 @@ function AuditResults({
     query = useWorkspaceQuery(auditPath(action, cursor), "AuditStage3ListEnvelope"),
     page = timezonePending ? undefined : query.data?.data.data,
     failure = query.error instanceof AccountFailure ? query.error.kind : null,
-    denied = failure === "forbidden" || failure === "unauthorized";
+    denied = failure === "forbidden" || failure === "unauthorized",
+    staleCursor = failure === "conflict" && !!cursor,
+    canGoBack = !!cursor && !denied && !staleCursor && (!!page || query.isError);
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
     timezone = validReportingTimezone(reportingTimezone) ? reportingTimezone : null,
     next = page?.nextCursor,
@@ -150,7 +152,7 @@ function AuditResults({
       )}
       {denied ? (
         <p role="alert">{t("settingsUi.sectionRestricted")}</p>
-      ) : failure === "conflict" && cursor ? (
+      ) : staleCursor ? (
         <div role="alert">
           <p>{t("settingsUi.audit.staleCursor")}</p>
           <Button variant="outline" onClick={() => goTo([])}>
@@ -199,9 +201,9 @@ function AuditResults({
           </table>
         </section>
       )}
-      {page && (
+      {(page || canGoBack) && (
         <div className="settings-audit-foot">
-          {page.items.length > 0 ? (
+          {page?.items.length ? (
             <p className="muted">
               {t(
                 page.total === undefined
@@ -214,13 +216,13 @@ function AuditResults({
                 },
               )}
             </p>
-          ) : page.total !== undefined ? (
+          ) : page?.total !== undefined ? (
             <p className="muted">
               {t("settingsUi.audit.total", { total: numbers.format(page.total) })}
             </p>
           ) : null}
           <div className="button-row">
-            {cursor && (
+            {canGoBack && (
               <Button variant="outline" onClick={() => goTo(pages.slice(0, -1))}>
                 {t("settingsUi.audit.previous")}
               </Button>
