@@ -113,6 +113,7 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     transferred: false,
     transferResponseGate: null as Promise<void> | null,
     selfReadsAfterTransfer: 0,
+    selfStatusAfterTransfer: 200,
     selfReplacementAfterTransfer: null as S["MemberSummary"] | null,
     selfResponseGateAfterTransfer: null as Promise<void> | null,
     auditDeniedAfterTransfer: 0,
@@ -180,6 +181,8 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       if (state.transferred) {
         state.selfReadsAfterTransfer++;
         await state.selfResponseGateAfterTransfer;
+        if (state.selfStatusAfterTransfer !== 200)
+          return route.fulfill(failure(state.selfStatusAfterTransfer));
       }
       return route.fulfill({ json: self(), headers: { ETag: '"me-1"' } });
     }

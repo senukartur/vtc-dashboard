@@ -566,6 +566,32 @@ test(
 );
 
 test(
+  "P11 the transfer notice survives a temporary session read failure",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await open(page, { pending: true });
+    await settled(page);
+    state.selfStatusAfterTransfer = 503;
+    await codeInput(page).fill(correctCode);
+    await panel(page).getByRole("button", { name: text.en.transferButton, exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Session check unavailable");
+    await expect(notice(page)).toHaveCount(0);
+    await expect(codeInput(page)).toHaveCount(0);
+    expect(state.commands).toHaveLength(1);
+
+    state.selfStatusAfterTransfer = 200;
+    await page.getByRole("button", { name: "Check again", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
+    await expect(notice(page)).toContainText(names.volga);
+    await expect(notice(page)).toBeFocused();
+    await expect(page).toHaveURL("/account/admin/settings");
+    expect(state.commands).toHaveLength(1);
+  },
+);
+
+test(
   "P11 a different account never sees the completed transfer notice",
   browserCase(["@functional"]),
   async ({ page }) => {

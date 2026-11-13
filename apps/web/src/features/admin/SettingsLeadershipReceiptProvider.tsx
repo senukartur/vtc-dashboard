@@ -52,12 +52,14 @@ export function SettingsLeadershipReceiptProvider({ children }: { children: Reac
   const identity = account ? JSON.stringify([account.member.id, account.identityEpoch]) : null;
   const inWorkspace = !!onSettings && !signOut.active;
   const scope = inWorkspace && identity ? JSON.stringify([identity, generation]) : null;
-  // Keep the notice only through the one intentional session refresh triggered by success.
+  // Keep the notice through the refresh triggered by success, including a temporary read failure.
   const noticeMatches =
     notice &&
     inWorkspace &&
     (generation === notice.generation || generation === notice.generation + 1) &&
-    (state === "checking" || (state === "authenticated" && identity === notice.identity));
+    (state === "checking" ||
+      state === "unavailable" ||
+      (state === "authenticated" && identity === notice.identity));
   if (notice && !noticeMatches) setNotice(null);
   const nickname = noticeMatches && state === "authenticated" ? notice.nickname : null;
   return (
