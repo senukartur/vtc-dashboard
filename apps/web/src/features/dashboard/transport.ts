@@ -73,7 +73,8 @@ export async function dashboardRead<K extends keyof DTO>(
       }),
     );
     if (response.status === 409) {
-      const safe = schema("Error").safeParse(await response.json());
+      // A missing or malformed error body cannot change the HTTP conflict into a network failure.
+      const safe = schema("Error").safeParse(await response.json().catch(() => undefined));
       if (safe.success && safe.data.error.code === "SETUP_REQUIRED") {
         throw new DashboardFailure("conflict", 409, null, true);
       }
