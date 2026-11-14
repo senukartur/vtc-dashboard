@@ -1,4 +1,11 @@
-import { type KeyboardEvent, type RefObject, useId, useLayoutEffect, useRef } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+  useId,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
@@ -9,6 +16,7 @@ import { CatalogName, DecisionBadge, GameChip } from "../trips/TripTable.js";
 import type { DTO } from "../trips/transport.js";
 import {
   DecisionForm,
+  DispatchDecisionBadge,
   EvidenceList,
   HoldReasons,
   QualificationCheckList,
@@ -16,8 +24,10 @@ import {
   RevisionDiff,
   TripFacts,
 } from "./decision-parts.js";
+import { stagedReview } from "./dispatch-model.js";
 import { ReviewCorrections } from "./ReviewPanel.js";
-import { historyItems, isOwn, queueType, reviewType } from "./review-model.js";
+import { historyItems, isOwn, queueType, reviewType, selfReviewCode } from "./review-model.js";
+import { SourceComparison } from "./SourceComparison.js";
 import "./review.css";
 
 /**
@@ -32,6 +42,8 @@ export function DecisionPanel({
   headingRef,
   onClose,
   fullHref,
+  staged = false,
+  children,
 }: {
   tripId: string;
   variant: "side" | "page";
@@ -39,13 +51,27 @@ export function DecisionPanel({
   headingRef?: RefObject<HTMLHeadingElement | null>;
   onClose?: () => void;
   fullHref?: string;
+  staged?: boolean;
+  children?: ReactNode;
 }) {
   const { t } = useTranslation("trips"),
     session = useSession(),
     headingId = useId(),
     timezone = session.self?.preferences.displayTimezone ?? "UTC",
-    query = useTripQuery(`/trips/${tripId}/review`, "EnvelopeReview"),
-    review = query.data?.data.data,
+    legacy = useTripQuery(`/trips/${tripId}/review`, "EnvelopeReview", !staged),
+    dispatch = useTripQuery(
+      `/trips/${tripId}/review?view=stage3`,
+      "TripStage3ReviewEnvelope",
+      staged,
+    ),
+    query = staged ? dispatch : legacy,
+    detail = dispatch.data?.data.data,
+    snapshot = staged ? (detail ? stagedReview(detail) : undefined) : legacy.data?.data.data,
+    self =
+      !!snapshot &&
+      (isOwn(snapshot.trip.summary, session.self?.member.id) ||
+        snapshot.blockedReasonCodes.includes(selfReviewCode)),
+    review = staged && self ? undefined : snapshot,
     etag = query.data?.etag ?? null,
     revision = review?.trip.manualRevision ?? null,
     revisions = useTripQuery(
@@ -105,13 +131,25 @@ export function DecisionPanel({
     // resolution), so they show whenever the read has them; a trip without facts or a manual
     // revision still states that its facts are unavailable.
     facts = review && (review.trip.effectiveFacts || !revision) && (
-      <TripFacts facts={review.trip.effectiveFacts} game={review.trip.summary.game} />
+      <TripFacts
+        facts={review.trip.effectiveFacts}
+        game={review.trip.summary.game}
+        showRecordedTelemetry={!staged || !(detail?.sources.manual || detail?.sources.telemetry)}
+      />
     ),
     // Telemetry facts lead on trips with a telemetry source (late telemetry changed them); a
     // manual trip shows its revision diff first.
     telemetryFirst = !!review?.trip.summary.sourceKinds.includes("ets2telemetry"),
     leading = telemetryFirst ? facts : null,
     trailing = telemetryFirst ? null : facts,
+    comparison = review && detail && (
+      <SourceComparison
+        manual={detail.sources.manual?.manualRevision ?? null}
+        telemetry={detail.sources.telemetry?.normalizedFacts ?? null}
+        game={detail.summary.game}
+        timezone={timezone}
+      />
+    ),
     diff = review && revision && (
       <RevisionDiff
         revision={revision}
@@ -129,8 +167,10 @@ export function DecisionPanel({
     check = review && (
       <QualificationCheckList check={review.qualificationCheck} game={review.trip.summary.game} />
     ),
-    log = review && <ReviewHistory items={history} timezone={timezone} />,
-    form = review && <DecisionForm key={tripId} tripId={tripId} review={review} etag={etag} />;
+    log = review && <ReviewHistory items={history} timezone={timezone} staged={staged} />,
+    form = review && (
+      <DecisionForm key={tripId} tripId={tripId} review={review} etag={etag} staged={staged} />
+    );
   return (
     <section
       ref={section}
@@ -141,7 +181,12 @@ export function DecisionPanel({
       <header className="review-decision-header">
         <div className="review-decision-bar">
           {summary && <GameChip game={summary.game} />}
-          {summary && <DecisionBadge decision={summary.decision} />}
+          {summary &&
+            (staged ? (
+              <DispatchDecisionBadge decision={summary.decision} />
+            ) : (
+              <DecisionBadge decision={summary.decision} />
+            ))}
           <span className="review-decision-actions">
             {variant === "side" && fullHref && (
               <Button asChild variant="outline" size="xs">
@@ -194,10 +239,13 @@ export function DecisionPanel({
       </header>
       <div className="review-decision-body">
         <State query={query} />
+        {staged && self && <p className="review-note">{t("selfReview")}</p>}
+        {staged && form}
         {review &&
           (variant === "page" ? (
             <div className="review-decision-columns">
               <div className="review-column">
+                {comparison}
                 {leading}
                 {diff}
                 {trailing}
@@ -206,18 +254,19 @@ export function DecisionPanel({
               </div>
               <div className="review-column">
                 {log}
-                {form}
+                {!staged && form}
               </div>
             </div>
           ) : (
             <>
+              {comparison}
               {leading}
               {diff}
               {trailing}
               {evidence}
               {check}
               {log}
-              {form}
+              {!staged && form}
             </>
           ))}
         {review && variant === "page" && (
@@ -225,10 +274,13 @@ export function DecisionPanel({
             tripId={tripId}
             trip={review.trip}
             etag={etag}
-            self={review.blockedReasonCodes.includes("self_review_forbidden")}
+            self={review.blockedReasonCodes.includes(selfReviewCode)}
           />
         )}
       </div>
+      {staged && review && variant === "page" && children && (
+        <div className="review-decision-body">{children}</div>
+      )}
     </section>
   );
 }

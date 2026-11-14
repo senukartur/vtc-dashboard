@@ -2,13 +2,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
+import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import {
   type Game,
   itemSchema,
   type Kind,
   listOfKind,
 } from "../../shared/catalog-selectors/contracts.js";
-import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import {
@@ -24,7 +24,9 @@ import { AccountFailure } from "../account/transport.js";
 import { evidenceContent } from "../manual-reports/fields.js";
 import { Confirm, Failure, Fields, RecordedTelemetryFields } from "../trips/components.js";
 import { useTripCommand } from "../trips/queries.js";
+import { DecisionBadge } from "../trips/TripTable.js";
 import { type DTO, TripFailure } from "../trips/transport.js";
+import { stagedDecisionInput } from "./dispatch-model.js";
 import {
   type CheckRow,
   type Choice,
@@ -35,6 +37,7 @@ import {
   diffRows,
   type HistoryItem,
   previousRevision,
+  type ReviewData,
 } from "./review-model.js";
 
 type Locale = "ru" | "en";
@@ -74,6 +77,17 @@ export function CodeLabel({ code }: { code: string }) {
     t(`code_${code}`)
   ) : (
     <code className="review-break">{code}</code>
+  );
+}
+
+export function DispatchDecisionBadge({ decision }: { decision: DTO["TripSummary"]["decision"] }) {
+  const { t } = useTranslation("trips");
+  return decision === "rejected" ? (
+    <Badge className="trips-decision" data-decision={decision}>
+      {t("dispatchReturned")}
+    </Badge>
+  ) : (
+    <DecisionBadge decision={decision} />
   );
 }
 
@@ -135,9 +149,11 @@ export function HoldReasons({ codes }: { codes: readonly string[] }) {
 export function TripFacts({
   facts,
   game,
+  showRecordedTelemetry = true,
 }: {
   facts: DTO["EffectiveTripFacts"] | null | undefined;
   game: Game;
+  showRecordedTelemetry?: boolean;
 }) {
   const { t } = useTranslation("trips"),
     locale = useLocale(),
@@ -147,9 +163,11 @@ export function TripFacts({
     return (
       <ReviewSection title={t("tripFacts")}>
         <p className="review-muted">{t("partial")}</p>
-        <dl className="review-facts">
-          <RecordedTelemetryFields telemetry={undefined} />
-        </dl>
+        {showRecordedTelemetry && (
+          <dl className="review-facts">
+            <RecordedTelemetryFields telemetry={undefined} />
+          </dl>
+        )}
       </ReviewSection>
     );
   const pin = (value: DTO["EffectiveCatalogPin"] | null, kind: Kind) =>
@@ -186,7 +204,7 @@ export function TripFacts({
             <dd>{value}</dd>
           </div>
         ))}
-        <RecordedTelemetryFields telemetry={facts.recordedTelemetry} />
+        {showRecordedTelemetry && <RecordedTelemetryFields telemetry={facts.recordedTelemetry} />}
       </dl>
       {(!facts.ruleContextComplete ||
         !facts.wholeTripDistanceSupported ||
@@ -505,7 +523,15 @@ export function QualificationCheckList({
 }
 
 /** Submitted revisions and decisions, newest first, with reviewer and over-limit marker. */
-export function ReviewHistory({ items, timezone }: { items: HistoryItem[]; timezone: string }) {
+export function ReviewHistory({
+  items,
+  timezone,
+  staged = false,
+}: {
+  items: HistoryItem[];
+  timezone: string;
+  staged?: boolean;
+}) {
   const { t } = useTranslation("trips"),
     locale = useLocale();
   return (
@@ -522,7 +548,11 @@ export function ReviewHistory({ items, timezone }: { items: HistoryItem[]; timez
                 <strong>
                   {item.kind === "revision"
                     ? t("revisionSubmitted", { number: item.number })
-                    : t(`outcome_${item.outcome}`)}
+                    : t(
+                        staged && item.outcome === "rejected" && item.reviewer
+                          ? "dispatchReturned"
+                          : `outcome_${item.outcome}`,
+                      )}
                 </strong>
                 {item.kind === "decision" && item.overLimits && (
                   <Badge className="review-marker">{t("overLimitsMarker")}</Badge>
@@ -600,10 +630,12 @@ export function DecisionForm({
   tripId,
   review,
   etag,
+  staged = false,
 }: {
   tripId: string;
-  review: DTO["Review"];
+  review: ReviewData;
   etag: string | null;
+  staged?: boolean;
 }) {
   const { t } = useTranslation("trips"),
     command = useTripCommand(),
@@ -622,7 +654,14 @@ export function DecisionForm({
     blockerId = useId();
   // The checkbox confirms the limits of one review version; a refreshed review needs a new tick.
   const confirmed = confirmation.value && confirmation.etag === etag,
-    state = decisionState({ review, choice, reason, confirmed, seconds: command.seconds }),
+    state = decisionState({
+      review,
+      choice,
+      reason,
+      confirmed,
+      seconds: command.seconds,
+      optionalAcceptReason: staged,
+    }),
     game = review.trip.summary.game,
     mode = review.acceptance.mode,
     decided = ["accepted", "rejected"].includes(review.trip.summary.decision);
@@ -671,14 +710,24 @@ export function DecisionForm({
     );
   const unavailable = mode === "unavailable",
     body = choice ? decisionBody({ review, choice, reason, confirmed }) : null,
-    overLimits = body?.confirmOverLimits === true;
+    overLimits = body?.confirmOverLimits === true,
+    reasonInvalid = staged && choice === "reject" && !reason.trim(),
+    reasonOptional = staged && choice === "accept";
   function pick(next: Choice) {
     if (next === "accept" && unavailable) return;
     setChoice(next);
     setSuccess(false);
   }
   const blockerText =
-    state.blocker && state.blocker !== "wait" ? t(`blocker_${state.blocker}`) : null;
+    state.blocker && state.blocker !== "wait"
+      ? t(
+          staged && state.blocker === "choice"
+            ? "dispatchChooseDecision"
+            : staged && state.blocker === "unavailable"
+              ? "dispatchAcceptUnavailable"
+              : `blocker_${state.blocker}`,
+        )
+      : null;
   return (
     <section className="review-section review-form" aria-labelledby={headingId}>
       {title}
@@ -703,14 +752,14 @@ export function DecisionForm({
           aria-pressed={choice === "reject"}
           onClick={() => pick("reject")}
         >
-          <span aria-hidden="true">✕</span> {t("chooseReject")}
+          <span aria-hidden="true">✕</span> {t(staged ? "dispatchReturn" : "chooseReject")}
         </button>
       </fieldset>
       {unavailable && (
         <div id={unavailableId} className="review-note">
           {state.blockedCodes.length ? (
             <>
-              <p>{t("acceptUnavailable")}</p>
+              <p>{t(staged ? "dispatchAcceptUnavailable" : "acceptUnavailable")}</p>
               <ul>
                 {state.blockedCodes.map((code) => (
                   <li key={code}>
@@ -720,20 +769,29 @@ export function DecisionForm({
               </ul>
             </>
           ) : (
-            <p>{t("blocker_unavailable")}</p>
+            <p>{t(staged ? "dispatchAcceptUnavailable" : "blocker_unavailable")}</p>
           )}
         </div>
       )}
       <div className="review-field">
         <label htmlFor="review-reason">
-          {t(state.reasonLabel === "rejection" ? "reasonRejection" : "reasonNote")}
+          {t(
+            reasonOptional
+              ? "dispatchOptionalNote"
+              : staged && choice === "reject"
+                ? "dispatchReturnReason"
+                : state.reasonLabel === "rejection"
+                  ? "reasonRejection"
+                  : "reasonNote",
+          )}
         </label>
         <textarea
           id="review-reason"
           className="input"
-          required
+          required={!staged || choice === "reject"}
+          aria-invalid={reasonInvalid || undefined}
           maxLength={2048}
-          aria-describedby={visibleId}
+          aria-describedby={reasonInvalid ? `${visibleId} ${blockerId}` : visibleId}
           value={reason}
           onChange={(event) => {
             setReason(event.target.value);
@@ -741,8 +799,13 @@ export function DecisionForm({
           }}
         />
         <small id={visibleId} className="review-muted">
-          {t("reasonVisible")}
+          {t(reasonOptional ? "dispatchNoteVisible" : "reasonVisible")}
         </small>
+        {reasonInvalid && (
+          <small id={blockerId} className="field-error" role="alert">
+            {t("dispatchReturnReasonRequired")}
+          </small>
+        )}
       </div>
       {state.needsConfirmation && (
         <fieldset className="review-over-limits">
@@ -771,7 +834,13 @@ export function DecisionForm({
       {success && <p role="status">{t("success")}</p>}
       <div className="review-submit">
         <Confirm
-          label={t(state.submitLabel === "record" ? "recordDecision" : state.submitLabel)}
+          label={t(
+            staged && choice === "reject"
+              ? "dispatchReturn"
+              : state.submitLabel === "record"
+                ? "recordDecision"
+                : state.submitLabel,
+          )}
           variant="default"
           guard={JSON.stringify([
             etag,
@@ -782,15 +851,15 @@ export function DecisionForm({
             confirmed,
             overLimits,
           ])}
-          disabled={!state.canSubmit}
+          disabled={!state.canSubmit || (staged && !etag)}
           pending={command.pending}
           failure={command.failure}
           describedBy={blockerText ? blockerId : undefined}
           onConfirm={async () => {
-            if (!choice) return;
+            if (!body || (staged && !etag)) return;
             const r = await command.run(
-              `/trips/${tripId}/decisions`,
-              decisionBody({ review, choice, reason, confirmed }),
+              `/trips/${tripId}/decisions${staged ? "?view=stage3" : ""}`,
+              staged ? stagedDecisionInput(body) : body,
               "EnvelopeDecision",
               etag,
             );
@@ -801,7 +870,9 @@ export function DecisionForm({
           <div className="review-confirm">
             <Fields
               values={{
-                decision: choice ? t(choice) : null,
+                decision: choice
+                  ? t(staged && choice === "reject" ? "dispatchReturn" : choice)
+                  : null,
                 version: review.trip.summary.version,
                 reviewedRevisionId: body?.reviewedRevisionId,
                 factRevisionId: review.factRevisionId,
@@ -818,7 +889,7 @@ export function DecisionForm({
             <p className="review-multiline">{reason}</p>
           </div>
         </Confirm>
-        {blockerText && (
+        {blockerText && !reasonInvalid && (
           <small id={blockerId} className="review-muted">
             {blockerText}
           </small>

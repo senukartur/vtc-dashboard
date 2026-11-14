@@ -33,10 +33,12 @@ export function Navigation({
   variant = "public",
   onMobileNavigate,
   attention,
+  stagedDispatch = false,
 }: {
   variant?: "public" | "sidebar" | "mobile";
   onMobileNavigate?: MobileNavigate;
   attention?: WorkspaceSummary | undefined;
+  stagedDispatch?: boolean;
 }) {
   const { t, i18n } = useTranslation("core");
   const location = useLocation();
@@ -100,7 +102,11 @@ export function Navigation({
               <DialogTitle>{t("navigation")}</DialogTitle>
               <DialogDescription>Yukon Union</DialogDescription>
               {workspace ? (
-                <MemberNavLinks onNavigate={close} attention={attention} />
+                <MemberNavLinks
+                  onNavigate={close}
+                  attention={attention}
+                  stagedDispatch={stagedDispatch}
+                />
               ) : (
                 <nav className="dialog-navigation" aria-label={t("navigation")}>
                   {links(close)}

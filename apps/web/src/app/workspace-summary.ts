@@ -3,13 +3,42 @@ import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { useSignOut } from "../features/account/sign-out.js";
 import { AccountFailure } from "../features/account/transport.js";
-import { type DTO, dashboardRead } from "../features/dashboard/transport.js";
+import {
+  DashboardFailure,
+  DashboardPayloadFailure,
+  type DTO,
+  dashboardRead,
+} from "../features/dashboard/transport.js";
 import { useSession } from "./Session.js";
 import { workspaceSummaryKey, workspaceSummaryPrefix } from "./workspace-summary-cache.js";
 
 export { refreshWorkspaceSummary } from "./workspace-summary-cache.js";
 
-export type WorkspaceSummary = DTO["WorkspaceSummary"];
+export type WorkspaceSummary = DTO["WorkspaceSummary"] & {
+  dispatch?: "stage3" | "legacy";
+  promotionsReady?: DTO["WorkspaceStage3Summary"]["promotionsReady"];
+};
+
+export function workspaceSummary(data: DTO["WorkspaceStage3Summary"]): WorkspaceSummary {
+  const { reviewQueue: staged, legacyReviewQueue: legacy, ...sections } = data;
+  if (staged && legacy) throw new DashboardPayloadFailure();
+  if (staged)
+    return {
+      ...sections,
+      dispatch: "stage3",
+      reviewQueue: { count: staged.waitingCount, oldestAgeSeconds: staged.oldestAgeSeconds },
+    };
+  if (legacy) return { ...sections, dispatch: "legacy", reviewQueue: legacy };
+  return sections;
+}
+
+function recoverableRefresh(error: unknown) {
+  return (
+    error instanceof DashboardFailure &&
+    !(error instanceof DashboardPayloadFailure) &&
+    (error.status === 0 || error.status === 503)
+  );
+}
 
 export function useWorkspaceSummary({ refreshOnFocus = false } = {}) {
   const client = useQueryClient();
@@ -30,12 +59,19 @@ export function useWorkspaceSummary({ refreshOnFocus = false } = {}) {
     retryOnMount: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
-    queryFn: async ({ signal }) => {
+    queryFn: async ({ signal, queryKey }): Promise<WorkspaceSummary | null> => {
       try {
-        return (await dashboardRead("/me/workspace-summary", "EnvelopeWorkspaceSummary", signal))
-          .data.data;
+        const result = await dashboardRead(
+          "/me/workspace-summary?view=stage3",
+          "WorkspaceStage3SummaryEnvelope",
+          signal,
+        );
+        return workspaceSummary(result.data.data);
       } catch (error) {
         if (!signal.aborted && error instanceof AccountFailure) {
+          // An invalid or denied snapshot clears the last successful selection for this key.
+          // A later transient failure must never revive a selection the server invalidated.
+          if (!recoverableRefresh(error)) client.setQueryData(queryKey, null);
           if (error.kind === "unauthorized") void session.confirmSessionLoss(signal);
           if (error.kind === "forbidden") void session.refresh();
         }
@@ -61,5 +97,15 @@ export function useWorkspaceSummary({ refreshOnFocus = false } = {}) {
       document.removeEventListener("visibilitychange", refresh);
     };
   }, [client, enabled, refreshOnFocus]);
-  return { ...query, data: enabled && !query.isError ? query.data : undefined };
+  const dispatchMode =
+    enabled &&
+    session.self?.capabilities.includes("trips.review") &&
+    (!query.isError || recoverableRefresh(query.error))
+      ? query.data?.dispatch
+      : undefined;
+  return {
+    ...query,
+    data: enabled && !query.isError ? (query.data ?? undefined) : undefined,
+    dispatchMode,
+  };
 }
