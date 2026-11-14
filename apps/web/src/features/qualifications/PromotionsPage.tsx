@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useHref, useLocation, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import type { CursorPages } from "../../shared/paging.js";
 import { Pager } from "../../shared/ui/pager.js";
@@ -22,6 +22,15 @@ const tabs = ["ready", "all", "history"] as const;
 type Tab = (typeof tabs)[number];
 type Filters = { tab: Tab; game: Game; memberId: string | null; search: string };
 type ListPage = { items: unknown[]; total: number; nextCursor: string | null };
+
+function promotionTab(params: URLSearchParams): Tab {
+  const value = params.get("tab");
+  return value === "all" || value === "history" ? value : "ready";
+}
+
+function promotionGame(params: URLSearchParams): Game {
+  return params.get("game") === "ats" ? "ats" : "ets2";
+}
 
 function searchParams({ tab, game, memberId, search }: Filters, cursor: string | null = null) {
   const params = new URLSearchParams({ game, tab });
@@ -49,10 +58,11 @@ export function PromotionsPage() {
 function PromotionsWorkspace() {
   const { t, i18n } = useTranslation("promotions");
   const [params, setParams] = useSearchParams();
+  const { pathname: workspacePath } = useLocation();
+  const workspaceHref = useHref(workspacePath);
   const command = usePromotionCommand();
-  const tabValue = params.get("tab");
-  const tab: Tab = tabValue === "all" || tabValue === "history" ? tabValue : "ready";
-  const game = params.get("game") === "ats" ? "ats" : "ets2";
+  const tab = promotionTab(params);
+  const game = promotionGame(params);
   const member = schema("Id").safeParse(tab === "history" ? params.get("memberId") : null);
   const memberId = member.success ? member.data : null;
   const searchValue = params.get("search") ?? "";
@@ -226,11 +236,20 @@ function PromotionsWorkspace() {
               type="search"
               maxLength={128}
               value={search}
-              onChange={(event) =>
+              onChange={(event) => {
+                // BrowserRouter updates the URL before React replaces the outgoing tab's input.
+                const { origin, pathname, search } = window.location;
+                const current = new URLSearchParams(search);
+                if (
+                  pathname !== new URL(workspaceHref, origin).pathname ||
+                  promotionTab(current) !== tab ||
+                  promotionGame(current) !== game
+                )
+                  return;
                 setParams(searchParams({ ...filters, search: event.target.value }), {
                   replace: true,
-                })
-              }
+                });
+              }}
             />
           </div>
         )}

@@ -1153,6 +1153,8 @@ test("a single logo upload stores the checked bytes, lists only a version and re
 test("each committed upload writes one audit entry and a replay by key writes nothing", async () => {
   const c = await company("audit_co");
   const before = await auditCount("catalog.changed");
+  // Give the upload a later audit timestamp than the company creation.
+  instant += 1;
   const key = newId();
   const png = rgbaLogo(3);
   const first = await catalogs.setLogo(director, c.id, key, png);

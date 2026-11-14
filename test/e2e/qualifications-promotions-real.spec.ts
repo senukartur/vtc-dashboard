@@ -170,11 +170,25 @@ test(
         (await qualifications.progress(fixture.staff, userId, "ats", "admin")).data.assignment,
       ).toEqual(beforeAts.assignment);
 
-      await page
+      const historyTab = page
         .getByRole("navigation", { name: "Promotion views" })
-        .getByRole("link", { name: "History", exact: true })
-        .click();
+        .getByRole("link", { name: "History", exact: true });
+      await historyTab.click();
+      await expect(historyTab).toHaveAttribute("aria-current", "page");
+      const memberLookup = page.waitForResponse(
+        (response) => {
+          const url = new URL(response.url());
+          return (
+            response.request().method() === "GET" &&
+            url.pathname === searchPath &&
+            url.searchParams.get("view") === "stage3" &&
+            url.searchParams.get("search") === nickname
+          );
+        },
+        { timeout: 20_000 },
+      );
       await page.getByRole("searchbox", { name: "Search by nickname" }).fill(nickname);
+      expect((await memberLookup).status(), "History nickname lookup").toBe(200);
       await page.getByRole("combobox", { name: "Select a driver" }).selectOption(userId);
       const history = page.getByRole("table", { name: "Company qualification history" });
       await expect(history.getByRole("row").filter({ hasText: promotionReason })).toContainText(

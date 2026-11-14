@@ -378,6 +378,37 @@ test(
 );
 
 test(
+  "An outgoing candidate search cannot replace History navigation",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockPromotions(page);
+    await page.goto(path);
+    await expect(candidates(page).getByRole("rowheader")).toHaveText(main.nickname);
+    const historyLink = tabs(page).getByRole("link", { name: "History", exact: true });
+    const readySearch = page.getByRole("searchbox", { name: "Search by nickname" });
+    await historyLink.evaluate(
+      (link, input) => {
+        if (!(link instanceof HTMLAnchorElement) || !(input instanceof HTMLInputElement))
+          throw new Error("MISSING_PROMOTION_NAVIGATION_CONTROLS");
+        link.click();
+        // Reproduce an input event from the outgoing Ready tab before React commits History.
+        const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        if (!setValue || !input.isConnected) throw new Error("EXPECTED_OUTGOING_SEARCH_INPUT");
+        setValue.call(input, "Synthetic outgoing input");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      },
+      await readySearch.elementHandle(),
+    );
+    await expect(historyLink).toHaveAttribute("aria-current", "page");
+    await expect(history(page)).toBeVisible();
+    await expect(readySearch).toHaveValue("");
+    expect(
+      state.reads.some((url) => url.searchParams.get("search") === "Synthetic outgoing input"),
+    ).toBe(false);
+  },
+);
+
+test(
   "History shows both action types and filters by server-searched member",
   browserCase(["@functional"]),
   async ({ page }) => {
