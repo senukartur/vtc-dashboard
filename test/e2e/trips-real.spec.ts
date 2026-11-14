@@ -2,11 +2,14 @@ import { randomUUID } from "node:crypto";
 import type { APIRequestContext, Page, Request, Response } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { and, eq, isNull, trips as tripRows } from "@vtc/db/trips-schema";
+import type { Telemetry } from "../../apps/api/src/modules/sources/contracts/telemetry.ts";
 import { pngBytes } from "../fixtures/manual-images.ts";
+import { telemetryFixture } from "../support/builders.ts";
 import { origin, resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { manualReferenceTimes } from "./support/manual-reference.ts";
+import { startReviewStage3Server } from "./support/review-stage-3-real.ts";
 import {
   diagnosticLocale,
   TripReadLedger,
@@ -18,6 +21,304 @@ test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 }
 
 type Schemas = components["schemas"];
 const tripsPath = "/api/v1/trips";
+
+test(
+  "real Stage 3 dispatcher reviews both sources, decides and restores a dismissed duplicate",
+  browserCase(["@real"]),
+  async ({ browser }) => {
+    test.setTimeout(90000);
+    await resetAccountLimits();
+    const fixture = await tripBrowserFixture();
+    try {
+      await using server = await startReviewStage3Server(browser);
+      const { identity, manualReports: manual, trips } = server.composed;
+      if (!manual || !trips) throw new Error("STAGE_3_TRIP_COMPOSITION_REQUIRED");
+      const submit = async (actor: typeof fixture.author, actualDistanceM: string) => {
+        const image = await manual.upload(
+          actor,
+          randomUUID(),
+          "synthetic-stage3-report.png",
+          (async function* () {
+            yield pngBytes();
+          })(),
+          "image/png",
+        );
+        return manual.submitReport(actor, randomUUID(), {
+          fields: {
+            ...fixture.fields,
+            ...manualReferenceTimes,
+            actualDistanceM,
+            evidenceIds: [image.id],
+          },
+        });
+      };
+      const telemetry = (canonical?: { tripId: string; expectedVersion: number }) => {
+        const message = telemetryFixture("completed") as unknown as Telemetry;
+        const time = Date.now();
+        message.eventId = randomUUID();
+        message.source.tripId = randomUUID();
+        message.source.pluginSessionId = randomUUID();
+        message.snapshot.context.gameBuild = { available: true, value: "synthetic-build" };
+        message.snapshot.start.utcMs = time - 3000;
+        if (message.snapshot.end) message.snapshot.end.utcMs = time;
+        message.createdUtcMs = time;
+        return server.unit.run((tx) =>
+          trips.storeInTransaction(tx, "ets2telemetry", message, {
+            ownerUserId: fixture.userId,
+            connection: { state: "unknown", referenceId: null },
+            ...(canonical ? { canonical } : {}),
+          }),
+        );
+      };
+      const ordinary = await submit(fixture.author, "123400");
+      const mixed = await submit(fixture.author, "471000");
+      const mixedReport = await manual.getReport(fixture.author, mixed.id);
+      await telemetry({ tripId: mixed.tripId, expectedVersion: mixedReport.tripVersion });
+      const dispatcher = await fixture.newMember(["driver", "dispatcher"]);
+      const dispatcherLogin = await identity.login(dispatcher.email, dispatcher.password);
+      const dispatcherActor = await identity.authenticate(
+        new Headers({
+          cookie: dispatcherLogin.cookies.map((cookie) => cookie.split(";", 1)[0]).join("; "),
+        }),
+      );
+      const own = await submit(dispatcherActor, "903000");
+      const left = await telemetry();
+      const right = await submit(fixture.author, "123400");
+      const reviewer = await server.actor(dispatcher.email, dispatcher.password);
+      const selfResponse = await reviewer.request.get("/api/v1/me");
+      expect(selfResponse.status()).toBe(200);
+      const self = ((await selfResponse.json()) as Schemas["EnvelopeSelf"]).data;
+      expect(self.member.roles).toEqual(expect.arrayContaining(["driver", "dispatcher"]));
+      expect(self.capabilities).toContain("trips.review");
+
+      async function committed(path: string, trigger: () => Promise<unknown>, view?: string) {
+        const result = reviewer.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            response.request().method() === "POST" &&
+            url.pathname === path &&
+            (!view || url.searchParams.get("view") === view)
+          );
+        });
+        await trigger();
+        await reviewer
+          .getByRole("dialog")
+          .getByRole("button", { name: "Confirm", exact: true })
+          .click();
+        const response = await result;
+        expect(response.status()).toBe(200);
+        await expect(reviewer.getByRole("dialog")).toHaveCount(0);
+        return response;
+      }
+      const workspaceRead = reviewer.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/me/workspace-summary",
+      );
+      await reviewer.goto("/account/review");
+      await catalogLanguage(reviewer);
+      const workspace = await workspaceRead;
+      expect(workspace.status()).toBe(200);
+      expect(new URL(workspace.url()).searchParams.get("view")).toBe("stage3");
+      const workspaceData = ((await workspace.json()) as Schemas["WorkspaceStage3SummaryEnvelope"])
+        .data;
+      expect(workspaceData.reviewQueue?.waitingCount).toBeGreaterThan(0);
+      expect(workspaceData.legacyReviewQueue).toBeUndefined();
+      await expect(reviewer.getByRole("button", { name: "Queue", exact: true })).toBeVisible();
+      await expect(reviewer.locator(".review-queue-totals")).toContainText("Waiting");
+      const waitingResponse = await reviewer.request.get(
+        `/api/v1/trips?scope=review&view=stage3&status=waiting&ownerId=${fixture.userId}&limit=25`,
+      );
+      expect(waitingResponse.status()).toBe(200);
+      const waiting = ((await waitingResponse.json()) as Schemas["TripStage3ReviewListEnvelope"])
+        .data;
+      const ordinaryWaiting = waiting.items.find(
+        (item) => item.trip.id === ordinary.tripId && item.state === "waiting",
+      );
+      expect(ordinaryWaiting?.state).toBe("waiting");
+      const reasonCode = ordinaryWaiting?.reasonCodes[0];
+      if (!reasonCode) throw new Error("STAGE_3_REVIEW_REASON_REQUIRED");
+      const reasonFilter = new URLSearchParams({
+        scope: "review",
+        view: "stage3",
+        status: "waiting",
+        ownerId: fixture.userId,
+        reasonCode,
+      });
+      const filteredResponse = await reviewer.request.get(`/api/v1/trips?${reasonFilter}`);
+      expect(filteredResponse.status()).toBe(200);
+      const filtered = ((await filteredResponse.json()) as Schemas["TripStage3ReviewListEnvelope"])
+        .data;
+      expect(filtered.items.some(({ trip }) => trip.id === ordinary.tripId)).toBe(true);
+      expect(filtered.items.every(({ reasonCodes }) => reasonCodes.includes(reasonCode))).toBe(
+        true,
+      );
+      reasonFilter.set("reasonCode", "synthetic_reason_never_recorded");
+      const noMatch = await reviewer.request.get(`/api/v1/trips?${reasonFilter}`);
+      expect(noMatch.status()).toBe(200);
+      expect(((await noMatch.json()) as Schemas["TripStage3ReviewListEnvelope"]).data).toEqual({
+        items: [],
+        total: 0,
+        nextCursor: null,
+      });
+      const ownWaiting = await reviewer.request.get(
+        `/api/v1/trips?scope=review&view=stage3&status=waiting&ownerId=${dispatcher.userId}`,
+      );
+      expect(ownWaiting.status()).toBe(200);
+      expect(
+        ((await ownWaiting.json()) as Schemas["TripStage3ReviewListEnvelope"]).data.total,
+      ).toBe(0);
+      const ownDetail = await reviewer.request.get(
+        `/api/v1/trips/${own.tripId}/review?view=stage3`,
+      );
+      expect(ownDetail.status()).toBe(403);
+      expect(await ownDetail.json()).toMatchObject({ error: { code: "SELF_REVIEW_FORBIDDEN" } });
+      const ownReads: string[] = [];
+      reviewer.on("request", (request) => {
+        const url = new URL(request.url());
+        if (request.method() === "GET" && url.pathname.startsWith(`/api/v1/trips/${own.tripId}/`))
+          ownReads.push(url.pathname + url.search);
+      });
+      await reviewer.goto(`/account/review/${own.tripId}`);
+      await expect(reviewer.locator(".review-decision").getByRole("alert")).toContainText(
+        "Your current permissions do not allow this action.",
+      );
+      await expect(reviewer.locator(".review-form")).toHaveCount(0);
+      await expect(reviewer.getByText("Reconciliation history", { exact: true })).toHaveCount(0);
+      expect(ownReads).toEqual([`/api/v1/trips/${own.tripId}/review?view=stage3`]);
+
+      await resetAccountLimits();
+      await reviewer.goto(`/account/review/${mixed.tripId}`);
+      const comparison = reviewer.locator(".dispatch-comparison");
+      const distance = comparison.getByRole("row", { name: /Actual driven distance/ });
+      await expect(distance.getByRole("rowheader")).toContainText("Different");
+      const distances = distance.getByRole("cell");
+      await expect(distances.first()).toHaveAccessibleName("471 km");
+      await expect(distances.nth(1)).toHaveAccessibleName("123.4 km");
+      const detailResponse = await reviewer.request.get(
+        `/api/v1/trips/${mixed.tripId}/review?view=stage3`,
+      );
+      expect(detailResponse.status()).toBe(200);
+      const detail = ((await detailResponse.json()) as Schemas["TripStage3ReviewEnvelope"]).data;
+      expect(detail.sources.telemetry?.normalizedFacts.actualDistanceM).toBe("123400");
+      expect(detail.sources.manual?.manualRevision.id).toBeTruthy();
+
+      await reviewer.locator("#review-choice-reject").click();
+      const returnForm = reviewer.locator(".review-form");
+      const returnReason = returnForm.getByRole("textbox", { name: "Reason for return" });
+      await expect(returnReason).toHaveAttribute("aria-invalid", "true");
+      await returnReason.fill("Fictional distance requires correction");
+      const returned = await committed(
+        `/api/v1/trips/${mixed.tripId}/decisions`,
+        () =>
+          returnForm.getByRole("button", { name: "Return for fixes", exact: true }).last().click(),
+        "stage3",
+      );
+      expect(((await returned.json()) as Schemas["EnvelopeDecision"]).data).toMatchObject({
+        outcome: "rejected",
+        reason: "Fictional distance requires correction",
+      });
+      await reviewer.goto(`/account/review?tab=resolved&ownerId=${fixture.userId}`);
+      await expect(
+        reviewer
+          .locator("#review-queue-table tbody tr")
+          .filter({ has: reviewer.locator(`#trip-link-${mixed.tripId}`) }),
+      ).toContainText("Needs fixes");
+
+      await resetAccountLimits();
+      await reviewer.goto(`/account/review/${ordinary.tripId}`);
+      await reviewer.locator("#review-choice-accept").click();
+      const decision = await committed(
+        `/api/v1/trips/${ordinary.tripId}/decisions`,
+        () => reviewer.getByRole("button", { name: "Accept trip", exact: true }).click(),
+        "stage3",
+      );
+      expect(decision.request().postDataJSON()).not.toHaveProperty("reason");
+      const saved = ((await decision.json()) as Schemas["EnvelopeDecision"]).data;
+      expect(saved).toMatchObject({ outcome: "accepted", reason: null });
+      await reviewer.reload();
+      await expect(reviewer.locator(".review-history li").first()).toContainText(/accepted/i);
+
+      await resetAccountLimits();
+      const candidatesPath = "/api/v1/reconciliation-candidates?view=stage3&game=ets2";
+      async function matchingCandidates(status: "waiting" | "dismissed") {
+        const response = await reviewer.request.get(`${candidatesPath}&status=${status}&limit=100`);
+        expect(response.status()).toBe(200);
+        const { data } = (await response.json()) as Schemas["TripStage3DuplicateListEnvelope"];
+        return data.items.filter(
+          ({ primaryTrip, secondaryTrip }) =>
+            (primaryTrip.id === left.tripId && secondaryTrip.id === right.tripId) ||
+            (primaryTrip.id === right.tripId && secondaryTrip.id === left.tripId),
+        );
+      }
+      // Discovery owns the pair. Wait for its current candidate before binding any UI action.
+      await expect
+        .poll(async () => (await matchingCandidates("waiting")).length, { timeout: 15000 })
+        .toBe(1);
+      const waitingPairs = await matchingCandidates("waiting");
+      expect(waitingPairs).toHaveLength(1);
+      const [duplicate] = waitingPairs;
+      if (!duplicate) throw new Error("STAGE_3_SYNTHETIC_DUPLICATE_REQUIRED");
+      expect(duplicate).toMatchObject({ version: 1, dismissed: false });
+      const duplicateId = duplicate.id;
+      await reviewer.goto("/account/review/reconciliation");
+      const pair = reviewer.locator(".dispatch-duplicate").filter({
+        has: reviewer.locator(`#duplicate-dismiss-${duplicateId}`),
+      });
+      await expect(pair).toBeVisible();
+      for (const tripId of [left.tripId, right.tripId])
+        await expect(pair.locator(`a[href^="/account/review/${tripId}?"]`)).toBeVisible();
+      await pair.getByRole("button", { name: "These are different trips", exact: true }).click();
+      const action = reviewer.locator(".dispatch-duplicate-action");
+      await action
+        .getByRole("textbox", { name: "Reason for dismissal" })
+        .fill("Fictional separate deliveries");
+      const duplicatePath = `/api/v1/reconciliation-candidates/${duplicateId}`;
+      const dismissed = await committed(`${duplicatePath}/dismissals`, () =>
+        action.getByRole("button", { name: "These are different trips", exact: true }).click(),
+      );
+      expect(dismissed.request().headers()["if-match"]).toBe('"v1"');
+      expect(
+        ((await dismissed.json()) as Schemas["TripStage3DuplicateDismissalEnvelope"]).data,
+      ).toMatchObject({ candidateId: duplicateId, version: 2, dismissed: true });
+      await expect(pair).toHaveCount(0);
+      const status = reviewer.getByRole("combobox", { name: "State", exact: true });
+      await status.selectOption("dismissed");
+      await reviewer.reload();
+      expect(await matchingCandidates("dismissed")).toEqual([
+        expect.objectContaining({ id: duplicateId, version: 2, dismissed: true }),
+      ]);
+      await pair.getByRole("button", { name: "Undo dismissal", exact: true }).click();
+      const undone = await committed(`${duplicatePath}/dismissal-reversals`, () =>
+        action.getByRole("button", { name: "Undo dismissal", exact: true }).click(),
+      );
+      expect(undone.request().headers()["if-match"]).toBe('"v2"');
+      expect(
+        ((await undone.json()) as Schemas["TripStage3DuplicateDismissalEnvelope"]).data,
+      ).toMatchObject({ candidateId: duplicateId, version: 3, dismissed: false });
+      await status.selectOption("waiting");
+      await reviewer.reload();
+      await expect(pair).toBeVisible();
+      expect(await matchingCandidates("waiting")).toEqual([
+        expect.objectContaining({ id: duplicateId, version: 3, dismissed: false }),
+      ]);
+
+      await resetAccountLimits();
+      const member = await server.actor(fixture.email, fixture.password);
+      const limited = await member.request.get("/api/v1/me/workspace-summary?view=stage3");
+      expect(limited.status()).toBe(200);
+      const visible = ((await limited.json()) as Schemas["WorkspaceStage3SummaryEnvelope"]).data;
+      expect(visible.reviewQueue).toBeUndefined();
+      expect(visible.legacyReviewQueue).toBeUndefined();
+      await member.goto(`/account/review/${mixed.tripId}`);
+      await catalogLanguage(member);
+      await expect(
+        member.getByText("Your current permissions do not allow this action.", { exact: true }),
+      ).toBeVisible();
+      await expect(member.locator(".dispatch-comparison")).toHaveCount(0);
+    } finally {
+      await fixture.close();
+    }
+  },
+);
 
 async function workspaceSummary(request: APIRequestContext) {
   const response = await request.get("/api/v1/me/workspace-summary");

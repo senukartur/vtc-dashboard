@@ -15,6 +15,495 @@ import {
 } from "./support/review-ui.ts";
 import { countInsertedAlerts } from "./support/trip-ui.ts";
 
+for (const locale of ["en", "ru"] as const)
+  test(
+    `Stage 3 queue compares independent sources and keeps the 1200px detail breakpoint (${locale})`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mockReview(page, { staged: true, locale, defensiveOwn: true });
+      const labels =
+        locale === "en"
+          ? {
+              compare: "Report and telemetry",
+              distance: "Actual driven distance",
+              damage: "Cargo damage",
+              conditions: "Conditions recorded by telemetry",
+              unknown: "Unknown",
+              difference: "Different",
+              unavailable: "Comparison unavailable",
+              back: "Back to queue",
+            }
+          : {
+              compare: "Отчёт и телеметрия",
+              distance: "Фактический пробег",
+              damage: "Ущерб грузу",
+              conditions: "Условия, записанные телеметрией",
+              unknown: "Неизвестно",
+              difference: "Отличается",
+              unavailable: "Сравнение недоступно",
+              back: "К очереди",
+            };
+      const widths =
+        info.project.name === "desktop-chromium"
+          ? [1200, 1280]
+          : [page.viewportSize()?.width ?? 390];
+      for (const width of widths) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto("/account/review?game=ets2");
+        await catalogLanguage(page, locale);
+        await expect(rowOf(page, reviewIds.own)).toHaveCount(0);
+        await expect(rowOf(page, reviewIds.late)).toBeVisible();
+        await capture(page, info, `stage-3-queue-${locale}-${width}`);
+        const link = page.locator(`#trip-link-${reviewIds.late}`);
+        await link.focus();
+        await page.keyboard.press("Enter");
+        await expect(panel(page).getByRole("heading", { name: labels.compare })).toBeVisible();
+        const comparison = panel(page).locator(".dispatch-comparison");
+        const distance = comparison.getByRole("row", { name: new RegExp(labels.distance) });
+        await expect(distance.getByRole("rowheader")).toContainText(labels.difference);
+        await expect(distance.getByRole("cell").nth(1)).toContainText(
+          locale === "en" ? "702.3 km" : "702,3 км",
+        );
+        await expect(
+          comparison.getByRole("row", { name: new RegExp(labels.damage) }),
+        ).toContainText("0%");
+        await expect(
+          comparison.getByRole("row", { name: new RegExp(labels.damage) }).getByRole("rowheader"),
+        ).toContainText(labels.unavailable);
+        const sourceConditions = panel(page)
+          .getByRole("heading", { name: labels.conditions })
+          .locator("..")
+          .locator("dd");
+        await expect(sourceConditions).toHaveText([
+          "World of Trucks",
+          "TruckersMP",
+          labels.unknown,
+        ]);
+        const overflows = () =>
+          page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+        await expect.poll(overflows).toBe(false);
+        await capture(page, info, `stage-3-review-${locale}-${width}`);
+        if (width >= 1200) {
+          const driver = rowOf(page, reviewIds.over).locator(".review-driver");
+          const fits = await driver.evaluate((cell) => {
+            const range = document.createRange();
+            range.selectNodeContents(cell);
+            const bounds = cell.getBoundingClientRect();
+            return Array.from(range.getClientRects()).every(
+              (line) => line.left >= bounds.left - 0.5 && line.right <= bounds.right + 0.5,
+            );
+          });
+          expect(fits).toBe(true);
+          await expect(page).toHaveURL(new RegExp(`[?&]trip=${reviewIds.late}$`));
+          await expect(panel(page).getByRole("heading", { level: 2 })).toBeFocused();
+          await page.keyboard.press("Escape");
+          await expect(link).toBeFocused();
+          await expect(panel(page)).toHaveCount(0);
+          await expect.poll(overflows).toBe(false);
+        } else {
+          await expect(page).toHaveURL(
+            new RegExp(`/account/review/${reviewIds.late}\\?game=ets2$`),
+          );
+          await expect(page.getByRole("link", { name: labels.back })).toHaveAttribute(
+            "href",
+            "/account/review?game=ets2",
+          );
+        }
+      }
+    },
+  );
+
+test(
+  "Stage 3 filters preserve the selected trip and cursor recovery, and Resolved uses decision time",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { staged: true, paged: true, expiredMemberCursor: true });
+    await page.goto("/account/review?order=desc");
+    await expect(page.getByText("Waiting (4)", { exact: true })).toBeVisible();
+    await expect(rowOf(page, reviewIds.resubmission)).toBeVisible();
+    await expect(rowOf(page, reviewIds.telemetry)).toHaveCount(0);
+    const offPageReason = page.getByRole("combobox", { name: "Reason", exact: true });
+    await offPageReason.selectOption({ label: "Actual completion is unknown" });
+    await expect.poll(() => mock.lists.at(-1)?.get("reasonCode")).toBe("actual_completion_unknown");
+    await expect(rowOf(page, reviewIds.telemetry)).toBeVisible();
+    const queuePager = queue(page).getByRole("navigation", { name: "Pages", exact: true });
+    const range = queuePager.locator(".pager-summary");
+    await expect(range).toHaveText("1–1 of 1");
+    await offPageReason.selectOption("");
+    await page.getByRole("combobox", { name: "Sort order" }).selectOption("asc");
+    await expect(rowOf(page, reviewIds.late)).toBeVisible();
+    const next = queuePager.getByRole("button", { name: "Next page", exact: true });
+    await expect(range).toHaveText("1–2 of 4");
+    await expect(
+      queuePager.getByRole("button", { name: "Previous page", exact: true }),
+    ).toHaveAttribute("aria-disabled", "true");
+    await expect(next).toBeEnabled();
+    mock.expire();
+    await next.click();
+    await expect
+      .poll(() => mock.lists.slice(-2).map((params) => params.has("cursor")))
+      .toEqual([true, false]);
+    await page.locator(`#trip-link-${reviewIds.late}`).click();
+    await expect(panel(page).getByRole("heading", { name: "Report and telemetry" })).toBeVisible();
+    await page.getByRole("button", { name: "All drivers" }).click();
+    const driverOptions = page.locator(".dispatch-driver-options");
+    await driverOptions.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect
+      .poll(() => mock.memberReads.slice(-2).map((params) => params.has("cursor")))
+      .toEqual([true, false]);
+    await expect(driverOptions.getByRole("alert")).toHaveCount(0);
+    await page.getByLabel("Find a driver on this page").fill("NordWind");
+    const driver = page.getByRole("combobox", { name: "Driver", exact: true });
+    await driver.focus();
+    await expect(driver).toBeFocused();
+    await driver.selectOption({ label: "Fictional_NordWind" });
+    const owner = mock.states.over.summary.owner.id;
+    await expect.poll(() => mock.lists.at(-1)?.get("ownerId")).toBe(owner);
+    await expect(driver).toBeFocused();
+    await expect(page).toHaveURL(new RegExp(`trip=${reviewIds.late}.*ownerId=${owner}`));
+    await expect(panel(page)).toBeVisible();
+    await page.getByRole("button", { name: /^Driver: Fictional_NordWind/ }).click();
+    const reasons = page.getByRole("combobox", { name: "Reason", exact: true });
+    await reasons.focus();
+    await expect(reasons).toBeFocused();
+    await expect(
+      reasons.getByRole("option", { name: "A correction proposal is pending" }),
+    ).toHaveAttribute("value", "proposal_pending");
+    await expect(
+      reasons.getByRole("option", { name: "Duplicate search is incomplete" }),
+    ).toHaveAttribute("value", "candidate_search_overflow");
+    await reasons.selectOption("rule_mass_exceeded");
+    await expect.poll(() => mock.lists.at(-1)?.get("reasonCode")).toBe("rule_mass_exceeded");
+    await expect(reasons).toBeFocused();
+    await expect(page.getByText("Waiting (4)", { exact: true })).toBeVisible();
+    await page.goto("/account/review?tab=decided&order=asc");
+    await expect(page.getByRole("button", { name: "Resolved", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect.poll(() => mock.lists.at(-1)?.get("order")).toBe("desc");
+    await expect(table(page).locator("tbody tr").first()).toContainText("Needs fixes");
+    await expect(table(page).locator("tbody tr").first().locator("time")).toHaveAttribute(
+      "datetime",
+      "2026-10-30T21:40:00.000Z",
+    );
+    await expect(page.getByRole("combobox", { name: "Sort order", exact: true })).toHaveCount(0);
+  },
+);
+
+test(
+  "Stage 3 direct Accept omits a blank reason and Return requires a reason",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { staged: true });
+    await page.goto(`/account/review/${reviewIds.resubmission}`);
+    const conditions = panel(page).getByRole("heading", { name: "Game conditions" }).locator("..");
+    await expect(conditions.locator("dd")).toHaveText(["Unknown", "Unknown", "Unknown"]);
+    await expect(
+      panel(page).getByText("No telemetry is available.", { exact: true }),
+    ).toBeVisible();
+    const decision = form(page);
+    await decision.locator("#review-choice-reject").click();
+    const reason = decision.getByRole("textbox", { name: "Reason for return" });
+    await reason.fill("  \n  ");
+    await expect(reason).toHaveAttribute("aria-invalid", "true");
+    await expect(decision.getByRole("alert")).toHaveText(
+      "Enter a reason before returning the trip.",
+    );
+    await expect(
+      decision.getByRole("button", { name: "Return for fixes", exact: true }).last(),
+    ).toBeDisabled();
+    await decision.locator("#review-choice-accept").click();
+    await expect(decision.getByRole("textbox", { name: "Note (optional)" })).toBeVisible();
+    await expect(
+      decision.getByRole("textbox", { name: "Note (optional)" }),
+    ).toHaveAccessibleDescription("Visible to the author and staff.");
+    await decision.getByRole("button", { name: "Accept trip", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect.poll(() => mock.posts.length).toBe(1);
+    expect(mock.posts[0]).toMatchObject({
+      path: `/api/v1/trips/${reviewIds.resubmission}/decisions?view=stage3`,
+      headers: { "if-match": '"v1"' },
+      body: {
+        decision: "accept",
+        proposalId: null,
+        reviewedRevisionId: mock.states.resubmission.review.trip.manualRevision?.id,
+      },
+    });
+    expect(mock.posts[0]?.body).not.toHaveProperty("reason");
+    expect(mock.posts[0]?.headers["idempotency-key"]).toMatch(uuid);
+    expect(mock.posts[0]?.headers["x-csrf-token"]).toBeTruthy();
+  },
+);
+
+test(
+  "Stage 3 duplicate dismissal and undo preserve the current version and old URL",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    const mock = await mockReview(page, { staged: true });
+    await page.goto("/account/review/reconciliation?game=ats");
+    await expect(page.getByRole("button", { name: "Duplicates (1)" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.getByText("No duplicates are waiting for review.")).toBeVisible();
+    await page.getByRole("combobox", { name: "Game", exact: true }).selectOption("ets2");
+    await expect.poll(() => mock.duplicateLists.at(-1)?.get("game")).toBe("ets2");
+    await expect(page.getByRole("link", { name: /#104$/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /#207$/ })).toBeVisible();
+    await capture(page, info, "stage-3-duplicates-en");
+    await page.getByRole("button", { name: "These are different trips", exact: true }).click();
+    const action = page.locator(".dispatch-duplicate-action");
+    await expect(action.getByRole("textbox", { name: "Reason for dismissal" })).toBeFocused();
+    await expect(
+      action.getByRole("button", { name: "These are different trips", exact: true }),
+    ).toBeDisabled();
+    await action
+      .getByRole("textbox", { name: "Reason for dismissal" })
+      .fill("  Fictional separate deliveries.  ");
+    await action.getByRole("button", { name: "These are different trips", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(page.getByText("Duplicate dismissed.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Duplicates (0)" })).toBeVisible();
+    const status = page.getByRole("combobox", { name: "State", exact: true });
+    await status.selectOption("dismissed");
+    await page.getByRole("button", { name: "Undo dismissal", exact: true }).click();
+    await expect(
+      action.getByRole("heading", { name: "Undo dismissal", exact: true }),
+    ).toBeFocused();
+    await expect(page.getByRole("button", { name: "Reviewed pair", exact: true })).toHaveCount(0);
+    await action.getByRole("button", { name: "Undo dismissal", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(page.getByText("Duplicate restored to the queue.", { exact: true })).toBeVisible();
+    expect(mock.posts.map(({ headers, body }) => [headers["if-match"], body])).toEqual([
+      ['"v1"', { reason: "Fictional separate deliveries." }],
+      ['"v2"', {}],
+    ]);
+    await status.selectOption("waiting");
+    await expect(page.getByRole("link", { name: /#104$/ })).toBeVisible();
+  },
+);
+
+for (const change of ["version", "alias", "own-telemetry"] as const)
+  test(
+    `Stage 3 duplicate merge blocks a changed detail ${change}`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const mock = await mockReview(page, { staged: true, duplicateDetailChanged: change });
+      await page.goto("/account/review?tab=duplicates");
+      await page.getByRole("button", { name: "Reviewed pair", exact: true }).click();
+      await expect(
+        page.getByRole("status").filter({
+          hasText:
+            change === "own-telemetry"
+              ? "Your current permissions do not allow this action."
+              : "This pair changed.",
+        }),
+      ).toBeVisible();
+      if (change === "own-telemetry")
+        expect(mock.details).not.toContain(`/api/v1/trips/${reviewIds.over}`);
+      await expect(page.getByRole("button", { name: "Merge trips", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("combobox", { name: "Choose the primary trip" })).toHaveCount(0);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      expect(mock.posts).toEqual([]);
+      const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+      await cancel.click();
+      await expect(page.getByRole("button", { name: "Reviewed pair", exact: true })).toBeFocused();
+    },
+  );
+
+test(
+  "Stage 3 duplicate merge submits the reviewed root versions after primary selection",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { staged: true });
+    await page.goto("/account/review?tab=duplicates");
+    await page.getByRole("button", { name: "Reviewed pair", exact: true }).click();
+    await page
+      .getByRole("combobox", { name: "Choose the primary trip" })
+      .selectOption(reviewIds.over);
+    await page.locator("#merge-reason").fill(" Fictional same delivery ");
+    await page.getByRole("button", { name: "Merge trips", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Server confirmed the command." }),
+    ).toBeVisible();
+    expect(mock.posts).toMatchObject([
+      {
+        path: "/api/v1/reconciliations",
+        body: {
+          primaryTripId: reviewIds.over,
+          secondaryTripId: reviewIds.late,
+          primaryVersion: 1,
+          secondaryVersion: 1,
+          reason: "Fictional same delivery",
+        },
+      },
+    ]);
+  },
+);
+
+test(
+  "legacy duplicate merge can submit an own telemetry trip",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { duplicateDetailChanged: "own-telemetry" });
+    await page.goto("/account/review/reconciliation");
+    await page.getByRole("button", { name: "Review candidate", exact: true }).click();
+    await page
+      .getByRole("combobox", { name: "Choose the primary trip" })
+      .selectOption(reviewIds.over);
+    await page.locator("#merge-reason").fill("Fictional same delivery");
+    await page.getByRole("button", { name: "Merge trips", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Server confirmed the command." }),
+    ).toBeVisible();
+    expect(mock.posts).toMatchObject([
+      {
+        path: "/api/v1/reconciliations",
+        body: {
+          primaryTripId: reviewIds.over,
+          secondaryTripId: reviewIds.late,
+          primaryVersion: 1,
+          secondaryVersion: 1,
+          reason: "Fictional same delivery",
+        },
+      },
+    ]);
+  },
+);
+
+for (const defensiveOwn of [false, true])
+  test(
+    `Stage 3 direct own review exposes no decision, evidence or ancillary reads (defensive fixture=${defensiveOwn})`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const mock = await mockReview(page, { staged: true, defensiveOwn });
+      const detail = `/api/v1/trips/${reviewIds.own}/review?view=stage3`;
+      await page.goto(`/account/review/${reviewIds.own}`);
+      await expect.poll(() => mock.details).toEqual([detail]);
+      await expect(
+        panel(page).getByText(
+          defensiveOwn
+            ? /cannot review your own manual report/
+            : "Your current permissions do not allow this action.",
+        ),
+      ).toBeVisible();
+      await expect(form(page)).toHaveCount(0);
+      await expect(panel(page).getByText("Reconciliation history", { exact: true })).toHaveCount(0);
+      await expect(panel(page).getByText("fictional-results-screen.png")).toHaveCount(0);
+      expect(mock.workspaceReads.map((params) => params.toString())).toEqual(["view=stage3"]);
+    },
+  );
+
+test(
+  "workspace mode stays closed after a failed first read",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page, { staged: true });
+    await page.route("**/api/v1/me/workspace-summary?view=stage3", (route) =>
+      route.fulfill({ status: 503, json: { error: { code: "SYNTHETIC_OUTAGE" } } }),
+    );
+    await page.goto(`/account/review/${reviewIds.late}`);
+    await expect(
+      page.getByRole("main").getByRole("button", { name: "Refresh", exact: true }),
+    ).toBeVisible();
+    expect(mock.details).toEqual([]);
+  },
+);
+
+for (const staged of [false, true])
+  test(
+    `workspace refresh preserves a ${staged ? "Stage 3" : "legacy"} draft only through temporary failures`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockReview(page, { staged });
+      const computedAt = "2026-11-12T08:00:00.000Z";
+      let response:
+        | "default"
+        | "temporary"
+        | "network"
+        | "malformed"
+        | "conflict"
+        | "omitted"
+        | "forbidden" = "default";
+      await page.route("**/api/v1/me/workspace-summary?view=stage3", (route) => {
+        if (response === "default") return route.fallback();
+        if (response === "network") return route.abort("failed");
+        if (response === "malformed" || response === "conflict")
+          return route.fulfill({
+            status: response === "conflict" ? 409 : 200,
+            body: "not JSON",
+            contentType: "application/json",
+          });
+        if (response === "omitted") return route.fulfill({ json: envelope({ computedAt }) });
+        return route.fulfill({
+          status: response === "temporary" ? 503 : 403,
+          json: { error: { code: "SYNTHETIC_OUTAGE" } },
+        });
+      });
+      await page.goto(`/account/review/${reviewIds.resubmission}`);
+      const reason = page.locator("#review-reason");
+      await reason.fill("Fictional draft survives a refresh");
+      const nav = page.locator("#member-sidebar").getByRole("link", { name: /^Dispatch/ });
+      await expect(nav).toHaveAccessibleName(/4 awaiting decision/);
+      const isSummary = (url: string) => new URL(url).pathname === "/api/v1/me/workspace-summary";
+      async function refresh(next: typeof response) {
+        response = next;
+        const settled =
+          next === "network"
+            ? page.waitForEvent("requestfailed", {
+                predicate: (request) => isSummary(request.url()),
+              })
+            : page.waitForResponse((result) => isSummary(result.url()));
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await settled;
+      }
+
+      await refresh(staged ? "temporary" : "network");
+      await expect(nav).toHaveAccessibleName("Dispatch");
+      await expect(reason).toHaveValue("Fictional draft survives a refresh");
+      const endpoint = staged ? /\/review\?view=stage3$/ : /\/review$/;
+      const detail = page.waitForResponse((result) => endpoint.test(result.url()));
+      await panel(page).getByRole("button", { name: "Refresh", exact: true }).click();
+      await detail;
+      await expect(reason).toHaveValue("Fictional draft survives a refresh");
+
+      await refresh(staged ? "malformed" : "forbidden");
+      await expect(panel(page)).toHaveCount(0);
+      await refresh("temporary");
+      await expect(
+        page.getByRole("main").getByRole("button", { name: "Refresh", exact: true }),
+      ).toBeVisible();
+      await expect(panel(page)).toHaveCount(0);
+      await refresh("default");
+      await expect(reason).toBeVisible();
+      await expect(reason).toHaveValue("");
+      if (staged) {
+        await reason.fill("Fictional draft before conflict");
+        await refresh("conflict");
+        await expect(page.getByRole("main").getByRole("alert")).toContainText(
+          "The record changed.",
+        );
+        await expect(panel(page)).toHaveCount(0);
+        await expect(page).toHaveURL(new RegExp(`/account/review/${reviewIds.resubmission}$`));
+        await refresh("temporary");
+        await expect(page.getByRole("main").getByRole("alert")).toContainText(
+          "The service is unavailable.",
+        );
+        await expect(panel(page)).toHaveCount(0);
+        await refresh("default");
+        await expect(reason).toHaveValue("");
+      }
+      await refresh("omitted");
+      await expect(
+        page.getByRole("main").getByText("Overall queue totals are unavailable."),
+      ).toBeVisible();
+      await expect(panel(page)).toHaveCount(0);
+    },
+  );
+
 test(
   "overall review totals stay independent of filters and distinguish zero age from an empty queue",
   browserCase(["@functional"]),

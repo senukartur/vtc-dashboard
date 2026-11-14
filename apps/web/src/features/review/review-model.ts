@@ -17,6 +17,20 @@ export type QueueParams = {
 export type QueueType = "late_telemetry" | "resubmission" | "manual" | "telemetry";
 export type RuleFlag = "exceeded" | "check" | "none";
 export type Choice = "accept" | "reject";
+export type ReviewTrip = Pick<
+  DTO["TripPrivate"],
+  | "summary"
+  | "manualRevision"
+  | "evidence"
+  | "effectiveFacts"
+  | "decisions"
+  | "pendingProposalId"
+  | "reviewReasonCodes"
+>;
+export type ReviewData = Pick<
+  DTO["Review"],
+  "acceptance" | "blockedReasonCodes" | "canDecide" | "factRevisionId" | "qualificationCheck"
+> & { trip: ReviewTrip };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const decisions: readonly QueueDecision[] = [
@@ -44,7 +58,8 @@ export const defaultOrder = (tab: QueueTab): QueueOrder => (tab === "awaiting" ?
  * means any source and is never sent.
  */
 export function queueParams(search: URLSearchParams): QueueParams {
-  const tab: QueueTab = search.get("tab") === "decided" ? "decided" : "awaiting",
+  const view = search.get("tab"),
+    tab: QueueTab = view === "decided" || view === "resolved" ? "decided" : "awaiting",
     game = search.get("game"),
     source = search.get("source"),
     decision = search.get("decision"),
@@ -129,7 +144,7 @@ export function queueType(summary: DTO["TripSummary"]): QueueType {
 }
 
 /** The same queue type from the private trip of a review read (no review block there). */
-export function reviewType(trip: DTO["TripPrivate"]): QueueType {
+export function reviewType(trip: ReviewTrip): QueueType {
   if (trip.reviewReasonCodes.includes(lateTelemetryCode)) return "late_telemetry";
   if (trip.manualRevision) return trip.manualRevision.number > 1 ? "resubmission" : "manual";
   return "telemetry";
@@ -292,12 +307,14 @@ export function decisionState({
   reason,
   confirmed,
   seconds,
+  optionalAcceptReason = false,
 }: {
-  review: DTO["Review"];
+  review: ReviewData;
   choice: Choice | null;
   reason: string;
   confirmed: boolean;
   seconds: number;
+  optionalAcceptReason?: boolean;
 }): DecisionState {
   const mode = review.acceptance.mode,
     trimmed = reason.trim(),
@@ -315,7 +332,7 @@ export function decisionState({
         ? "choice"
         : choice === "accept" && mode === "unavailable"
           ? "unavailable"
-          : !trimmed
+          : !trimmed && !(optionalAcceptReason && choice === "accept")
             ? "reason"
             : trimmed.length > reasonLimit
               ? "length"
@@ -336,17 +353,19 @@ export function decisionState({
 }
 
 /** Exact DecisionInput; the over-limit flag is added only to a confirmed over-limit accept. */
+export type DirectDecisionInput = DTO["DecisionInput"] & { proposalId: null };
+
 export function decisionBody({
   review,
   choice,
   reason,
   confirmed,
 }: {
-  review: DTO["Review"];
+  review: ReviewData;
   choice: Choice;
   reason: string;
   confirmed: boolean;
-}): DTO["DecisionInput"] {
+}): DirectDecisionInput {
   return {
     decision: choice,
     reviewedRevisionId: review.trip.manualRevision?.id ?? review.factRevisionId,

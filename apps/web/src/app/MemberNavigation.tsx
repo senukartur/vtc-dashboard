@@ -30,11 +30,13 @@ export function MemberNavLinks({
   collapsed = false,
   variant = "sidebar",
   attention,
+  stagedDispatch = false,
 }: {
   onNavigate?: Navigate | undefined;
   collapsed?: boolean;
   variant?: "sidebar" | "sheet";
   attention?: WorkspaceSummary | undefined;
+  stagedDispatch?: boolean;
 }) {
   const { t, i18n } = useTranslation("core");
   const session = useSession();
@@ -67,7 +69,7 @@ export function MemberNavLinks({
   }
   if (!session.self) return null;
   const capabilities = session.self.capabilities;
-  const current = matchRouteMeta(location.pathname);
+  const current = matchRouteMeta(location.pathname, stagedDispatch);
   const report = t("nav.newReport");
   const sheet = variant === "sheet";
   return (
@@ -81,7 +83,10 @@ export function MemberNavLinks({
         </Button>
       )}
       <nav className="sidebar-navigation member-navigation" aria-label={t("nav.primary")}>
-        {(sheet ? moreGroups(capabilities) : visibleGroups(capabilities)).map((group) => {
+        {(sheet
+          ? moreGroups(capabilities, stagedDispatch)
+          : visibleGroups(capabilities, stagedDispatch)
+        ).map((group) => {
           const titleId = `${prefix}-${group.id}`;
           return (
             <div key={group.id} className="nav-group">
@@ -132,10 +137,10 @@ export function MemberNavLinks({
   );
 }
 
-export function Breadcrumb() {
+export function Breadcrumb({ stagedDispatch = false }: { stagedDispatch?: boolean }) {
   const { t } = useTranslation("core");
   const { pathname } = useLocation();
-  const meta = matchRouteMeta(pathname);
+  const meta = matchRouteMeta(pathname, stagedDispatch);
   if (!meta) return null;
   const parent = meta.item ? navItem(meta.item) : undefined;
   return (
@@ -159,10 +164,12 @@ export function MemberSidebar({
   collapsed,
   onToggle,
   attention,
+  stagedDispatch = false,
 }: {
   collapsed: boolean;
   onToggle: () => void;
   attention?: WorkspaceSummary | undefined;
+  stagedDispatch?: boolean;
 }) {
   const { t } = useTranslation("core");
   const session = useSession();
@@ -192,7 +199,11 @@ export function MemberSidebar({
         )}
       </div>
       {session.state !== "checking" && (
-        <MemberNavLinks collapsed={collapsed} attention={attention} />
+        <MemberNavLinks
+          collapsed={collapsed}
+          attention={attention}
+          stagedDispatch={stagedDispatch}
+        />
       )}
       {session.state === "authenticated" && !signOut.active && (
         <div className="sidebar-footer">
