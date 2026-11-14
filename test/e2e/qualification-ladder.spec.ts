@@ -659,6 +659,11 @@ for (const locale of ["en", "ru"] as const) {
         const table = panel.getByRole("table", { name: s.ladder });
         await expect(table.getByRole("columnheader", { name: s.count })).toHaveCount(1);
         await expect(table.getByText(s.starting, { exact: true })).toBeVisible();
+        await expect(table.getByRole("rowheader").first()).toContainText(s.starting);
+        const driverCell = table.getByRole("row").nth(1).getByRole("cell").nth(4);
+        await expect(driverCell).toHaveAccessibleName(/^\d+$/);
+        if (await page.evaluate(() => innerWidth <= 800))
+          await expect(driverCell.getByText(s.count, { exact: true })).toBeVisible();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
           true,
         );
@@ -673,6 +678,13 @@ for (const locale of ["en", "ru"] as const) {
         await dialog.getByRole("button", { name: s.confirm, exact: true }).click();
         const inserted = table.getByRole("row", { name: new RegExp(name.split(" · ")[0] ?? name) });
         await expect(inserted).toBeVisible();
+        await expect(inserted.getByRole("rowheader")).toContainText(name);
+        expect(
+          await table.evaluate((element) => {
+            const frame = element.parentElement;
+            return !!frame && frame.scrollWidth <= frame.clientWidth + 1;
+          }),
+        ).toBe(true);
         const up = table.getByRole("button", {
           name: s.moveUp.replace("{{name}}", name),
           exact: true,
@@ -699,7 +711,8 @@ for (const locale of ["en", "ru"] as const) {
           }),
         ).toHaveCount(1);
         await expect(panel.getByText(s.zero, { exact: true })).toBeVisible();
-        await panel.getByRole("button", { name: s.reviewArchive, exact: true }).click();
+        const reviewArchive = panel.getByRole("button", { name: s.reviewArchive, exact: true });
+        await reviewArchive.click();
         await expect(dialog.getByText(name, { exact: false }).first()).toBeVisible();
         await expect(
           dialog.getByText(
@@ -714,7 +727,8 @@ for (const locale of ["en", "ru"] as const) {
         await page.keyboard.press("Escape");
         await expect(dialog).toHaveCount(0);
         await expect(inserted).toBeVisible();
-        await panel.getByRole("button", { name: s.reviewArchive, exact: true }).click();
+        await expect(reviewArchive).toBeFocused();
+        await reviewArchive.press("Enter");
         const committedArchive = page.waitForResponse(
           (response) =>
             new URL(response.url()).pathname === `${api}/levels/${archived.id}/archive` &&

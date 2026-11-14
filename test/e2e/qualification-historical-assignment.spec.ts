@@ -17,10 +17,15 @@ test(
     await mockQualifications(page);
     const reads: string[] = [];
     let input: unknown;
+    let rejectCursor = false;
     await page.route("**/api/v1/admin/qualification-levels/archived?**", (route) => {
       const query = new URL(route.request().url()).searchParams;
       const cursor = query.get("cursor");
       reads.push(query.toString());
+      if (cursor && rejectCursor) {
+        rejectCursor = false;
+        return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
+      }
       return route.fulfill({
         json: envelope({
           items: [
@@ -59,15 +64,33 @@ test(
     await purpose.selectOption("historical_resolution");
     await expect(archived.getByRole("option", { name, exact: true })).toHaveCount(1);
     await archived.selectOption(archivedId);
-    await assignmentForm.getByRole("button", { name: "Next page", exact: true }).click();
-    await expect(
-      archived.getByRole("option", { name: "Fictional other tier", exact: true }),
-    ).toHaveCount(1);
+    const pager = assignmentForm.getByRole("navigation", { name: "Archived level pages" });
+    const next = pager.getByRole("button", { name: "Next page", exact: true });
+    await next.focus();
+    await next.press("Enter");
+    const other = archived.getByRole("option", { name: "Fictional other tier", exact: true });
+    await expect(other).toHaveCount(1);
     await expect(archived).toHaveValue(archivedId);
+    await expect(next).toBeFocused();
+    await expect(next).toHaveAttribute("aria-disabled", "true");
     expect(reads).toEqual([
       "game=ets2&limit=25",
       "game=ets2&limit=25&cursor=synthetic-next-archived-page",
     ]);
+    await pager.getByRole("button", { name: "Previous page", exact: true }).click();
+    await expect(other).toHaveCount(0);
+    await expect(next).not.toHaveAttribute("aria-disabled", "true");
+    rejectCursor = true;
+    await next.click();
+    await expect.poll(() => reads.length).toBe(5);
+    expect(reads.slice(2)).toEqual([
+      "game=ets2&limit=25",
+      "game=ets2&limit=25&cursor=synthetic-next-archived-page",
+      "game=ets2&limit=25",
+    ]);
+    await expect(next).not.toHaveAttribute("aria-disabled", "true");
+    await expect(archived).toHaveValue(archivedId);
+    await expect(assignmentForm.getByRole("alert")).toHaveCount(0);
 
     await purpose.selectOption("administrative_correction");
     await expect(archived).toHaveCount(0);

@@ -1,17 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Card, Input, Label } from "../../shared/ui/primitives.js";
-import {
-  Confirm,
-  Failure,
-  LevelContext,
-  MemberContext,
-  PageNav,
-  Recovery,
-  State,
-} from "./components.js";
+import { Confirm, Failure, LevelContext, MemberContext, Recovery, State } from "./components.js";
 import { useQualificationCommand, useQualificationQuery } from "./queries.js";
-import { type DTO, type Game, utcInput } from "./transport.js";
+import { type DTO, type Game, qualificationCursorRejected, utcInput } from "./transport.js";
 
 type ArchivedLevel = DTO["QualificationArchivedLevel"];
 
@@ -256,14 +250,13 @@ function ArchivedLevelPicker({
   onSelect: (level: ArchivedLevel | undefined) => void;
 }) {
   const { t } = useTranslation("qualifications");
-  const [cursors, setCursors] = useState<string[]>([]);
-  const params = new URLSearchParams({ game, limit: "25" });
-  const cursor = cursors.at(-1);
-  if (cursor) params.set("cursor", cursor);
+  const path = "/admin/qualification-levels/archived";
+  const pages = useCursorPages(`${path}?game=${game}`, { rejects: qualificationCursorRejected });
   const query = useQualificationQuery(
-    `/admin/qualification-levels/archived?${params}`,
+    `${path}?${queryString({ game, limit: 25, cursor: pages.cursor })}`,
     "EnvelopeListQualificationArchivedLevel",
   );
+  pages.recover(query.error);
   const page = query.data?.data.data;
   const items = page?.items.filter((row) => row.game === game) ?? [];
   const options =
@@ -289,14 +282,7 @@ function ArchivedLevelPicker({
       </select>
       <State query={query} />
       {page && items.length === 0 && <p>{t("noArchivedLevels")}</p>}
-      {(cursors.length > 0 || page?.nextCursor) && (
-        <PageNav
-          hasPrevious={cursors.length > 0}
-          next={page?.nextCursor}
-          onPrevious={() => setCursors((previous) => previous.slice(0, -1))}
-          onNext={(next) => setCursors((previous) => [...previous, next])}
-        />
-      )}
+      <Pager pages={pages} nextCursor={page?.nextCursor} label={t("archivedLevelPages")} />
     </>
   );
 }

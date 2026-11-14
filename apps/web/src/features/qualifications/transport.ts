@@ -25,6 +25,13 @@ export class QualificationFailure extends AccountFailure {
     super(kind, delay);
   }
 }
+/**
+ * Qualification lists answer 409 for a cursor they no longer accept; 409 `SETUP_REQUIRED` is a
+ * missing-assignment state, not a cursor rejection, so it never restarts paging.
+ */
+export function qualificationCursorRejected(error: unknown) {
+  return error instanceof QualificationFailure && error.status === 409 && !error.setupRequired;
+}
 export function fail(response: Response): never {
   const kinds: Record<number, AccountFailure["kind"]> = {
     400: "invalid",

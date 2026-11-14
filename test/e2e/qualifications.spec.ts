@@ -6,9 +6,10 @@ import {
   qualificationPhaseScenario,
   safeQualificationPhase,
 } from "../../scripts/browser-diagnostics.mjs";
-import { catalogLanguage } from "./support/catalogs.ts";
+import { catalogLanguage, list } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { mockQualifications } from "./support/qualifications.ts";
+import { countInsertedAlerts } from "./support/trip-ui.ts";
 
 async function persistRace(
   info: TestInfo,
@@ -511,6 +512,115 @@ test(
     await card.getByText("Rule version history", { exact: true }).click();
     await expect.poll(() => state.ruleRequests.at(-1)).toBe("2:");
     expect(state.ruleRequests.filter((request) => request.startsWith("2:"))).toEqual(["2:"]);
+  },
+);
+
+test(
+  "controlled rejected qualification cursors restart once without an alert; setup-required keeps its alert",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockQualifications(page);
+    state.rulePaged = true;
+    let code: "VERSION_CONFLICT" | "SETUP_REQUIRED" = "VERSION_CONFLICT";
+    const rejected = () => ({
+      status: 409,
+      json: {
+        error: {
+          code,
+          messageKey:
+            code === "SETUP_REQUIRED" ? "errors.setup_required" : "errors.version_conflict",
+          retryable: false,
+        },
+        meta: { requestId: "synthetic-cursor-conflict" },
+      },
+    });
+    // Every list answers its first page with a cursor and rejects that cursor with 409.
+    const members: string[] = [],
+      history: string[] = [],
+      rules: string[] = [];
+    await page.route(
+      (url) => url.pathname === "/api/v1/admin/qualification-members",
+      (route) => {
+        const cursor = new URL(route.request().url()).searchParams.get("cursor");
+        members.push(cursor ?? "");
+        if (cursor) return route.fulfill(rejected());
+        return route.fulfill({
+          json: list(
+            [
+              {
+                id: "d3100000-0000-4000-8000-000000000009",
+                nickname: "Fictional Picker Member",
+                formerMember: false,
+                roles: ["driver"],
+              },
+            ],
+            "synthetic-member-next",
+          ),
+        });
+      },
+    );
+    await page.route(
+      (url) => url.pathname.endsWith("/qualification-action-history"),
+      (route) => {
+        const cursor = new URL(route.request().url()).searchParams.get("cursor");
+        history.push(cursor ?? "");
+        if (cursor) return route.fulfill(rejected());
+        return route.fulfill({ json: list([], "synthetic-history-next") });
+      },
+    );
+    await page.route(
+      (url) => url.pathname.includes("/admin/") && url.pathname.endsWith("/rule-versions"),
+      (route) => {
+        const cursor = new URL(route.request().url()).searchParams.get("cursor");
+        rules.push(cursor ?? "");
+        return cursor ? route.fulfill(rejected()) : route.fallback();
+      },
+    );
+    await page.goto("/account/qualifications");
+    const alerts = await countInsertedAlerts(page, "main");
+    const next = (name: string) =>
+      page
+        .getByRole("navigation", { name, exact: true })
+        .getByRole("button", { name: "Next page", exact: true });
+    await next("Member pages").click();
+    await expect.poll(() => members).toEqual(["", "synthetic-member-next", ""]);
+    await expect(next("Member pages")).toBeEnabled();
+    await next("Assignment history pages").click();
+    await expect.poll(() => history).toEqual(["", "synthetic-history-next", ""]);
+    const card = page
+      .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
+      .locator("..");
+    await card.getByText("Rule version history", { exact: true }).click();
+    await next("Rule version pages").click();
+    await expect.poll(() => rules).toEqual(["", "synthetic-rule-next", ""]);
+    // Each restarted first page has rendered again with its own next cursor.
+    for (const name of ["Member pages", "Assignment history pages", "Rule version pages"])
+      await expect(next(name)).toBeEnabled();
+    await expect(
+      page.locator("#qualification-member option", { hasText: "Fictional Picker Member" }),
+    ).toHaveCount(1);
+    // A stale cursor restarts its own list once, at the first page, and never shows an error.
+    expect(await alerts()).toBe(0);
+    expect(members).toEqual(["", "synthetic-member-next", ""]);
+    expect(history).toEqual(["", "synthetic-history-next", ""]);
+    expect(rules).toEqual(["", "synthetic-rule-next", ""]);
+
+    // SETUP_REQUIRED is not a stale cursor: the list keeps its alert and does not restart.
+    code = "SETUP_REQUIRED";
+    await next("Member pages").click();
+    await expect.poll(() => members.at(-1)).toBe("synthetic-member-next");
+    const staff = page
+      .getByRole("heading", { name: "Qualification administration", exact: true })
+      .locator("..");
+    await expect(staff.getByRole("alert")).toBeVisible();
+    await expect(staff.getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
+    // The error rendered, so recover() declined it: the picker is still on page two.
+    await expect(
+      page
+        .getByRole("navigation", { name: "Member pages", exact: true })
+        .getByRole("button", { name: "Previous page", exact: true }),
+    ).toBeEnabled();
+    expect(members).toEqual(["", "synthetic-member-next", "", "synthetic-member-next"]);
   },
 );
 

@@ -3,15 +3,22 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { formatQuantity } from "../../shared/formatting.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Badge, Card, Label } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { progressPercent } from "../dashboard/model.js";
 import { AssignmentEditor } from "./assignments.js";
-import { ActionActor, Fact, PageNav, RulesView, State, Time } from "./components.js";
+import { ActionActor, Fact, RulesView, State, Time } from "./components.js";
 import { LevelPanel, LevelsTable } from "./levels.js";
 import { defaultLevelId, sortLevels, unconfiguredCount } from "./model.js";
 import { useQualificationQuery } from "./queries.js";
-import { type DTO, type Game, QualificationFailure } from "./transport.js";
+import {
+  type DTO,
+  type Game,
+  QualificationFailure,
+  qualificationCursorRejected,
+} from "./transport.js";
 import "./qualifications.css";
 
 const games = [
@@ -150,12 +157,15 @@ function TargetPicker({
   onChange: (member: DTO["MemberSummary"] | null) => void;
 }) {
   const { t } = useTranslation("qualifications"),
-    [cursors, setCursors] = useState<string[]>([]),
+    pages = useCursorPages("/admin/qualification-members", {
+      rejects: qualificationCursorRejected,
+    }),
     query = useQualificationQuery(
-      `/admin/qualification-members?limit=25${cursors.length ? `&cursor=${encodeURIComponent(cursors.at(-1) ?? "")}` : ""}`,
+      `/admin/qualification-members?${queryString({ limit: 25, cursor: pages.cursor })}`,
       "EnvelopeListMemberSummary",
     ),
     items = query.data?.data.data.items ?? [];
+  pages.recover(query.error);
   const candidates =
     selected && !items.some((m) => m.id === selected.id) ? [selected, ...items] : items;
   const duplicateNames = new Set(
@@ -194,12 +204,7 @@ function TargetPicker({
           {t("selected")}: {selected.nickname} · <code>{selected.id}</code>
         </p>
       )}
-      <PageNav
-        next={query.data?.data.data.nextCursor}
-        hasPrevious={cursors.length > 0}
-        onNext={(c) => setCursors((p) => [...p, c])}
-        onPrevious={() => setCursors((p) => p.slice(0, -1))}
-      />
+      <Pager pages={pages} nextCursor={query.data?.data.data.nextCursor} label={t("memberPages")} />
     </div>
   );
 }
@@ -219,13 +224,14 @@ function MemberQualification({
     session = useSession(),
     id = target?.id ?? session.self?.member.id ?? "",
     base = manage ? `/admin/members/${id}` : "/me",
-    [cursors, setCursors] = useState<string[]>([]);
+    historyPath = `${base}/${manage ? "qualification-action-history" : "qualification-assignments"}`,
+    pages = useCursorPages(`${historyPath}?game=${game}`, { rejects: qualificationCursorRejected });
   const progress = useQualificationQuery(
       `${base}/qualification-progress?game=${game}`,
       "EnvelopeProgress",
     ),
     history = useQualificationQuery(
-      `${base}/${manage ? "qualification-action-history" : "qualification-assignments"}?game=${game}&limit=25${cursors.length ? `&cursor=${encodeURIComponent(cursors.at(-1) ?? "")}` : ""}`,
+      `${historyPath}?${queryString({ game, limit: 25, cursor: pages.cursor })}`,
       manage ? "EnvelopeListQualificationActionHistory" : "EnvelopeListAssignmentHistory",
     ),
     p = progress.data?.data.data,
@@ -234,6 +240,7 @@ function MemberQualification({
       levels.length > 0 &&
       progress.error instanceof QualificationFailure &&
       progress.error.setupRequired;
+  pages.recover(history.error);
   // Progress and the level pointer can describe different instants.
   const terminal = level?.terminal;
   const hasEffectiveRuleAtProgress =
@@ -338,7 +345,7 @@ function MemberQualification({
           progress={p}
           etag={progress.data?.etag ?? history.data?.etag ?? null}
           former={target?.formerMember ?? false}
-          onRefresh={() => setCursors([])}
+          onRefresh={() => pages.restart()}
         />
       )}
       <Card className="stack">
@@ -347,8 +354,8 @@ function MemberQualification({
         <State
           query={history}
           refresh={() => {
-            setCursors([]);
-            if (!cursors.length) return history.refetch();
+            pages.restart();
+            if (!pages.cursor) return history.refetch();
           }}
         />
         {history.data && history.data.data.data.items.length === 0 && <p>{t("emptyHistory")}</p>}
@@ -387,11 +394,10 @@ function MemberQualification({
             </small>
           </article>
         ))}
-        <PageNav
-          next={history.data?.data.data.nextCursor}
-          hasPrevious={cursors.length > 0}
-          onNext={(c) => setCursors((prev) => [...prev, c])}
-          onPrevious={() => setCursors((prev) => prev.slice(0, -1))}
+        <Pager
+          pages={pages}
+          nextCursor={history.data?.data.data.nextCursor}
+          label={t("historyPages")}
         />
       </Card>
     </>

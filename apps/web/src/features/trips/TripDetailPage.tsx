@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
 import { EventSelect, EvidenceItem } from "../manual-reports/fields.js";
 import { ReferenceFacts } from "../manual-reports/ReferenceFacts.js";
@@ -15,7 +17,6 @@ import {
   EffectiveFacts,
   Failure,
   Fields,
-  PageNav,
   Revision,
   State,
   TripSummary,
@@ -235,9 +236,9 @@ function ReviewDetail({ tripId }: { tripId: string }) {
 function PrivateHistory({ tripId }: { tripId: string }) {
   const { t } = useTranslation("trips"),
     [tab, setTab] = useState("revisions"),
-    [cursor, setCursor] = useState<string | null>(null),
-    [cursors, setCursors] = useState<string[]>([]);
-  const suffix = `?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    // Each trip and tab has its own cursor stack; choosing a tab starts at its first page.
+    pages = useCursorPages(`${tripId}:${tab}`);
+  const suffix = `?${queryString({ limit: 25, cursor: pages.cursor })}`;
   const revisions = useTripQuery(
       `/trips/${tripId}/manual-revisions${suffix}`,
       "EnvelopeListManualRevision",
@@ -265,8 +266,7 @@ function PrivateHistory({ tripId }: { tripId: string }) {
             variant={tab === name ? "default" : "outline"}
             onClick={() => {
               setTab(name);
-              setCursor(null);
-              setCursors([]);
+              pages.restart();
             }}
           >
             {t(name)}
@@ -326,18 +326,7 @@ function PrivateHistory({ tripId }: { tripId: string }) {
           </article>
         ))}
       {query.data && !query.data.data.data.items.length && <p>{t("empty")}</p>}
-      <PageNav
-        next={next}
-        hasPrevious={cursors.length > 0}
-        onNext={(c) => {
-          setCursors([...cursors, cursor ?? ""]);
-          setCursor(c);
-        }}
-        onPrevious={() => {
-          setCursor(cursors.at(-1) || null);
-          setCursors(cursors.slice(0, -1));
-        }}
-      />
+      <Pager pages={pages} nextCursor={next} label={t("historyPages")} />
     </div>
   );
 }

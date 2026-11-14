@@ -1,10 +1,9 @@
-// Explicit roles preserve the table semantics when narrow layouts switch cells to block display.
-// biome-ignore-all lint/a11y/noRedundantRoles: mobile WebKit may drop implicit table roles.
 import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { formatQuantity } from "../../shared/formatting.js";
+import { DataTable, type DataTableColumn } from "../../shared/ui/DataTable.js";
 import { Badge, Button, Card, Input, Label } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { useSignOut } from "../account/sign-out.js";
@@ -127,6 +126,7 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
     const row = levels.find((level) => level.id === id);
     return row ? [row] : [];
   });
+  const editsEnabled = ladder?.ladderEditsEnabled === true;
   const archiving = levels.find((row) => row.id === archiveDraft?.levelId);
   function selectEditor(row: LadderLevel) {
     setOpenedEditors((previous) =>
@@ -167,143 +167,156 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
     if (result) committed();
     return result;
   }
+  const allowlist = (count: number | null) =>
+    count === null
+      ? t("noRestriction")
+      : count === 0
+        ? t("noneAllowed")
+        : t("allowedCount", { count });
+  const columns: DataTableColumn<{ level: LadderLevel; index: number }>[] = [
+    {
+      id: "level",
+      header: t("level"),
+      rowHeader: true,
+      cardLabel: false,
+      className: "qualification-ladder-level",
+      cell: ({ level, index }) => (
+        <>
+          <strong>{level.name}</strong>
+          <p className="qualification-ladder-meta">
+            <span>
+              {t("stage")} {index + 1}
+            </span>
+            {index === 0 && <Badge size="xs">{t("ladderFirst")}</Badge>}
+            {index === rows.length - 1 && <Badge size="xs">{t("topLevel")}</Badge>}
+            <Badge
+              size="xs"
+              className={level.configured ? "badge-accepted" : "qualification-badge-pending"}
+            >
+              {t(level.configured ? "statusEffective" : "statusUnpublished")}
+            </Badge>
+          </p>
+        </>
+      ),
+    },
+    {
+      id: "mass",
+      header: t("colMass"),
+      cell: ({ level }) => {
+        const rule = level.freightRuleSummary;
+        if (!rule) return t("unset");
+        return rule.maxMassKg === null
+          ? t("noRestriction")
+          : formatQuantity(rule.maxMassKg, "t", locale);
+      },
+    },
+    {
+      id: "trailers",
+      header: t("colTrailers"),
+      cell: ({ level }) => {
+        const rule = level.freightRuleSummary;
+        return rule ? allowlist(rule.allowedTrailerTypeCount) : t("unset");
+      },
+    },
+    {
+      id: "adr",
+      header: t("colAdr"),
+      cell: ({ level }) => {
+        const rule = level.freightRuleSummary;
+        return rule ? allowlist(rule.allowedAdrCategoryCount) : t("unset");
+      },
+    },
+    {
+      id: "threshold",
+      header: t("colThreshold"),
+      cell: ({ level }) => {
+        if (level.terminal) return t("topLevel");
+        if (!level.promotionConfigured) return t("ladderPromotionUnconfigured");
+        return t("thresholdValue", {
+          trips: level.requiredTrips ?? t("noMinimum"),
+          distance:
+            level.requiredDistanceM === null
+              ? t("noMinimum")
+              : formatQuantity(level.requiredDistanceM, "km", locale),
+        });
+      },
+    },
+    {
+      id: "drivers",
+      header: t("ladderDrivers"),
+      cell: ({ level }) => level.currentDriverCount,
+    },
+    {
+      id: "actions",
+      header: t("ladderActions"),
+      cardLabel: false,
+      className: "qualification-ladder-controls",
+      cell: ({ level: row, index }) => (
+        <div className="qualification-actions qualification-ladder-row-actions">
+          {editsEnabled && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={hold || staleOrder || index === 0}
+                aria-label={t("ladderMoveUpName", { name: row.name })}
+                onClick={() => move(index, -1)}
+              >
+                {t("ladderMoveUp")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={hold || staleOrder || index === rows.length - 1}
+                aria-label={t("ladderMoveDownName", { name: row.name })}
+                onClick={() => move(index, 1)}
+              >
+                {t("ladderMoveDown")}
+              </Button>
+            </>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            aria-expanded={row.id === selectedId}
+            aria-label={t("ladderEditName", { name: row.name })}
+            onClick={() => selectEditor(row)}
+          >
+            {t(row.id === selectedId ? "close" : "edit")}
+          </Button>
+          {editsEnabled && (
+            <Button
+              type="button"
+              variant="outline"
+              aria-label={t("ladderArchiveName", { name: row.name })}
+              aria-expanded={row.id === archiving?.id}
+              disabled={hold || levels.length === 1 || changed || staleOrder}
+              onClick={() =>
+                setArchiveDraft(
+                  row.id === archiving?.id ? undefined : { levelId: row.id, reason: "" },
+                )
+              }
+            >
+              {t("ladderArchive")}
+            </Button>
+          )}
+        </div>
+      ),
+    },
+  ];
   return (
     <>
       {visible && ladder && (
         <>
           {!ladder.ladderEditsEnabled && <p className="muted">{t("ladderEditsUnavailable")}</p>}
-          <table className="qualification-ladder-table" role="table" aria-label={t("ladderTitle")}>
-            <thead role="rowgroup">
-              <tr role="row">
-                {[
-                  "level",
-                  "colMass",
-                  "colTrailers",
-                  "colAdr",
-                  "colThreshold",
-                  "ladderDrivers",
-                  "ladderActions",
-                ].map((key) => (
-                  <th key={key} scope="col" role="columnheader">
-                    {t(key)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody role="rowgroup">
-              {rows.map((row, index) => {
-                const rules = row.freightRuleSummary;
-                const allowlist = (count: number | null) =>
-                  count === null
-                    ? t("noRestriction")
-                    : count === 0
-                      ? t("noneAllowed")
-                      : t("allowedCount", { count });
-                return (
-                  <tr key={row.id} role="row">
-                    <th scope="row" role="rowheader" className="qualification-ladder-level">
-                      <strong>{row.name}</strong>
-                      <p className="qualification-ladder-meta">
-                        <span>
-                          {t("stage")} {index + 1}
-                        </span>
-                        {index === 0 && <Badge size="xs">{t("ladderFirst")}</Badge>}
-                        {index === rows.length - 1 && <Badge size="xs">{t("topLevel")}</Badge>}
-                        <Badge
-                          size="xs"
-                          className={
-                            row.configured ? "badge-accepted" : "qualification-badge-pending"
-                          }
-                        >
-                          {t(row.configured ? "statusEffective" : "statusUnpublished")}
-                        </Badge>
-                      </p>
-                    </th>
-                    <LadderCell label={t("colMass")}>
-                      {!rules
-                        ? t("unset")
-                        : rules.maxMassKg === null
-                          ? t("noRestriction")
-                          : formatQuantity(rules.maxMassKg, "t", locale)}
-                    </LadderCell>
-                    <LadderCell label={t("colTrailers")}>
-                      {rules ? allowlist(rules.allowedTrailerTypeCount) : t("unset")}
-                    </LadderCell>
-                    <LadderCell label={t("colAdr")}>
-                      {rules ? allowlist(rules.allowedAdrCategoryCount) : t("unset")}
-                    </LadderCell>
-                    <LadderCell label={t("colThreshold")}>
-                      {row.terminal
-                        ? t("topLevel")
-                        : row.promotionConfigured
-                          ? t("thresholdValue", {
-                              trips: row.requiredTrips ?? t("noMinimum"),
-                              distance:
-                                row.requiredDistanceM === null
-                                  ? t("noMinimum")
-                                  : formatQuantity(row.requiredDistanceM, "km", locale),
-                            })
-                          : t("ladderPromotionUnconfigured")}
-                    </LadderCell>
-                    <LadderCell label={t("ladderDrivers")}>{row.currentDriverCount}</LadderCell>
-                    <td className="qualification-ladder-controls" role="cell">
-                      <div className="qualification-actions qualification-ladder-row-actions">
-                        {ladder.ladderEditsEnabled && (
-                          <>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              disabled={hold || staleOrder || index === 0}
-                              aria-label={t("ladderMoveUpName", { name: row.name })}
-                              onClick={() => move(index, -1)}
-                            >
-                              {t("ladderMoveUp")}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              disabled={hold || staleOrder || index === rows.length - 1}
-                              aria-label={t("ladderMoveDownName", { name: row.name })}
-                              onClick={() => move(index, 1)}
-                            >
-                              {t("ladderMoveDown")}
-                            </Button>
-                          </>
-                        )}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          aria-expanded={row.id === selectedId}
-                          aria-label={t("ladderEditName", { name: row.name })}
-                          onClick={() => selectEditor(row)}
-                        >
-                          {t(row.id === selectedId ? "close" : "edit")}
-                        </Button>
-                        {ladder.ladderEditsEnabled && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            aria-label={t("ladderArchiveName", { name: row.name })}
-                            aria-expanded={row.id === archiving?.id}
-                            disabled={hold || levels.length === 1 || changed || staleOrder}
-                            onClick={() =>
-                              setArchiveDraft(
-                                row.id === archiving?.id
-                                  ? undefined
-                                  : { levelId: row.id, reason: "" },
-                              )
-                            }
-                          >
-                            {t("ladderArchive")}
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <DataTable
+            caption={t("ladderTitle")}
+            className="qualification-ladder-table"
+            cardsBelow={800}
+            columns={columns}
+            rows={rows.map((level, index) => ({ level, index }))}
+            rowKey={({ level }) => level.id}
+          />
           {ladder.ladderEditsEnabled && staleOrder && (
             <div className="stack">
               <p role="status">{t("ladderOrderChanged")}</p>
@@ -427,17 +440,6 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
         </>
       )}
     </>
-  );
-}
-
-function LadderCell({ label, children }: { label: string; children: string | number }) {
-  return (
-    <td role="cell">
-      <span className="qualification-ladder-cell-label" aria-hidden="true">
-        {label}
-      </span>
-      {children}
-    </td>
   );
 }
 

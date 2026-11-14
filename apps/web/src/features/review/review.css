@@ -109,49 +109,16 @@
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   }
 }
+/* The shared DataTable draws the frame, states and pager (shared/ui/data-table.css). */
 .review-queue .review-list-area {
   /* Containing block of last resort: a row-link overlay never covers the app chrome. */
   position: relative;
   display: grid;
-  gap: 8px;
   min-width: 0;
-  padding: 4px 12px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-.review-queue .review-list-area > .button {
-  justify-self: start;
-}
-.review-queue .review-empty {
-  display: grid;
-  gap: 8px;
-  justify-items: start;
-  padding-block: 8px;
-}
-.review-queue .review-empty p {
-  margin: 0;
-  color: var(--secondary);
-}
-.review-queue .review-list-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-}
-.review-queue .review-list-footer > small {
-  flex: 1 1 240px;
-}
-.review-queue .review-list-footer .trip-actions {
-  gap: 6px;
 }
 
 /* Queue table: fixed column shares keep the layout independent of long names. */
-.review-queue .review-table {
-  table-layout: fixed;
-}
-.review-queue .review-table:focus-visible {
+.review-queue #review-queue-table:focus-visible {
   outline-offset: 2px;
 }
 .review-queue .review-table :is(th, td) {
@@ -164,9 +131,6 @@
 }
 .review-queue .review-table td {
   padding-block: 4px;
-}
-.review-queue .review-table :is(th, td):first-child {
-  padding-left: 8px;
 }
 .review-queue .review-col-driver {
   width: 17%;
@@ -186,7 +150,7 @@
 .review-queue .review-col-filed {
   width: 15%;
 }
-.review-queue .review-driver {
+.review-queue td.review-driver {
   font-weight: 600;
 }
 .review-queue .review-you {
@@ -272,24 +236,6 @@
 /* Phone cards: line 1 driver and rules flag, line 2 route, line 3 type, revision and time. The
    header row stays available to assistive technology only. */
 @media (max-width: 760px) {
-  .review-queue .review-list-area {
-    padding: 0;
-    border: 0;
-    background: transparent;
-  }
-  .review-queue .review-table,
-  .review-queue .review-table tbody,
-  .review-queue .review-table td {
-    display: block;
-  }
-  .review-queue .review-table thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
   .review-queue .review-table tr.review-row {
     position: relative;
     display: flex;
@@ -354,9 +300,6 @@
     order: 1;
     margin-left: 0;
     flex-basis: 100%;
-  }
-  .review-queue .review-list-footer .trip-actions {
-    flex: 1 1 100%;
   }
 }
 

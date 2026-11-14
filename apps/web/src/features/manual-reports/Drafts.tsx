@@ -3,11 +3,13 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { formatUtc } from "../../shared/formatting.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
-import { Confirm, Failure, PageNav, State } from "../trips/components.js";
+import { Confirm, Failure, State } from "../trips/components.js";
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
 import { CatalogName, GameChip } from "../trips/TripTable.js";
-import { type DTO, queryString, rejectedCursor } from "../trips/transport.js";
+import type { DTO } from "../trips/transport.js";
 import { displayTimezone } from "./reference-time.js";
 import "./manual-reports.css";
 
@@ -86,8 +88,6 @@ export function DeleteDraft({
   );
 }
 
-const firstPage = { cursor: null, previous: [] };
-
 export function DraftList({
   first,
   headingLevel = 2,
@@ -106,20 +106,17 @@ export function DraftList({
   const headingId = useId();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const timezone = displayTimezone(session.self?.preferences.displayTimezone);
-  const [page, setPage] = useState<{
-    cursor: string | null;
-    previous: (string | null)[];
-  }>(firstPage);
+  const pages = useCursorPages(`${editingOnly ? "editing" : "all"}:${locale}`);
   const [notice, setNotice] = useState<"draftDeleted" | "draftDeleteConflict" | null>(
     location.state?.draftDeleted === true ? "draftDeleted" : null,
   );
   const [focusAfter, setFocusAfter] = useState<{ removed: string; neighbor?: string } | null>(null);
-  const next = useManualDrafts(!!page.cursor, page.cursor, editingOnly);
-  const query = page.cursor ? next : first;
+  const next = useManualDrafts(!!pages.cursor, pages.cursor, editingOnly);
+  const query = pages.cursor ? next : first;
   const list = query.data?.data.data;
   const items = list?.items;
-  if (rejectedCursor(page.cursor, query.error) || (page.cursor && items?.length === 0))
-    setPage(firstPage);
+  // A rejected cursor, or a later page emptied by deletions, restarts at the first page.
+  if (!pages.recover(query.error) && pages.cursor && items?.length === 0) pages.restart();
 
   useLayoutEffect(() => {
     if (!focusAfter || !items || items.some(({ id }) => id === focusAfter.removed)) return;
@@ -200,16 +197,7 @@ export function DraftList({
           })}
         </div>
       )}
-      {(list?.nextCursor || page.previous.length > 0) && (
-        <PageNav
-          next={list?.nextCursor}
-          hasPrevious={page.previous.length > 0}
-          onNext={(cursor) => setPage({ cursor, previous: [...page.previous, page.cursor] })}
-          onPrevious={() =>
-            setPage({ cursor: page.previous.at(-1) ?? null, previous: page.previous.slice(0, -1) })
-          }
-        />
-      )}
+      <Pager pages={pages} nextCursor={list?.nextCursor} />
     </section>
   );
 }

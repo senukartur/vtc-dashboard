@@ -7,27 +7,23 @@
 .qualification-ladder :is(li, fieldset, input, select) {
   min-width: 0;
 }
-.qualification-ladder {
-  container: qualification-ladder / inline-size;
-}
 .qualification-ladder :is(h3, p, code, li, button, th, td) {
   overflow-wrap: anywhere;
   white-space: normal;
 }
-.qualification-ladder-table {
-  width: 100%;
-  border-collapse: collapse;
+.qualification-ladder-table .table {
   font-size: var(--font-small);
 }
-.qualification-ladder-table :is(th, td) {
-  padding: 8px 6px;
-  border-block-end: 1px solid var(--border);
-  text-align: start;
-  vertical-align: top;
-}
-.qualification-ladder-level {
-  min-width: 0;
+.qualification-ladder-table .qualification-ladder-level {
   width: 19%;
+}
+.qualification-ladder-table .qualification-ladder-controls {
+  width: 24%;
+}
+@media (max-width: 800px) {
+  .qualification-ladder-table :is(.qualification-ladder-level, .qualification-ladder-controls) {
+    grid-column: 1 / -1;
+  }
 }
 .qualification-ladder-meta,
 .qualification-ladder-row-actions {
@@ -35,6 +31,9 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
+}
+.qualification-ladder-level strong {
+  color: var(--foreground);
 }
 .qualification-ladder-meta {
   color: var(--muted);
@@ -50,41 +49,6 @@
 .qualification-ladder select {
   width: 100%;
   max-width: 100%;
-}
-.qualification-ladder-cell-label {
-  display: none;
-}
-@container qualification-ladder (max-width: 690px) {
-  .qualification-ladder-table :is(table, tbody, tr, th, td),
-  .qualification-ladder-table {
-    display: block;
-  }
-  .qualification-ladder-table thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  .qualification-ladder-table tbody tr {
-    margin-block-end: 8px;
-    padding: 6px 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-  }
-  .qualification-ladder-table :is(th, td) {
-    border: 0;
-    padding: 4px 0;
-  }
-  .qualification-ladder-level {
-    width: auto;
-  }
-  .qualification-ladder-cell-label {
-    display: inline-block;
-    margin-inline-end: 8px;
-    font-weight: 600;
-  }
 }
 .qualification-workspace .card {
   gap: 8px;
