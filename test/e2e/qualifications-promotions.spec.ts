@@ -298,8 +298,12 @@ test(
 
     await tabs(page).getByRole("link", { name: "All", exact: true }).click();
     await expect(page.getByText("2 candidates", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Next page" }).click();
+    const next = page.getByRole("button", { name: "Next page" });
+    await next.focus();
+    await page.keyboard.press("Enter");
     await expect(candidates(page).getByRole("rowheader")).toContainText(second.nickname);
+    await expect(next).toBeFocused();
+    await expect(next).toBeDisabled();
     await expect(candidates(page)).toContainText("No next level");
     await expect(candidates(page)).toContainText("3 / No minimum");
     await expect(candidates(page).getByRole("button", { name: /Promote/ })).toHaveCount(0);
@@ -838,8 +842,8 @@ for (const locale of ["en", "ru"] as const)
         page.getByRole("navigation", { name: ui.tabs }).locator('a[aria-current="page"]'),
       ).toHaveCount(1);
       const width = page.viewportSize()?.width ?? 0;
-      if (width <= 1050) await expect(table.locator(".promotion-cell-label").first()).toBeVisible();
-      else await expect(table.locator(".promotion-cell-label").first()).toBeHidden();
+      if (width <= 800) await expect(table.locator(".data-table-label").first()).toBeVisible();
+      else await expect(table.locator(".data-table-label").first()).toBeHidden();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
         width,
       );

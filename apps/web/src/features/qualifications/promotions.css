@@ -113,9 +113,6 @@
 .promotion-history thead th:last-child {
   width: 26%;
 }
-.promotion-cell-label {
-  display: none;
-}
 .promotion-reason {
   white-space: pre-wrap;
 }
@@ -142,46 +139,9 @@
 .promotion-preview dd {
   margin: 0;
 }
-@media (max-width: 1050px) {
-  .promotion-table,
-  .promotion-table tbody {
-    display: block;
-  }
-  .promotion-table thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    clip-path: inset(50%);
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .promotion-table tbody tr {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 16px;
-    padding-block: 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  .promotion-table tbody tr:first-child {
-    padding-top: 0;
-  }
-  .promotion-table tbody tr:last-child {
-    border-bottom: 0;
-    padding-bottom: 0;
-  }
-  .promotion-table tbody :is(th, td) {
-    display: block;
-    padding: 0;
-    border: 0;
-  }
-  .promotion-table th[scope="row"] {
+@media (max-width: 800px) {
+  .promotion-table.data-table .table th[scope="row"] {
     grid-column: 1 / -1;
     font-size: 0.9375rem;
-  }
-  .promotion-cell-label {
-    display: block;
-    margin-bottom: 2px;
-    color: var(--muted);
-    font-size: var(--font-small);
   }
 }

@@ -2,8 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
+import type { CursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Button, Card, Label, Select } from "../../shared/ui/primitives.js";
-import { PageNav } from "./components.js";
 import { usePromotionCommand } from "./PromotionCommandProvider.js";
 import { PromotionConfirmation } from "./PromotionConfirmation.js";
 import {
@@ -57,7 +58,7 @@ function PromotionsWorkspace() {
   const cursorValue = params.get("cursor");
   const cursor = cursorValue && cursorValue.length <= 2048 ? cursorValue : null;
   const [selection, setSelection] = useState<DTO["MemberSummary"] | null>(null);
-  const previous = useRef(new Map<string, string | null>());
+  const previous = useRef(new Map<string, { cursor: string | null; page: number }>());
   const handledChange = useRef<typeof command.changed>(null);
   const recovery = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -107,9 +108,27 @@ function PromotionsWorkspace() {
     }
   }, [changed, command.conflict, cursor, game, memberId, open, setParams, tab]);
 
-  function firstPage(replace = false) {
-    if (cursor) setParams(searchParams(filters), { replace });
-  }
+  // The workspace cursor is shareable and follows browser Back/Forward. Adapt the URL
+  // controls to Pager while keeping the explicit first-page action for rejected cursors.
+  const previousPage = previous.current.get(`${pageKey}&cursor=${cursor}`);
+  const page = cursor ? (previousPage?.page ?? 1) + 1 : 1;
+  const pages: CursorPages = {
+    cursor,
+    page,
+    hasPrevious: !!cursor,
+    next(next) {
+      previous.current.set(`${pageKey}&cursor=${next}`, { cursor, page });
+      setParams(searchParams(filters, next));
+    },
+    previous() {
+      setParams(searchParams(filters, previousPage?.cursor ?? null));
+    },
+    restart() {
+      heading.current?.focus();
+      setParams(searchParams(filters), { replace: true });
+    },
+    recover: () => false,
+  };
   function chooseMember(member: DTO["MemberSummary"] | null) {
     setSelection(member);
     setParams(searchParams({ ...filters, memberId: member?.id ?? null }));
@@ -235,7 +254,7 @@ function PromotionsWorkspace() {
         </div>
       )}
       <Card className="promotion-results stack">
-        <PromotionReadState query={query} cursor={cursor} onFirstPage={() => firstPage(true)} />
+        <PromotionReadState query={query} cursor={cursor} onFirstPage={pages.restart} />
         {data && data.items.length === 0 && (
           <p role="status">
             {t(tab === "history" ? "emptyHistory" : tab === "ready" ? "emptyReady" : "emptyAll")}
@@ -251,20 +270,8 @@ function PromotionsWorkspace() {
             blocked={!!candidate}
           />
         )}
-        {(cursor || data?.nextCursor) && !query.isError && (
-          <PageNav
-            hasPrevious={!!cursor}
-            next={data?.nextCursor}
-            onNext={(next) => {
-              previous.current.set(`${pageKey}&cursor=${next}`, cursor);
-              setParams(searchParams(filters, next));
-            }}
-            onPrevious={() =>
-              setParams(
-                searchParams(filters, previous.current.get(`${pageKey}&cursor=${cursor}`) ?? null),
-              )
-            }
-          />
+        {!query.isError && (
+          <Pager pages={pages} nextCursor={data?.nextCursor} busy={query.isPending} />
         )}
       </Card>
       {open && candidate && (

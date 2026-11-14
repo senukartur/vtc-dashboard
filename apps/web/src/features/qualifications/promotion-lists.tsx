@@ -1,10 +1,12 @@
-// biome-ignore-all lint/a11y/noRedundantRoles: explicit table roles survive the stacked layout in WebKit.
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
-import { Button, Input, Label, Select, Table } from "../../shared/ui/primitives.js";
-import { Failure, PageNav } from "./components.js";
+import { useCursorPages } from "../../shared/paging.js";
+import { DataTable } from "../../shared/ui/DataTable.js";
+import { Pager } from "../../shared/ui/pager.js";
+import { Button, Input, Label, Select } from "../../shared/ui/primitives.js";
+import { Failure } from "./components.js";
 import { usePromotionMemberSearch } from "./promotion-queries.js";
 import type { Candidate } from "./promotion-transport.js";
 import { type DTO, QualificationFailure } from "./transport.js";
@@ -76,14 +78,14 @@ export function usePromotionDisplay() {
   };
 }
 
-function PromotionCell({ label, children }: { label: string; children: ReactNode }) {
+function DriverIdentity({ member }: { member: DTO["MemberSummary"] }) {
   return (
-    <td role="cell">
-      <span className="promotion-cell-label" aria-hidden="true">
-        {label}
-      </span>
-      <div>{children}</div>
-    </td>
+    <>
+      {member.nickname}
+      <code className="promotion-member-id" title={member.id}>
+        {member.id.slice(-12)}
+      </code>
+    </>
   );
 }
 
@@ -99,70 +101,70 @@ export function CandidateTable({
   const { t } = useTranslation("promotions");
   const display = usePromotionDisplay();
   return (
-    <Table
+    <DataTable
+      caption={t("candidates")}
       className="promotion-table promotion-candidates"
-      aria-label={t("candidates")}
-      role="table"
-    >
-      <thead role="rowgroup">
-        <tr role="row">
-          {(
-            ["driver", "game", "transition", "trips", "distance", "readySince", "action"] as const
-          ).map((key) => (
-            <th key={key} scope="col" role="columnheader">
-              {t(key)}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody role="rowgroup">
-        {items.map((candidate) => (
-          <tr key={candidate.assignmentId} role="row">
-            <th scope="row" role="rowheader">
-              {candidate.member.nickname}
-              <code className="promotion-member-id" title={candidate.member.id}>
-                {candidate.member.id.slice(-12)}
-              </code>
-            </th>
-            <PromotionCell label={t("game")}>{candidate.game.toUpperCase()}</PromotionCell>
-            <PromotionCell label={t("transition")}>
-              <div>{candidate.currentLevel.name}</div>
-              <div className={candidate.nextLevel ? "promotion-next-level" : "promotion-muted"}>
-                {candidate.nextLevel ? `→ ${candidate.nextLevel.name}` : t("terminal")}
+      cardsBelow={800}
+      rows={items}
+      rowKey={(candidate) => candidate.assignmentId}
+      columns={[
+        {
+          id: "driver",
+          header: t("driver"),
+          rowHeader: true,
+          cardLabel: false,
+          cell: ({ member }) => <DriverIdentity member={member} />,
+        },
+        { id: "game", header: t("game"), cell: ({ game }) => game.toUpperCase() },
+        {
+          id: "transition",
+          header: t("transition"),
+          cell: ({ currentLevel, nextLevel }) => (
+            <>
+              <div>{currentLevel.name}</div>
+              <div className={nextLevel ? "promotion-next-level" : "promotion-muted"}>
+                {nextLevel ? `→ ${nextLevel.name}` : t("terminal")}
               </div>
-            </PromotionCell>
-            <PromotionCell label={t("trips")}>
-              {display.trips(candidate.acceptedTrips, candidate.requiredTrips)}
-            </PromotionCell>
-            <PromotionCell label={t("distance")}>
-              {display.distance(candidate.actualDistanceM, candidate.requiredDistanceM)}
-            </PromotionCell>
-            <PromotionCell label={t("readySince")}>
-              {candidate.eligibleSince
-                ? display.time(candidate.eligibleSince)
-                : candidate.eligible
-                  ? t("unknown")
-                  : "—"}
-            </PromotionCell>
-            <PromotionCell label={t("action")}>
-              {candidate.eligible && candidate.nextLevel ? (
-                <Button
-                  type="button"
-                  aria-disabled={blocked || undefined}
-                  aria-label={t("promoteDriver", { nickname: candidate.member.nickname })}
-                  aria-description={candidate.member.id}
-                  onClick={(event) => onPromote(candidate, event.currentTarget)}
-                >
-                  {t("promote")}
-                </Button>
-              ) : (
-                <span className="promotion-muted">{candidate.nextLevel ? t("notReady") : "—"}</span>
-              )}
-            </PromotionCell>
-          </tr>
-        ))}
-      </tbody>
-    </Table>
+            </>
+          ),
+        },
+        {
+          id: "trips",
+          header: t("trips"),
+          cell: ({ acceptedTrips, requiredTrips }) => display.trips(acceptedTrips, requiredTrips),
+        },
+        {
+          id: "distance",
+          header: t("distance"),
+          cell: ({ actualDistanceM, requiredDistanceM }) =>
+            display.distance(actualDistanceM, requiredDistanceM),
+        },
+        {
+          id: "readySince",
+          header: t("readySince"),
+          cell: ({ eligibleSince, eligible }) =>
+            eligibleSince ? display.time(eligibleSince) : eligible ? t("unknown") : "—",
+        },
+        {
+          id: "action",
+          header: t("action"),
+          cell: (candidate) =>
+            candidate.eligible && candidate.nextLevel ? (
+              <Button
+                type="button"
+                aria-disabled={blocked || undefined}
+                aria-label={t("promoteDriver", { nickname: candidate.member.nickname })}
+                aria-description={candidate.member.id}
+                onClick={(event) => onPromote(candidate, event.currentTarget)}
+              >
+                {t("promote")}
+              </Button>
+            ) : (
+              <span className="promotion-muted">{candidate.nextLevel ? t("notReady") : "—"}</span>
+            ),
+        },
+      ]}
+    />
   );
 }
 
@@ -170,51 +172,53 @@ export function HistoryTable({ items }: { items: HistoryItem[] }) {
   const { t } = useTranslation("promotions");
   const display = usePromotionDisplay();
   return (
-    <Table
+    <DataTable
+      caption={t("companyHistory")}
       className="promotion-table promotion-history"
-      aria-label={t("companyHistory")}
-      role="table"
-    >
-      <thead role="rowgroup">
-        <tr role="row">
-          {(["driver", "game", "action", "date", "actor", "reason"] as const).map((key) => (
-            <th key={key} scope="col" role="columnheader">
-              {t(key)}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody role="rowgroup">
-        {items.map((item) => (
-          <tr key={`${item.kind}:${item.id}`} role="row">
-            <th scope="row" role="rowheader">
-              {item.member.nickname}
-              <code className="promotion-member-id" title={item.member.id}>
-                {item.member.id.slice(-12)}
-              </code>
-            </th>
-            <PromotionCell label={t("game")}>{item.game.toUpperCase()}</PromotionCell>
-            <PromotionCell label={t("action")}>
+      cardsBelow={800}
+      rows={items}
+      rowKey={(item) => `${item.kind}:${item.id}`}
+      columns={[
+        {
+          id: "driver",
+          header: t("driver"),
+          rowHeader: true,
+          cardLabel: false,
+          cell: ({ member }) => <DriverIdentity member={member} />,
+        },
+        { id: "game", header: t("game"), cell: ({ game }) => game.toUpperCase() },
+        {
+          id: "action",
+          header: t("action"),
+          cell: (item) => (
+            <>
               <strong>{t(item.kind === "promotion" ? "promotion" : item.purpose)}</strong>
               <div>
                 {item.kind === "promotion"
                   ? `${item.sourceLevel.name} → ${item.targetLevel.name}`
                   : item.level.name}
               </div>
-            </PromotionCell>
-            <PromotionCell label={t("date")}>
-              {display.time(item.kind === "promotion" ? item.confirmedAt : item.assignedAt)}
-            </PromotionCell>
-            <PromotionCell label={t("actor")}>
-              {item.actor?.nickname ?? item.actor?.id ?? t("unrecorded")}
-            </PromotionCell>
-            <PromotionCell label={t("reason")}>
-              <div className="promotion-reason">{item.reason ?? t("unrecorded")}</div>
-            </PromotionCell>
-          </tr>
-        ))}
-      </tbody>
-    </Table>
+            </>
+          ),
+        },
+        {
+          id: "date",
+          header: t("date"),
+          cell: (item) =>
+            display.time(item.kind === "promotion" ? item.confirmedAt : item.assignedAt),
+        },
+        {
+          id: "actor",
+          header: t("actor"),
+          cell: ({ actor }) => actor?.nickname ?? actor?.id ?? t("unrecorded"),
+        },
+        {
+          id: "reason",
+          header: t("reason"),
+          cell: ({ reason }) => <div className="promotion-reason">{reason ?? t("unrecorded")}</div>,
+        },
+      ]}
+    />
   );
 }
 
@@ -288,14 +292,13 @@ function HistoryMemberResults({
 }) {
   const { t } = useTranslation("promotions");
   const id = useId();
-  const [cursors, setCursors] = useState<string[]>([]);
-  const cursor = cursors.at(-1) ?? null;
-  const query = usePromotionMemberSearch(search, cursor);
+  const pages = useCursorPages(search);
+  const query = usePromotionMemberSearch(search, pages.cursor);
   const data = query.data?.data.data;
   const items = data?.items ?? [];
   return (
     <>
-      <PromotionReadState query={query} cursor={cursor} onFirstPage={() => setCursors([])} />
+      <PromotionReadState query={query} cursor={pages.cursor} onFirstPage={pages.restart} />
       {data && items.length === 0 && <p role="status">{t("emptySearch")}</p>}
       {items.length > 0 && (
         <div className="promotion-field">
@@ -324,13 +327,8 @@ function HistoryMemberResults({
           </Select>
         </div>
       )}
-      {(cursor || data?.nextCursor) && (
-        <PageNav
-          hasPrevious={!!cursor}
-          next={data?.nextCursor}
-          onNext={(next) => setCursors((previous) => [...previous, next])}
-          onPrevious={() => setCursors((previous) => previous.slice(0, -1))}
-        />
+      {!query.isError && (
+        <Pager pages={pages} nextCursor={data?.nextCursor} busy={query.isPending} />
       )}
     </>
   );
