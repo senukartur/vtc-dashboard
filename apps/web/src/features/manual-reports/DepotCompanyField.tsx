@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DepotSelector } from "../../shared/catalog-selectors/DepotSelector.js";
 import { visibleDepot } from "../../shared/catalog-selectors/depots.js";
+import { queryString } from "../../shared/paging.js";
 import { State } from "../trips/components.js";
 import { useTripQuery } from "../trips/queries.js";
-import { type DTO, queryString } from "../trips/transport.js";
+import type { DTO } from "../trips/transport.js";
 
 type Game = DTO["ManualDatedSubmissionFields"]["game"];
 

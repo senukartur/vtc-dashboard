@@ -21,7 +21,8 @@ import {
   submittedAt,
 } from "../../apps/web/src/features/review/review-model.ts";
 import { tripTranslations } from "../../apps/web/src/features/trips/translations.ts";
-import { type DTO, queryString, schema } from "../../apps/web/src/features/trips/transport.ts";
+import { type DTO, schema } from "../../apps/web/src/features/trips/transport.ts";
+import { queryString } from "../../apps/web/src/shared/paging.ts";
 
 // Synthetic contract examples only; identities and reasons are fictional.
 const cases = JSON.parse(

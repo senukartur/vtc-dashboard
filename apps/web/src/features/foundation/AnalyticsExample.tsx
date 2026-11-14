@@ -2,7 +2,8 @@ import { useTranslation } from "react-i18next";
 import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
 import { chartGeometry, formatQuantity, formatUtc, type Locale } from "../../shared/formatting.js";
 import { ChartContainer } from "../../shared/ui/chart.js";
-import { Card, Table } from "../../shared/ui/primitives.js";
+import { DataTable } from "../../shared/ui/DataTable.js";
+import { Card } from "../../shared/ui/primitives.js";
 import type { FoundationMocks } from "./mocks.js";
 
 export function AnalyticsExample({
@@ -52,27 +53,25 @@ export function AnalyticsExample({
           </BarChart>
         </ChartContainer>
         <figcaption>
-          <Table>
-            <caption>
-              {t("chart")} · {t("reporting")}: {data.reportingTimezone}
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">{t("day")}</th>
-                <th scope="col">
-                  {t("distance")} ({t("unitKm")})
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.buckets.map((bucket) => (
-                <tr key={bucket.date}>
-                  <th scope="row">{bucket.date}</th>
-                  <td>{formatQuantity(bucket.actualDistanceM, "km", locale)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+          <DataTable
+            caption={`${t("chart")} · ${t("reporting")}: ${data.reportingTimezone}`}
+            captionVisible
+            columns={[
+              {
+                id: "day",
+                header: t("day"),
+                rowHeader: true,
+                cell: (bucket: (typeof data.buckets)[number]) => bucket.date,
+              },
+              {
+                id: "distance",
+                header: `${t("distance")} (${t("unitKm")})`,
+                cell: (bucket) => formatQuantity(bucket.actualDistanceM, "km", locale),
+              },
+            ]}
+            rows={data.buckets}
+            rowKey={(bucket) => bucket.date}
+          />
         </figcaption>
       </figure>
       <p className="muted">
