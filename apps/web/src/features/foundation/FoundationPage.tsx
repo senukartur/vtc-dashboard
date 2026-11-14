@@ -1,5 +1,5 @@
 import type { components } from "@vtc/contracts";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatQuantity, type Locale } from "../../shared/formatting.js";
@@ -11,12 +11,22 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../../shared/ui/dialog.js";
-import { Badge, Button, Card, Label, Table } from "../../shared/ui/primitives.js";
+import { DataTable, type DataTableColumn } from "../../shared/ui/DataTable.js";
+import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
 import { ControlsExample } from "./ControlsExample.js";
 import { LocalForm } from "./LocalForm.js";
 import { createFoundationMocks, type FoundationMocks, fixtureId } from "./mocks.js";
+import { ServerTableExample } from "./ServerTableExample.js";
 
-const states = ["success", "loading", "empty", "error", "forbidden", "partial"] as const;
+const states = [
+  "success",
+  "loading",
+  "empty",
+  "filtered",
+  "error",
+  "forbidden",
+  "partial",
+] as const;
 type ContentState = (typeof states)[number];
 const AnalyticsExample = lazy(() =>
   import("./AnalyticsExample.js").then((module) => ({ default: module.AnalyticsExample })),
@@ -33,52 +43,98 @@ function CatalogName({ label }: { label: components["schemas"]["CatalogLabel"] |
   );
 }
 
-function TripList({ response, locale }: { response: FoundationMocks["trips"]; locale: Locale }) {
+type Trip = FoundationMocks["trips"]["data"]["items"][number];
+
+/**
+ * The example list as a static DataTable; the content-state selector drives its loading, error,
+ * empty and empty-after-filters states. Retry and Reset return to the available example.
+ */
+function TripList({
+  rows,
+  state,
+  locale,
+  onRecover,
+  onReset,
+}: {
+  rows: Trip[];
+  state: ContentState;
+  locale: Locale;
+  onRecover: () => void;
+  onReset: () => void;
+}) {
   const { t } = useTranslation("foundation");
+  const columns: DataTableColumn<Trip>[] = [
+    {
+      id: "driver",
+      header: t("driver"),
+      cell: (trip) => (
+        <>
+          <strong>{trip.owner.nickname}</strong>
+          <small>{trip.game.toUpperCase()}</small>
+        </>
+      ),
+    },
+    {
+      id: "route",
+      header: t("route"),
+      cell: (trip) => (
+        <div className="route">
+          <CatalogName label={trip.origin} />
+          <span className="route-arrow" aria-hidden="true">
+            ↓
+          </span>
+          <CatalogName label={trip.destination} />
+        </div>
+      ),
+    },
+    {
+      id: "distance",
+      header: t("distance"),
+      align: "end",
+      cell: (trip) => formatQuantity(trip.actualDistanceM, "km", locale),
+    },
+    {
+      id: "status",
+      header: t("status"),
+      cell: (trip) => (
+        <Badge className={trip.decision === "accepted" ? "badge-accepted" : "badge-neutral"}>
+          <span aria-hidden="true">{trip.decision === "accepted" ? "✓" : "—"}</span>
+          {t(trip.decision === "accepted" ? "accepted" : "unassessed")}
+        </Badge>
+      ),
+    },
+  ];
   return (
-    <div className="trip-list">
-      <Table>
-        <caption>{t("tripsCaption")}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{t("driver")}</th>
-            <th scope="col">{t("route")}</th>
-            <th scope="col">{t("distance")}</th>
-            <th scope="col">{t("status")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {response.data.items.map((trip) => (
-            <tr key={trip.id}>
-              <td data-label={t("driver")}>
-                <strong>{trip.owner.nickname}</strong>
-                <small>{trip.game.toUpperCase()}</small>
-              </td>
-              <td data-label={t("route")}>
-                <div className="route">
-                  <CatalogName label={trip.origin} />
-                  <span className="route-arrow" aria-hidden="true">
-                    ↓
-                  </span>
-                  <CatalogName label={trip.destination} />
-                </div>
-              </td>
-              <td data-label={t("distance")} className="numeric">
-                {formatQuantity(trip.actualDistanceM, "km", locale)}
-              </td>
-              <td data-label={t("status")}>
-                <Badge
-                  className={trip.decision === "accepted" ? "badge-accepted" : "badge-neutral"}
-                >
-                  <span aria-hidden="true">{trip.decision === "accepted" ? "✓" : "—"}</span>
-                  {t(trip.decision === "accepted" ? "accepted" : "unassessed")}
-                </Badge>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-    </div>
+    <DataTable
+      className="trip-list-example"
+      caption={t("tripsCaption")}
+      captionVisible
+      columns={columns}
+      rows={rows}
+      rowKey={(trip) => trip.id}
+      status={state === "loading" ? "loading" : state === "error" ? "error" : "ready"}
+      skeletonRows={3}
+      error={
+        <>
+          <strong>{t("errorTitle")}</strong> {t("errorText")}
+        </>
+      }
+      onRetry={onRecover}
+      empty={{
+        message: (
+          <>
+            <h3>{t("emptyTitle")}</h3>
+            <p>{t("emptyText")}</p>
+          </>
+        ),
+        action: (
+          <Button variant="outline" size="xs" onClick={onRecover}>
+            {t("reset")}
+          </Button>
+        ),
+      }}
+      {...(state === "filtered" ? { filtered: { onReset } } : {})}
+    />
   );
 }
 
@@ -93,11 +149,16 @@ export function FoundationPage({
   const { t: core } = useTranslation("core");
   const locale: Locale = i18n.resolvedLanguage === "ru" ? "ru" : "en";
   const [state, setState] = useState<ContentState>("success");
+  const stateSelect = useRef<HTMLSelectElement>(null);
   const [selected, setSelected] = useState(fixtureId);
   const [displayTimezone, setDisplayTimezone] = useState("UTC");
   const mocks = mockFactory(locale);
   const visibleTrips =
-    state === "empty" ? mocks.empty : state === "partial" ? mocks.partial : mocks.trips;
+    state === "empty" || state === "filtered"
+      ? mocks.empty
+      : state === "partial"
+        ? mocks.partial
+        : mocks.trips;
   const permitted = state !== "forbidden";
   return (
     <>
@@ -140,6 +201,7 @@ export function FoundationPage({
               <div className="field">
                 <Label htmlFor="content-state">{t("state")}</Label>
                 <select
+                  ref={stateSelect}
                   id="content-state"
                   value={state}
                   onChange={(event) => {
@@ -156,29 +218,8 @@ export function FoundationPage({
                 </select>
               </div>
             </div>
-            <div className="content-state" aria-live="polite" aria-busy={state === "loading"}>
-              {state === "loading" ? (
-                <div className="state-message">
-                  <span className="status-symbol" aria-hidden="true">
-                    …
-                  </span>
-                  <p>{t("loadingText")}</p>
-                  <Button variant="outline" onClick={() => setState("success")}>
-                    {t("reset")}
-                  </Button>
-                </div>
-              ) : state === "error" ? (
-                <div className="state-message" role="alert">
-                  <span className="status-symbol" aria-hidden="true">
-                    !
-                  </span>
-                  <h3>{t("errorTitle")}</h3>
-                  <p>{t("errorText")}</p>
-                  <Button variant="outline" onClick={() => setState("success")}>
-                    {t("retry")}
-                  </Button>
-                </div>
-              ) : state === "forbidden" ? (
+            <div className="content-state" aria-live="polite">
+              {state === "forbidden" ? (
                 <div className="state-message">
                   <span className="status-symbol" aria-hidden="true">
                     ×
@@ -191,25 +232,25 @@ export function FoundationPage({
                     </Link>
                   </Button>
                 </div>
-              ) : visibleTrips.data.items.length === 0 ? (
-                <div className="state-message">
-                  <span className="status-symbol" aria-hidden="true">
-                    —
-                  </span>
-                  <h3>{t("emptyTitle")}</h3>
-                  <p>{t("emptyText")}</p>
-                  <Button variant="outline" onClick={() => setState("success")}>
-                    {t("reset")}
-                  </Button>
-                </div>
               ) : (
                 <>
                   {state === "partial" && <p className="notice">{t("partialText")}</p>}
-                  <TripList response={visibleTrips} locale={locale} />
+                  <TripList
+                    rows={visibleTrips.data.items}
+                    state={state}
+                    locale={locale}
+                    onRecover={() => setState("success")}
+                    onReset={() => {
+                      // The reset button unmounts with the empty state; focus the selector.
+                      stateSelect.current?.focus();
+                      setState("success");
+                    }}
+                  />
                 </>
               )}
             </div>
           </Card>
+          {permitted && <ServerTableExample locale={locale} displayTimezone={displayTimezone} />}
           {permitted && (
             <Card aria-labelledby="catalog-title">
               <h2 id="catalog-title">{t("selection")}</h2>

@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Card, Input, Label } from "../../shared/ui/primitives.js";
 import { EvidenceItem } from "../manual-reports/fields.js";
-import { Confirm, Failure, Fields, PageNav, State } from "../trips/components.js";
+import { Confirm, Failure, Fields, State } from "../trips/components.js";
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
 import { canonicalDecimal, type DTO, proposalResult, schema } from "../trips/transport.js";
 /**
@@ -63,15 +65,15 @@ function ResolutionForm({
     [error, setError] = useState(false),
     [saved, setSaved] = useState(false),
     [catalogField, setCatalogField] = useState("cargoId"),
-    [requestCursor, setRequestCursor] = useState<string | null>(null),
-    [assignmentCursor, setAssignmentCursor] = useState<string | null>(null);
+    requestPages = useCursorPages(`/trips/${tripId}/correction-requests`),
+    assignmentPages = useCursorPages(`/trips/${tripId}/qualification-assignments`);
   const requests = useTripQuery(
-      `/trips/${tripId}/correction-requests?limit=25${requestCursor ? `&cursor=${encodeURIComponent(requestCursor)}` : ""}`,
+      `/trips/${tripId}/correction-requests?${queryString({ limit: 25, cursor: requestPages.cursor })}`,
       "EnvelopeListManualCorrectionRequest",
       open,
     ),
     assignments = useTripQuery(
-      `/trips/${tripId}/qualification-assignments?limit=25${assignmentCursor ? `&cursor=${encodeURIComponent(assignmentCursor)}` : ""}`,
+      `/trips/${tripId}/qualification-assignments?${queryString({ limit: 25, cursor: assignmentPages.cursor })}`,
       "EnvelopeListAssignmentHistory",
       open && !requests.isPending,
     );
@@ -117,11 +119,10 @@ function ResolutionForm({
                 ))}
             </select>
             <State query={requests} />
-            <PageNav
-              next={requests.data?.data.data.nextCursor}
-              hasPrevious={!!requestCursor}
-              onNext={setRequestCursor}
-              onPrevious={() => setRequestCursor(null)}
+            <Pager
+              pages={requestPages}
+              nextCursor={requests.data?.data.data.nextCursor}
+              label={t("correctionRequestPages")}
             />
             <div className="trip-grid">
               {(["actualDistanceM", "cargoMassKg"] as const).map((k) => (
@@ -206,11 +207,10 @@ function ResolutionForm({
               ))}
             </select>
             <State query={assignments} />
-            <PageNav
-              next={assignments.data?.data.data.nextCursor}
-              hasPrevious={!!assignmentCursor}
-              onNext={setAssignmentCursor}
-              onPrevious={() => setAssignmentCursor(null)}
+            <Pager
+              pages={assignmentPages}
+              nextCursor={assignments.data?.data.data.nextCursor}
+              label={t("assignmentPages")}
             />
             {trip.effectiveFacts?.provider === "ets2telemetry" && (
               <>
@@ -304,10 +304,9 @@ export function ProposalList({
   self: boolean;
 }) {
   const { t } = useTranslation("trips"),
-    [cursor, setCursor] = useState<string | null>(null),
-    [history, setHistory] = useState<string[]>([]),
+    pages = useCursorPages(`/trips/${tripId}/proposals`),
     query = useTripQuery(
-      `/trips/${tripId}/proposals?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+      `/trips/${tripId}/proposals?${queryString({ limit: 25, cursor: pages.cursor })}`,
       "EnvelopeListTripProposal",
     );
   return (
@@ -319,17 +318,10 @@ export function ProposalList({
         <Proposal key={p.id} proposal={p} tripId={tripId} etag={etag} self={self} />
       ))}
       {query.data && !query.data.data.data.items.length && <p>{t("empty")}</p>}
-      <PageNav
-        next={query.data?.data.data.nextCursor}
-        hasPrevious={history.length > 0}
-        onNext={(c) => {
-          setHistory([...history, cursor ?? ""]);
-          setCursor(c);
-        }}
-        onPrevious={() => {
-          setCursor(history.at(-1) || null);
-          setHistory(history.slice(0, -1));
-        }}
+      <Pager
+        pages={pages}
+        nextCursor={query.data?.data.data.nextCursor}
+        label={t("proposalPages")}
       />
     </Card>
   );

@@ -1,31 +1,24 @@
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { isPlainSelfClick } from "../../app/Navigation.js";
 import { useSession } from "../../app/Session.js";
 import { formatDecimal, formatQuantity } from "../../shared/formatting.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs.js";
 import { DraftList, useManualDrafts } from "../manual-reports/Drafts.js";
-import { PageNav, State } from "./components.js";
+import { failureKey } from "./components.js";
 import { useWideLayout } from "./layout.js";
 import { tripListFilters, tripPeriodBounds } from "./list-model.js";
 import { useTripQuery } from "./queries.js";
 import { TripListFilters } from "./TripListFilters.js";
 import { TripPanel } from "./TripPanel.js";
 import { TripTable } from "./TripTable.js";
-import {
-  filterSearch,
-  queryString,
-  rejectedCursor,
-  selectedTrip,
-  selectionSearch,
-} from "./transport.js";
+import { filterSearch, selectedTrip, selectionSearch } from "./transport.js";
 import { useSearchDraft } from "./useSearchDraft.js";
 import "./trips.css";
 import "./trips-list.css";
-
-const firstPage = (key: string) => ({ key, cursor: null, previous: [] });
 
 export function TripsPage() {
   const { t, i18n } = useTranslation("trips");
@@ -51,19 +44,17 @@ export function TripsPage() {
     period && savedTimezone ? tripPeriodBounds(period, new Date(), savedTimezone) : undefined;
   const periodUnavailable = !!period && !bounds;
 
-  const filterKey = queryString({ ...effective, ...bounds, locale });
-  const [page, setPage] = useState<{
-    key: string;
-    cursor: string | null;
-    previous: (string | null)[];
-  }>(() => firstPage(filterKey));
-  const { cursor, previous } = page.key === filterKey ? page : firstPage(filterKey);
-  if (page.key !== filterKey) setPage(firstPage(filterKey));
+  // Filters, sort and locale; a change restarts at the first page.
+  const pages = useCursorPages(queryString({ ...effective, ...bounds, locale }));
   const query = useTripQuery(
-    `/trips?${queryString({ ...effective, ...bounds, locale, limit: 25, cursor })}`,
+    `/trips?${queryString({ ...effective, ...bounds, locale, limit: 25, cursor: pages.cursor })}`,
     "EnvelopeListTripSummary",
     !viewDrafts,
+    false,
+    true,
   );
+  // A rejected cursor restarts the same effective list without rendering a page error.
+  pages.recover(query.error);
   const ownSummary = useTripQuery(
     "/me/trip-status-summary",
     "EnvelopeOwnTripStatusSummary",
@@ -71,9 +62,9 @@ export function TripsPage() {
   );
   const lifetime = ownSummary.data?.data.data.lifetimeTotals;
   const list = query.data?.data.data;
-  const total = list?.total;
-  // A rejected cursor restarts the same effective list without rendering a page error.
-  if (rejectedCursor(cursor, query.error)) setPage(firstPage(filterKey));
+  // Rows kept from another page or filter are dimmed; their total no longer applies.
+  const stale = query.isPlaceholderData;
+  const total = stale ? undefined : list?.total;
 
   // The side panel exists only on wide layouts; narrow layouts ignore `?trip=` entirely.
   const selected = !viewDrafts && wide ? selectedTrip(params) : null;
@@ -140,57 +131,65 @@ export function TripsPage() {
     setParams(selectionSearch(new URLSearchParams(window.location.search), null));
   }
 
+  const filtersActive = [
+    effective.game,
+    effective.decision,
+    effective.source,
+    period,
+    ownerId,
+    q,
+  ].some(Boolean);
   const knownTotal = total !== undefined ? formatDecimal(String(total), locale) : null;
   const matches =
     knownTotal !== null
       ? t("matches", { total: knownTotal })
-      : list || query.isError
+      : (list && !stale) || query.isError
         ? t("matchesUnavailable")
         : "";
   const driver = list?.items.find((trip) => trip.owner.id === ownerId)?.owner.nickname;
   const body = (
     <div className="trips-layout" data-panel={selected ? "open" : undefined}>
       <div className="trips-list-area">
-        <State
-          query={query}
-          refresh={() => {
-            setPage(firstPage(filterKey));
-            if (!cursor) void query.refetch();
-          }}
-        />
         <TripTable
           items={list?.items}
           selectedId={selected}
           showOwner={scope === "company"}
           timezone={timezone}
           order={order}
-          onSort={() =>
-            change("order", order === "completion_desc" ? "completion_asc" : "completion_desc")
-          }
+          onOrder={(value) => change("order", value)}
           linkFor={(id) =>
             wide
               ? { pathname: location.pathname, search: selectionSearch(params, id) }
               : `/account/trips/${id}`
           }
           onLinkClick={select}
-          footer={
-            list && (
-              <PageNav
-                next={list.nextCursor}
-                hasPrevious={previous.length > 0}
-                onNext={(next) =>
-                  setPage({ key: filterKey, previous: [...previous, cursor], cursor: next })
-                }
-                onPrevious={() =>
-                  setPage({
-                    key: filterKey,
-                    cursor: previous.at(-1) ?? null,
-                    previous: previous.slice(0, -1),
-                  })
-                }
-              />
-            )
-          }
+          state={{
+            status: query.isError ? "error" : list ? "ready" : "loading",
+            busy: stale,
+            error: t(failureKey(query.error)),
+            onRetry: () => {
+              pages.restart();
+              if (!pages.cursor) void query.refetch();
+            },
+            empty:
+              scope === "mine"
+                ? {
+                    message: t("noTripsYet"),
+                    action: submit && (
+                      <Button asChild size="xs">
+                        <Link to="/account/reports/new">{t("newReport")}</Link>
+                      </Button>
+                    ),
+                  }
+                : { message: t("empty") },
+            ...(filtersActive ? { filtered: { onReset: reset, message: t("empty") } } : {}),
+            pagination: {
+              pages,
+              nextCursor: list?.nextCursor,
+              pageSize: 25,
+              total: list?.total,
+            },
+          }}
         />
       </div>
       {selected && (

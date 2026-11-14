@@ -49,6 +49,9 @@ export const qualificationTranslations = {
     thresholds: "Promotion requirements",
     history: "Assignment history",
     emptyHistory: "No supported assignment intervals are recorded for this game.",
+    memberPages: "Member pages",
+    historyPages: "Assignment history pages",
+    rulePages: "Rule version pages",
     immutable:
       "Supported intervals and immutable rule versions are retained. Private staff reasons and actors are not included in this view.",
     currentInterval: "Current interval",
@@ -225,6 +228,9 @@ export const qualificationTranslations = {
     thresholds: "Требования для повышения",
     history: "История назначений",
     emptyHistory: "Для этой игры подтверждённые интервалы назначений не записаны.",
+    memberPages: "Страницы участников",
+    historyPages: "Страницы истории назначений",
+    rulePages: "Страницы версий правил",
     immutable:
       "Подтверждённые интервалы и неизменяемые версии правил сохранены. Закрытые причины и авторы действий в этом представлении отсутствуют.",
     currentInterval: "Текущий интервал",

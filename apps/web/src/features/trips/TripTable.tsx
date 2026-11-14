@@ -1,9 +1,10 @@
-import type { MouseEvent, ReactNode } from "react";
+import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, type To } from "react-router-dom";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
-import { Badge, Table } from "../../shared/ui/primitives.js";
+import { DataTable, type DataTableColumn, type DataTableProps } from "../../shared/ui/DataTable.js";
+import { Badge } from "../../shared/ui/primitives.js";
 import { type TripOrder, tripListTimestamp } from "./list-model.js";
 import type { DTO } from "./transport.js";
 import "./trips-list.css";
@@ -53,14 +54,11 @@ export function sourceNames(trip: DTO["TripSummary"], t: (key: string) => string
   return trip.sourceKinds.length ? trip.sourceKinds.map((s) => t(s)).join(" + ") : t("unknown");
 }
 
-function CellLabel({ children }: { children: ReactNode }) {
-  // Visible only on phone cards; the table header already names the column for assistive tech.
-  return (
-    <span className="trips-cell-label" aria-hidden="true">
-      {children}
-    </span>
-  );
-}
+type Trip = DTO["TripSummary"];
+export type TripTableState = Pick<
+  DataTableProps<Trip, "completion">,
+  "status" | "busy" | "error" | "onRetry" | "empty" | "filtered" | "pagination"
+>;
 
 export function TripTable({
   items,
@@ -70,134 +68,138 @@ export function TripTable({
   onLinkClick,
   timezone,
   order,
-  onSort,
-  footer,
+  onOrder,
+  state,
 }: {
-  items: DTO["TripSummary"][] | undefined;
+  items: Trip[] | undefined;
   selectedId: string | null;
   showOwner: boolean;
   linkFor: (id: string) => To;
   onLinkClick: (event: MouseEvent<HTMLAnchorElement>, id: string) => void;
   timezone: string;
   order: TripOrder;
-  onSort: () => void;
-  footer: ReactNode;
+  onOrder: (order: TripOrder) => void;
+  state: TripTableState;
 }) {
   const { t, i18n } = useTranslation("trips"),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
-  return (
-    <>
-      <Table className="trips-table">
-        <caption className="visually-hidden">{t("listLabel")}</caption>
-        <thead>
-          <tr>
-            <th scope="col" className="trips-col-route">
-              {t("route")}
-            </th>
-            <th scope="col" className="trips-col-cargo">
-              {t("cargo")}
-            </th>
-            <th scope="col" className="trips-col-distance trips-numeric">
-              {t("distance")}
-            </th>
-            <th scope="col" className="trips-col-source">
-              {t("source")}
-            </th>
-            <th scope="col" className="trips-col-decision">
-              {t("decision")}
-            </th>
-            <th
-              scope="col"
-              className="trips-col-time"
-              aria-sort={order === "completion_desc" ? "descending" : "ascending"}
-            >
-              <span className="trips-column-label">{t("completionColumn")}</span>
-              <button type="button" className="trips-sort" onClick={onSort}>
-                {t("completion")}
-                <span aria-hidden="true">{order === "completion_desc" ? "↓" : "↑"}</span>
-              </button>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {items?.map((trip) => {
-            const selected = trip.id === selectedId;
-            const timestamp = tripListTimestamp(trip);
-            return (
-              <tr key={trip.id} className="trips-row" data-selected={selected ? "true" : undefined}>
-                <td className="trips-route">
-                  <CellLabel>{t("route")}</CellLabel>
-                  <span className="trips-route-line">
-                    <GameChip game={trip.game} />
-                    <Link
-                      id={`trip-link-${trip.id}`}
-                      className="trips-link"
-                      to={linkFor(trip.id)}
-                      aria-current={selected ? "true" : undefined}
-                      aria-describedby={`trip-time-${trip.id}`}
-                      onClick={(event) => onLinkClick(event, trip.id)}
-                    >
-                      <span>
-                        {trip.number !== undefined && (
-                          <span className="trips-number">#{trip.number} </span>
-                        )}
-                        <CatalogName value={trip.origin} /> →{" "}
-                        <CatalogName value={trip.destination} />
-                      </span>
-                    </Link>
-                  </span>
-                  {showOwner && <span className="trips-owner">{trip.owner.nickname}</span>}
-                  {!showOwner && (trip.event || trip.gameMode) && (
-                    <span className="trips-row-meta">
-                      {trip.gameMode && (
-                        <span>
-                          {t(
-                            trip.gameMode === "unknown"
-                              ? "recordedUnknown"
-                              : `telemetryMode_${trip.gameMode}`,
-                          )}
-                        </span>
-                      )}
-                      {trip.event && (
-                        <Link to={`/account/events/${trip.event.id}`}>{trip.event.title}</Link>
-                      )}
-                    </span>
+  const columns: DataTableColumn<Trip, "completion">[] = [
+    {
+      id: "route",
+      header: t("route"),
+      className: "trips-col-route trips-route",
+      cell: (trip) => {
+        const selected = trip.id === selectedId;
+        return (
+          <>
+            <span className="trips-route-line">
+              <GameChip game={trip.game} />
+              <Link
+                id={`trip-link-${trip.id}`}
+                className="trips-link"
+                to={linkFor(trip.id)}
+                aria-current={selected ? "true" : undefined}
+                aria-describedby={`trip-time-${trip.id}`}
+                onClick={(event) => onLinkClick(event, trip.id)}
+              >
+                <span>
+                  {trip.number !== undefined && (
+                    <span className="trips-number">#{trip.number} </span>
                   )}
-                </td>
-                <td>
-                  <CellLabel>{t("cargo")}</CellLabel>
+                  <CatalogName value={trip.origin} /> → <CatalogName value={trip.destination} />
+                </span>
+              </Link>
+            </span>
+            {showOwner && <span className="trips-owner">{trip.owner.nickname}</span>}
+            {!showOwner && (trip.event || trip.gameMode) && (
+              <span className="trips-row-meta">
+                {trip.gameMode && (
                   <span>
-                    <CatalogName value={trip.cargo} />
-                  </span>
-                </td>
-                <td className="trips-numeric">
-                  <CellLabel>{t("distance")}</CellLabel>
-                  <span>{formatQuantity(trip.actualDistanceM, "km", locale)}</span>
-                </td>
-                <td className="trips-source trips-muted">
-                  <CellLabel>{t("source")}</CellLabel>
-                  <span>{sourceNames(trip, t)}</span>
-                </td>
-                <td>
-                  <CellLabel>{t("decision")}</CellLabel>
-                  <DecisionBadge decision={trip.decision} />
-                </td>
-                <td className="trips-muted">
-                  <CellLabel>{t("completionColumn")}</CellLabel>
-                  <span id={`trip-time-${trip.id}`}>
-                    {formatUtc(timestamp?.at ?? null, locale, timezone)}
-                    {timestamp?.label && (
-                      <small className="trips-time-basis">{t(timestamp.label)}</small>
+                    {t(
+                      trip.gameMode === "unknown"
+                        ? "recordedUnknown"
+                        : `telemetryMode_${trip.gameMode}`,
                     )}
                   </span>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </Table>
-      {items?.length === 0 && <p className="trips-empty">{t("empty")}</p>}
-      <div className="trips-list-footer">{footer}</div>
-    </>
+                )}
+                {trip.event && (
+                  <Link to={`/account/events/${trip.event.id}`}>{trip.event.title}</Link>
+                )}
+              </span>
+            )}
+          </>
+        );
+      },
+    },
+    {
+      id: "cargo",
+      header: t("cargo"),
+      className: "trips-col-cargo",
+      cell: (trip) => (
+        <span>
+          <CatalogName value={trip.cargo} />
+        </span>
+      ),
+    },
+    {
+      id: "distance",
+      header: t("distance"),
+      align: "end",
+      className: "trips-col-distance",
+      cell: (trip) => <span>{formatQuantity(trip.actualDistanceM, "km", locale)}</span>,
+    },
+    {
+      id: "source",
+      header: t("source"),
+      className: "trips-col-source trips-source trips-muted",
+      cell: (trip) => <span>{sourceNames(trip, t)}</span>,
+    },
+    {
+      id: "decision",
+      header: t("decision"),
+      className: "trips-col-decision",
+      cell: (trip) => <DecisionBadge decision={trip.decision} />,
+    },
+    {
+      id: "completion",
+      header: t("completion"),
+      cardLabel: t("completionColumn"),
+      className: "trips-col-time trips-muted",
+      sort: {
+        key: "completion",
+        defaultDirection: "desc",
+        options: { desc: t("newestFirst"), asc: t("oldestFirst") },
+      },
+      cell: (trip) => {
+        const timestamp = tripListTimestamp(trip);
+        return (
+          <span id={`trip-time-${trip.id}`}>
+            {formatUtc(timestamp?.at ?? null, locale, timezone)}
+            {timestamp?.label && <small className="trips-time-basis">{t(timestamp.label)}</small>}
+          </span>
+        );
+      },
+    },
+  ];
+  return (
+    <DataTable
+      className="trips-table"
+      caption={t("listLabel")}
+      columns={columns}
+      rows={items}
+      rowKey={(trip) => trip.id}
+      rowAttributes={(trip) => ({
+        className: "trips-row",
+        "data-selected": trip.id === selectedId ? "true" : undefined,
+      })}
+      cardsBelow={800}
+      sort={{
+        value: { key: "completion", direction: order === "completion_asc" ? "asc" : "desc" },
+        onChange: (next) =>
+          onOrder(next.direction === "asc" ? "completion_asc" : "completion_desc"),
+        label: t("completionOrder"),
+      }}
+      {...state}
+    />
   );
 }
