@@ -14,6 +14,7 @@ export const dashboardTranslations = {
       continueDraft: "Продолжить черновик · {{date}}",
       events: "Мероприятия без ответа ({{total}})",
       review: "Ждут решения ({{total}})",
+      promotions: "Готовы к повышению ({{total}})",
       applications: "Заявки на рассмотрении ({{total}})",
     },
     filters: {
@@ -160,6 +161,7 @@ export const dashboardTranslations = {
       continueDraft: "Continue draft · {{date}}",
       events: "Events awaiting your response ({{total}})",
       review: "Awaiting decision ({{total}})",
+      promotions: "Ready for promotion ({{total}})",
       applications: "Submitted applications ({{total}})",
     },
     title: "Company Overview",

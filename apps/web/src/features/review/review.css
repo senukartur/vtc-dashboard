@@ -759,3 +759,120 @@
   width: 100%;
   padding: 0;
 }
+
+/* Stage 3 keeps decision controls above the supporting facts and history. */
+.dispatch-review .review-queue-header > .button {
+  justify-self: start;
+}
+.dispatch-review .review-toolbar {
+  align-items: start;
+}
+.dispatch-review .review-filters {
+  align-items: start;
+}
+.dispatch-review .review-filter {
+  max-width: min(100%, 22rem);
+}
+.dispatch-review .dispatch-table thead th {
+  overflow-wrap: anywhere;
+}
+.dispatch-review .dispatch-table th.dispatch-age {
+  width: 15%;
+}
+.dispatch-review .dispatch-table th.review-driver {
+  width: 15%;
+}
+.dispatch-review .dispatch-table th.review-route {
+  width: 24%;
+}
+.dispatch-review .dispatch-table th.dispatch-game {
+  width: 9%;
+}
+.dispatch-review .dispatch-table th.dispatch-distance {
+  width: 13%;
+}
+.dispatch-review .dispatch-table th.dispatch-reason {
+  width: 24%;
+}
+.dispatch-review .dispatch-reason .trips-decision {
+  margin: 0 6px 4px 0;
+}
+.dispatch-review .dispatch-driver-filter {
+  position: relative;
+  min-width: 0;
+}
+.dispatch-review .dispatch-driver-filter > .button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+.dispatch-review .dispatch-driver-options:not([hidden]) {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  gap: 6px;
+  width: min(18rem, 72vw);
+  padding: 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.dispatch-review .dispatch-duplicate-status {
+  width: auto;
+}
+.dispatch-review .dispatch-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.dispatch-review .dispatch-pair-trip {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 8px;
+  border-inline-start: 2px solid var(--border);
+}
+.review-decision .dispatch-comparison .table {
+  table-layout: fixed;
+  font-size: var(--font-small);
+}
+.review-decision .dispatch-comparison :is(th, td) {
+  padding-inline: 6px;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.review-decision .dispatch-comparison .dispatch-comparison-field {
+  width: 32%;
+  color: var(--muted);
+}
+.review-decision .dispatch-comparison th > span {
+  display: block;
+}
+.review-decision .dispatch-comparison tr[data-changed] td {
+  background: var(--accent-soft);
+}
+@media (max-width: 760px) {
+  .review-decision .dispatch-comparison .table tbody .dispatch-comparison-field {
+    width: auto;
+    grid-column: 1 / -1;
+  }
+  .dispatch-review .dispatch-table .dispatch-age {
+    order: 2;
+  }
+  .dispatch-review .dispatch-table .dispatch-game,
+  .dispatch-review .dispatch-table .dispatch-distance {
+    order: 4;
+  }
+  .dispatch-review .dispatch-table .dispatch-reason {
+    order: 5;
+    flex-basis: 100%;
+  }
+  .dispatch-review .dispatch-driver-options:not([hidden]) {
+    position: static;
+    max-width: 100%;
+  }
+  .dispatch-review .dispatch-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -32,7 +32,7 @@ Roles are additive and separate from ETS2/ATS qualifications. Nobody may approve
 - **Analytics**: accepted trip counts and actual distance for company and driver, in one reporting timezone. Browse recent trips, filter by date, search or follow driver history links.
 - **Events**: staff draft and publish public or private convoys with platform, cities, depots, exact distance, DLCs and galleries with covers. Members see depot logos and RSVPs. Only authors and admins see decline reasons. One-hour reminders and nearest-event quick RSVP in the header and overview. Staff record actual attendance. Confirmed event trips may carry prescribed loads beyond qualification limits.
 - **Notifications**: in-app history and updates while the site is open.
-- **Workspace attention**: counts and actions by permission.
+- **Workspace attention**: counts by permission, promotion links.
 - **Administration**: members, roles, qualification levels, company settings, integrations and a filterable audit log. The serving Director transfers leadership using a ten-minute email code.
 
 ## Not in the MVP

@@ -25,6 +25,7 @@ export const paths = {
   reconciliation: "/account/review/reconciliation",
   reviewTrip: "/account/review/:tripId",
   applications: "/account/admin/applications",
+  promotions: "/account/admin/promotions",
   members: "/account/admin/members",
   catalogs: "/account/catalogs",
   settings: "/account/admin/settings",
@@ -42,6 +43,7 @@ export type NavItemId =
   | "dispatch"
   | "reconciliation"
   | "applications"
+  | "promotions"
   | "members"
   | "catalogs"
   | "settings";
@@ -84,6 +86,7 @@ export const navGroups: readonly NavGroup[] = [
     id: "management",
     items: [
       { id: "applications", route: "applications", capability: "applications.manage" },
+      { id: "promotions", route: "promotions", capability: "qualifications.manage" },
       { id: "members", route: "members", capability: "members.manage" },
       { id: "catalogs", route: "catalogs", capability: "qualifications.manage" },
       { id: "settings", route: "settings", capability: "company.configure" },
@@ -127,6 +130,7 @@ export const routeMeta: Record<RouteId, RouteMeta> = {
   reconciliation: item("review", "reconciliation"),
   reviewTrip: item("review", "dispatch", "tripReview"),
   applications: item("management", "applications"),
+  promotions: item("management", "promotions"),
   members: item("management", "members"),
   catalogs: item("management", "catalogs"),
   settings: item("management", "settings"),
@@ -134,21 +138,31 @@ export const routeMeta: Record<RouteId, RouteMeta> = {
 
 const routeObjects = (Object.keys(paths) as RouteId[]).map((id) => ({ id, path: paths[id] }));
 /** Matches with React Router's own ranking, so `/review/reconciliation` beats `/review/:tripId`. */
-export function matchRouteMeta(pathname: string): (RouteMeta & { id: RouteId }) | null {
+export function matchRouteMeta(
+  pathname: string,
+  stagedDispatch = false,
+): (RouteMeta & { id: RouteId }) | null {
   const match = matchRoutes(routeObjects, pathname)?.at(-1);
   if (!match) return null;
   const id = match.route.id;
-  return { id, ...routeMeta[id] };
+  const meta = routeMeta[id];
+  return stagedDispatch && id === "reconciliation"
+    ? { id, ...meta, item: "dispatch" }
+    : { id, ...meta };
 }
 export function navItem(id: NavItemId): NavItem | undefined {
   return navGroups.flatMap((group) => group.items).find((entry) => entry.id === id);
 }
 
-export function visibleGroups(capabilities: readonly string[]): NavGroup[] {
+export function visibleGroups(capabilities: readonly string[], stagedDispatch = false): NavGroup[] {
   return navGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((entry) => capabilities.includes(entry.capability)),
+      items: group.items.filter(
+        (entry) =>
+          capabilities.includes(entry.capability) &&
+          !(stagedDispatch && entry.id === "reconciliation"),
+      ),
     }))
     .filter((group) => group.items.length > 0);
 }
@@ -203,9 +217,9 @@ export function bottomBarItems(capabilities: readonly string[]): BarItem[] {
   ];
 }
 /** Groups for the phone More sheet: the visible groups without sections already in the bar. */
-export function moreGroups(capabilities: readonly string[]): NavGroup[] {
+export function moreGroups(capabilities: readonly string[], stagedDispatch = false): NavGroup[] {
   const inBar = new Set<string>(bottomBarItems(capabilities).map((entry) => entry.id));
-  return visibleGroups(capabilities)
+  return visibleGroups(capabilities, stagedDispatch)
     .map((group) => ({ ...group, items: group.items.filter((entry) => !inBar.has(entry.id)) }))
     .filter((group) => group.items.length > 0);
 }

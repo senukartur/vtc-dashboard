@@ -2,14 +2,17 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
+import { useWorkspaceSummary } from "../../app/workspace-summary.js";
 import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Pager } from "../../shared/ui/pager.js";
 import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
 import { EventSelect, EvidenceItem } from "../manual-reports/fields.js";
 import { ReferenceFacts } from "../manual-reports/ReferenceFacts.js";
 import { DecisionPanel } from "../review/DecisionPanel.js";
-import { ReconciliationHistory } from "../review/ReconciliationPage.js";
+import { dispatchSearch } from "../review/dispatch-model.js";
+import { ReviewAccessState } from "../review/ReviewAccessState.js";
 import { ProposalList } from "../review/ReviewPanel.js";
+import { ReconciliationHistory } from "../review/reconciliation-parts.js";
 import { queueSearch } from "../review/review-model.js";
 import {
   Codes,
@@ -207,8 +210,12 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
 function ReviewDetail({ tripId }: { tripId: string }) {
   const { t } = useTranslation("trips"),
     location = useLocation(),
-    [history, setHistory] = useState(false),
-    back = `/account/review${queueSearch(new URLSearchParams(location.search))}`;
+    summary = useWorkspaceSummary(),
+    mode = summary.dispatchMode,
+    staged = mode === "stage3",
+    search = new URLSearchParams(location.search),
+    back = `/account/review${staged ? dispatchSearch(search) : queueSearch(search)}`;
+  if (!mode) return <ReviewAccessState summary={summary} />;
   return (
     <div className="stack trip-page review-detail">
       <header className="trip-heading review-detail-header">
@@ -222,7 +229,18 @@ function ReviewDetail({ tripId }: { tripId: string }) {
           </Link>
         </Button>
       </header>
-      <DecisionPanel tripId={tripId} variant="page" />
+      <DecisionPanel key={`${mode}:${tripId}`} tripId={tripId} variant="page" staged={staged}>
+        {staged && <ReviewDetailHistory key={tripId} tripId={tripId} />}
+      </DecisionPanel>
+      {!staged && <ReviewDetailHistory key={tripId} tripId={tripId} />}
+    </div>
+  );
+}
+function ReviewDetailHistory({ tripId }: { tripId: string }) {
+  const { t } = useTranslation("trips");
+  const [history, setHistory] = useState(false);
+  return (
+    <>
       <Card>
         <details open={history} onToggle={(e) => setHistory(e.currentTarget.open)}>
           <summary>{t("privateView")}</summary>
@@ -230,7 +248,7 @@ function ReviewDetail({ tripId }: { tripId: string }) {
         </details>
       </Card>
       <ReconciliationHistory tripId={tripId} />
-    </div>
+    </>
   );
 }
 function PrivateHistory({ tripId }: { tripId: string }) {

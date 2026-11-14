@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { createAppQueryClient } from "../../apps/web/src/app/session-cache.ts";
+import { affectedRead, type Change } from "../../apps/web/src/features/qualifications/changes.ts";
 import { fenceQualificationReads } from "../../apps/web/src/features/qualifications/read-fence.ts";
 
 const scope = ["qualification-workspace", "synthetic", 1, 1, "manage"];
@@ -11,7 +12,8 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
-const level = { kind: "level", id: "level", game: "ets2" } as const;
+const level = { kind: "level", id: "level", game: "ets2", publication: true } as const;
+const fenceScope = (change: Change) => (path: string) => affectedRead(change, path, "synthetic");
 
 test("synchronous abort replacement cannot be mistaken for the cancelled retryer after its old catch sets idle", async () => {
   const client = createAppQueryClient(),
@@ -34,7 +36,7 @@ test("synchronous abort replacement cannot be mistaken for the cancelled retryer
     })
     .catch(() => undefined);
   try {
-    await fenceQualificationReads(client, scope, level, "synthetic", false);
+    await fenceQualificationReads(client, scope, fenceScope(level));
     expect(client.getQueryCache().find({ queryKey })?.promise).toBeDefined();
     expect(client.getQueryState(queryKey)?.status).not.toBe("success");
     newer.resolve(4);
@@ -95,7 +97,7 @@ test("fence preserves newer cached data and timestamps without cancellation erro
       }),
     );
     client.setQueryData(list, { version: 3 }, { updatedAt: 12345 });
-    await fenceQualificationReads(client, scope, level, "synthetic", false);
+    await fenceQualificationReads(client, scope, fenceScope(level));
     old.resolve({ version: 1 });
     await pending;
     expect(aborted).toBe(true);
@@ -126,6 +128,7 @@ test("fenced progress and old-cursor history require new reads and ignore even a
       game: "ets2",
       levelId: "next",
       roleChange: false,
+      historical: false,
     } as const;
   const reads = [
     "qualification-progress?game=ets2",
@@ -150,7 +153,7 @@ test("fenced progress and old-cursor history require new reads and ignore even a
         })
         .catch(() => undefined);
     });
-    await fenceQualificationReads(client, scope, change, "synthetic", false);
+    await fenceQualificationReads(client, scope, fenceScope(change));
     for (const item of reads) {
       expect(item.aborted).toBe(true);
       expect(client.getQueryState(item.queryKey)).toMatchObject({
@@ -213,7 +216,7 @@ test("status repair never crosses an intervening new fetch, success, error or ca
           },
         })
         .catch(() => undefined);
-      await fenceQualificationReads(client, scope, level, "synthetic", false);
+      await fenceQualificationReads(client, scope, fenceScope(level));
       if (result === "cached-success") {
         expect(client.getQueryState(queryKey)).toMatchObject({
           data: 4,

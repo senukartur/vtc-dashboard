@@ -1,4 +1,9 @@
 import { AccountFailure } from "../account/transport.js";
+import {
+  affectedPromotionRead,
+  promotionCandidatesPath,
+  promotionHistoryPath,
+} from "./promotion-transport.js";
 import { type DTO, type Game, schema } from "./transport.js";
 
 export type CommandOwner =
@@ -7,8 +12,15 @@ export type CommandOwner =
   | { kind: "member"; id: string; game: Game; rolePromotionLevelId: string | null };
 export type Change =
   | { kind: "ladder"; game: Game; archive: boolean }
-  | { kind: "level"; id: string; game: Game }
-  | { kind: "member"; id: string; game: Game; levelId: string; roleChange: boolean };
+  | { kind: "level"; id: string; game: Game; publication: boolean }
+  | {
+      kind: "member";
+      id: string;
+      game: Game;
+      levelId: string;
+      roleChange: boolean;
+      historical: boolean;
+    };
 const uncertain = () => new AccountFailure("uncertain");
 export function commandChange(
   owner: CommandOwner | undefined,
@@ -34,7 +46,7 @@ export function commandChange(
     ((path === `/admin/qualification-levels/${owner.id}` && method === "PATCH") ||
       (path === `/admin/qualification-levels/${owner.id}/rule-versions` && method === "POST"))
   )
-    return { kind: "level", id: owner.id, game: owner.game };
+    return { kind: "level", id: owner.id, game: owner.game, publication: method === "POST" };
   const input = body as Record<string, unknown>,
     promotion = path === `/admin/members/${owner.id}/promotions`;
   if (
@@ -51,6 +63,7 @@ export function commandChange(
       game: owner.game,
       levelId,
       roleChange: promotion && levelId === owner.rolePromotionLevelId,
+      historical: !promotion && input.purpose === "historical_resolution",
     };
   }
   throw uncertain();
@@ -99,10 +112,22 @@ export function affectedRead(
   path: string,
   selfId: string | undefined,
   conflict = false,
+  refreshPromotions = true,
 ) {
   const url = new URL(path, "https://qualification.invalid"),
     game = url.searchParams.get("game");
   if (url.pathname === `/admin/qualification-ladders/${change.game}`) return true;
+  if (
+    refreshPromotions &&
+    affectedPromotionRead(
+      url,
+      change.game,
+      change.kind === "member"
+        ? { history: true, memberId: change.id }
+        : { history: change.kind === "ladder" ? change.archive : !change.publication },
+    )
+  )
+    return true;
   if (change.kind === "ladder")
     return (
       game === change.game &&
@@ -129,6 +154,18 @@ export function affectedRead(
     ].includes(url.pathname.split("/").at(-1) ?? "")
   );
 }
+export function deferPagedQualificationRead(change: Change, path: string) {
+  const { pathname, searchParams } = new URL(path, "https://qualification.invalid");
+  return (
+    searchParams.has("cursor") &&
+    (pathname === promotionCandidatesPath ||
+      pathname === promotionHistoryPath ||
+      (change.kind !== "level" &&
+        (pathname === "/qualification-levels" ||
+          /\/qualification-(?:assignments|action-history)$/.test(pathname))))
+  );
+}
+
 export function isRuleHistory(id: string, path: string) {
   const pathname = new URL(path, "https://qualification.invalid").pathname;
   return [

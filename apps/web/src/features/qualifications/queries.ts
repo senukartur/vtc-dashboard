@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "../../app/Session.js";
+import { refreshWorkspaceSummary } from "../../app/workspace-summary-cache.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
 import {
@@ -9,6 +10,7 @@ import {
   type Change,
   type CommandOwner,
   commandChange,
+  deferPagedQualificationRead,
   isRuleHistory,
   validateChangedResult,
 } from "./changes.js";
@@ -67,7 +69,7 @@ export function useQualificationCommand(
     level: DTO["QualificationLevel"],
     operation: "rename" | "publish" | "schedule",
   ) => void,
-  options?: { preserveLimitedRecovery?: boolean },
+  options?: { preserveLimitedRecovery?: boolean; refreshPromotions?: boolean },
 ) {
   const session = useSession(),
     client = useQueryClient(),
@@ -116,7 +118,10 @@ export function useQualificationCommand(
   const pathOf = (key: readonly unknown[]) =>
     typeof key.at(-2) === "string" ? (key.at(-2) as string) : "";
   async function refresh(change: Change, level?: DTO["QualificationLevel"], conflict = false) {
-    await fenceQualificationReads(client, scope, change, session.self?.member.id, conflict);
+    const refreshPromotions = options?.refreshPromotions !== false;
+    const affected = (path: string) =>
+      affectedRead(change, path, session.self?.member.id, conflict, refreshPromotions);
+    await fenceQualificationReads(client, scope, affected);
     if (change.kind === "level")
       await client.invalidateQueries({
         queryKey: scope,
@@ -133,7 +138,7 @@ export function useQualificationCommand(
           queryKey: scope,
           predicate: (query) =>
             query.queryKey.at(-1) === "EnvelopeListQualificationLevel" &&
-            affectedRead(change, pathOf(query.queryKey), session.self?.member.id, conflict),
+            affected(pathOf(query.queryKey)),
         },
         (previous) =>
           previous
@@ -160,34 +165,33 @@ export function useQualificationCommand(
       const path = pathOf(key);
       if (change.kind === "level" && isRuleHistory(change.id, path)) return false;
       if (level && key.at(-1) === "EnvelopeListQualificationLevel") return false;
-      return affectedRead(change, path, session.self?.member.id, conflict);
+      return affected(path);
     };
     await client.invalidateQueries({
       queryKey: scope,
       predicate: (query) => dependent(query.queryKey),
       refetchType: "none",
     });
-    await client.refetchQueries(
-      {
-        queryKey: scope,
-        type: "active",
-        predicate: (query) => {
-          const path = pathOf(query.queryKey),
-            url = new URL(path, "https://qualification.invalid");
-          // State-bound history cursors are reset by the owner before refresh, never replayed after a write.
-          if (
-            (change.kind === "member" || change.kind === "ladder") &&
-            (url.pathname === "/qualification-levels" ||
-              /\/qualification-(?:assignments|action-history)$/.test(url.pathname)) &&
-            url.searchParams.has("cursor")
-          )
-            return false;
-          return dependent(query.queryKey);
+    await Promise.all([
+      client.refetchQueries(
+        {
+          queryKey: scope,
+          type: "active",
+          // Cursor pages stay stale until their owner navigates or starts at the first page.
+          predicate: (query) =>
+            dependent(query.queryKey) &&
+            !deferPagedQualificationRead(change, pathOf(query.queryKey)),
         },
-      },
-      // Older reads were fenced above; only another post-commit read may be coalesced here.
-      { cancelRefetch: false },
-    );
+        // Older reads were fenced above; only another post-commit read may be coalesced here.
+        { cancelRefetch: false },
+      ),
+      refreshPromotions &&
+      !conflict &&
+      (change.kind === "ladder" ||
+        (change.kind === "level" ? change.publication : !change.historical))
+        ? refreshWorkspaceSummary(client, session)
+        : undefined,
+    ]);
     const projectionFilters = {
       predicate: ({ queryKey }: { queryKey: readonly unknown[] }) =>
         affectedQualificationProjection(change, queryKey),

@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import type { components } from "@vtc/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAppQueryClient } from "../../apps/web/src/app/session-cache.ts";
 import {
   refreshWorkspaceSummary,
@@ -9,7 +9,11 @@ import {
 import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { AccountFailure } from "../../apps/web/src/features/account/transport.ts";
 import { dashboardTranslations } from "../../apps/web/src/features/dashboard/translations.ts";
-import { schema } from "../../apps/web/src/features/dashboard/transport.ts";
+import {
+  DashboardFailure,
+  dashboardRead,
+  schema,
+} from "../../apps/web/src/features/dashboard/transport.ts";
 import {
   blockView,
   type Countdown,
@@ -52,6 +56,31 @@ function keys(value: object, prefix = ""): string[] {
 const placeholders = (text: string) => [...text.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
 /** The countdown without its timer hint: what the chip shows. */
 const shown = ({ nextChangeMs: _, ...rest }: Countdown) => rest;
+
+it("preserves workspace conflicts with or without a valid setup-required body", async () => {
+  for (const setupRequired of [true, false]) {
+    const body = setupRequired
+      ? JSON.stringify({
+          error: { code: "SETUP_REQUIRED", messageKey: "errors.setup_required", retryable: false },
+          meta: { requestId: "synthetic-dashboard-conflict" },
+        })
+      : "Not JSON";
+    const response = new Response(body, {
+      status: 409,
+      headers: { "Content-Type": "application/json" },
+    });
+    const readBody = vi.spyOn(response, "json");
+    vi.stubGlobal("fetch", async () => response);
+    const request = dashboardRead(
+      "/me/workspace-summary?view=stage3",
+      "WorkspaceStage3SummaryEnvelope",
+      new AbortController().signal,
+    );
+    await expect(request).rejects.toBeInstanceOf(DashboardFailure);
+    await expect(request).rejects.toMatchObject({ kind: "conflict", status: 409, setupRequired });
+    expect(readBody).toHaveBeenCalledTimes(1);
+  }
+});
 
 it("refreshes a newer authority in the command's member and generation after commit", async () => {
   const require = createRequire(new URL("../../apps/web/package.json", import.meta.url));
@@ -157,6 +186,7 @@ describe("needs attention sections", () => {
     "events.respond",
     "trips.review",
     "applications.manage",
+    "qualifications.manage",
   ];
   const summary: components["schemas"]["WorkspaceSummary"] = {
     computedAt: "2026-11-12T12:00:00.000Z",
@@ -174,6 +204,17 @@ describe("needs attention sections", () => {
       { key: "applications", count: 3 },
     ]);
     expect(visibleActionSections(summary, ["trips.review"])).toEqual([{ key: "review", count: 4 }]);
+  });
+  it("sums promotion readiness across games for staff and hides zero or omitted counts", () => {
+    const loaded = { computedAt: summary.computedAt, promotionsReady: { ets2: 2, ats: 4 } };
+    expect(visibleActionSections(loaded, ["qualifications.manage"])).toEqual([
+      { key: "promotions", count: 6 },
+    ]);
+    expect(visibleActionSections(loaded, ["trips.review"])).toEqual([]);
+    expect(visibleActionSections({ ...loaded, promotionsReady: { ets2: 0, ats: 0 } }, all)).toEqual(
+      [],
+    );
+    expect(visibleActionSections({ computedAt: summary.computedAt }, all)).toEqual([]);
   });
   it("never treats a count the summary omits as a failure: the section is simply absent", () => {
     // Applications module off: the director's summary has no application count at all.
