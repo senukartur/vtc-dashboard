@@ -359,7 +359,8 @@ export const administrationTranslations = {
       stepSuccessor: "1 · Successor",
       stepCode: "2 · Code and confirmation",
       choose: "Choose a member…",
-      consequenceDriver: "You stay a driver with your other roles, qualifications and trips.",
+      consequenceDriver:
+        "You remain a driver and keep your qualifications and trips. The new Director can appoint you as a Deputy Director.",
       consequenceEmail: "The code goes to your verified email.",
       resendIn: "New code available in {{time}}",
       codeIntro:
@@ -877,7 +878,8 @@ export const administrationTranslations = {
       stepSuccessor: "1 · Преемник",
       stepCode: "2 · Код и подтверждение",
       choose: "Выберите участника…",
-      consequenceDriver: "Вы останетесь водителем с прежними ролями, квалификациями и рейсами.",
+      consequenceDriver:
+        "Вы останетесь водителем и сохраните свои квалификации и рейсы. Новый директор может назначить вас заместителем.",
       consequenceEmail: "Код придёт на ваш подтверждённый email.",
       resendIn: "Новый код можно запросить через {{time}}",
       codeIntro:

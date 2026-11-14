@@ -408,16 +408,17 @@ test(
 
       await page.goto("/account/admin/settings?tab=qualifications");
       await settings.getByRole("button", { name: "Archive " + name, exact: true }).click();
-      await expect(settings.getByLabel("Transfer drivers to")).toHaveValue(source.id);
-      await settings.getByRole("button", { name: "Review archive", exact: true }).click();
+      const archiveDialog = page.getByRole("dialog");
+      await expect(archiveDialog.getByLabel("Transfer drivers to")).toHaveValue(source.id);
+      await expect(archiveDialog.getByRole("button", { name: "Archive level" })).toBeDisabled();
+      await archiveDialog
+        .getByRole("checkbox", { name: "I confirm the archive and driver reassignment." })
+        .check();
       const archived = page.waitForResponse(
         responseAt(ladderPath + "/levels/" + changed.nextLevel.id + "/archive", "POST"),
       );
       const archivedSummary = page.waitForResponse(responseAt(summaryPath, "GET"));
-      await page
-        .getByRole("dialog")
-        .getByRole("button", { name: "Archive level", exact: true })
-        .click();
+      await archiveDialog.getByRole("button", { name: "Archive level", exact: true }).click();
       expect((await archived).status()).toBe(200);
       const afterArchive = (
         (await (await archivedSummary).json()).data as S["WorkspaceStage3Summary"]

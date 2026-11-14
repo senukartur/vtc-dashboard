@@ -522,11 +522,11 @@ test("candidates use active current per-game assignments, canonical thresholds, 
 });
 
 test("candidate nickname search filters active rows and totals before paging or eligibility", async () => {
-  const mixed = await member(["trainee"], true, "Fictional Pilot%_\\A");
-  const second = await member(["trainee"], true, "Fictional pILOT%_\\B");
-  const unready = await member(["trainee"], true, "Fictional pilot%_\\C");
-  const former = await member(["trainee"], true, "Fictional pilot%_\\Former");
-  await member(["trainee"], true, "Fictional pilotXYA");
+  const mixed = await member(["trainee"], true, "Synthetic Candidate Pilot_%\\A");
+  const second = await member(["trainee"], true, "Synthetic Candidate pILOT_%\\B");
+  const unready = await member(["trainee"], true, "Synthetic Candidate pilot_%\\C");
+  const former = await member(["trainee"], true, "Synthetic Candidate pilot_%\\Former");
+  await member(["trainee"], true, "Synthetic Candidate pilotXYA");
   await identity.administer(
     director,
     former.actor.userId,
@@ -549,7 +549,7 @@ test("candidate nickname search filters active rows and totals before paging or 
   const get = (filters: Record<string, string>, cookie = directorCookie) =>
     app.inject({ url: `${base}?${new URLSearchParams(filters)}`, headers: { cookie } });
   const query = { game: "ets2", limit: "1" };
-  const search = "  pIlOt%_\\  ";
+  const search = "  pIlOt_%\\  ";
   try {
     const first = await get({ ...query, search });
     expect(first.statusCode).toBe(200);
