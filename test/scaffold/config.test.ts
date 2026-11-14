@@ -226,6 +226,42 @@ test("qualification activation requires identity/trips and an independent cursor
     readConfig({ ...input, QUALIFICATION_LADDER_EDITS_ENABLED: "true" }).qualifications,
     { cursorKey: "b".repeat(64), ladderEditsEnabled: true },
   );
+  const cutoff = "2026-01-02T03:04:05.678Z";
+  const tracking = {
+    QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED: "true",
+    QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE: cutoff,
+  };
+  assert.equal(
+    readConfig({ ...input, ...tracking }).qualifications?.eligibilityTrackingSince,
+    cutoff,
+  );
+  assert.deepEqual(
+    readConfig({ ...input, ...tracking, QUALIFICATION_LADDER_EDITS_ENABLED: "true" })
+      .qualifications,
+    { cursorKey: "b".repeat(64), ladderEditsEnabled: true, eligibilityTrackingSince: cutoff },
+  );
+  for (const off of [
+    { ...tracking, QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED: "false" },
+    { QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE: "" },
+  ])
+    assert.equal(
+      readConfig({ ...input, ...off }).qualifications?.eligibilityTrackingSince,
+      undefined,
+    );
+  for (const changes of [
+    { QUALIFICATIONS_ENABLED: "false" },
+    { QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED: "yes" },
+    ...[
+      "",
+      "2026-02-30T03:04:05.678Z",
+      "2026-01-02T03:04:05.678+00:00",
+      "9999-01-01T00:00:00.000Z",
+    ].map((value) => ({ QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE: value })),
+  ])
+    assert.throws(
+      () => readConfig({ ...input, ...tracking, ...changes }),
+      /QUALIFICATIONS_ELIGIBILITY_TRACKING/,
+    );
   for (const changes of [
     { QUALIFICATIONS_ENABLED: "yes" },
     { QUALIFICATION_LADDER_EDITS_ENABLED: "yes" },

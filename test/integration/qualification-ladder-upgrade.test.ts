@@ -25,7 +25,7 @@ const prefix = qualificationLadderPriorFolder();
 beforeAll(async () => {
   control = await testConnection();
   await reset(control);
-  expect(await runMigrations(settings, { folder: await prefix })).toBe(30);
+  expect(await runMigrations(settings, { folder: await prefix })).toBe(31);
 }, SCHEMA_SETUP_TIMEOUT_MS);
 afterAll(async () => {
   await unit.close();
@@ -129,7 +129,7 @@ test(
     const [ledger] = await control.query<RowDataPacket[]>(
       "SELECT version, hash, state FROM _vtc_migrations ORDER BY version",
     );
-    expect(await runMigrations(settings)).toBeGreaterThan(0);
+    expect(await runMigrations(settings)).toBe(1);
     expect(await runMigrations(settings)).toBe(0);
     const [upgraded] = await control.query<RowDataPacket[]>(
       "SELECT CAST(id AS CHAR) id, CAST(user_id AS CHAR) userId, game, level, assigned_at, CAST(level_id AS CHAR) levelId FROM qualification_initial_assignments ORDER BY id",

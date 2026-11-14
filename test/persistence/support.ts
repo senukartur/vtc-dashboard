@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 105 tables including the ledger and 30 migrations.
+// Fresh full-schema preparation now covers 105 tables including the ledger and 31 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -282,7 +282,8 @@ async function publishedPrefixFolder(
     | 27
     | 28
     | 29
-    | 30,
+    | 30
+    | 31,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -337,6 +338,8 @@ async function publishedPrefixFolder(
   if (count === 29 && entries[28]?.tag !== "0028_faulty_caretaker")
     throw new Error("PUBLISHED_STAGE_3_PREFIX_REQUIRED");
   if (count === 30 && entries[29]?.tag !== "0029_orange_zaladane")
+    throw new Error("PUBLISHED_ELIGIBILITY_TRACKING_PREFIX_REQUIRED");
+  if (count === 31 && entries[30]?.tag !== "0030_superb_monster_badoon")
     throw new Error("PUBLISHED_QUALIFICATION_LADDER_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
@@ -471,6 +474,10 @@ export async function stage3PriorFolder(): Promise<string> {
   return publishedPrefixFolder(29);
 }
 
-export async function qualificationLadderPriorFolder(): Promise<string> {
+export async function qualificationEligibilityPriorFolder(): Promise<string> {
   return publishedPrefixFolder(30);
+}
+
+export async function qualificationLadderPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(31);
 }

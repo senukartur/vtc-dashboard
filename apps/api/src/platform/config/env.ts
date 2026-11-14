@@ -14,6 +14,7 @@ import {
 } from "../../modules/notifications/service.js";
 import {
   type QualificationsConfig,
+  validateEligibilityTrackingSince,
   validateQualificationsConfig,
 } from "../../modules/qualifications/service.js";
 import {
@@ -179,12 +180,32 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     throw new Error(
       "Invalid environment fields: QUALIFICATION_LADDER_EDITS_ENABLED, QUALIFICATIONS_ENABLED",
     );
+  const eligibilityTracking = input.QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED;
+  const eligibilitySince = input.QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE;
+  if (
+    ![undefined, "true", "false"].includes(eligibilityTracking) ||
+    (eligibilityTracking === "true" &&
+      (input.QUALIFICATIONS_ENABLED !== "true" || !eligibilitySince))
+  )
+    throw new Error(
+      "Invalid environment fields: QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED, QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE, QUALIFICATIONS_ENABLED",
+    );
+  if (eligibilitySince) {
+    try {
+      validateEligibilityTrackingSince(eligibilitySince);
+    } catch {
+      throw new Error("Invalid environment fields: QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE");
+    }
+  }
   if (input.QUALIFICATIONS_ENABLED === "true") {
     try {
       if (!identity || !trips) throw new Error();
       qualifications = {
         cursorKey: input.QUALIFICATIONS_CURSOR_KEY ?? "",
         ...(input.QUALIFICATION_LADDER_EDITS_ENABLED === "true" && { ladderEditsEnabled: true }),
+        ...(eligibilityTracking === "true" && eligibilitySince !== undefined
+          ? { eligibilityTrackingSince: eligibilitySince }
+          : {}),
       };
       validateQualificationsConfig(qualifications);
       if (

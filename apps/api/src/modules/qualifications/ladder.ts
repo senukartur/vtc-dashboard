@@ -89,6 +89,13 @@ export function createLadder(
       "transaction" | "qualificationContextInTransaction" | "externalCommand"
     >;
     assignment: ReturnType<typeof createAssignmentWriter>;
+    updateEligibility: (
+      tx: TxContext,
+      game: Game,
+      changedLevels: readonly ActiveLevel[],
+      gameLevels: readonly ActiveLevel[],
+      instant: string,
+    ) => Promise<void>;
     emit: (tx: TxContext, id: string, version: number, instant: string) => Promise<void>;
   },
   enabled: boolean,
@@ -292,7 +299,8 @@ export function createLadder(
               );
             const oldTopId = before.at(-1)?.id;
             const newTopId = proposed.at(-1)?.id;
-            const changedSuccessors: string[] = [];
+            const changedSuccessors: ActiveLevel[] = [];
+            const updatedLevels: ActiveLevel[] = [];
             let commandReason = reason;
             if (archived) {
               const row = {
@@ -327,6 +335,7 @@ export function createLadder(
                   row.promotionGeneration + (row.id === oldTopId && row.id !== newTopId ? 1 : 0),
               };
               const updated = { ...row, ...next };
+              updatedLevels.push(updated);
               if (previous)
                 await c(tx)
                   .update(qualificationLevels)
@@ -347,33 +356,13 @@ export function createLadder(
                 if (rationale !== null) commandReason = null;
                 await ports.emit(tx, row.id, next.version, instant);
               }
-              if (successorChanged) changedSuccessors.push(row.id);
+              if (successorChanged) changedSuccessors.push(updated);
             }
-            // Every game command version is invalidated, including a reorder followed by its reversal.
-            // The B2 eligibility writer also resets the observation checkpoint for changed successors.
-            const assignmentIds = (levelIds: string[]) =>
-              c(tx)
-                .select({ id: qualificationAssignments.id })
-                .from(qualificationAssignments)
-                .where(
-                  and(
-                    eq(qualificationAssignments.game, game),
-                    isNull(qualificationAssignments.endedAt),
-                    inArray(qualificationAssignments.levelId, levelIds),
-                  ),
-                );
-            if (changedSuccessors.length) {
-              await c(tx)
-                .update(qualificationStates)
-                .set({ eligibleSince: null })
-                .where(
-                  and(
-                    eq(qualificationStates.game, game),
-                    inArray(qualificationStates.assignmentId, assignmentIds(changedSuccessors)),
-                  ),
-                )
-                .orderBy(asc(qualificationStates.userId));
-            }
+            if (changedSuccessors.length)
+              await ports.updateEligibility(tx, game, changedSuccessors, updatedLevels, instant);
+
+            // Invalidate this game's command versions even after an order is reversed.
+            // The assignment writer increments moved states and publishes that version.
             await c(tx)
               .update(qualificationStates)
               .set({ version: sql`${qualificationStates.version} + 1` })
@@ -383,7 +372,19 @@ export function createLadder(
                   archived
                     ? or(
                         isNull(qualificationStates.assignmentId),
-                        notInArray(qualificationStates.assignmentId, assignmentIds([archived.id])),
+                        notInArray(
+                          qualificationStates.assignmentId,
+                          c(tx)
+                            .select({ id: qualificationAssignments.id })
+                            .from(qualificationAssignments)
+                            .where(
+                              and(
+                                eq(qualificationAssignments.game, game),
+                                eq(qualificationAssignments.levelId, archived.id),
+                                isNull(qualificationAssignments.endedAt),
+                              ),
+                            ),
+                        ),
                       )
                     : undefined,
                 ),

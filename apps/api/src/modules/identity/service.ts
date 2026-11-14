@@ -113,6 +113,7 @@ export interface IdentityPorts {
       userId: string,
       assignments: readonly components["schemas"]["AssignmentInput"][],
       assignedAt: string,
+      companyId?: string,
     ): Promise<void>;
     currentAssignments?(
       tx: TxContext,
@@ -631,14 +632,27 @@ export function createIdentity(
     );
   }
 
-  async function queryQualificationMembers(tx: TxContext, after: string | null, limit: number) {
+  async function queryQualificationMembers(
+    tx: TxContext,
+    after: string | null,
+    limit: number,
+    search?: string,
+  ) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
     const current = await lockCompany(tx);
     const rows = await client(tx)
       .select({ id: user.id, nickname: user.name, status: membership.status })
       .from(user)
       .innerJoin(membership, eq(membership.userId, user.id))
-      .where(after ? gt(user.id, applicationId(after)) : undefined)
+      .where(
+        and(
+          after ? gt(user.id, applicationId(after)) : undefined,
+          administrationMemberPredicate(
+            current.directorUserId,
+            search === undefined ? {} : { search },
+          ),
+        ),
+      )
       .orderBy(user.id)
       .limit(limit + 1)
       .for("share");
@@ -1468,6 +1482,7 @@ export function createIdentity(
                   targetId,
                   input.qualifications ?? [],
                   instant,
+                  current.id,
                 );
               }
               await invalidate(tx, target, input.kind !== "roles");

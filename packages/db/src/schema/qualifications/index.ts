@@ -30,10 +30,13 @@ export {
   isNull,
   lt,
   lte,
+  ne,
   notInArray,
   or,
   sql,
 } from "drizzle-orm";
+
+export { alias } from "drizzle-orm/mysql-core";
 
 const fk = (name: string, column: AnyMySqlColumn, target: AnyMySqlColumn) =>
   foreignKey({ name, columns: [column], foreignColumns: [target] }).onDelete("restrict");
@@ -167,6 +170,7 @@ export const qualificationStates = mysqlTable(
     game: game("game").notNull(),
     assignmentId: idColumn("assignment_id"),
     eligibleSince: utcColumn("eligible_since"),
+    eligibilityEvaluatedAt: utcColumn("eligibility_evaluated_at"),
     version: int("version", { unsigned: true }).notNull(),
   },
   (t) => [

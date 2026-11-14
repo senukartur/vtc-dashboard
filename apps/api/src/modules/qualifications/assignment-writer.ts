@@ -14,30 +14,30 @@ export function createAssignmentWriter(
   unit: UnitOfWork,
   outbox: Pick<ReturnType<typeof createOutbox>, "append"> = createOutbox(unit),
   now = () => new Date().toISOString(),
+  trackEligibility = false,
 ) {
   return async (
     tx: TxContext,
     actor: Actor,
     input: Omit<Assignment, "id" | "actorId" | "revision">,
-    options?: { companyId: string; instant: string },
+    options?: { companyId: string | null; instant: string },
   ) => {
     const c = unit.client(tx);
     let [current] = await c
-      .select()
+      .select({
+        assignmentId: qualificationStates.assignmentId,
+        version: qualificationStates.version,
+      })
       .from(qualificationStates)
       .where(
         and(eq(qualificationStates.userId, input.userId), eq(qualificationStates.game, input.game)),
       )
       .for("update");
     if (!current) {
-      current = {
-        userId: input.userId,
-        game: input.game,
-        assignmentId: null,
-        eligibleSince: null,
-        version: 1,
-      };
-      await c.insert(qualificationStates).values(current);
+      current = { assignmentId: null, version: 1 };
+      await c
+        .insert(qualificationStates)
+        .values({ userId: input.userId, game: input.game, ...current });
     }
     let previous: Assignment | undefined;
     if (current.assignmentId && input.purpose !== "historical_resolution") {
@@ -60,7 +60,10 @@ export function createAssignmentWriter(
       .set({
         ...(input.purpose === "historical_resolution"
           ? {}
-          : { assignmentId: row.id, eligibleSince: null }),
+          : {
+              assignmentId: row.id,
+              ...(trackEligibility ? { eligibleSince: null, eligibilityEvaluatedAt: null } : {}),
+            }),
         version: current.version + 1,
       })
       .where(
@@ -74,29 +77,20 @@ export function createAssignmentWriter(
       reason: "operator_request",
       occurredAt: instant,
     } as const;
-    if (options) {
-      const snapshot = (assignment: Assignment) => ({
-        game: assignment.game,
-        assignmentId: assignment.id,
-        levelId: assignment.levelId,
-      });
-      await audit.append(tx, {
-        ...entry,
-        companyId: options.companyId,
-        operation:
-          input.purpose === "promotion" ? "qualification.promoted" : "qualification.assigned",
-        subjectKind: "qualification",
-        subjectId: input.userId,
-        details: { before: previous ? snapshot(previous) : null, after: snapshot(row) },
-      });
-    } else {
-      await audit.append(tx, {
-        ...entry,
-        operation: "membership.changed",
-        subjectKind: "user",
-        subjectId: input.userId,
-      });
-    }
+    const snapshot = (assignment: Assignment) => ({
+      game: assignment.game,
+      assignmentId: assignment.id,
+      levelId: assignment.levelId,
+    });
+    await audit.append(tx, {
+      ...entry,
+      companyId: options?.companyId ?? null,
+      operation:
+        input.purpose === "promotion" ? "qualification.promoted" : "qualification.assigned",
+      subjectKind: "qualification",
+      subjectId: row.id,
+      details: { before: previous ? snapshot(previous) : null, after: snapshot(row) },
+    });
     const eventId = newId();
     await outbox.append(tx, {
       eventId,
