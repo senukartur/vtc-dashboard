@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 106 tables including the ledger and 32 migrations.
+// Fresh full-schema preparation now covers 107 tables including the ledger and 33 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -189,6 +189,7 @@ export async function reset(connection: Connection) {
     "admissions_limits",
     "admissions_decisions",
     "admissions_invitations",
+    "admissions_truckers_checks",
     "admissions_applications",
     "mail_commands",
     "mail_deliveries",
@@ -283,7 +284,8 @@ async function publishedPrefixFolder(
     | 28
     | 29
     | 30
-    | 31,
+    | 31
+    | 32,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -341,6 +343,8 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_ELIGIBILITY_TRACKING_PREFIX_REQUIRED");
   if (count === 31 && entries[30]?.tag !== "0030_superb_monster_badoon")
     throw new Error("PUBLISHED_QUALIFICATION_LADDER_PREFIX_REQUIRED");
+  if (count === 32 && entries[31]?.tag !== "0031_odd_stellaris")
+    throw new Error("PUBLISHED_STAGE_4_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -480,4 +484,27 @@ export async function qualificationEligibilityPriorFolder(): Promise<string> {
 
 export async function qualificationLadderPriorFolder(): Promise<string> {
   return publishedPrefixFolder(31);
+}
+
+export async function stage4PriorFolder(): Promise<string> {
+  return publishedPrefixFolder(32);
+}
+
+/**
+ * Current Identity writes every membership column, including Stage 4 `joined_at`. Published
+ * prefixes before 0032 lack it, so seed them through a temporary column that is dropped again
+ * before the forward migrations restore the exact prefix shape.
+ */
+export async function withPrefixMembershipJoinedAt<T>(
+  connection: Connection,
+  run: () => Promise<T>,
+): Promise<T> {
+  await connection.query(
+    "ALTER TABLE identity_memberships ADD COLUMN joined_at datetime(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3))",
+  );
+  try {
+    return await run();
+  } finally {
+    await connection.query("ALTER TABLE identity_memberships DROP COLUMN joined_at");
+  }
 }

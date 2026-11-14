@@ -466,6 +466,9 @@ export function createAdmissions(
             discord: input.discord,
             introduction: input.introduction,
             invitationId: null,
+            // Stage 4 referral columns stay unset until VTC-144 accepts the fields.
+            referralSource: null,
+            referralOther: null,
           };
           await client(tx).insert(applications).values(row);
           await record(tx, company.id, undefined, row, {

@@ -225,6 +225,13 @@
       "when": 1794621946896,
       "tag": "0031_odd_stellaris",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "5",
+      "when": 1794683732395,
+      "tag": "0032_bizarre_iron_patriot",
+      "breakpoints": true
     }
   ]
 }

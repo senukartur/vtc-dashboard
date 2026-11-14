@@ -15,7 +15,7 @@ import {
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
-import { idColumn, opaqueColumn } from "../../core/values.js";
+import { idColumn, opaqueColumn, utcColumn } from "../../core/values.js";
 
 // Keep module queries on the same Drizzle type identity as the transaction host.
 export { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
@@ -77,7 +77,10 @@ export const membership = mysqlTable("identity_memberships", {
   credentialEpoch: int("credential_epoch", { unsigned: true }).notNull().default(1),
   emailEpoch: int("email_epoch", { unsigned: true }).notNull().default(1),
   locale: mysqlEnum("locale", ["en", "ru"]).notNull().default("ru"),
-  displayTimezone: varchar("display_timezone", { length: 128 }).notNull().default("UTC"),
+  // Null means "as on the device" (VTC-142); server texts use the company reporting zone.
+  displayTimezone: varchar("display_timezone", { length: 128 }).default("UTC"),
+  // Latest join or return to the company (VTC-140 memberSince); history keeps the first join.
+  joinedAt: utcColumn("joined_at").notNull().default(sql`(UTC_TIMESTAMP(3))`),
 });
 
 export const roles = mysqlTable(
