@@ -271,7 +271,12 @@ function PromotionsWorkspace() {
           />
         )}
         {!query.isError && (
-          <Pager pages={pages} nextCursor={data?.nextCursor} busy={query.isPending} />
+          <Pager
+            pages={pages}
+            nextCursor={data?.nextCursor}
+            busy={query.isPending}
+            label={t(tab === "history" ? "historyPages" : "candidatePages")}
+          />
         )}
       </Card>
       {open && candidate && (

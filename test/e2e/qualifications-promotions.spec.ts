@@ -298,7 +298,9 @@ test(
 
     await tabs(page).getByRole("link", { name: "All", exact: true }).click();
     await expect(page.getByText("2 candidates", { exact: true })).toBeVisible();
-    const next = page.getByRole("button", { name: "Next page" });
+    const next = page
+      .getByRole("navigation", { name: "Promotion candidate pages" })
+      .getByRole("button", { name: "Next page" });
     await next.focus();
     await page.keyboard.press("Enter");
     await expect(candidates(page).getByRole("rowheader")).toContainText(second.nickname);
@@ -333,15 +335,32 @@ test(
     await expect(history(page)).toContainText("Synthetic history reason");
     await expect(history(page).locator("time")).toHaveAttribute("datetime", historyInstant);
     await expect(page.getByText("2 actions", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Next page" }).click();
+    const historyPager = page.getByRole("navigation", { name: "Qualification history pages" });
+    await historyPager.getByRole("button", { name: "Next page" }).click();
     await expect(history(page)).toContainText("Initial assignment");
     await expect(history(page).getByText("Not recorded")).toHaveCount(2);
     await expect(history(page).locator("time")).toHaveAttribute("datetime", instant);
-    await page.getByRole("searchbox", { name: "Search by nickname" }).fill("  tunDra  ");
+    const search = page.getByRole("searchbox", { name: "Search by nickname" });
+    await search.fill("Fictional");
+    const searchPager = page.getByRole("navigation", { name: "Driver search result pages" });
+    await expect(historyPager).toBeVisible();
+    await expect(searchPager).toBeVisible();
+    await searchPager.getByRole("button", { name: "Next page" }).click();
+    await expect(
+      page
+        .getByRole("combobox", { name: "Select a driver" })
+        .locator("option")
+        .filter({ hasText: second.nickname }),
+    ).toHaveCount(1);
+    await expect(history(page)).toContainText("Initial assignment");
+
+    await search.fill("  tunDra  ");
+    await expect(searchPager).toHaveCount(0);
     await page.getByRole("combobox", { name: "Select a driver" }).selectOption(second.id);
     await expect(history(page).getByRole("rowheader")).toContainText(second.nickname);
     await expect(page.getByText("1 action", { exact: true })).toBeVisible();
-    expect(state.reads.find((url) => url.pathname === searchPath)?.searchParams.toString()).toBe(
+    const searchRequests = state.reads.filter((url) => url.pathname === searchPath);
+    expect(searchRequests.at(-1)?.searchParams.toString()).toBe(
       "view=stage3&search=tunDra&limit=25",
     );
     const request = state.reads.filter((url) => url.pathname === historyPath).at(-1);

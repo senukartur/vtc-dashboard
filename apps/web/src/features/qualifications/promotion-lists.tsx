@@ -328,7 +328,12 @@ function HistoryMemberResults({
         </div>
       )}
       {!query.isError && (
-        <Pager pages={pages} nextCursor={data?.nextCursor} busy={query.isPending} />
+        <Pager
+          pages={pages}
+          nextCursor={data?.nextCursor}
+          busy={query.isPending}
+          label={t("searchPages")}
+        />
       )}
     </>
   );
