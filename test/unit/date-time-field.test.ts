@@ -4,6 +4,7 @@ import { referenceInstant } from "../../apps/web/src/features/manual-reports/ref
 import { utcInput as qualificationUtcInput } from "../../apps/web/src/features/qualifications/transport.ts";
 import {
   clampSegment,
+  composeEdit,
   composeTime,
   composeWallClock,
   decodeIncomplete,
@@ -210,5 +211,30 @@ describe("date-only and time-only values", () => {
     expect(
       composeTime({ hours: "17", minutes: "00", seconds: "30", milliseconds: "500" }, "minute"),
     ).toBe("17:00");
+  });
+});
+
+describe("hidden sub-minute parts", () => {
+  const stored = splitWallClock("2099-10-25T14:00:30.500");
+  if (!stored) throw new Error("fixture");
+  test("a date-only edit at minute or second precision keeps them exactly", () => {
+    const moved = { ...stored, date: "2099-10-26" };
+    expect(composeEdit(moved, "minute", true)).toBe("2099-10-26T14:00:30.500");
+    expect(composeEdit(moved, "second", true)).toBe("2099-10-26T14:00:30.500");
+    const exact = splitWallClock("2099-10-25T18:00:00.000");
+    if (!exact) throw new Error("fixture");
+    expect(composeEdit({ ...exact, date: "2099-10-26" }, "minute", true)).toBe(
+      "2099-10-26T18:00:00.000",
+    );
+    expect(composeEdit({ ...stored, seconds: "", milliseconds: "" }, "minute", true)).toBe(
+      "2099-10-25T14:00",
+    );
+  });
+  test("a time edit emits exactly the shown segments", () => {
+    expect(composeEdit({ ...stored, hours: "15" }, "minute", false)).toBe("2099-10-25T15:00");
+    expect(composeEdit({ ...stored, minutes: "05" }, "second", false)).toBe("2099-10-25T14:05:30");
+    expect(composeEdit({ ...stored, hours: "15" }, "millisecond", false)).toBe(
+      "2099-10-25T15:00:30.500",
+    );
   });
 });

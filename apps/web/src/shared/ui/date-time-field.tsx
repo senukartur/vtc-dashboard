@@ -7,8 +7,8 @@ import { cn } from "../cn.js";
 import { Calendar } from "./calendar.js";
 import {
   clampSegment,
+  composeEdit,
   composeTime,
-  composeWallClock,
   type DateLocale,
   decodeIncomplete,
   editSegment,
@@ -22,6 +22,7 @@ import {
   type Segment,
   segmentSpec,
   segmentsFor,
+  shownTime,
   splitTime,
   splitWallClock,
   stepSegment,
@@ -72,15 +73,6 @@ type Mode = "datetime" | "date" | "time";
 type Display = { date: string } & TimeParts;
 type FieldState = { value: string; locale: DateLocale; display: Display; dateBlurred: boolean };
 
-function visibleTime(parts: TimeParts, precision: Precision): TimeParts {
-  return {
-    hours: parts.hours,
-    minutes: parts.minutes,
-    seconds: precision === "minute" ? "" : parts.seconds,
-    milliseconds: precision === "millisecond" ? parts.milliseconds : "",
-  };
-}
-
 function deriveDisplay(value: string, locale: DateLocale, precision: Precision, mode: Mode) {
   if (!value) return { date: "", ...emptyTime };
   const incomplete = decodeIncomplete(value);
@@ -89,21 +81,29 @@ function deriveDisplay(value: string, locale: DateLocale, precision: Precision, 
     return { date: isIsoDate(value) ? formatDateText(value, locale) : value, ...emptyTime };
   if (mode === "time") {
     const parts = splitTime(value);
-    return { date: "", ...(parts ? visibleTime(parts, precision) : emptyTime) };
+    return { date: "", ...(parts ? shownTime(parts, precision) : emptyTime) };
   }
+  // Sub-minute parts the precision hides stay in the display (not rendered) so that a date-only
+  // edit keeps them; a time edit clears them.
   const split = splitWallClock(value);
   if (!split) return { date: value, ...emptyTime };
-  return { date: formatDateText(split.date, locale), ...visibleTime(split, precision) };
+  return { ...split, date: formatDateText(split.date, locale) };
 }
 
-function displayValue(display: Display, locale: DateLocale, precision: Precision, mode: Mode) {
+function displayValue(
+  display: Display,
+  locale: DateLocale,
+  precision: Precision,
+  mode: Mode,
+  dateOnly: boolean,
+) {
   const segments = mode === "date" ? [] : segmentsFor(precision);
   if (!display.date.trim() && segments.every((segment) => !display[segment])) return "";
   if (mode === "time") return composeTime(display, precision) ?? incompleteValue("", display);
   const date = parseDateText(display.date, locale);
   if (mode === "date") return date ?? incompleteValue(display.date, emptyTime);
   return (
-    (date && composeWallClock({ ...display, date }, precision)) ??
+    (date && composeEdit({ ...display, date }, precision, dateOnly)) ??
     incompleteValue(display.date, display)
   );
 }
@@ -223,8 +223,10 @@ function DateTimeControl({
   const describe = (...extra: string[]) =>
     [describedBy, ...extra].filter(Boolean).join(" ") || undefined;
 
-  function update(next: Display) {
-    const nextValue = displayValue(next, locale, precision, mode);
+  /** A date-only edit keeps hidden sub-minute parts; a time edit emits what is shown. */
+  function update(changed: Display, dateOnly = false) {
+    const next = dateOnly ? changed : { ...changed, ...shownTime(changed, precision) };
+    const nextValue = displayValue(next, locale, precision, mode, dateOnly);
     setState({ ...current, value: nextValue, display: next });
     if (nextValue !== value) onChange(nextValue);
   }
@@ -244,7 +246,7 @@ function DateTimeControl({
     if (!iso) return;
     returnFocus.current = true;
     setOpen(false);
-    update({ ...display, date: formatDateText(iso, locale) });
+    update({ ...display, date: formatDateText(iso, locale) }, true);
   }
   function typeInto(segment: Segment, index: number, raw: string, inputType: string | undefined) {
     const before = display[segment];
@@ -322,7 +324,7 @@ function DateTimeControl({
                   aria-required={requiredAttr}
                   aria-invalid={invalidAttr}
                   aria-describedby={describe(hintId)}
-                  onChange={(event) => update({ ...display, date: event.target.value })}
+                  onChange={(event) => update({ ...display, date: event.target.value }, true)}
                   onBlur={() =>
                     showDisplay(
                       {

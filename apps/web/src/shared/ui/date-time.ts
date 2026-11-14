@@ -56,6 +56,31 @@ export function splitWallClock(value: string): ({ date: string } & TimeParts) | 
   return { date, hours, minutes, seconds, milliseconds: fraction ? fraction.padEnd(3, "0") : "" };
 }
 
+/** The time parts a precision shows; hidden sub-minute parts are cleared. */
+export function shownTime(parts: TimeParts, precision: Precision): TimeParts {
+  return {
+    hours: parts.hours,
+    minutes: parts.minutes,
+    seconds: precision === "minute" ? "" : parts.seconds,
+    milliseconds: precision === "millisecond" ? parts.milliseconds : "",
+  };
+}
+
+/**
+ * The wall clock after a user edit. A date-only edit keeps sub-minute parts the precision hides
+ * (editing the date of "…T14:00:30.500" at minute precision keeps ":30.500"); a time edit emits
+ * exactly the shown segments.
+ */
+export function composeEdit(
+  parts: { date: string } & TimeParts,
+  precision: Precision,
+  dateOnly: boolean,
+): string | undefined {
+  return dateOnly
+    ? composeWallClock(parts, "millisecond")
+    : composeWallClock({ ...parts, ...shownTime(parts, precision) }, precision);
+}
+
 /** A real calendar date already in "YYYY-MM-DD" form. */
 export function isIsoDate(value: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);

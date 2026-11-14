@@ -3,7 +3,7 @@ import type { components } from "@vtc/contracts";
 import { stage2Fixture } from "../fixtures/events-stage-2.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { dateTimeField, fillDate, fillTime, timeField } from "./support/date-time.ts";
-import { mockEvents } from "./support/events.ts";
+import { eventId, mockEvents } from "./support/events.ts";
 import { detailsPath } from "./support/events-detail.ts";
 import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
@@ -336,6 +336,42 @@ test(
     await page.getByRole("button", { name: "Save draft", exact: true }).click();
     await expect.poll(() => posts.length).toBe(1);
     expect(posts[0]).toMatchObject({ draft: true, meetingAt: null, startsAt: null, endsAt: null });
+  },
+);
+
+test(
+  "legacy event edit keeps hidden seconds when only the date changes",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockEvents(page, true);
+    state.event.startsAt = "2099-10-25T13:00:30.500Z";
+    await page.goto(`/account/events/${eventId}`);
+    await catalogLanguage(page);
+    await page.getByRole("button", { name: "Edit event", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const meeting = dateTimeField(dialog, "Meeting time (UTC)");
+    const start = dateTimeField(dialog, "Start time (UTC)");
+    await expect(start.date).toHaveValue("10/25/2099");
+    await expect(start.segment("hours")).toHaveValue("13");
+    await expect(start.segment("minutes")).toHaveValue("00");
+
+    // A typed date and a calendar pick change only the date of the exact stored values.
+    await start.date.fill("10/26/2099");
+    await meeting.calendarButton.click();
+    const picker = calendar(page, "Meeting time");
+    await expect(picker.locator('button[data-day="2099-10-25"]')).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Enter");
+    await expect(meeting.date).toHaveValue("10/26/2099");
+    await expect(start.segment("hours")).toHaveValue("13");
+    await expect(start.segment("minutes")).toHaveValue("00");
+
+    await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expect.poll(() => state.commands.length).toBe(1);
+    expect(state.commands[0]?.body).toMatchObject({
+      meetingAt: "2099-10-26T12:00:00.000Z",
+      startsAt: "2099-10-26T13:00:30.500Z",
+    });
   },
 );
 
