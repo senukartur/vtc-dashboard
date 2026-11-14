@@ -164,24 +164,28 @@ const canonical = (input: unknown): string =>
 const normalizedEmail = (email: string): string => email.toLowerCase();
 const isFailure = (value: SafeResult): value is Failed => typeof value.failure === "number";
 
+function nicknamePredicate(search?: string) {
+  if (search === undefined) return undefined;
+  const term = search.trim();
+  if (!term || term.length > 128) throw identityError(422);
+  // Same LIKE escaping as catalog search; the name column's collation is case-insensitive.
+  const escaped = term.replace(/[\\%_]/g, (value) => `\\${value}`);
+  return sql`${user.name} LIKE ${`%${escaped}%`}`;
+}
+
 function administrationMemberPredicate(
   directorUserId: string,
-  filters: AdministrationMemberFilters,
+  { role, search }: AdministrationMemberFilters,
 ) {
-  const { role } = filters,
-    term = filters.search?.trim();
   if (role !== undefined && role !== "director" && !assignableRoles.includes(role))
     throw identityError(422);
-  if (term !== undefined && (!term || term.length > 128)) throw identityError(422);
-  // Same LIKE escaping as catalog search; the name column's collation is case-insensitive.
-  const escaped = term?.replace(/[\\%_]/g, (value) => `\\${value}`);
   return and(
     role === "director"
       ? eq(user.id, directorUserId)
       : role
         ? sql`EXISTS (SELECT 1 FROM ${roles} WHERE ${roles.userId} = ${user.id} AND ${roles.role} = ${role})`
         : undefined,
-    escaped !== undefined ? sql`${user.name} LIKE ${`%${escaped}%`}` : undefined,
+    nicknamePredicate(search),
   );
 }
 
@@ -2105,7 +2109,7 @@ export function createIdentity(
         rows.filter((row) => row.nickname.trim()).map((row) => [row.id, row.nickname]),
       );
     },
-    async memberSummariesInTransaction(tx: TxContext, ids: string[]) {
+    async memberSummariesInTransaction(tx: TxContext, ids: string[], nicknameSearch?: string) {
       const current = await lockCompany(tx);
       if (ids.length > 100) throw new Error("MEMBER_SUMMARY_BOUND_EXCEEDED");
       const unique = [...new Set(ids)].map(applicationId);
@@ -2114,12 +2118,18 @@ export function createIdentity(
         .select({ id: user.id, nickname: user.name, status: membership.status })
         .from(user)
         .innerJoin(membership, eq(membership.userId, user.id))
-        .where(inArray(user.id, unique))
+        .where(and(inArray(user.id, unique), nicknamePredicate(nicknameSearch)))
         .for("share");
+      if (!rows.length) return new Map<string, components["schemas"]["MemberSummary"]>();
       const assigned = await client(tx)
         .select()
         .from(roles)
-        .where(inArray(roles.userId, unique))
+        .where(
+          inArray(
+            roles.userId,
+            rows.map(({ id }) => id),
+          ),
+        )
         .for("share");
       return new Map(
         rows.map((row) => [

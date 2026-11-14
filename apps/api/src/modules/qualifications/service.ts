@@ -752,18 +752,27 @@ export function createQualifications(
     },
     async promotionCandidates(
       actor: Actor,
-      options: Page & { game: Game; status?: "eligible" | "all" },
+      options: Page & { game: Game; status?: "eligible" | "all"; search?: string },
     ): Promise<S["QualificationStage3PromotionCandidateList"]> {
       game(options.game);
       const status = options.status ?? "eligible";
       if (status !== "eligible" && status !== "all") throw identityError(422);
+      const search = options.search?.trim();
+      if (options.search !== undefined && (!search || options.search.length > 128))
+        throw identityError(422);
       return ports.identity.transaction(async (tx) => {
         await ports.identity.qualificationContextInTransaction(tx, [], actor);
         const instant = at();
         const gameLevels = await eligibility.levels(tx, options.game);
         const paging = page(
           actor,
-          ["promotion-candidates", options.game, status, ladder.revision(gameLevels)],
+          [
+            "promotion-candidates",
+            options.game,
+            status,
+            ladder.revision(gameLevels),
+            ...(search === undefined ? [] : [search]),
+          ],
           options,
         );
         const { rows, total } = await eligibility.candidates(
@@ -774,6 +783,7 @@ export function createQualifications(
           paging.after,
           paging.limit,
           gameLevels,
+          search,
         );
         const { items, nextCursor } = paging.finish(rows, (row) => ({
           id: row.id,

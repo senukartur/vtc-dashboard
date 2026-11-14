@@ -1034,10 +1034,20 @@ export function createEvents(
     });
     return result;
   }
+  async function eventAuditTitle(tx: TxContext, event: Event) {
+    const [row] = await c(tx)
+      .select({ title: eventRevisions.title })
+      .from(eventRevisions)
+      .where(eq(eventRevisions.id, event.currentRevisionId as string))
+      .for("share");
+    if (!row) throw new Error("EVENT_REVISION_MISSING");
+    return row.title;
+  }
   async function emit(
     tx: TxContext,
     actor: Actor,
     event: Event,
+    title: string,
     type: CompanyEvent["type"],
     revisionId: string,
     version: number,
@@ -1054,6 +1064,7 @@ export function createEvents(
       subjectId: event.id,
       occurredAt: at(),
       reason: "operator_request",
+      details: { title },
     });
     await outbox.append(tx, {
       eventId,
@@ -1201,6 +1212,7 @@ export function createEvents(
       tx,
       actor,
       next,
+      value.title,
       "event.changed",
       id,
       version,
@@ -1805,6 +1817,7 @@ export function createEvents(
             tx,
             actor,
             { ...e, changeSequence: sequence },
+            await eventAuditTitle(tx, e),
             "event.response_changed",
             revisionId,
             version,
@@ -1985,6 +1998,7 @@ export function createEvents(
             tx,
             actor,
             { ...e, changeSequence: sequence },
+            await eventAuditTitle(tx, e),
             "event.attendance_changed",
             lastId,
             version,

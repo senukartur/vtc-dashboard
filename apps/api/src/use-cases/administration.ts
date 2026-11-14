@@ -200,18 +200,28 @@ export function createAdministration(
             : undefined;
         return {
           items: items.map((row) => {
+            const { context, ...safe } = { context: undefined, ...row };
+            const { objectType, subjectId, actorId } = safe;
             let objectName: string | null = null;
-            if (row.objectType === "user") objectName = nicknames.get(row.subjectId) ?? null;
-            if (row.objectType === "company" && row.subjectId === company.id)
-              objectName = COMPANY_NAME;
-            if (row.objectType === "application")
-              objectName = admissionLabels?.applications.get(row.subjectId) ?? null;
-            if (row.objectType === "invitation")
-              objectName = admissionLabels?.invitations.get(row.subjectId) ?? null;
+            if (
+              objectType === "event" &&
+              context &&
+              "title" in context &&
+              current.capabilities.includes("events.manage")
+            )
+              objectName = context.title;
+            if (objectType === "catalog" && context && "kind" in context)
+              objectName = `${context.kind} / ${context.games.map((game) => game.toUpperCase()).join(", ")}`;
+            if (objectType === "user") objectName = nicknames.get(subjectId) ?? null;
+            if (objectType === "company" && subjectId === company.id) objectName = COMPANY_NAME;
+            if (objectType === "application")
+              objectName = admissionLabels?.applications.get(subjectId) ?? null;
+            if (objectType === "invitation")
+              objectName = admissionLabels?.invitations.get(subjectId) ?? null;
             return {
-              ...row,
+              ...safe,
               objectName,
-              actorNickname: row.actorId ? (nicknames.get(row.actorId) ?? null) : null,
+              actorNickname: actorId ? (nicknames.get(actorId) ?? null) : null,
             };
           }),
           nextCursor,

@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import type { SchemaObject } from "ajv";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, test } from "vitest";
 import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 
@@ -220,5 +222,30 @@ test("Stage 3 company history accepts both promotion proof and ordinary assignme
       ...response,
       data: { ...response.data, items: [{ ...promotion, kind: "assignment" }] },
     }),
+  ).toBe(false);
+});
+
+test("candidate search is additive, bounded and confined to its route", () => {
+  const openapi = JSON.parse(
+    readFileSync(new URL("../../docs/contracts/dashboard/openapi.json", import.meta.url), "utf8"),
+  ) as {
+    paths: Record<
+      string,
+      { get: { parameters: { name?: string; required?: boolean; schema: SchemaObject }[] } }
+    >;
+  };
+  const base = "/api/v1/admin/promotion-";
+  const search = openapi.paths[`${base}candidates`]?.get.parameters.find(
+    (item) => item.name === "search",
+  );
+  expect(search?.required).toBe(false);
+  if (!search) throw new Error("CANDIDATE_SEARCH_CONTRACT_MISSING");
+  const parse = new Ajv2020().compile(search.schema);
+  expect(parse("  Fictional %_\\ Pilot  ")).toBe(true);
+  expect(parse("x".repeat(128))).toBe(true);
+  for (const invalid of ["", "  ", "x".repeat(129), ["Fictional"]])
+    expect(parse(invalid)).toBe(false);
+  expect(
+    openapi.paths[`${base}history`]?.get.parameters.some((item) => item.name === "search"),
   ).toBe(false);
 });

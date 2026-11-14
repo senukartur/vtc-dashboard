@@ -198,7 +198,7 @@ OpenAPI stages the following operations and shared-path extensions. A shared pat
 | `GET /api/v1/reconciliation-candidates?view=stage3` | `listReconciliationCandidates` | `trips.review` | VTC-133 |
 | `POST /api/v1/reconciliation-candidates/{candidateId}/dismissals` | `dismissReconciliationCandidate` | `trips.review` | VTC-133 |
 | `POST /api/v1/reconciliation-candidates/{candidateId}/dismissal-reversals` | `undoReconciliationCandidateDismissal` | `trips.review` | VTC-133 |
-| `GET /api/v1/admin/promotion-candidates?game=ets2&status=eligible` | `listPromotionCandidates` | `qualifications.manage` | VTC-134 |
+| `GET /api/v1/admin/promotion-candidates?game=ets2&status=eligible&search=nickname` | `listPromotionCandidates` | `qualifications.manage` | VTC-134 |
 | `GET /api/v1/admin/promotion-history` | `listPromotionHistory` | `qualifications.manage` | VTC-134 |
 | `GET /api/v1/admin/members/{memberId}/qualification-action-history?view=stage3` | `listQualificationActionHistory` | `qualifications.manage` | VTC-134 |
 | `GET /api/v1/admin/qualification-members?view=stage3` | `listQualificationMembers` | `qualifications.manage` | VTC-134 |

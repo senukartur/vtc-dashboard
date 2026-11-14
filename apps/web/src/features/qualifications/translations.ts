@@ -35,7 +35,7 @@ export const qualificationTranslations = {
     ladderArchive: "Archive level",
     ladderArchiveName: "Archive {{name}}",
     ladderArchiveTarget: "Transfer drivers to",
-    ladderArchiveReview: "Review archive",
+    ladderArchiveAcknowledge: "I confirm the archive and driver reassignment.",
     ladderArchiveWarning:
       "Current drivers will move to the selected level with fresh progress. Their global roles and past trips stay as recorded.",
     ladderSaveOrder: "Save level order",
@@ -259,7 +259,7 @@ export const qualificationTranslations = {
     ladderArchive: "Архивировать уровень",
     ladderArchiveName: "Архивировать «{{name}}»",
     ladderArchiveTarget: "Перевести водителей на уровень",
-    ladderArchiveReview: "Проверить архивацию",
+    ladderArchiveAcknowledge: "Подтверждаю архивацию и перевод водителей.",
     ladderArchiveWarning:
       "Текущие водители перейдут на выбранный уровень и начнут прогресс заново. Их глобальные роли и прошлые рейсы сохранятся.",
     ladderSaveOrder: "Сохранить порядок уровней",

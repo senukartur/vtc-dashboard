@@ -14,11 +14,12 @@ import { useQualificationQuery } from "./queries.js";
 export function usePromotionCandidates(
   game: Candidate["game"],
   status: Parameters<typeof promotionCandidatesUrl>[1],
+  search: string,
   cursor: string | null,
   enabled: boolean,
 ) {
   return useQualificationQuery(
-    promotionCandidatesUrl(game, status, cursor),
+    promotionCandidatesUrl(game, status, search, cursor),
     "QualificationStage3PromotionCandidateListEnvelope",
     enabled,
   );

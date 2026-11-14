@@ -26,3 +26,20 @@ export function thresholdSummary(level: Level): ThresholdSummary {
   if (level.terminal) return { kind: "terminal" };
   return { kind: "value", trips: level.requiredTrips, distanceM: level.requiredDistanceM };
 }
+
+type CandidateThresholds = Pick<
+  DTO["QualificationStage3PromotionCandidate"],
+  "nextLevel" | "eligible" | "requiredTrips" | "requiredDistanceM"
+>;
+
+export function candidateThresholdState(candidate: CandidateThresholds) {
+  if (!candidate.nextLevel) return "terminal";
+  // An effective rule with both minimums blank makes any active assignment eligible.
+  if (
+    !candidate.eligible &&
+    candidate.requiredTrips === null &&
+    candidate.requiredDistanceM === null
+  )
+    return "unconfigured";
+  return "configured";
+}

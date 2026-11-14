@@ -346,3 +346,24 @@
     font-size: var(--font-badge);
   }
 }
+
+.qualification-archive-dialog {
+  overflow-wrap: anywhere;
+}
+
+.qualification-archive-dialog .qualification-archive-acknowledgement {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  line-height: 1.5;
+}
+
+.qualification-archive-dialog .qualification-archive-acknowledgement input {
+  flex: none;
+  margin-block-start: 0.2rem;
+}
+
+.qualification-archive-dialog .qualification-archive-submit:not(:disabled) {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}

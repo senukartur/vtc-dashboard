@@ -837,7 +837,7 @@ export interface paths {
         };
         /**
          * List company promotion candidates
-         * @description Return active members in the selected game with current assignments and authoritative accepted trip totals for those assignments. Eligibility follows the same rule, current/next levels and totals as confirmation. Historical eligibility onset can be unknown; ineligible rows have eligibleSince null. Order by eligibleSince descending with null last, then member ID ascending. Filter before total and paging. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.
+         * @description Return active members in the selected game with current assignments and authoritative accepted trip totals for those assignments. Eligibility follows the same rule, current/next levels and totals as confirmation. Historical eligibility onset can be unknown; ineligible rows have eligibleSince null. Order by eligibleSince descending with null last, then member ID ascending. Filter by status and optional nickname substring before total and paging. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.
          */
         get: operations["listPromotionCandidates"];
         put?: never;
@@ -7971,6 +7971,8 @@ export interface operations {
                 cursor?: components["parameters"]["Cursor"];
                 game: components["schemas"]["Game"];
                 limit?: components["parameters"]["Limit"];
+                /** @description Case-insensitive literal nickname substring. Surrounding whitespace is ignored. */
+                search?: string;
                 /** @description Defaults to eligible. */
                 status?: "eligible" | "all";
             };

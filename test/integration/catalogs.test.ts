@@ -24,6 +24,7 @@ import {
   type Identity,
 } from "../../apps/api/src/modules/identity/service.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { createAdministration } from "../../apps/api/src/use-cases/administration.ts";
 import { catalogConfig } from "../fixtures/catalogs/synthetic.ts";
 import {
   guardedSettings,
@@ -644,6 +645,46 @@ test("import updates only named values, never deletes and keeps parents and hidd
     hidden: true,
   });
   expect(await count("catalog_cities")).toBe(2);
+});
+
+test("mixed catalog imports and edits expose only their catalog and verified games", async () => {
+  const administration = createAdministration(unit, identity, {
+    telemetry: false,
+    manual: false,
+    qualifications: false,
+    externalIdentities: false,
+    admissions: false,
+    mail: false,
+  });
+  const file = csv(cityHeader, "ats,audit_ats,Fictional ATS city,,,", cityRow("audit_ets2"));
+  const preview = await catalogs.previewImport(director, "cities", file);
+  const result = await catalogs.applyImport(
+    director,
+    "cities",
+    file,
+    newId(),
+    preview.token as string,
+  );
+  const edited = await city("audit_edit", "ats");
+  const page = await administration.auditStage3(director, {});
+  expect(page.items.find((row) => row.subjectId === result.importId)).toMatchObject({
+    action: "catalog.imported",
+    objectType: "catalog",
+    objectName: "cities / ETS2, ATS",
+    details: null,
+  });
+  expect(page.items.find((row) => row.subjectId === edited.id)).toMatchObject({
+    action: "catalog.changed",
+    objectType: "catalog",
+    objectName: "cities / ATS",
+    details: null,
+  });
+  expect(JSON.stringify(page.items)).not.toMatch(/Fictional ATS city|audit_ats|fileSha256|context/);
+  const [stored] = await control.execute<RowDataPacket[]>(
+    "SELECT details FROM audit_entries WHERE subject_id=?",
+    [result.importId],
+  );
+  expect(stored[0]?.details).toEqual({ kind: "cities", games: ["ets2", "ats"] });
 });
 
 test("an import records one audit row and replays by key without new effects", async () => {

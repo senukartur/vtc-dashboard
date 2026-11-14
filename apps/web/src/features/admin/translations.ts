@@ -151,7 +151,7 @@ export const administrationTranslations = {
     transferCode: "Code from your current verified email",
     transferReview: "Review successor and transfer",
     transferConfirm:
-      "Transfer the Director role to this member. Your other roles and qualifications are preserved.",
+      "You remain a driver and keep your qualifications and trips. The new Director can appoint you as a Deputy Director.",
     transferPending: "Code requested for {{name}}. Changing the selection requires a new code.",
     verifyEmailFirst: "Verify your current email before requesting leadership transfer.",
     tokens: "Personal telemetry credentials",
@@ -261,7 +261,7 @@ export const administrationTranslations = {
       companyName: "Company name",
       sectionRestricted: "Your current account cannot open this section.",
       deputyAfterTransfer:
-        "After the transfer, you are a driver. The new director can appoint you as a deputy.",
+        "You remain a driver and keep your qualifications and trips. The new Director can appoint you as a Deputy Director.",
       audit: {
         allActions: "All actions",
         when: "When",
@@ -269,7 +269,18 @@ export const administrationTranslations = {
         what: "What changed",
         times: "Times in the company reporting timezone ({{timezone}}).",
         utcFallback: "Times in UTC because the company reporting timezone is unavailable.",
-        detailsUnavailable: "Change details unavailable.",
+        eventChanged: "Event changed",
+        catalogLabel: "{{kind}} · {{games}}",
+        catalogKinds: {
+          dlcs: "DLCs",
+          regions: "Regions",
+          cities: "Cities",
+          companies: "Companies",
+          cargoes: "Cargo",
+          trailers: "Trailers",
+          depots: "Depots",
+          company_logos: "Company logos",
+        },
         reference: "ID {{id}}…",
         before: "Before",
         after: "After",
@@ -368,11 +379,12 @@ export const administrationTranslations = {
       waitTime: "Try again in {{time}}.",
       dialogTitle: "Transfer leadership to {{nickname}}?",
       dialogBody: "The Director role moves to {{nickname}} at once, in one operation.",
-      dialogPointDriver: "You stay a driver with your other roles, qualifications and trips.",
+      dialogPointDriver:
+        "You remain a driver and keep your qualifications and trips. The new Director can appoint you as a Deputy Director.",
       dialogPointBack: "Only the new director can transfer it back, with the same procedure.",
       dialogPointAudit: "The code stops working and the audit log records the transfer.",
       transferred:
-        "Leadership transferred to {{nickname}}. You are now a driver; the audit log records the transfer.",
+        "Leadership transferred to {{nickname}}. You remain a driver and keep your qualifications and trips.",
       dismiss: "Dismiss",
       footer:
         "Only the director can change the director's email or password, with confirmation on the current email.",
@@ -656,7 +668,7 @@ export const administrationTranslations = {
     transferCode: "Код с вашей текущей подтверждённой почты",
     transferReview: "Проверить преемника и передать руководство",
     transferConfirm:
-      "Роль директора перейдёт этому участнику. Ваши остальные роли и квалификации сохранятся.",
+      "Вы останетесь водителем и сохраните свои квалификации и рейсы. Новый директор может назначить вас заместителем.",
     transferPending: "Код запрошен для {{name}}. Изменение выбора потребует нового кода.",
     verifyEmailFirst: "Подтвердите текущую почту перед передачей руководства.",
     tokens: "Личные ключи телеметрии",
@@ -767,7 +779,7 @@ export const administrationTranslations = {
       companyName: "Название компании",
       sectionRestricted: "У вашей учётной записи нет доступа к этому разделу.",
       deputyAfterTransfer:
-        "После передачи руководства вы будете водителем. Новый директор может назначить вас заместителем.",
+        "Вы останетесь водителем и сохраните свои квалификации и рейсы. Новый директор может назначить вас заместителем.",
       audit: {
         allActions: "Все действия",
         when: "Когда",
@@ -775,7 +787,18 @@ export const administrationTranslations = {
         what: "Что изменилось",
         times: "Время в отчётном часовом поясе компании ({{timezone}}).",
         utcFallback: "Время в UTC, поскольку отчётный часовой пояс компании недоступен.",
-        detailsUnavailable: "Подробности изменения недоступны.",
+        eventChanged: "Событие изменено",
+        catalogLabel: "{{kind}} · {{games}}",
+        catalogKinds: {
+          dlcs: "Дополнения",
+          regions: "Регионы",
+          cities: "Города",
+          companies: "Компании",
+          cargoes: "Грузы",
+          trailers: "Прицепы",
+          depots: "Депо",
+          company_logos: "Логотипы компаний",
+        },
         reference: "ID {{id}}…",
         before: "До",
         after: "После",
@@ -874,11 +897,12 @@ export const administrationTranslations = {
       waitTime: "Повторите через {{time}}.",
       dialogTitle: "Передать руководство участнику {{nickname}}?",
       dialogBody: "Роль «Директор» перейдёт к участнику {{nickname}} сразу и одной операцией.",
-      dialogPointDriver: "Вы останетесь водителем с прежними ролями, квалификациями и рейсами.",
+      dialogPointDriver:
+        "Вы останетесь водителем и сохраните свои квалификации и рейсы. Новый директор может назначить вас заместителем.",
       dialogPointBack: "Вернуть руководство может только новый директор, такой же передачей.",
       dialogPointAudit: "Код перестанет действовать, а журнал запишет передачу.",
       transferred:
-        "Руководство передано участнику {{nickname}}. Теперь вы водитель; передача записана в журнал.",
+        "Руководство передано участнику {{nickname}}. Вы остались водителем и сохранили свои квалификации и рейсы.",
       dismiss: "Скрыть",
       footer:
         "Сменить email или пароль директора может только сам директор, с подтверждением на текущий email.",

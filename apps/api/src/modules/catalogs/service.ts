@@ -355,6 +355,8 @@ export function createCatalogs(
     actor: Actor,
     operation: "catalog.changed" | "catalog.imported",
     subjectId: string,
+    kind: ImportList | "company_logos",
+    games: Game[],
   ) {
     const company = await ports.identity.onboardingCompany(tx);
     await audit.append(tx, {
@@ -366,6 +368,7 @@ export function createCatalogs(
       occurredAt: now().toISOString(),
       companyId: company.id,
       reason: "catalog_update",
+      details: { kind, games },
     });
   }
   function assertPatchShape(list: CatalogList, input: S["CatalogItemPatch"]) {
@@ -817,11 +820,12 @@ export function createCatalogs(
     id: string,
   ) {
     const [row] = await c(tx)
-      .select({ id: table.id, hidden: table.hidden })
+      .select({ id: table.id, game: table.game, hidden: table.hidden })
       .from(table)
       .where(and(eq(table.id, applicationId(id)), eq(table.game, game)))
       .for("share");
     if (!row || row.hidden) throw catalogError(422, "CATALOG_PARENT_INVALID");
+    return row;
   }
 
   // ---- Company logos ----
@@ -829,12 +833,12 @@ export function createCatalogs(
   const logoReason = (error: unknown) => (error instanceof PngError ? error.reason : "corrupt");
   async function lockCompany(tx: TxContext, id: string) {
     const [row] = await c(tx)
-      .select({ id: catalogCompanies.id })
+      .select({ id: catalogCompanies.id, game: catalogCompanies.game })
       .from(catalogCompanies)
       .where(eq(catalogCompanies.id, applicationId(id)))
       .for("update");
     if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
-    return row.id;
+    return row;
   }
   /** The company row is already locked, which serializes writers of its logo. */
   async function saveLogo(tx: TxContext, companyId: string, bytes: Buffer) {
@@ -1176,7 +1180,7 @@ export function createCatalogs(
               if (duplicateKey(error)) throw catalogError(409, "CATALOG_CODE_CONFLICT");
               throw error;
             }
-            await recordAudit(tx, actor, "catalog.changed", id);
+            await recordAudit(tx, actor, "catalog.changed", id, list, [input.game]);
             return { item: await itemById(tx, list, id, "en") };
           },
         );
@@ -1235,7 +1239,7 @@ export function createCatalogs(
                 throw error;
               }
             }
-            await recordAudit(tx, actor, "catalog.changed", row.id);
+            await recordAudit(tx, actor, "catalog.changed", row.id, list, [row.game]);
             return { item: await itemById(tx, list, row.id, "en") };
           },
         );
@@ -1316,7 +1320,9 @@ export function createCatalogs(
                 .set({ ...update.set, updatedAt })
                 .where(eq(table.id, update.id));
             const importId = newId();
-            await recordAudit(tx, actor, "catalog.imported", importId);
+            // The transaction validated every file row, including unchanged rows.
+            const games = [...new Set(rows.map((row) => row.values.game as Game))];
+            await recordAudit(tx, actor, "catalog.imported", importId, list, games);
             return {
               importId,
               rows: rows.length,
@@ -1473,8 +1479,8 @@ export function createCatalogs(
           key,
           { input },
           async () => {
-            await depotParent(tx, catalogCompanies, input.game, input.companyId);
-            await depotParent(tx, catalogCities, input.game, input.cityId);
+            const company = await depotParent(tx, catalogCompanies, input.game, input.companyId);
+            await depotParent(tx, catalogCities, company.game, input.cityId);
             await parent(tx, "dlc", input.game, input.dlcId ?? null);
             const id = newId();
             try {
@@ -1493,7 +1499,7 @@ export function createCatalogs(
               if (duplicateKey(error)) throw catalogError(409, "CATALOG_CODE_CONFLICT");
               throw error;
             }
-            await recordAudit(tx, actor, "catalog.changed", id);
+            await recordAudit(tx, actor, "catalog.changed", id, "depots", [company.game]);
             return { item: await depotById(tx, id, "en") };
           },
         );
@@ -1535,7 +1541,7 @@ export function createCatalogs(
                 .update(catalogCompanyCities)
                 .set({ ...fields, updatedAt: now().toISOString() })
                 .where(eq(catalogCompanyCities.id, row.id));
-            await recordAudit(tx, actor, "catalog.changed", row.id);
+            await recordAudit(tx, actor, "catalog.changed", row.id, "depots", [row.game]);
             return { item: await depotById(tx, row.id, "en") };
           },
         );
@@ -1565,9 +1571,9 @@ export function createCatalogs(
           key,
           { companyId, sha256: digest },
           async () => {
-            const id = await lockCompany(tx, companyId);
+            const { id, game } = await lockCompany(tx, companyId);
             await saveLogo(tx, id, bytes);
-            await recordAudit(tx, actor, "catalog.changed", id);
+            await recordAudit(tx, actor, "catalog.changed", id, "company_logos", [game]);
             return { item: await itemById(tx, "companies", id, "en") };
           },
         );
@@ -1584,14 +1590,14 @@ export function createCatalogs(
           key,
           { companyId },
           async () => {
-            const id = await lockCompany(tx, companyId);
+            const { id, game } = await lockCompany(tx, companyId);
             const [current] = await c(tx)
               .select({ sha: catalogCompanyLogos.sha256 })
               .from(catalogCompanyLogos)
               .where(eq(catalogCompanyLogos.companyId, id));
             if (current) {
               await c(tx).delete(catalogCompanyLogos).where(eq(catalogCompanyLogos.companyId, id));
-              await recordAudit(tx, actor, "catalog.changed", id);
+              await recordAudit(tx, actor, "catalog.changed", id, "company_logos", [game]);
             }
             return { item: await itemById(tx, "companies", id, "en") };
           },
@@ -1680,7 +1686,8 @@ export function createCatalogs(
               throw importInvalid(plan.lines.filter((line) => line.status === "error"));
             for (const write of plan.writes) await saveLogo(tx, write.companyId, write.bytes);
             const importId = newId();
-            await recordAudit(tx, actor, "catalog.imported", importId);
+            // The plan resolves every entry against locked company rows in this game.
+            await recordAudit(tx, actor, "catalog.imported", importId, "company_logos", [game]);
             return {
               importId,
               rows: files.length,

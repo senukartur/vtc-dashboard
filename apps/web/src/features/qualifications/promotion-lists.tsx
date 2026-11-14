@@ -7,6 +7,7 @@ import { DataTable } from "../../shared/ui/DataTable.js";
 import { Pager } from "../../shared/ui/pager.js";
 import { Button, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { Failure } from "./components.js";
+import { candidateThresholdState } from "./model.js";
 import { usePromotionMemberSearch } from "./promotion-queries.js";
 import type { Candidate } from "./promotion-transport.js";
 import { type DTO, QualificationFailure } from "./transport.js";
@@ -64,29 +65,22 @@ export function usePromotionDisplay() {
   const timezone = self?.preferences.displayTimezone ?? "UTC";
   const number = new Intl.NumberFormat(locale);
   return {
-    trips: (actual: number, required: number | null) =>
-      t("progress", {
-        actual: number.format(actual),
-        required: required === null ? t("noMinimum") : number.format(required),
-      }),
-    distance: (actual: string, required: string | null) =>
-      t("progress", {
-        actual: formatQuantity(actual, "km", locale),
-        required: required === null ? t("noMinimum") : formatQuantity(required, "km", locale),
-      }),
+    trips: (actual: number, required: number | null, showThreshold = true) =>
+      !showThreshold
+        ? number.format(actual)
+        : t("progress", {
+            actual: number.format(actual),
+            required: required === null ? t("noMinimum") : number.format(required),
+          }),
+    distance: (actual: string, required: string | null, showThreshold = true) =>
+      !showThreshold
+        ? formatQuantity(actual, "km", locale)
+        : t("progress", {
+            actual: formatQuantity(actual, "km", locale),
+            required: required === null ? t("noMinimum") : formatQuantity(required, "km", locale),
+          }),
     time: (value: string) => <time dateTime={value}>{formatUtc(value, locale, timezone)}</time>,
   };
-}
-
-function DriverIdentity({ member }: { member: DTO["MemberSummary"] }) {
-  return (
-    <>
-      {member.nickname}
-      <code className="promotion-member-id" title={member.id}>
-        {member.id.slice(-12)}
-      </code>
-    </>
-  );
 }
 
 export function CandidateTable({
@@ -98,7 +92,7 @@ export function CandidateTable({
   onPromote: (candidate: Candidate, trigger: HTMLButtonElement) => void;
   blocked: boolean;
 }) {
-  const { t } = useTranslation("promotions");
+  const { t } = useTranslation(["promotions", "qualifications"]);
   const display = usePromotionDisplay();
   return (
     <DataTable
@@ -113,7 +107,7 @@ export function CandidateTable({
           header: t("driver"),
           rowHeader: true,
           cardLabel: false,
-          cell: ({ member }) => <DriverIdentity member={member} />,
+          cell: ({ member }) => member.nickname,
         },
         { id: "game", header: t("game"), cell: ({ game }) => game.toUpperCase() },
         {
@@ -131,13 +125,22 @@ export function CandidateTable({
         {
           id: "trips",
           header: t("trips"),
-          cell: ({ acceptedTrips, requiredTrips }) => display.trips(acceptedTrips, requiredTrips),
+          cell: (candidate) =>
+            display.trips(
+              candidate.acceptedTrips,
+              candidate.requiredTrips,
+              candidateThresholdState(candidate) === "configured",
+            ),
         },
         {
           id: "distance",
           header: t("distance"),
-          cell: ({ actualDistanceM, requiredDistanceM }) =>
-            display.distance(actualDistanceM, requiredDistanceM),
+          cell: (candidate) =>
+            display.distance(
+              candidate.actualDistanceM,
+              candidate.requiredDistanceM,
+              candidateThresholdState(candidate) === "configured",
+            ),
         },
         {
           id: "readySince",
@@ -154,13 +157,18 @@ export function CandidateTable({
                 type="button"
                 aria-disabled={blocked || undefined}
                 aria-label={t("promoteDriver", { nickname: candidate.member.nickname })}
-                aria-description={candidate.member.id}
                 onClick={(event) => onPromote(candidate, event.currentTarget)}
               >
                 {t("promote")}
               </Button>
             ) : (
-              <span className="promotion-muted">{candidate.nextLevel ? t("notReady") : "—"}</span>
+              <span className="promotion-muted">
+                {candidateThresholdState(candidate) === "unconfigured"
+                  ? t("qualifications:ladderPromotionUnconfigured")
+                  : candidate.nextLevel
+                    ? t("notReady")
+                    : "—"}
+              </span>
             ),
         },
       ]}
@@ -184,7 +192,7 @@ export function HistoryTable({ items }: { items: HistoryItem[] }) {
           header: t("driver"),
           rowHeader: true,
           cardLabel: false,
-          cell: ({ member }) => <DriverIdentity member={member} />,
+          cell: ({ member }) => member.nickname,
         },
         { id: "game", header: t("game"), cell: ({ game }) => game.toUpperCase() },
         {

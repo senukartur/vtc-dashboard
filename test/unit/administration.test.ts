@@ -16,6 +16,8 @@ import { createWorkspaceSummary } from "../../apps/api/src/use-cases/workspace-s
 import { frozenAttempt } from "../../apps/web/src/features/admin/attempt.ts";
 import { administrationTranslations } from "../../apps/web/src/features/admin/translations.ts";
 
+import { safeAuditContext } from "../../packages/db/src/core/audit-details.ts";
+
 test("administration keysets are domain-separated and scoped to effective limit", () => {
   const key = randomBytes(32).toString("hex"),
     actor = {
@@ -429,4 +431,47 @@ test("workspace route applies current session authority and no-store to success 
   } finally {
     await app.close();
   }
+});
+
+test("event and catalog audit context is closed by action, subject and value", () => {
+  const title = "Fictional event";
+  expect(safeAuditContext("configuration.changed", "event", { title })).toEqual({ title });
+  expect(safeAuditContext("configuration.changed", "event", { title: null })).toEqual({
+    title: null,
+  });
+  expect(safeAuditContext("configuration.changed", "company", { title })).toBeUndefined();
+  for (const invalid of [
+    { title, reason: "Synthetic decline" },
+    { title: " " },
+    { title: "x".repeat(257) },
+    { before: null, after: { title } },
+    {},
+  ])
+    expect(() => safeAuditContext("configuration.changed", "event", invalid)).toThrow(
+      "INVALID_AUDIT_DETAILS",
+    );
+  const mixed = { kind: "depots", games: ["ats", "ets2"] };
+  expect(safeAuditContext("catalog.imported", "catalog", mixed)).toEqual({
+    kind: "depots",
+    games: ["ets2", "ats"],
+  });
+  expect(
+    safeAuditContext("catalog.published", "catalog", { kind: "cities", games: ["ets2"] }),
+  ).toEqual({
+    kind: "cities",
+    games: ["ets2"],
+  });
+  expect(() => safeAuditContext("catalog.changed", "catalog", mixed)).toThrow(
+    "INVALID_AUDIT_DETAILS",
+  );
+  for (const invalid of [
+    { ...mixed, kind: "file_hash" },
+    { ...mixed, games: ["ets2", "ets2"] },
+    { ...mixed, games: ["ets2", "other"] },
+    { ...mixed, games: [] },
+    { ...mixed, filename: "synthetic.csv" },
+  ])
+    expect(() => safeAuditContext("catalog.imported", "catalog", invalid)).toThrow(
+      "INVALID_AUDIT_DETAILS",
+    );
 });

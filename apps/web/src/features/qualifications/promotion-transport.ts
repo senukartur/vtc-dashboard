@@ -45,9 +45,10 @@ function listPath(path: string, filters: Record<string, string>, cursor: string 
 export function promotionCandidatesUrl(
   game: CandidateFilter["game"],
   status: NonNullable<CandidateFilter["status"]>,
+  search: CandidateFilter["search"],
   cursor: string | null,
 ) {
-  return listPath(promotionCandidatesPath, { game, status }, cursor);
+  return listPath(promotionCandidatesPath, { game, status, ...(search ? { search } : {}) }, cursor);
 }
 
 export function promotionHistoryUrl(

@@ -178,7 +178,8 @@ async function mockPromotions(
         assignmentId: id(13),
         currentLevel: state.current.nextLevel ?? nextLevel,
       };
-      const rows =
+      const search = url.searchParams.get("search")?.toLowerCase() ?? "";
+      const population =
         game === "ats"
           ? [atsCandidate]
           : all
@@ -186,6 +187,7 @@ async function mockPromotions(
             : state.committed
               ? []
               : [state.current, ...(state.other ? [state.other] : [])];
+      const rows = population.filter((item) => item.member.nickname.toLowerCase().includes(search));
       return route.fulfill({
         json: envelope({
           items: cursor ? rows.slice(1) : rows.slice(0, 1),
@@ -307,7 +309,7 @@ test(
     await expect(next).toBeFocused();
     await expect(next).toBeDisabled();
     await expect(candidates(page)).toContainText("No next level");
-    await expect(candidates(page)).toContainText("3 / No minimum");
+    await expect(candidates(page)).not.toContainText("No minimum");
     await expect(candidates(page).getByRole("button", { name: /Promote/ })).toHaveCount(0);
     await page.getByRole("button", { name: "Previous page" }).click();
     await expect(candidates(page).getByRole("rowheader")).toContainText(main.nickname);
@@ -321,6 +323,57 @@ test(
         .at(-1)
         ?.searchParams.toString(),
     ).toBe("game=ats&status=all&limit=25");
+  },
+);
+
+for (const [tab, status] of [
+  ["ready", "eligible"],
+  ["all", "all"],
+]) {
+  test(
+    `Nickname search resets the ${tab} candidate cursor`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockPromotions(page);
+      state.other = { ...first, member: second, assignmentId: id(17) };
+      await page.goto(`${path}?tab=${tab}`);
+      await expect(candidates(page).getByRole("rowheader")).toHaveText(main.nickname);
+      await page.getByRole("button", { name: "Next page" }).click();
+      await expect(candidates(page).getByRole("rowheader")).toHaveText(second.nickname);
+      const search = page.getByRole("searchbox", { name: "Search by nickname" });
+      await search.fill("  NorTh  ");
+      await expect(candidates(page).getByRole("rowheader")).toHaveText(main.nickname);
+      const reads = state.reads.filter((url) => url.pathname === candidatePath);
+      expect(reads.at(-1)?.searchParams.get("search")).toBe("NorTh");
+      expect(reads.at(-1)?.searchParams.get("status")).toBe(status);
+      expect(reads.at(-1)?.searchParams.get("cursor")).toBeNull();
+      await expect(page.getByRole("button", { name: "Previous page" })).toHaveCount(0);
+    },
+  );
+}
+
+test(
+  "Unconfigured candidates share the ladder label, and configured blank minima stay explicit",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockPromotions(page);
+    state.current = {
+      ...first,
+      currentLevel: { ...firstLevel, name: "Trainee" },
+      nextLevel: { ...nextLevel, name: "Driver III" },
+      eligible: false,
+      eligibleSince: null,
+      requiredTrips: null,
+      requiredDistanceM: null,
+    };
+    state.other = { ...first, member: second, requiredTrips: null, requiredDistanceM: null };
+    await page.goto(`${path}?tab=all`);
+    await expect(candidates(page)).toContainText("Promotion requires a new effective rule.");
+    await expect(candidates(page)).toContainText("Trainee");
+    await expect(candidates(page)).toContainText("Driver III");
+    await expect(candidates(page)).not.toContainText("No minimum");
+    await page.getByRole("button", { name: "Next page" }).click();
+    await expect(candidates(page).getByText(/No minimum/)).toHaveCount(2);
   },
 );
 
@@ -357,7 +410,8 @@ test(
     await search.fill("  tunDra  ");
     await expect(searchPager).toHaveCount(0);
     await page.getByRole("combobox", { name: "Select a driver" }).selectOption(second.id);
-    await expect(history(page).getByRole("rowheader")).toContainText(second.nickname);
+    await expect(history(page).getByRole("rowheader")).toHaveText(second.nickname);
+    await expect(history(page)).not.toContainText(second.id.slice(-12));
     await expect(page.getByText("1 action", { exact: true })).toBeVisible();
     const searchRequests = state.reads.filter((url) => url.pathname === searchPath);
     expect(searchRequests.at(-1)?.searchParams.toString()).toBe(
@@ -665,7 +719,7 @@ test(
 );
 
 test(
-  "A duplicate nickname stays distinguishable across candidate pages and in confirmation",
+  "Duplicate nicknames have no ID in the table and still confirm the correct assignment",
   browserCase(["@functional"]),
   async ({ page }) => {
     const state = await mockPromotions(page);
@@ -677,13 +731,13 @@ test(
     };
     state.other = duplicate;
     await page.goto(path);
-    await expect(candidates(page).getByRole("rowheader")).toContainText(main.id.slice(-12));
+    await expect(candidates(page).getByRole("rowheader")).toHaveText(main.nickname);
     await page.getByRole("button", { name: "Next page" }).click();
-    const secondRow = candidates(page)
-      .getByRole("row")
-      .filter({ hasText: duplicate.member.id.slice(-12) });
-    await expect(secondRow.getByRole("rowheader")).toContainText(main.nickname);
-    await secondRow.getByRole("button", { name: `Promote ${main.nickname}` }).click();
+    await expect(page.getByRole("button", { name: "Previous page" })).toBeVisible();
+    await expect(candidates(page).getByRole("rowheader")).toHaveText(main.nickname);
+    await candidates(page)
+      .getByRole("button", { name: `Promote ${main.nickname}` })
+      .click();
     const dialog = confirmDialog(page);
     await expect(dialog.getByText(duplicate.member.id, { exact: true })).toBeVisible();
     await dialog.getByRole("textbox", { name: "Reason" }).fill("Verified progress");

@@ -8,9 +8,12 @@ import {
   auditSubjects,
 } from "../schema/audit.js";
 import {
+  type AuditContext,
+  type AuditContextRecord,
   type AuditDetailRecord,
   type AuditDetails,
   auditObject,
+  safeAuditContext,
   safeAuditDetails,
 } from "./audit-details.js";
 import type { TxContext, UnitOfWork } from "./unit-of-work.js";
@@ -30,7 +33,8 @@ type AuditCodes = {
   subjectKind: (typeof auditSubjects)[number];
 };
 
-export type AuditInput = AuditMetadata & ((AuditCodes & { details?: never }) | AuditDetailRecord);
+export type AuditInput = AuditMetadata &
+  ((AuditCodes & { details?: never }) | AuditDetailRecord | AuditContextRecord);
 
 interface AuditPage {
   companyId: string;
@@ -87,6 +91,9 @@ function readableDetails(
 ) {
   if (raw !== null) {
     try {
+      // Context is private to the Administration projection; only the bounded display label leaves it.
+      const context = safeAuditContext(action, objectType, raw);
+      if (context) return { action, objectType, details: null, context };
       // The allowlist checks the action, subject and both snapshots together.
       return {
         action,
@@ -104,7 +111,9 @@ function readableDetails(
 // compatible with the published pre-Stage 3 schema and its migration-prefix tests.
 const legacyAuditEntries = mysqlTable(getTableName(auditEntries), auditEntryColumns);
 
-function safeInput(raw: AuditInput): AuditMetadata & AuditCodes & { details?: AuditDetails } {
+function safeInput(
+  raw: AuditInput,
+): AuditMetadata & AuditCodes & { details?: AuditDetails | AuditContext } {
   const allowed = [
     "actorKind",
     "actorId",
@@ -145,7 +154,9 @@ function safeInput(raw: AuditInput): AuditMetadata & AuditCodes & { details?: Au
     reason: input.reason,
     companyId: input.companyId ?? null,
     ...(Object.hasOwn(input, "details") && {
-      details: safeAuditDetails(input.operation, input.subjectKind, input.details),
+      details:
+        safeAuditContext(input.operation, input.subjectKind, input.details) ??
+        safeAuditDetails(input.operation, input.subjectKind, input.details),
     }),
   };
 }

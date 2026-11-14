@@ -10,7 +10,7 @@ import {
   isNull,
   lte,
   qualificationAssignments,
-  qualificationLevels,
+  type qualificationLevels,
   qualificationRules,
   qualificationStates,
   sql,
@@ -21,7 +21,7 @@ import { canonicalDecimal } from "../qualification-rules/decimal.js";
 import { evaluateQualificationProgress } from "../qualification-rules/index.js";
 import { type ContributionRegister, emptyTotals } from "../trips/contributions.js";
 import type { Game } from "./initialization.js";
-import { activeLevels, type ActiveLevel } from "./ladder.js";
+import { type ActiveLevel, activeLevels } from "./ladder.js";
 import type { Position } from "./pagination.js";
 
 type S = components["schemas"];
@@ -145,7 +145,7 @@ export function createEligibility(
     tx: TxContext,
     game: Game,
     instant: string,
-    options: { levelId?: string; includeOnset?: boolean } = {},
+    options: { levelId?: string; includeOnset?: boolean; search?: string | undefined } = {},
   ) {
     let after: string | undefined;
     for (;;) {
@@ -163,6 +163,7 @@ export function createEligibility(
       const members = await identity.memberSummariesInTransaction(
         tx,
         rows.map(({ userId }) => userId),
+        options.search,
       );
       yield rows.flatMap((row) => {
         const member = members.get(row.userId);
@@ -408,10 +409,12 @@ export function createEligibility(
       after: Position | null,
       limit: number,
       gameLevels: ActiveLevel[],
+      search?: string,
     ) {
       let total = 0;
       let page: (S["QualificationStage3PromotionCandidate"] & { id: string })[] = [];
-      for await (const rows of activeAssignments(tx, game, instant)) {
+      for await (const rows of activeAssignments(tx, game, instant, { search })) {
+        if (!rows.length) continue;
         const candidates = await evaluate(tx, game, rows, gameLevels, instant, true);
         for (const item of candidates) {
           if (status === "eligible" && !item.eligible) continue;

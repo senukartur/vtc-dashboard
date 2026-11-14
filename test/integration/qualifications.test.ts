@@ -521,6 +521,98 @@ test("candidates use active current per-game assignments, canonical thresholds, 
   });
 });
 
+test("candidate nickname search filters active rows and totals before paging or eligibility", async () => {
+  const mixed = await member(["trainee"], true, "Fictional Pilot%_\\A");
+  const second = await member(["trainee"], true, "Fictional pILOT%_\\B");
+  const unready = await member(["trainee"], true, "Fictional pilot%_\\C");
+  const former = await member(["trainee"], true, "Fictional pilot%_\\Former");
+  await member(["trainee"], true, "Fictional pilotXYA");
+  await identity.administer(
+    director,
+    former.actor.userId,
+    newId(),
+    (await identity.current(former.actor)).version,
+    { kind: "deactivate" },
+  );
+  await publish("ets2", 0, 1, null);
+  tick();
+  service = tracked();
+  await replace([(await fixture({ ownerId: mixed.actor.userId })).change]);
+  tick();
+  await replace([(await fixture({ ownerId: second.actor.userId })).change]);
+  const app = await createApp({
+    identity,
+    qualifications: service,
+    checkReadiness: async () => true,
+  });
+  const base = "/api/v1/admin/promotion-candidates";
+  const get = (filters: Record<string, string>, cookie = directorCookie) =>
+    app.inject({ url: `${base}?${new URLSearchParams(filters)}`, headers: { cookie } });
+  const query = { game: "ets2", limit: "1" };
+  const search = "  pIlOt%_\\  ";
+  try {
+    const first = await get({ ...query, search });
+    expect(first.statusCode).toBe(200);
+    expect(first.headers["cache-control"]).toBe("no-store");
+    const response = first.json().data;
+    expect(response).toMatchObject({
+      total: 2,
+      items: [{ member: { id: second.actor.userId }, eligible: true }],
+      nextCursor: expect.any(String),
+    });
+    const cursor = response.nextCursor as string;
+    const last = await get({ ...query, search: search.trim(), cursor });
+    expect(last.statusCode).toBe(200);
+    expect(last.json().data).toMatchObject({
+      total: 2,
+      items: [{ member: { id: mixed.actor.userId }, eligible: true }],
+      nextCursor: null,
+    });
+    for (const filters of [
+      { ...query, cursor },
+      { ...query, search: "pilot", cursor },
+    ])
+      expect((await get(filters)).statusCode).toBe(409);
+    const unfiltered = await get(query);
+    expect(unfiltered.json().data).toMatchObject({ total: 2, nextCursor: expect.any(String) });
+    expect(
+      (await get({ ...query, search, cursor: unfiltered.json().data.nextCursor })).statusCode,
+    ).toBe(409);
+    const all = { ...query, status: "all", search };
+    const allFirst = await get(all);
+    const a = allFirst.json().data;
+    expect(a).toMatchObject({ total: 3, items: [{ member: { id: second.actor.userId } }] });
+    const b = (await get({ ...all, cursor: a.nextCursor })).json().data;
+    expect(b).toMatchObject({ total: 3, items: [{ member: { id: mixed.actor.userId } }] });
+    const c = (await get({ ...all, cursor: b.nextCursor })).json().data;
+    expect(c).toMatchObject({
+      total: 3,
+      items: [{ member: { id: unready.actor.userId }, eligible: false }],
+      nextCursor: null,
+    });
+    expect((await get({ ...all, game: "ats", status: "eligible" })).json().data).toEqual({
+      total: 0,
+      items: [],
+      nextCursor: null,
+    });
+    expect((await get({ ...all, search: "Synthetic absence" })).json().data).toEqual({
+      total: 0,
+      items: [],
+      nextCursor: null,
+    });
+    for (const invalid of ["", "  ", "x".repeat(129)])
+      expect((await get({ ...query, search: invalid })).statusCode).toBe(422);
+    expect((await get({ ...query, search }, ownerCookie)).statusCode).toBe(403);
+    const history = await app.inject({
+      url: "/api/v1/admin/promotion-history?search=pilot",
+      headers: { cookie: directorCookie },
+    });
+    expect(history.statusCode).toBe(422);
+  } finally {
+    await app.close();
+  }
+});
+
 test("P10 cursors, command ETags and checkpoints follow only changed game topology", async () => {
   await publish("ets2", 0, 1, null);
   await publish("ets2", 2, 1, null);

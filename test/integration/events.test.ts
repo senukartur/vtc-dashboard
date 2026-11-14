@@ -29,6 +29,7 @@ import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.
 import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { createAdministration } from "../../apps/api/src/use-cases/administration.ts";
 import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
 import {
   createSyntheticTripEvidence,
@@ -888,6 +889,41 @@ test("history paginates complete unequal attendance batches without losing revis
     nextAfterSequence: { definitions: null, responses: null, attendance: null },
   });
 });
+test("event audit rows project only the authoritative title and preserve exact replay", async () => {
+  const administration = createAdministration(unit, identity, {
+    telemetry: false,
+    manual: false,
+    qualifications: false,
+    externalIdentities: false,
+    admissions: false,
+    mail: false,
+  });
+  const title = "Fictional audit convoy";
+  const event = await create({ title, description: "Synthetic private event description" });
+  const key = newId();
+  const id = event.data.event.id;
+  const response = { response: "declined", reason: "Synthetic private RSVP reason" } as const;
+  const first = await service.respond(trainee, id, key, 1, response);
+  await expect(service.respond(trainee, id, key, 1, response)).resolves.toEqual(first);
+  const read = await administration.auditStage3(director, { action: "configuration.changed" });
+  const items = read.items.filter((row) => row.subjectId === id);
+  expect(items).toHaveLength(2);
+  for (const item of items) {
+    expect(item).toMatchObject({ objectType: "event", objectName: title, details: null });
+    expect(item).not.toHaveProperty("context");
+  }
+  expect(new Set(items.map((row) => row.actorId))).toEqual(
+    new Set([director.userId, trainee.userId]),
+  );
+  expect(JSON.stringify(items)).not.toContain("Synthetic private");
+  const [stored] = await control.execute<RowDataPacket[]>(
+    "SELECT details FROM audit_entries WHERE subject_id=? AND subject_kind='event'",
+    [id],
+  );
+  expect(stored.map((row) => row.details)).toEqual([{ title }, { title }]);
+  await expect(administration.auditStage3(trainee, {})).rejects.toMatchObject({ statusCode: 403 });
+});
+
 test("history/audit/outbox and batch changes roll back together after injected effect failure", async () => {
   const e = await create(),
     id = e.data.event.id;
