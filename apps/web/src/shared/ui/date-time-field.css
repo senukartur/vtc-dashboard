@@ -189,7 +189,8 @@
   .calendar {
     --cell: 40px;
   }
-  .date-time-segment {
+  /* Scoped to the group so host resets such as `.host input { min-width: 0 }` cannot shrink touch targets. */
+  .date-time-time .date-time-segment {
     min-width: var(--target-min);
   }
 }
