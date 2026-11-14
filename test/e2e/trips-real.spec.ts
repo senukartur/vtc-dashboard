@@ -190,14 +190,15 @@ test(
       const comparison = reviewer.locator(".dispatch-comparison");
       const distance = comparison.getByRole("row", { name: /Actual driven distance/ });
       await expect(distance.getByRole("rowheader")).toContainText("Different");
-      await expect(distance.getByRole("cell").first()).toHaveText("471 km");
+      const distances = distance.getByRole("cell");
+      await expect(distances.first()).toHaveAccessibleName("471 km");
+      await expect(distances.nth(1)).toHaveAccessibleName("123.4 km");
       const detailResponse = await reviewer.request.get(
         `/api/v1/trips/${mixed.tripId}/review?view=stage3`,
       );
       expect(detailResponse.status()).toBe(200);
       const detail = ((await detailResponse.json()) as Schemas["TripStage3ReviewEnvelope"]).data;
-      expect(detail.sources.telemetry?.normalizedFacts.actualDistanceM).toBeTruthy();
-      expect(detail.sources.telemetry?.normalizedFacts.actualDistanceM).not.toBe("471000");
+      expect(detail.sources.telemetry?.normalizedFacts.actualDistanceM).toBe("123400");
       expect(detail.sources.manual?.manualRevision.id).toBeTruthy();
 
       await reviewer.locator("#review-choice-reject").click();
