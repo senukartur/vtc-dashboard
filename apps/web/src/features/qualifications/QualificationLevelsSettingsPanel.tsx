@@ -4,7 +4,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { formatQuantity } from "../../shared/formatting.js";
 import { DataTable, type DataTableColumn } from "../../shared/ui/DataTable.js";
-import { Badge, Button, Card, Input, Label } from "../../shared/ui/primitives.js";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../../shared/ui/dialog.js";
+import { Badge, Button, Card, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { useSignOut } from "../account/sign-out.js";
 import {
@@ -34,8 +35,8 @@ type EditInput = DTO[
   | "QualificationLadderArchiveInput"];
 type Insertion = { etag: string | null; before: string | null };
 type AddDraft = { name: string; reason: string; insertion?: Insertion };
+type ArchiveDraft = { level: LadderLevel; target?: string; reason: string };
 const emptyAddDraft: AddDraft = { name: "", reason: "" };
-type ArchiveDraft = { levelId: string; target?: string; reason: string };
 
 export function QualificationLevelsSettingsPanel({ visible = true }: { visible?: boolean }) {
   const session = useSession();
@@ -105,12 +106,17 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
   const [selectedId, setSelected] = useState<string | null>(null);
   const [openedEditors, setOpenedEditors] = useState<LadderLevel[]>([]);
   const [archiveDraft, setArchiveDraft] = useState<ArchiveDraft>();
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [success, setSuccess] = useState(false);
   const [reorderDraft, setReorderDraft] = useState<{ etag: string; ids: string[] }>();
   const [reorderReason, setReorderReason] = useState("");
   const [addDraft, setAddDraft] = useState<AddDraft>(emptyAddDraft);
   const attemptedEdit = useRef<Edit | null>(null);
   const reasonId = useId();
+  const archiveTrigger = useRef<HTMLButtonElement>(null);
+  const ladderHeading = useRef<HTMLHeadingElement>(null);
+  // History or a game switch can hide the pane while its draft and command remain mounted.
+  if (!visible && archiveOpen) setArchiveOpen(false);
   const etag = ladder && query.data?.etag === `"v${ladder.revision}"` ? query.data.etag : null;
   const hold = !etag || command.pending || command.seconds > 0 || command.canRecover;
   const levels = ladder?.levels ?? [];
@@ -127,7 +133,7 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
     return row ? [row] : [];
   });
   const editsEnabled = ladder?.ladderEditsEnabled === true;
-  const archiving = levels.find((row) => row.id === archiveDraft?.levelId);
+  const archiving = levels.find((row) => row.id === archiveDraft?.level.id);
   function selectEditor(row: LadderLevel) {
     setOpenedEditors((previous) =>
       previous.some(({ id }) => id === row.id) ? previous : [...previous, row],
@@ -150,7 +156,10 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
       setReorderDraft(undefined);
       setReorderReason("");
     }
-    if (attemptedEdit.current === "archive") setArchiveDraft(undefined);
+    if (attemptedEdit.current === "archive") {
+      setArchiveOpen(false);
+      setArchiveDraft(undefined);
+    }
     if (attemptedEdit.current === "add") setAddDraft(emptyAddDraft);
     attemptedEdit.current = null;
     setSuccess(true);
@@ -289,13 +298,16 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
               type="button"
               variant="outline"
               aria-label={t("ladderArchiveName", { name: row.name })}
-              aria-expanded={row.id === archiving?.id}
+              aria-haspopup="dialog"
               disabled={hold || levels.length === 1 || changed || staleOrder}
-              onClick={() =>
-                setArchiveDraft(
-                  row.id === archiving?.id ? undefined : { levelId: row.id, reason: "" },
-                )
-              }
+              onClick={(event) => {
+                archiveTrigger.current = event.currentTarget;
+                setSuccess(false);
+                setArchiveDraft((draft) =>
+                  draft?.level.id === row.id ? draft : { level: row, reason: "" },
+                );
+                setArchiveOpen(true);
+              }}
             >
               {t("ladderArchive")}
             </Button>
@@ -306,6 +318,11 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
   ];
   return (
     <>
+      {visible && (
+        <h3 ref={ladderHeading} tabIndex={-1}>
+          {t("ladderTitle")} · {game.toUpperCase()}
+        </h3>
+      )}
       {visible && ladder && (
         <>
           {!ladder.ladderEditsEnabled && <p className="muted">{t("ladderEditsUnavailable")}</p>}
@@ -377,20 +394,6 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
               </div>
             </div>
           )}
-          {ladder.ladderEditsEnabled && archiving && archiveDraft && (
-            <ArchiveLevel
-              key={archiving.id}
-              level={archiving}
-              ladder={ladder}
-              root={root}
-              etag={etag}
-              command={command}
-              hold={hold || changed || staleOrder}
-              submit={submit}
-              draft={archiveDraft}
-              setDraft={setArchiveDraft}
-            />
-          )}
         </>
       )}
       {visible &&
@@ -432,10 +435,51 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
         ) : (
           <p>{t("ladderMaxLevels", { count: maxLevels })}</p>
         ))}
-      {visible && (
+      {visible && archiveOpen && archiveDraft && (
+        <ArchiveLevel
+          key={archiveDraft.level.id}
+          level={archiving ?? archiveDraft.level}
+          draft={archiveDraft}
+          setDraft={setArchiveDraft}
+          levels={levels}
+          root={root}
+          etag={etag}
+          command={command}
+          hold={hold || changed || staleOrder || !editsEnabled || !archiving}
+          submit={submit}
+          onDismiss={() => {
+            setArchiveOpen(false);
+            // A failed read or ambiguous response can hide the original row. Keep the form draft
+            // for a fresh review; the command hook separately retains the exact prior request.
+            if (!command.canRecover && command.failure?.kind !== "conflict")
+              setArchiveDraft(undefined);
+          }}
+          onRecovered={committed}
+          onFocusReturn={() => {
+            const trigger = archiveTrigger.current;
+            const fallback = ladderHeading.current;
+            if (fallback?.isConnected && fallback.getClientRects().length > 0) {
+              (trigger?.isConnected && !trigger.disabled ? trigger : fallback).focus();
+            }
+          }}
+        />
+      )}
+      {visible && !archiveOpen && (
         <>
           <Failure error={command.failure} seconds={command.seconds} />
           <Recovery command={command} onRecovered={committed} />
+          {archiveDraft && command.failure?.kind === "conflict" && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={(event) => {
+                archiveTrigger.current = event.currentTarget;
+                setArchiveOpen(true);
+              }}
+            >
+              {t("ladderArchiveName", { name: archiveDraft.level.name })}
+            </Button>
+          )}
           {success && <p role="status">{t("success")}</p>}
         </>
       )}
@@ -570,7 +614,7 @@ function AddLevel({
 
 function ArchiveLevel({
   level,
-  ladder,
+  levels,
   root,
   etag,
   command,
@@ -578,78 +622,131 @@ function ArchiveLevel({
   submit,
   draft,
   setDraft,
-}: StructuralForm & {
+  onDismiss,
+  onRecovered,
+  onFocusReturn,
+}: Omit<StructuralForm, "ladder"> & {
   level: LadderLevel;
+  levels: LadderLevel[];
   draft: ArchiveDraft;
   setDraft: (draft: ArchiveDraft) => void;
+  onDismiss: () => void;
+  onRecovered: () => void;
+  onFocusReturn: () => void;
 }) {
   const { t } = useTranslation("qualifications");
   const id = useId();
-  const available = ladder.levels.filter((row) => row.id !== level.id);
-  const defaultTarget = ladder.levels.find(
+  const { target, reason } = draft;
+  const [acknowledged, setAcknowledged] = useState<string | null>(null);
+  const available = levels.filter((row) => row.id !== level.id);
+  const defaultTarget = available.find(
     (row) => row.position === (level.position === 1 ? 2 : level.position - 1),
   );
-  const selected = draft.target ? available.find((row) => row.id === draft.target) : defaultTarget;
+  const selected = target ? available.find((row) => row.id === target) : defaultTarget;
   const label = (row: LadderLevel) =>
     t("ladderLevelPosition", { position: row.position, name: row.name });
-  if (!defaultTarget) return null;
-  const input: DTO["QualificationLadderArchiveInput"] = {
-    targetLevelId: selected?.id ?? "",
-    observedDriverCount: level.currentDriverCount,
-    ...(draft.reason.trim() && { reason: draft.reason.trim() }),
-  };
+  const sourceLabel = label(level);
+  const count = level.currentDriverCount;
+  // A level rename can change the reviewed labels without changing the ladder revision.
+  const guard = JSON.stringify([
+    etag,
+    level.id,
+    sourceLabel,
+    selected?.id,
+    selected && label(selected),
+    reason,
+    count,
+  ]);
+  if (acknowledged !== null && acknowledged !== guard) setAcknowledged(null);
+  const confirmed = acknowledged === guard;
   return (
-    <Card className="stack">
-      <h3>{t("ladderArchiveName", { name: label(level) })}</h3>
-      <p>{t("ladderArchiveWarning")}</p>
-      <p>{t("ladderDriverCount", { count: level.currentDriverCount })}</p>
-      <Label htmlFor={`${id}-target`}>{t("ladderArchiveTarget")}</Label>
-      <select
-        className="input"
-        id={`${id}-target`}
-        value={selected?.id ?? ""}
-        disabled={hold}
-        onChange={(event) => setDraft({ ...draft, target: event.target.value })}
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !command.pending) onDismiss();
+      }}
+    >
+      <DialogContent
+        className="qualification-settings-confirmation qualification-archive-dialog"
+        onInteractOutside={(event) => event.preventDefault()}
+        onEscapeKeyDown={(event) => {
+          if (command.pending) event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          onFocusReturn();
+        }}
       >
-        {!selected && (
-          <option value="" disabled>
-            {t("ladderArchiveTarget")}
-          </option>
-        )}
-        {available.map((row) => (
-          <option value={row.id} key={row.id}>
-            {label(row)}
-          </option>
-        ))}
-      </select>
-      <Reason
-        id={id}
-        value={draft.reason}
-        onChange={(reason) => setDraft({ ...draft, reason })}
-        disabled={hold}
-      />
-      <Confirm
-        label={t("ladderArchiveReview")}
-        guard={JSON.stringify([etag, level.id, label(level), selected && label(selected), input])}
-        disabled={hold || !selected}
-        pending={command.pending}
-        failure={command.failure}
-        title={t("ladderArchiveName", { name: label(level) })}
-        description={t("ladderArchiveWarning")}
-        destructiveLabel={t("ladderArchive")}
-        onConfirm={() =>
-          selected && etag
-            ? submit("archive", `${root}/levels/${level.id}/archive`, input, etag)
-            : Promise.resolve(undefined)
-        }
-      >
-        <p>
-          {ladder.game.toUpperCase()} · {label(level)} → {selected && label(selected)}
-        </p>
-        <p>{t("ladderDriverCount", { count: level.currentDriverCount })}</p>
-        {input.reason && <p>{input.reason}</p>}
-      </Confirm>
-    </Card>
+        <DialogTitle>{t("ladderArchiveName", { name: sourceLabel })}</DialogTitle>
+        <DialogDescription>{t("ladderArchiveWarning")}</DialogDescription>
+        <p>{t("ladderDriverCount", { count })}</p>
+        <form
+          className="stack"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (hold || !selected || !etag || !confirmed) return;
+            setAcknowledged(null);
+            const input: DTO["QualificationLadderArchiveInput"] = {
+              targetLevelId: selected.id,
+              observedDriverCount: count,
+              ...(reason.trim() && { reason: reason.trim() }),
+            };
+            void submit("archive", `${root}/levels/${level.id}/archive`, input, etag);
+          }}
+        >
+          <div className="stack">
+            <Label htmlFor={`${id}-target`}>{t("ladderArchiveTarget")}</Label>
+            <Select
+              id={`${id}-target`}
+              value={selected?.id ?? ""}
+              disabled={hold}
+              onChange={(event) => setDraft({ ...draft, target: event.target.value })}
+            >
+              {!selected && (
+                <option value="" disabled>
+                  {t("ladderArchiveTarget")}
+                </option>
+              )}
+              {available.map((row) => (
+                <option value={row.id} key={row.id}>
+                  {label(row)}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <Reason
+            id={id}
+            value={reason}
+            onChange={(reason) => setDraft({ ...draft, reason })}
+            disabled={hold}
+          />
+          <Label className="qualification-archive-acknowledgement">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              disabled={hold || !selected}
+              onChange={(event) => setAcknowledged(event.target.checked ? guard : null)}
+            />
+            {t("ladderArchiveAcknowledge")}
+          </Label>
+          <Failure error={command.failure} seconds={command.seconds} />
+          <div className="button-row">
+            <Button type="button" variant="outline" disabled={command.pending} onClick={onDismiss}>
+              {t("trips:cancel")}
+            </Button>
+            <Button
+              type="submit"
+              variant="outline"
+              className="qualification-archive-submit"
+              disabled={hold || !selected || !confirmed}
+            >
+              {t(command.pending ? "trips:loading" : "ladderArchive")}
+            </Button>
+            <Recovery command={command} onRecovered={onRecovered} />
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

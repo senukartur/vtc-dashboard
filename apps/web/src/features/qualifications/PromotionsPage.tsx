@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useHref, useLocation, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import type { CursorPages } from "../../shared/paging.js";
 import { Pager } from "../../shared/ui/pager.js";
-import { Button, Card, Label, Select } from "../../shared/ui/primitives.js";
+import { Button, Card, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { usePromotionCommand } from "./PromotionCommandProvider.js";
 import { PromotionConfirmation } from "./PromotionConfirmation.js";
 import {
@@ -20,12 +20,22 @@ import "./promotions.css";
 
 const tabs = ["ready", "all", "history"] as const;
 type Tab = (typeof tabs)[number];
-type Filters = { tab: Tab; game: Game; memberId: string | null };
+type Filters = { tab: Tab; game: Game; memberId: string | null; search: string };
 type ListPage = { items: unknown[]; total: number; nextCursor: string | null };
 
-function searchParams({ tab, game, memberId }: Filters, cursor: string | null = null) {
+function promotionTab(params: URLSearchParams): Tab {
+  const value = params.get("tab");
+  return value === "all" || value === "history" ? value : "ready";
+}
+
+function promotionGame(params: URLSearchParams): Game {
+  return params.get("game") === "ats" ? "ats" : "ets2";
+}
+
+function searchParams({ tab, game, memberId, search }: Filters, cursor: string | null = null) {
   const params = new URLSearchParams({ game, tab });
   if (tab === "history" && memberId) params.set("memberId", memberId);
+  if (tab !== "history" && search) params.set("search", search);
   if (cursor) params.set("cursor", cursor);
   return params;
 }
@@ -48,13 +58,24 @@ export function PromotionsPage() {
 function PromotionsWorkspace() {
   const { t, i18n } = useTranslation("promotions");
   const [params, setParams] = useSearchParams();
+  const { pathname: workspacePath } = useLocation();
+  const workspaceHref = useHref(workspacePath);
   const command = usePromotionCommand();
-  const tabValue = params.get("tab");
-  const tab: Tab = tabValue === "all" || tabValue === "history" ? tabValue : "ready";
-  const game = params.get("game") === "ats" ? "ats" : "ets2";
+  const tab = promotionTab(params);
+  const game = promotionGame(params);
   const member = schema("Id").safeParse(tab === "history" ? params.get("memberId") : null);
   const memberId = member.success ? member.data : null;
-  const filters: Filters = { tab, game, memberId };
+  const searchValue = params.get("search") ?? "";
+  const search = searchValue.length <= 128 ? searchValue : "";
+  const filters: Filters = { tab, game, memberId, search };
+  const term = search.trim();
+  const [settledTerm, setSettledTerm] = useState(term);
+  const searching = tab !== "history" && term !== settledTerm;
+  useEffect(() => {
+    if (!searching) return;
+    const timer = window.setTimeout(() => setSettledTerm(term), 250);
+    return () => window.clearTimeout(timer);
+  }, [searching, term]);
   const cursorValue = params.get("cursor");
   const cursor = cursorValue && cursorValue.length <= 2048 ? cursorValue : null;
   const [selection, setSelection] = useState<DTO["MemberSummary"] | null>(null);
@@ -68,12 +89,13 @@ function PromotionsWorkspace() {
   const candidates = usePromotionCandidates(
     game,
     tab === "all" ? "all" : "eligible",
+    term,
     cursor,
-    tab !== "history",
+    tab !== "history" && !searching,
   );
   const history = usePromotionHistory(game, memberId, cursor, tab === "history");
   const query = tab === "history" ? history : candidates;
-  const data: ListPage | undefined = query.data?.data.data;
+  const data: ListPage | undefined = searching ? undefined : query.data?.data.data;
   const total = data?.total;
   const pageKey = searchParams(filters).toString();
 
@@ -104,9 +126,9 @@ function PromotionsWorkspace() {
         // Cursor replacement closes a location-bound preview. Keep its focus on this page.
         focusReturn.current = command.conflict ? "recovery" : "heading";
       }
-      setParams(searchParams({ tab, game, memberId }), { replace: true });
+      setParams(searchParams({ tab, game, memberId, search }), { replace: true });
     }
-  }, [changed, command.conflict, cursor, game, memberId, open, setParams, tab]);
+  }, [changed, command.conflict, cursor, game, memberId, open, search, setParams, tab]);
 
   // The workspace cursor is shareable and follows browser Back/Forward. Adapt the URL
   // controls to Pager while keeping the explicit first-page action for rejected cursors.
@@ -200,12 +222,36 @@ function PromotionsWorkspace() {
             <option value="ats">ATS</option>
           </Select>
         </div>
-        {tab === "history" && (
+        {tab === "history" ? (
           <HistoryMemberFilter
             memberId={memberId}
             memberLabel={selectedLabel}
             onSelect={chooseMember}
           />
+        ) : (
+          <div className="promotion-field">
+            <Label htmlFor="promotion-search">{t("search")}</Label>
+            <Input
+              id="promotion-search"
+              type="search"
+              maxLength={128}
+              value={search}
+              onChange={(event) => {
+                // BrowserRouter updates the URL before React replaces the outgoing tab's input.
+                const { origin, pathname, search } = window.location;
+                const current = new URLSearchParams(search);
+                if (
+                  pathname !== new URL(workspaceHref, origin).pathname ||
+                  promotionTab(current) !== tab ||
+                  promotionGame(current) !== game
+                )
+                  return;
+                setParams(searchParams({ ...filters, search: event.target.value }), {
+                  replace: true,
+                });
+              }}
+            />
+          </div>
         )}
       </div>
       {notice && (
@@ -254,7 +300,11 @@ function PromotionsWorkspace() {
         </div>
       )}
       <Card className="promotion-results stack">
-        <PromotionReadState query={query} cursor={cursor} onFirstPage={pages.restart} />
+        {searching ? (
+          <p role="status">{t("loading")}</p>
+        ) : (
+          <PromotionReadState query={query} cursor={cursor} onFirstPage={pages.restart} />
+        )}
         {data && data.items.length === 0 && (
           <p role="status">
             {t(tab === "history" ? "emptyHistory" : tab === "ready" ? "emptyReady" : "emptyAll")}
@@ -263,14 +313,14 @@ function PromotionsWorkspace() {
         {tab === "history" && !!history.data?.data.data.items.length && (
           <HistoryTable items={history.data.data.data.items} />
         )}
-        {tab !== "history" && !!candidates.data?.data.data.items.length && (
+        {tab !== "history" && !searching && !!candidates.data?.data.data.items.length && (
           <CandidateTable
             items={candidates.data.data.data.items}
             onPromote={promote}
             blocked={!!candidate}
           />
         )}
-        {!query.isError && (
+        {!searching && !query.isError && (
           <Pager
             pages={pages}
             nextCursor={data?.nextCursor}

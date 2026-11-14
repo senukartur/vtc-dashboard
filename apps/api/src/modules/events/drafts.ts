@@ -255,7 +255,13 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
     }
   }
 
-  async function auditChange(tx: TxContext, actor: Actor, id: string, time: string) {
+  async function auditChange(
+    tx: TxContext,
+    actor: Actor,
+    id: string,
+    time: string,
+    title: string | null,
+  ) {
     await audit.append(tx, {
       actorKind: "user",
       actorId: actor.userId,
@@ -264,6 +270,7 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
       subjectId: id,
       occurredAt: time,
       reason: "operator_request",
+      details: { title },
     });
   }
 
@@ -441,7 +448,7 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
               updatedBy: actor.userId,
             });
           await storeDlcs(tx, id, value);
-          await auditChange(tx, actor, id, time);
+          await auditChange(tx, actor, id, time, value.row.title);
           return {
             schemaVersion: 1 as const,
             route: "draft_create" as const,
@@ -488,7 +495,7 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
               .set({ ...value.row, version, updatedAt: time, updatedBy: actor.userId })
               .where(eq(eventDrafts.eventId, id));
             await storeDlcs(tx, id, value);
-            await auditChange(tx, actor, id, time);
+            await auditChange(tx, actor, id, time, value.row.title);
             return {
               schemaVersion: 1 as const,
               route: "draft_update" as const,
@@ -519,7 +526,7 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
               .set({ version, updatedAt: time, updatedBy: actor.userId, discardedAt: time })
               .where(eq(eventDrafts.eventId, id));
             await ports.discardMedia?.(tx, id);
-            await auditChange(tx, actor, id, time);
+            await auditChange(tx, actor, id, time, row.title);
             return {
               schemaVersion: 1 as const,
               route: "draft_delete" as const,

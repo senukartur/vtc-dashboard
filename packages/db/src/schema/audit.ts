@@ -1,5 +1,5 @@
 import { index, json, mysqlEnum, mysqlTable, varchar } from "drizzle-orm/mysql-core";
-import type { AuditDetails } from "../core/audit-details.js";
+import type { AuditContext, AuditDetails } from "../core/audit-details.js";
 import { idColumn, utcColumn } from "../core/values.js";
 
 export const auditOperations = [
@@ -63,7 +63,7 @@ export const auditEntryColumns = {
 
 export const auditEntries = mysqlTable(
   "audit_entries",
-  { ...auditEntryColumns, details: json("details").$type<AuditDetails>() },
+  { ...auditEntryColumns, details: json("details").$type<AuditDetails | AuditContext>() },
   (table) => [
     index("audit_subject_time_idx").on(table.subjectKind, table.subjectId, table.occurredAt),
     index("audit_actor_time_idx").on(table.actorId, table.occurredAt),

@@ -176,3 +176,69 @@ export function safeAuditDetails(
   if (before === null && after === null) return invalidDetails();
   return { before, after } as AuditDetails;
 }
+
+const catalogKind = oneOf(
+  "dlcs",
+  "regions",
+  "cities",
+  "companies",
+  "cargoes",
+  "trailers",
+  "depots",
+  "company_logos",
+);
+type CatalogKind = ReturnType<typeof catalogKind>;
+type CatalogGame = ReturnType<typeof game>;
+type EventContext = { title: string | null };
+type CatalogContext = { kind: CatalogKind; games: CatalogGame[] };
+
+export type AuditContextRecord =
+  | { operation: "configuration.changed"; subjectKind: "event"; details: EventContext }
+  | {
+      operation: "catalog.changed" | "catalog.imported" | "catalog.published";
+      subjectKind: "catalog";
+      details: CatalogContext;
+    };
+export type AuditContext = AuditContextRecord["details"];
+
+function eventContext(value: unknown): EventContext {
+  const { title } = auditObject(value, ["title"], invalidDetails);
+  if (title !== null && (typeof title !== "string" || !title.trim() || title.length > 256))
+    return invalidDetails();
+  return { title };
+}
+
+function catalogContext(value: unknown, allowMixedGames: boolean): CatalogContext {
+  const { kind, games } = auditObject(value, ["kind", "games"], invalidDetails);
+  if (
+    !Array.isArray(games) ||
+    types.isProxy(games) ||
+    games.length < 1 ||
+    games.length > (allowMixedGames ? 2 : 1) ||
+    Reflect.ownKeys(games).length !== games.length + 1
+  )
+    return invalidDetails();
+  const validated = Array.from({ length: games.length }, (_, i) => {
+    const descriptor = Object.getOwnPropertyDescriptor(games, i);
+    if (!descriptor?.enumerable || !("value" in descriptor)) return invalidDetails();
+    return game(descriptor.value);
+  });
+  if (new Set(validated).size !== validated.length) return invalidDetails();
+  return { kind: catalogKind(kind), games: validated.length === 2 ? ["ets2", "ats"] : validated };
+}
+
+export function safeAuditContext(
+  operation: (typeof auditOperations)[number],
+  subject: (typeof auditSubjects)[number],
+  raw: unknown,
+): AuditContext | undefined {
+  if (subject === "event" && operation === "configuration.changed") return eventContext(raw);
+  if (
+    subject === "catalog" &&
+    (operation === "catalog.changed" ||
+      operation === "catalog.imported" ||
+      operation === "catalog.published")
+  )
+    return catalogContext(raw, operation === "catalog.imported");
+  return undefined;
+}

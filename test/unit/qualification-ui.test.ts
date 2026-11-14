@@ -1,6 +1,7 @@
 import type { components } from "@vtc/contracts";
 import { describe, expect, test } from "vitest";
 import {
+  candidateThresholdState,
   defaultLevelId,
   sortLevels,
   thresholdSummary,
@@ -144,4 +145,19 @@ describe("qualification translations", () => {
       false,
     );
   });
+});
+
+test("candidate threshold presentation distinguishes missing rules, blank minima and the top level", () => {
+  const successor = { id: level("driver_iii").id, name: "Driver III" };
+  const missing = {
+    nextLevel: successor,
+    eligible: false,
+    requiredTrips: null,
+    requiredDistanceM: null,
+  };
+  expect(candidateThresholdState(missing)).toBe("unconfigured");
+  expect(candidateThresholdState({ ...missing, eligible: true })).toBe("configured");
+  expect(candidateThresholdState({ ...missing, requiredDistanceM: "25000" })).toBe("configured");
+  expect(candidateThresholdState({ ...missing, requiredTrips: 1 })).toBe("configured");
+  expect(candidateThresholdState({ ...missing, nextLevel: null })).toBe("terminal");
 });

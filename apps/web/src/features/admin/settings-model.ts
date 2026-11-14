@@ -165,6 +165,28 @@ export function shortAuditId(id: string): string {
   return id.slice(0, 8);
 }
 
+const catalogKinds = [
+  "dlcs",
+  "regions",
+  "cities",
+  "companies",
+  "cargoes",
+  "trailers",
+  "depots",
+  "company_logos",
+] as const;
+
+export function catalogAuditLabel(objectName: string | null) {
+  if (!objectName) return null;
+  const [rawKind, games, extra] = objectName.split(" / ");
+  const kind = catalogKinds.find((value) => value === rawKind);
+  return kind &&
+    extra === undefined &&
+    (games === "ETS2" || games === "ATS" || games === "ETS2, ATS")
+    ? { kind, games }
+    : null;
+}
+
 export function auditSnapshot(
   row: components["schemas"]["AuditStage3Entry"],
   side: "before" | "after",

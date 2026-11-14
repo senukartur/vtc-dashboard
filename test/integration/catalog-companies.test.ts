@@ -1153,6 +1153,8 @@ test("a single logo upload stores the checked bytes, lists only a version and re
 test("each committed upload writes one audit entry and a replay by key writes nothing", async () => {
   const c = await company("audit_co");
   const before = await auditCount("catalog.changed");
+  // Give the upload a later audit timestamp than the company creation.
+  instant += 1;
   const key = newId();
   const png = rgbaLogo(3);
   const first = await catalogs.setLogo(director, c.id, key, png);
@@ -1166,12 +1168,13 @@ test("each committed upload writes one audit entry and a replay by key writes no
   });
   expect((await storedLogo(c.id))?.sha).toBe(sha256Hex(png).toUpperCase());
   const [audit] = await control.query<RowDataPacket[]>(
-    "SELECT operation, subject_kind, CAST(subject_id AS CHAR) subject_id, CAST(actor_id AS CHAR) actor_id FROM audit_entries WHERE operation='catalog.changed' ORDER BY occurred_at DESC, id LIMIT 1",
+    "SELECT operation, subject_kind, CAST(subject_id AS CHAR) subject_id, CAST(actor_id AS CHAR) actor_id, details FROM audit_entries WHERE operation='catalog.changed' ORDER BY occurred_at DESC, id LIMIT 1",
   );
   expect(audit[0]).toMatchObject({
     subject_kind: "catalog",
     subject_id: c.id,
     actor_id: director.userId,
+    details: { kind: "company_logos", games: [c.game] },
   });
   // The audit entry carries no image content.
   const [dump] = await control.query<RowDataPacket[]>("SELECT * FROM audit_entries");

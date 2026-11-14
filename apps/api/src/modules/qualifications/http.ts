@@ -26,6 +26,7 @@ const id = {
   },
   game = { type: "string", enum: ["ets2", "ats"] },
   view = { type: "string", const: "stage3" },
+  nicknameSearch = { type: "string", minLength: 1, maxLength: 128, pattern: "\\S" },
   page = {
     limit: { type: "integer", minimum: 1, maximum: 100 },
     cursor: { type: "string", minLength: 1, maxLength: 2048 },
@@ -172,7 +173,7 @@ export async function registerQualificationRoutes(
             {
               ...page,
               view,
-              search: { type: "string", minLength: 1, maxLength: 128, pattern: "\\S" },
+              search: nicknameSearch,
             },
             ["view"],
           ),
@@ -184,12 +185,17 @@ export async function registerQualificationRoutes(
       return memberEnvelope(request.query.view === "stage3", envelope(request, result));
     },
   );
-  app.get<{ Querystring: Page & { game: Game; status?: "eligible" | "all" } }>(
+  app.get<{ Querystring: Page & { game: Game; status?: "eligible" | "all"; search?: string } }>(
     "/api/v1/admin/promotion-candidates",
     {
       schema: {
         querystring: object(
-          { ...page, game, status: { type: "string", enum: ["eligible", "all"] } },
+          {
+            ...page,
+            game,
+            status: { type: "string", enum: ["eligible", "all"] },
+            search: nicknameSearch,
+          },
           ["game"],
         ),
         response: { 200: ref("QualificationStage3PromotionCandidateListEnvelope") },

@@ -27,7 +27,8 @@ const labels = {
     moveUp: "Move {{name}} up",
     saveOrder: "Save level order",
     archive: "Archive {{name}}",
-    reviewArchive: "Review archive",
+    acknowledge: "I confirm the archive and driver reassignment.",
+    cancel: "Cancel",
     confirmArchive: "Archive level",
     target: "Transfer drivers to",
     position: "Position",
@@ -44,7 +45,8 @@ const labels = {
     moveUp: "Переместить «{{name}}» выше",
     saveOrder: "Сохранить порядок уровней",
     archive: "Архивировать «{{name}}»",
-    reviewArchive: "Проверить архивацию",
+    acknowledge: "Подтверждаю архивацию и перевод водителей.",
+    cancel: "Отмена",
     confirmArchive: "Архивировать уровень",
     target: "Перевести водителей на уровень",
     position: "Позиция",
@@ -67,6 +69,7 @@ async function mockLadder(page: Page, withDashboard = false) {
   let failNext = false;
   let ladderStatus = 200;
   let renameReplayStatus = 409;
+  const renamed = new Map<string, { name: string; version: number }>();
   const commands: { etag: string | undefined; key: string | undefined; input: unknown }[] = [];
   const renameCommands: typeof commands = [];
   await page.route("**/api/v1/admin/qualification-ladders/ats**", async (route) => {
@@ -99,6 +102,7 @@ async function mockLadder(page: Page, withDashboard = false) {
           requiredDistanceM: null,
           currentDriverCount:
             withDashboard && id === (order.includes(ids[2]) ? ids[2] : ids[1]) ? 1 : 0,
+          ...renamed.get(id),
         })),
       };
       return route.fulfill({ headers: { etag }, json: envelope(data) });
@@ -169,6 +173,9 @@ async function mockLadder(page: Page, withDashboard = false) {
     ladderRead(status: number) {
       ladderStatus = status;
     },
+    renameLevel(id: string, name: string) {
+      renamed.set(id, { name, version: (renamed.get(id)?.version ?? 1) + 1 });
+    },
     renameReplay(status: number) {
       renameReplayStatus = status;
     },
@@ -221,8 +228,9 @@ test(
     const panel = page.getByRole("region", { name: labels.en.ladder });
     await panel.getByRole("button", { name: "ATS", exact: true }).click();
     await panel.getByRole("button", { name: "Archive Fictional level 3", exact: true }).click();
-    await panel.getByRole("button", { name: labels.en.reviewArchive, exact: true }).click();
-    await page.getByRole("dialog").getByRole("button", { name: labels.en.confirmArchive }).click();
+    const archive = page.getByRole("dialog");
+    await archive.getByRole("checkbox", { name: labels.en.acknowledge }).check();
+    await archive.getByRole("button", { name: labels.en.confirmArchive }).click();
     await expect(panel.getByRole("status")).toHaveText("The server confirmed the change.");
     expect(reads).toEqual({ ets2: 1, ats: 1 });
 
@@ -234,31 +242,149 @@ test(
 );
 
 test(
-  "P11 preserves archive context after a lost response, failed read and definite replay conflict",
+  "Archive requires a fresh acknowledgement after edits and returns focus on Cancel",
   browserCase(["@functional"]),
   async ({ page }) => {
     const server = await mockLadder(page);
     await page.goto(`${path}&game=ats`);
+    const trigger = page.getByRole("button", { name: "Archive Fictional level 3", exact: true });
+    await trigger.focus();
+    await trigger.press("Enter");
+    const dialog = page.getByRole("dialog");
+    const target = dialog.getByLabel(labels.en.target, { exact: true });
+    const reason = dialog.getByLabel("Reason (optional)", { exact: true });
+    const acknowledge = dialog.getByRole("checkbox", { name: labels.en.acknowledge });
+    const archive = dialog.getByRole("button", { name: labels.en.confirmArchive, exact: true });
+    await expect(target).toHaveValue(ids[1]);
+    await expect(target).toBeFocused();
+    await expect(archive).toBeDisabled();
+    await acknowledge.check();
+    await expect(archive).toBeEnabled();
+    await target.selectOption(ids[0]);
+    await expect(archive).toBeDisabled();
+    await expect(acknowledge).not.toBeChecked();
+    await acknowledge.check();
+    await reason.fill("Fictional reason");
+    await expect(archive).toBeDisabled();
+    await expect(acknowledge).not.toBeChecked();
+    await reason.focus();
+    await page.keyboard.press("Tab");
+    await expect(acknowledge).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(archive).toBeEnabled();
+    await page.keyboard.press("Tab");
+    const cancel = dialog.getByRole("button", { name: labels.en.cancel, exact: true });
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    expect(server.commands).toHaveLength(0);
+  },
+);
+
+test(
+  "Archive requires acknowledgement after either reviewed level is renamed at the same ladder revision",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const server = await mockLadder(page);
+    await page.goto(`${path}&game=ats`);
+    await page.getByRole("button", { name: "Archive Fictional level 3", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const acknowledgement = dialog.getByRole("checkbox", { name: labels.en.acknowledge });
+    const archive = dialog.getByRole("button", { name: labels.en.confirmArchive, exact: true });
+    const target = dialog.getByLabel(labels.en.target, { exact: true });
+    const reason = dialog.getByLabel("Reason (optional)", { exact: true });
+    await reason.fill("Fictional reason");
+    for (const id of [ids[2], ids[1]]) {
+      await acknowledgement.check();
+      await expect(archive).toBeEnabled();
+      const name = id === ids[2] ? "Fictional renamed source" : "Fictional renamed target";
+      server.renameLevel(id, name);
+      const refreshed = page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" && new URL(response.url()).pathname === api,
+      );
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      expect((await refreshed).headers().etag).toBe('"v1"');
+      if (id === ids[2]) await expect(dialog.getByRole("heading")).toContainText(name);
+      else await expect(target.locator("option:checked")).toContainText(name);
+      await expect(target).toHaveValue(ids[1]);
+      await expect(reason).toHaveValue("Fictional reason");
+      await expect(acknowledgement).not.toBeChecked();
+      await expect(archive).toBeDisabled();
+    }
+    expect(server.commands).toHaveLength(0);
+  },
+);
+
+test(
+  "Archive stays closed after Settings Back and Forward and retains an unsubmitted draft",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const server = await mockLadder(page);
+    await page.goto("/account/admin/settings?game=ats");
+    const general = page.getByRole("tab", { name: "General", exact: true });
+    const qualifications = page.getByRole("tab", { name: "Qualification levels", exact: true });
+    await qualifications.click();
+    const trigger = page.getByRole("button", { name: "Archive Fictional level 3", exact: true });
+    const dialog = page.getByRole("dialog");
+    const reason = dialog.getByLabel("Reason (optional)", { exact: true });
+    const acknowledgement = dialog.getByRole("checkbox", { name: labels.en.acknowledge });
+    await trigger.click();
+    await reason.fill("Fictional unsubmitted reason");
+    await acknowledgement.check();
+
+    await page.goBack();
+    await expect(general).toBeFocused();
+    await expect(dialog).toHaveCount(0);
+    await page.goForward();
+    await expect(qualifications).toHaveAttribute("aria-selected", "true");
+    await expect(trigger).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    await expect(general).toBeFocused();
+
+    await trigger.click();
+    await expect(reason).toHaveValue("Fictional unsubmitted reason");
+    await expect(acknowledgement).not.toBeChecked();
+    await expect(
+      dialog.getByRole("button", { name: labels.en.confirmArchive, exact: true }),
+    ).toBeDisabled();
+    expect(server.commands).toHaveLength(0);
+  },
+);
+
+test(
+  "P11 preserves archive context after a lost response, failed read and definite replay conflict",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const server = await mockLadder(page);
+    await page.goto("/account/admin/settings?game=ats");
+    const qualifications = page.getByRole("tab", { name: "Qualification levels", exact: true });
+    await qualifications.click();
     const panel = page.getByRole("region", { name: labels.en.ladder });
     const dialog = page.getByRole("dialog");
-    const target = panel.getByLabel(labels.en.target, { exact: true });
-    const reason = panel.getByLabel("Reason (optional)", { exact: true }).first();
-    const review = panel.getByRole("button", { name: labels.en.reviewArchive, exact: true });
+    const target = dialog.getByLabel(labels.en.target, { exact: true });
+    const reason = dialog.getByLabel("Reason (optional)", { exact: true });
+    const checked = dialog.getByRole("checkbox", { name: labels.en.acknowledge });
     const recover = panel.getByRole("button", { name: "Check the previous action", exact: true });
     await panel.getByRole("button", { name: "Archive Fictional level 3", exact: true }).click();
     await target.selectOption(ids[0]);
     await reason.fill("Fictional retained archive reason");
-    await review.click();
+    await checked.check();
     server.failResponse();
     await dialog.getByRole("button", { name: labels.en.confirmArchive, exact: true }).click();
     await expect(dialog.getByRole("alert")).toContainText("The result is uncertain");
     expect(server.commands).toHaveLength(1);
-    await page.keyboard.press("Escape");
+    await page.goBack();
+    await expect(page.getByRole("tab", { name: "General", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     await expect(dialog).toHaveCount(0);
-    await expect(recover).toBeVisible();
     server.ladderRead(503);
-    await page.getByRole("tab", { name: "General", exact: true }).click();
-    await page.getByRole("tab", { name: "Qualification levels", exact: true }).click();
+    await page.goForward();
+    await expect(qualifications).toHaveAttribute("aria-selected", "true");
+    await expect(dialog).toHaveCount(0);
     await expect(panel.getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
     await expect(recover).toBeVisible();
     server.ladderRead(200);
@@ -270,6 +396,11 @@ test(
     );
     await recover.click();
     expect((await replay).status()).toBe(409);
+    await panel
+      .getByRole("button", { name: "Archive Fictional level 3", exact: true })
+      .last()
+      .click();
+    await expect(checked).not.toBeChecked();
     await expect(target).toHaveValue(ids[0]);
     await expect(reason).toHaveValue("Fictional retained archive reason");
     expect(server.commands).toHaveLength(2);
@@ -803,35 +934,42 @@ for (const locale of ["en", "ru"] as const) {
         if (!archived) throw new Error("SYNTHETIC_LEVEL_MISSING");
         const previous = latest.levels.find((row) => row.position === archived.position - 1);
         if (!previous) throw new Error("SYNTHETIC_LEVEL_MISSING");
-        await table
-          .getByRole("button", { name: s.archive.replace("{{name}}", name), exact: true })
-          .click();
-        await expect(panel.getByLabel(s.target, { exact: true })).toHaveValue(previous.id);
-        await expect(
-          panel.getByLabel(s.target, { exact: true }).getByRole("option", {
-            name: `${previous.position} · ${previous.name}`,
-            exact: true,
+        const archiveTrigger = table.getByRole("button", {
+          name: s.archive.replace("{{name}}", name),
+          exact: true,
+        });
+        await archiveTrigger.focus();
+        await archiveTrigger.press("Enter");
+        const archiveTarget = dialog.getByLabel(s.target, { exact: true });
+        const confirm = dialog.getByRole("button", { name: s.confirmArchive, exact: true });
+        const checkbox = dialog.getByRole("checkbox", { name: s.acknowledge });
+        await expect(archiveTarget).toHaveValue(previous.id);
+        await expect(archiveTarget).toBeFocused();
+        await expect(confirm).toBeDisabled();
+        await expect(dialog.getByRole("heading")).toContainText(name);
+        expect(
+          await dialog.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            return (
+              rect.left >= 0 &&
+              rect.right <= innerWidth &&
+              element.scrollWidth <= element.clientWidth + 1
+            );
           }),
-        ).toHaveCount(1);
-        await expect(panel.getByText(s.zero, { exact: true })).toBeVisible();
-        const reviewArchive = panel.getByRole("button", { name: s.reviewArchive, exact: true });
-        await reviewArchive.click();
-        await expect(dialog.getByText(name, { exact: false }).first()).toBeVisible();
-        await expect(
-          dialog.getByText(
-            `ATS · ${archived.position} · ${name} → ${previous.position} · ${previous.name}`,
-            { exact: true },
-          ),
-        ).toBeVisible();
+        ).toBe(true);
         await expect(dialog).toHaveAccessibleDescription(
           new RegExp(s.warning.replaceAll(".", "\\.")),
         );
         await expect(dialog.getByText(s.zero, { exact: true })).toBeVisible();
+        await checkbox.check();
+        await expect(confirm).toBeEnabled();
         await page.keyboard.press("Escape");
         await expect(dialog).toHaveCount(0);
         await expect(inserted).toBeVisible();
-        await expect(reviewArchive).toBeFocused();
-        await reviewArchive.press("Enter");
+        await expect(archiveTrigger).toBeFocused();
+        await archiveTrigger.press("Enter");
+        await expect(checkbox).not.toBeChecked();
+        await checkbox.check();
         const committedArchive = page.waitForResponse(
           (response) =>
             new URL(response.url()).pathname === `${api}/levels/${archived.id}/archive` &&
@@ -844,6 +982,7 @@ for (const locale of ["en", "ru"] as const) {
         await expect(dialog).toHaveCount(0);
         await expect(table).toBeVisible();
         await expect(inserted).toHaveCount(0);
+        await expect(panel.getByRole("heading", { name: `${s.ladder} · ATS` })).toBeFocused();
         const refreshed = await snapshot();
         expect(refreshed.revision).toBe(latest.revision + 1);
         expect(refreshed.levels.map((row) => row.id)).toEqual(original.levels.map((row) => row.id));

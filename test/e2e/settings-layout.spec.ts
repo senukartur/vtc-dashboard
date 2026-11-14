@@ -459,7 +459,7 @@ test(
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
     await expect(notice(page)).toHaveText(
-      `✓ Leadership transferred to ${names.volga}. You are now a driver; the audit log records the transfer.`,
+      `✓ Leadership transferred to ${names.volga}. You remain a driver and keep your qualifications and trips.`,
     );
     await expect(notice(page)).toBeFocused();
     expect(
@@ -636,6 +636,10 @@ test(
     const dialog = page.getByRole("dialog");
     const confirm = dialog.getByRole("button", { name: "Confirm", exact: true });
     await trigger.click();
+    await expect(dialog).toContainText(
+      "You remain a driver and keep your qualifications and trips.",
+    );
+    await expect(dialog).toContainText("The new Director can appoint you as a Deputy Director.");
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(trigger).toBeFocused();
     expect(state.commands).toEqual([]);
@@ -979,6 +983,69 @@ test(
   },
 );
 
+for (const locale of ["en", "ru"] as const) {
+  test(`Readable audit rows in ${locale}`, browserCase(["@functional"]), async ({ page }) => {
+    await mockSettings(page, { role: "deputy" });
+    await page.route("**/api/v1/admin/audit?*", (route) =>
+      route.fulfill({
+        json: {
+          data: {
+            nextCursor: null,
+            items: [
+              {
+                id: ids.self,
+                subjectId: ids.cedar,
+                actorId: null,
+                actorNickname: null,
+                action: "configuration.changed",
+                objectType: "event",
+                objectName: "Fictional Snow Convoy",
+                occurredAt: "2026-10-28T12:10:00.000Z",
+                details: null,
+              },
+              {
+                id: ids.kestrel,
+                subjectId: ids.cedar,
+                actorId: null,
+                actorNickname: null,
+                action: "catalog.imported",
+                objectType: "catalog",
+                objectName: "cities / ETS2, ATS",
+                occurredAt: "2026-10-27T12:10:00.000Z",
+                details: null,
+              },
+              {
+                id: ids.cedar,
+                subjectId: ids.company,
+                actorId: null,
+                actorNickname: null,
+                action: "catalog.published",
+                objectType: "catalog",
+                objectName: null,
+                occurredAt: "2026-10-26T12:10:00.000Z",
+                details: null,
+              },
+            ],
+          },
+          meta: { requestId: "synthetic-audit-layout" },
+        },
+      }),
+    );
+    await page.goto("/account/admin/settings?tab=audit");
+    if (locale === "ru") await catalogLanguage(page, locale);
+    const audit = page.getByRole("region", { name: text[locale].audit, exact: true });
+    const russian = locale === "ru";
+    await expect(audit).toContainText(russian ? "Событие изменено" : "Event changed");
+    await expect(audit).toContainText("Fictional Snow Convoy");
+    await expect(audit).toContainText(russian ? "Города · ETS2, ATS" : "Cities · ETS2, ATS");
+    await expect(audit).toContainText(russian ? "Каталог опубликован" : "Catalog published");
+    await expect(audit).toContainText("ID c6500000…");
+    await expect(audit).not.toContainText(
+      russian ? "Подробности изменения недоступны." : "Change details unavailable.",
+    );
+  });
+}
+
 test(
   "P11 exact action filter, opaque next and previous cursors, and stale-page recovery",
   browserCase(["@functional"]),
@@ -998,7 +1065,7 @@ test(
     await expect(page.getByText("Entries 1–1 of 2", { exact: true })).toBeVisible();
     state.auditTotal = undefined;
     await next.click();
-    await expect(audit).toContainText("Change details unavailable.");
+    await expect(audit).not.toContainText("Change details unavailable.");
     await expect(audit).toContainText("ID c6500000…");
     await expect(audit).not.toContainText(ids.company);
     await expect(page.getByText("Entries 2–2", { exact: true })).toBeVisible();

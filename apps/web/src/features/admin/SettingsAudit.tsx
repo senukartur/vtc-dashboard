@@ -11,6 +11,7 @@ import {
   auditActions,
   auditPath,
   auditSnapshot,
+  catalogAuditLabel,
   shortAuditId,
   validReportingTimezone,
 } from "./settings-model.js";
@@ -21,17 +22,33 @@ type Row = DTO["AuditStage3Entry"];
 function AuditChange({ row }: { row: Row }) {
   const { t } = useTranslation("administration");
   const action = auditAction(row.action);
+  const eventChanged = row.objectType === "event" && row.action === "configuration.changed";
+  const catalog = row.objectType === "catalog" ? catalogAuditLabel(row.objectName) : null;
+  const objectName = catalog
+    ? t("settingsUi.audit.catalogLabel", {
+        kind: t(`settingsUi.audit.catalogKinds.${catalog.kind}`),
+        games: catalog.games,
+      })
+    : row.objectName;
   return (
     <>
-      <strong>{action ? t(`auditActions.${auditActions[action]}`) : t("auditUnknown")}</strong>
+      <strong>
+        {eventChanged
+          ? t("settingsUi.audit.eventChanged")
+          : action
+            ? t(`auditActions.${auditActions[action]}`)
+            : t("auditUnknown")}
+      </strong>
       <p>
         {t(`settingsUi.audit.object.${row.objectType}`)}
         {" · "}
-        {row.objectName || t("settingsUi.audit.reference", { id: shortAuditId(row.subjectId) })}
+        {objectName || t("settingsUi.audit.reference", { id: shortAuditId(row.subjectId) })}
       </p>
-      {row.details ? (
+      {row.details && (
         <>
-          {row.action === "configuration.changed" && <p>{t("reportingTimezone")}</p>}
+          {row.action === "configuration.changed" && row.objectType === "company" && (
+            <p>{t("reportingTimezone")}</p>
+          )}
           <dl className="settings-audit-change">
             <div>
               <dt>{t("settingsUi.audit.before")}</dt>
@@ -48,8 +65,6 @@ function AuditChange({ row }: { row: Row }) {
             </div>
           </dl>
         </>
-      ) : (
-        <p className="muted">{t("settingsUi.audit.detailsUnavailable")}</p>
       )}
     </>
   );

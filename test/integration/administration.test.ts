@@ -338,7 +338,7 @@ test("Stage 3 filters exact action before the time/ID keyset and preserves unsaf
   const secondSession = await composed.identity.login(deputy.email, password);
   const [low, high] = [newId(), newId()].sort();
   if (!low || !high) throw new Error("SYNTHETIC_AUDIT_IDS_REQUIRED");
-  const invalidSnapshotsIds = [newId(), newId(), newId()] as const;
+  const invalidSnapshotsIds = [newId(), newId(), newId(), newId()] as const;
   const ids: string[] = [];
   const valid = { before: null, after: { reportingTimezone: "Europe/Warsaw" } };
   const seed = (
@@ -346,7 +346,7 @@ test("Stage 3 filters exact action before the time/ID keyset and preserves unsaf
     options: {
       id?: string;
       company?: string | null;
-      subject?: "user" | "company";
+      subject?: "user" | "company" | "event" | "catalog";
       details?: unknown;
     } = {},
   ) => {
@@ -388,6 +388,28 @@ test("Stage 3 filters exact action before the time/ID keyset and preserves unsaf
       subject: "user",
       details: valid,
     });
+
+    await seed("configuration.changed", {
+      id: invalidSnapshotsIds[3],
+      subject: "event",
+      details: { title: "Fictional event", reason: "Synthetic private audit field" },
+    });
+    const publicationId = newId();
+    const legacyCatalogId = newId();
+    await seed("catalog.published", {
+      id: publicationId,
+      subject: "catalog",
+      details: { kind: "cargoes", games: ["ats"] },
+    });
+    await seed("catalog.published", { id: legacyCatalogId, subject: "catalog" });
+    const publications = await read("?view=stage3&action=catalog.published");
+    expect(publications.statusCode).toBe(200);
+    expect(publications.json().data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: publicationId, objectName: "cargoes / ATS", details: null }),
+        expect.objectContaining({ id: legacyCatalogId, objectName: null, details: null }),
+      ]),
+    );
 
     const query = "?view=stage3&action=legacy.test&limit=1";
     const first = await read(query);
@@ -455,8 +477,12 @@ test("Stage 3 filters exact action before the time/ID keyset and preserves unsaf
     const invalidSnapshots = (malformed.json().data.items as AuditStage3Entry[]).filter((row) =>
       invalidSnapshotsIds.some((id) => id === row.id),
     );
-    expect(invalidSnapshots).toHaveLength(3);
+    expect(invalidSnapshots).toHaveLength(4);
     expect(invalidSnapshots.every((row) => row.details === null)).toBe(true);
+    expect(
+      invalidSnapshots.find((row) => row.id === invalidSnapshotsIds[3])?.objectName,
+    ).toBeNull();
+    expect(malformed.body).not.toContain("Synthetic private audit field");
     for (const invalid of [
       "?action=legacy.test",
       "?view=stage2",

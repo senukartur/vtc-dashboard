@@ -170,11 +170,25 @@ test(
         (await qualifications.progress(fixture.staff, userId, "ats", "admin")).data.assignment,
       ).toEqual(beforeAts.assignment);
 
-      await page
+      const historyTab = page
         .getByRole("navigation", { name: "Promotion views" })
-        .getByRole("link", { name: "History", exact: true })
-        .click();
+        .getByRole("link", { name: "History", exact: true });
+      await historyTab.click();
+      await expect(historyTab).toHaveAttribute("aria-current", "page");
+      const memberLookup = page.waitForResponse(
+        (response) => {
+          const url = new URL(response.url());
+          return (
+            response.request().method() === "GET" &&
+            url.pathname === searchPath &&
+            url.searchParams.get("view") === "stage3" &&
+            url.searchParams.get("search") === nickname
+          );
+        },
+        { timeout: 20_000 },
+      );
       await page.getByRole("searchbox", { name: "Search by nickname" }).fill(nickname);
+      expect((await memberLookup).status(), "History nickname lookup").toBe(200);
       await page.getByRole("combobox", { name: "Select a driver" }).selectOption(userId);
       const history = page.getByRole("table", { name: "Company qualification history" });
       await expect(history.getByRole("row").filter({ hasText: promotionReason })).toContainText(
@@ -408,16 +422,17 @@ test(
 
       await page.goto("/account/admin/settings?tab=qualifications");
       await settings.getByRole("button", { name: "Archive " + name, exact: true }).click();
-      await expect(settings.getByLabel("Transfer drivers to")).toHaveValue(source.id);
-      await settings.getByRole("button", { name: "Review archive", exact: true }).click();
+      const archiveDialog = page.getByRole("dialog");
+      await expect(archiveDialog.getByLabel("Transfer drivers to")).toHaveValue(source.id);
+      await expect(archiveDialog.getByRole("button", { name: "Archive level" })).toBeDisabled();
+      await archiveDialog
+        .getByRole("checkbox", { name: "I confirm the archive and driver reassignment." })
+        .check();
       const archived = page.waitForResponse(
         responseAt(ladderPath + "/levels/" + changed.nextLevel.id + "/archive", "POST"),
       );
       const archivedSummary = page.waitForResponse(responseAt(summaryPath, "GET"));
-      await page
-        .getByRole("dialog")
-        .getByRole("button", { name: "Archive level", exact: true })
-        .click();
+      await archiveDialog.getByRole("button", { name: "Archive level", exact: true }).click();
       expect((await archived).status()).toBe(200);
       const afterArchive = (
         (await (await archivedSummary).json()).data as S["WorkspaceStage3Summary"]
