@@ -6,9 +6,10 @@ export interface Page {
   limit?: number;
   cursor?: string;
 }
-interface Position {
+export interface Position {
   id: string;
   time: string | null;
+  kind?: "assignment" | "promotion";
 }
 export function pagination(key: string, domain = "qualifications") {
   const sign = (body: string) =>
@@ -47,6 +48,11 @@ export function pagination(key: string, domain = "qualifications") {
         };
         applicationId(payload.after.id);
         if (payload.after.time !== null) utcDateTime(payload.after.time);
+        if (
+          payload.after.kind !== undefined &&
+          !["assignment", "promotion"].includes(payload.after.kind)
+        )
+          throw new Error();
         if (payload.binding !== binding) throw new Error();
         after = payload.after;
       } catch {

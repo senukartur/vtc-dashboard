@@ -211,6 +211,13 @@
       "when": 1794590317849,
       "tag": "0029_orange_zaladane",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "5",
+      "when": 1794611664003,
+      "tag": "0030_superb_monster_badoon",
+      "breakpoints": true
     }
   ]
 }

@@ -118,6 +118,11 @@ export function composeIdentity(
         },
       )
     : undefined;
+  const qualificationsLifecycle = createQualificationInitialization(
+    unit,
+    outbox,
+    qualificationsConfig?.eligibilityTrackingSince,
+  );
   identity = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit, outbox),
     ...(tripsConfig
@@ -128,7 +133,7 @@ export function composeIdentity(
           },
         }
       : {}),
-    qualificationsLifecycle: createQualificationInitialization(unit, outbox),
+    qualificationsLifecycle,
     ...(telemetryConfig
       ? { invalidateTelemetryCredentials: (tx, id) => invalidateTelemetryCredentials(unit, tx, id) }
       : {}),
@@ -138,7 +143,7 @@ export function composeIdentity(
   if (admissionsConfig)
     admissions = createAdmissions(unit, admissionsConfig, {
       identity,
-      qualifications: createQualificationInitialization(unit, outbox),
+      qualifications: qualificationsLifecycle,
       events: admissionsEvents(unit, outbox),
       invalidateMail: (tx, id) => invalidateAdmissionsMail(unit, tx, id),
       ...(messaging
@@ -373,6 +378,7 @@ export function composeIdentity(
         })
       : undefined;
   const workspaceSummary = createWorkspaceSummary(identity, {
+    ...(qualifications ? { qualifications } : {}),
     ...(tripWorkspace ? { trips: tripWorkspace } : {}),
     ...(dispatchReviewStage3Enabled && tripDecisions
       ? { dispatch: tripDecisions.reviewQueue }
