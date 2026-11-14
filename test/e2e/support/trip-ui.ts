@@ -37,6 +37,13 @@ export async function mockTrips(page: Page) {
       self.data.capabilities.push("trips.review");
       return route.fulfill({ json: self });
     }
+    if (path === "/api/v1/me/workspace-summary" && url.searchParams.get("view") === "stage3")
+      return route.fulfill({
+        json: envelope({
+          computedAt: "2026-11-12T08:00:00.000Z",
+          legacyReviewQueue: { count: 0, oldestAgeSeconds: null },
+        }),
+      });
     const catalogRow = /^\/api\/v1\/catalogs\/(cities|cargoes|trailers)(?:\/([^/]+))?$/.exec(path);
     if (catalogRow) {
       const name = catalogRow[1],
