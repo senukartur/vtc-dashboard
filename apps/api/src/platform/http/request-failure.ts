@@ -6,9 +6,7 @@ import type { FastifyRequest } from "fastify";
 
 const apiRoot = fileURLToPath(new URL("../../", import.meta.url));
 const diagnosticCodes = new Set([
-  "RESPONSE_SCHEMA_INVALID",
   "TRANSACTION_COMMIT_OUTCOME_UNKNOWN",
-  "TRANSACTION_CONTROL_TIMEOUT",
   "FST_ERR_FAILED_ERROR_SERIALIZATION",
   "FST_ERR_REP_INVALID_PAYLOAD_TYPE",
   "FST_ERR_HOOK_TIMEOUT",
@@ -30,6 +28,7 @@ const diagnosticCodes = new Set([
   "ER_LOCK_WAIT_TIMEOUT",
   "ER_NO_SUCH_TABLE",
 ]);
+const diagnosticMessages = new Set(["RESPONSE_SCHEMA_INVALID", "TRANSACTION_CONTROL_TIMEOUT"]);
 
 function errorField(error: object, key: string): unknown {
   try {
@@ -80,8 +79,9 @@ function failureDetails(error: unknown) {
     location ??= sourceLocation(current);
     const code = errorField(current, "code");
     if (typeof code === "string" && diagnosticCodes.has(code)) return { reason: code, location };
-    if (errorField(current, "message") === "RESPONSE_SCHEMA_INVALID")
-      return { reason: "RESPONSE_SCHEMA_INVALID", location };
+    const message = errorField(current, "message");
+    if (typeof message === "string" && diagnosticMessages.has(message))
+      return { reason: message, location };
     const name = errorField(current, "name");
     if (
       name === "TypeError" ||

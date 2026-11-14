@@ -148,6 +148,9 @@ test("failure logs allow known nested codes and suppress private exception detai
   app.get("/unexpected-error", async () => {
     throw privateError;
   });
+  app.get("/transaction-timeout", async () => {
+    throw new Error("TRANSACTION_CONTROL_TIMEOUT");
+  });
   await registerTelemetryRoutes(
     app,
     { config: { origin: "http://localhost" } } as Identity,
@@ -163,19 +166,21 @@ test("failure logs allow known nested codes and suppress private exception detai
   try {
     const unexpected = await app.inject("/unexpected-error");
     assert.equal(unexpected.statusCode, 500);
+    assert.equal((await app.inject("/transaction-timeout")).statusCode, 500);
     const telemetry = await app.inject({
       url: "/api/telemetry/v1/connection?key=PRIVATE_TELEMETRY_QUERY",
       headers: { authorization: "Bearer PRIVATE_TELEMETRY_TOKEN" },
     });
     assert.equal(telemetry.statusCode, 503);
     assert.deepEqual(telemetry.json().error, { code: "TEMPORARILY_UNAVAILABLE", retryable: true });
-    assert.equal(log.mock.callCount(), 2);
-    const [unexpectedLog, telemetryLog] = log.mock.calls.map(({ arguments: args }) => {
+    assert.equal(log.mock.callCount(), 3);
+    const [unexpectedLog, timeoutLog, telemetryLog] = log.mock.calls.map(({ arguments: args }) => {
       const line = String(args[0]);
       assert.doesNotMatch(line, /PRIVATE_|private@example\.invalid/);
       return JSON.parse(line);
     });
     assert.equal(unexpectedLog.reason, "TypeError");
+    assert.equal(timeoutLog.reason, "TRANSACTION_CONTROL_TIMEOUT");
     assert.equal(telemetryLog.reason, "ER_BAD_FIELD_ERROR");
     assert.equal(telemetryLog.route, "/api/telemetry/v1/connection");
     assert.equal(telemetryLog.code, "TEMPORARILY_UNAVAILABLE");
