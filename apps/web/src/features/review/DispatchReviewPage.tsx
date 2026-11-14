@@ -296,7 +296,7 @@ export function DispatchReviewPage({
                       },
                     }
                   : {}),
-                pagination: { pages, nextCursor: data?.nextCursor, pageSize },
+                pagination: { pages, nextCursor: data?.nextCursor, pageSize, total: data?.total },
               }}
             />
           </div>

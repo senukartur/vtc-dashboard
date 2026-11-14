@@ -126,12 +126,14 @@ test(
     await offPageReason.selectOption({ label: "Actual completion is unknown" });
     await expect.poll(() => mock.lists.at(-1)?.get("reasonCode")).toBe("actual_completion_unknown");
     await expect(rowOf(page, reviewIds.telemetry)).toBeVisible();
+    const queuePager = queue(page).getByRole("navigation", { name: "Pages", exact: true });
+    const range = queuePager.locator(".pager-summary");
+    await expect(range).toHaveText("1–1 of 1");
     await offPageReason.selectOption("");
     await page.getByRole("combobox", { name: "Sort order" }).selectOption("asc");
     await expect(rowOf(page, reviewIds.late)).toBeVisible();
-    const queuePager = queue(page).getByRole("navigation", { name: "Pages", exact: true });
     const next = queuePager.getByRole("button", { name: "Next page", exact: true });
-    await expect(queuePager.locator(".pager-summary")).toHaveText("Page 1");
+    await expect(range).toHaveText("1–2 of 4");
     await expect(
       queuePager.getByRole("button", { name: "Previous page", exact: true }),
     ).toHaveAttribute("aria-disabled", "true");
