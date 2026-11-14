@@ -4,6 +4,7 @@ import type { components } from "@vtc/contracts";
 import { deferred } from "../support/concurrency.ts";
 import { csrf, origin, resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage, envelope, mockCatalogs } from "./support/catalogs.ts";
+import { makeProgressFixture, mockDashboardRoutes } from "./support/dashboard-ui.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -52,11 +53,14 @@ const labels = {
   },
 };
 
-async function mockLadder(page: Page) {
+async function mockLadder(page: Page, withDashboard = false) {
   const capabilities = ["company.read", "company.configure", "qualifications.manage"];
-  await mockCatalogs(page, true, {
-    capabilities,
-  });
+  if (withDashboard) {
+    capabilities.push("trips.submit_own");
+    await mockDashboardRoutes(page, { capabilities });
+  } else {
+    await mockCatalogs(page, true, { capabilities });
+  }
   let revision = 1;
   let order: readonly (typeof ids)[number][] = ids;
   let failNext = false;
@@ -92,7 +96,8 @@ async function mockLadder(page: Page) {
           freightRuleSummary: null,
           requiredTrips: null,
           requiredDistanceM: null,
-          currentDriverCount: 0,
+          currentDriverCount:
+            withDashboard && id === (order.includes(ids[2]) ? ids[2] : ids[1]) ? 1 : 0,
         })),
       };
       return route.fulfill({ headers: { etag }, json: envelope(data) });
@@ -168,6 +173,64 @@ async function mockLadder(page: Page) {
     },
   };
 }
+
+test(
+  "P11 refreshes only the changed game on return to Overview in the same session",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const server = await mockLadder(page, true);
+    const reads = { ets2: 0, ats: 0 };
+    let archived = false;
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    await page.clock.setFixedTime(new Date("2026-11-12T08:00:00.000Z"));
+    await page.route("**/api/v1/me/qualification-progress?game=*", (route) => {
+      const game = new URL(route.request().url()).searchParams.get("game");
+      if (game !== "ets2" && game !== "ats") return route.fallback();
+      reads[game]++;
+      const progress = makeProgressFixture(game);
+      if (game === "ats") {
+        progress.data.assignment.levelId = archived ? ids[1] : ids[2];
+        progress.data.acceptedTrips = archived ? 0 : 8;
+      }
+      return route.fulfill({ json: progress });
+    });
+    await page.route(`**${api}/levels/${ids[2]}/archive`, (route) => {
+      expect(route.request().method()).toBe("POST");
+      expect(route.request().headers()["if-match"]).toBe('"v1"');
+      expect(route.request().postDataJSON()).toEqual({
+        targetLevelId: ids[1],
+        observedDriverCount: 1,
+      });
+      archived = true;
+      server.external([ids[0], ids[1]]);
+      return route.fulfill({
+        headers: { etag: '"v2"' },
+        json: envelope({ game: "ats", revision: 2 }),
+      });
+    });
+
+    await page.goto("/account/dashboard");
+    const progress = page.getByRole("region", { name: "My Qualification" });
+    await expect(progress.getByText("8 / 20", { exact: true })).toBeVisible();
+    await expect(progress.getByText("15 / 20", { exact: true })).toBeVisible();
+    expect(reads).toEqual({ ets2: 1, ats: 1 });
+
+    await page.getByRole("link", { name: "Company settings", exact: true }).click();
+    await page.getByRole("tab", { name: "Qualification levels", exact: true }).click();
+    const panel = page.getByRole("region", { name: labels.en.ladder });
+    await panel.getByRole("button", { name: "ATS", exact: true }).click();
+    await panel.getByRole("button", { name: "Archive Fictional level 3", exact: true }).click();
+    await panel.getByRole("button", { name: labels.en.reviewArchive, exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: labels.en.confirmArchive }).click();
+    await expect(panel.getByRole("status")).toHaveText("The server confirmed the change.");
+    expect(reads).toEqual({ ets2: 1, ats: 1 });
+
+    await page.getByRole("link", { name: "Overview", exact: true }).click();
+    await expect(progress.getByText("0 / 20", { exact: true })).toBeVisible();
+    await expect(progress.getByText("15 / 20", { exact: true })).toBeVisible();
+    expect(reads).toEqual({ ets2: 1, ats: 2 });
+  },
+);
 
 test(
   "P11 preserves archive context after a lost response, failed read and definite replay conflict",

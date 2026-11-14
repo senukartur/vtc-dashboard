@@ -192,9 +192,19 @@ export function useQualificationCommand(
         ? refreshWorkspaceSummary(client, session)
         : undefined,
     ]);
+    // The P10 provider owns its dashboard refresh after reloading session authority.
+    const dashboardScope =
+      refreshPromotions && session.self
+        ? {
+            memberId: session.self.member.id,
+            generation: session.generation,
+            identityEpoch: session.self.identityEpoch,
+            access: session.self.capabilities.join(","),
+          }
+        : undefined;
     const projectionFilters = {
       predicate: ({ queryKey }: { queryKey: readonly unknown[] }) =>
-        affectedQualificationProjection(change, queryKey),
+        affectedQualificationProjection(change, queryKey, dashboardScope),
     };
     await client.cancelQueries(projectionFilters);
     await client.invalidateQueries(projectionFilters, { cancelRefetch: false });

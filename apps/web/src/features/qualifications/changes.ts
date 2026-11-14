@@ -174,7 +174,22 @@ export function isRuleHistory(id: string, path: string) {
   ].includes(pathname);
 }
 
-export function affectedQualificationProjection(change: Change, key: readonly unknown[]) {
+export function affectedQualificationProjection(
+  change: Change,
+  key: readonly unknown[],
+  dashboardScope?: { memberId: string; generation: number; identityEpoch: number; access: string },
+) {
+  if (key[0] === "dashboard-my-progress") {
+    return (
+      dashboardScope !== undefined &&
+      key[1] === change.game &&
+      key[2] === dashboardScope.memberId &&
+      key[3] === dashboardScope.generation &&
+      key[4] === dashboardScope.identityEpoch &&
+      key[5] === dashboardScope.access &&
+      (change.kind !== "member" || (change.id === dashboardScope.memberId && !change.historical))
+    );
+  }
   const path = String(key.at(-2) ?? "");
   if (key[0] === "administration") {
     if (path === "/admin/company-settings") return change.kind !== "member";

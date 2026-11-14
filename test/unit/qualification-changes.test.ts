@@ -46,6 +46,36 @@ test("ladder refresh covers readiness and relocation projections while preservin
       ]),
     ).toBe(game === "ets2");
 });
+test("dashboard progress follows its game and authority for ladder, rule and current own assignments", () => {
+  const scope = { memberId: id, generation: 2, identityEpoch: 3, access: "trips.submit_own" };
+  const key = ["dashboard-my-progress", "ets2", id, 2, 3, scope.access, "en", "path"];
+  const assignment = {
+    kind: "member",
+    id,
+    game: "ets2",
+    levelId: other,
+    roleChange: false,
+    historical: false,
+  } as const;
+  for (const change of [
+    { kind: "ladder", game: "ets2", archive: true },
+    { kind: "level", game: "ets2", id: other, publication: true },
+    assignment,
+  ] as const) {
+    expect(affectedQualificationProjection(change, key, scope)).toBe(true);
+    expect(affectedQualificationProjection(change, key.with(6, "ru"), scope)).toBe(true);
+    expect(affectedQualificationProjection(change, key.with(1, "ats"), scope)).toBe(false);
+    expect(affectedQualificationProjection(change, key.with(2, other), scope)).toBe(false);
+    expect(affectedQualificationProjection(change, key.with(3, 1), scope)).toBe(false);
+    expect(affectedQualificationProjection(change, key.with(4, 2), scope)).toBe(false);
+    expect(affectedQualificationProjection(change, key.with(5, "company.read"), scope)).toBe(false);
+    expect(affectedQualificationProjection(change, key)).toBe(false);
+  }
+  expect(affectedQualificationProjection({ ...assignment, id: other }, key, scope)).toBe(false);
+  expect(affectedQualificationProjection({ ...assignment, historical: true }, key, scope)).toBe(
+    false,
+  );
+});
 test("closed command success must belong to the requested level and game before affecting private caches", () => {
   const owner = { kind: "level", id, game: "ets2" } as const;
   const change = commandChange(
