@@ -218,6 +218,13 @@
       "when": 1794611664003,
       "tag": "0030_superb_monster_badoon",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "5",
+      "when": 1794621946896,
+      "tag": "0031_odd_stellaris",
+      "breakpoints": true
     }
   ]
 }
