@@ -2516,3 +2516,35 @@ test("workers replay legacy route text and use ordered city/depot identity after
   expect(alerts.filter((item) => item.liveToastEligible)).toHaveLength(1);
   expect((await stagedNotifications.history(observer)).items).toEqual([]);
 });
+test("Stage 4 toggles stay hidden and rejected for every viewer until VTC-142", async () => {
+  const six = [
+    "eventChanges",
+    "eventReminders",
+    "qualificationChanges",
+    "tripFinished",
+    "tripRejected",
+    "tripStarted",
+  ];
+  for (const roles of [["driver"], ["driver", "dispatcher"]] as const) {
+    const person = await member([...roles]);
+    const read = await service.getPreferences(person.actor);
+    expect(Object.keys(read.data).sort(), roles.join()).toEqual(six);
+    for (const extra of [
+      { reviewQueue: true },
+      { newApplications: false },
+      { tripAccepted: false },
+      { newEvent: true },
+    ])
+      await expect(
+        service.setPreferences(person.actor, newId(), read.version, { ...read.data, ...extra }),
+        JSON.stringify(extra),
+      ).rejects.toMatchObject({ statusCode: 422 });
+    const [rows] = await control.execute<RowDataPacket[]>(
+      "SELECT version,review_queue,new_applications,trip_accepted,new_event,(SELECT COUNT(*) FROM notification_commands WHERE recipient_id=?) receipts FROM notification_recipients WHERE recipient_id=?",
+      [person.actor.userId, person.actor.userId],
+    );
+    expect(rows.map((row) => Object.values(row).map(Number))).toEqual([
+      [read.version, 1, 1, 1, 1, 0],
+    ]);
+  }
+});

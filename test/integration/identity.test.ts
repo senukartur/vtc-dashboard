@@ -1291,3 +1291,28 @@ test("login keeps omitted and false sessions at 24 hours and true sessions at a 
     await app.close();
   }
 });
+
+test("a null display time zone stays rejected without a write until VTC-142", async () => {
+  const login = await signIn((await addMember()).email);
+  const before = await safe(identity.current(login.actor));
+  expect(before.data.preferences.displayTimezone).toBe("UTC");
+  await expect(
+    safe(identity.preferences(login.actor, newId(), before.version, { displayTimezone: null })),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  await expect(
+    safe(
+      identity.preferences(login.actor, newId(), before.version, {
+        locale: "en",
+        displayTimezone: null,
+      }),
+    ),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  const after = await safe(identity.current(login.actor));
+  expect(after.version).toBe(before.version);
+  expect(after.data.preferences).toEqual(before.data.preferences);
+  const [rows] = await control.execute<RowDataPacket[]>(
+    "SELECT display_timezone zone,joined_at IS NOT NULL joined FROM identity_memberships WHERE user_id=?",
+    [login.actor.userId],
+  );
+  expect(rows.map((row) => [row.zone, Number(row.joined)])).toEqual([["UTC", 1]]);
+});

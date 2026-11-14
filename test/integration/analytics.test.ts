@@ -406,3 +406,82 @@ test("verifies EXPLAIN uses trip_analytics_reporting index", async () => {
   );
   expect(explain[0]?.key).toBe("trip_analytics_reporting");
 });
+
+test("Stage 4 analytics parameters and the breakdown route stay inactive until VTC-143 and VTC-112", async () => {
+  for (const url of [
+    "/api/v1/analytics/company?period=all_time",
+    "/api/v1/analytics/company?period=range&fromDate=2026-10-01&toDateExclusive=2026-10-31",
+    "/api/v1/analytics/leaderboard?period=all_time",
+  ]) {
+    const res = await app.inject({ method: "GET", url, headers: { cookie: driver1Cookie } });
+    expect(res.statusCode, url).toBe(422);
+  }
+  const breakdown = await app.inject({
+    method: "GET",
+    url: "/api/v1/analytics/company/breakdown?dimension=route&fromDate=2026-10-01&toDateExclusive=2026-10-31",
+    headers: { cookie: driver1Cookie },
+  });
+  expect(breakdown.statusCode).toBe(404);
+  const company = await app.inject({
+    method: "GET",
+    url: "/api/v1/analytics/company?fromDate=2026-10-20&toDateExclusive=2026-10-22",
+    headers: { cookie: driver1Cookie },
+  });
+  expect(company.statusCode).toBe(200);
+  for (const key of ["period", "activeDrivers", "activeMembers", "byGame"])
+    expect(company.json().data, key).not.toHaveProperty(key);
+  const board = await app.inject({
+    method: "GET",
+    url: "/api/v1/analytics/leaderboard?fromDate=2026-10-20&toDateExclusive=2026-10-22",
+    headers: { cookie: driver1Cookie },
+  });
+  expect(board.statusCode).toBe(200);
+  for (const key of ["rankedMembers", "viewer", "period"])
+    expect(board.json().data, key).not.toHaveProperty(key);
+});
+
+test("Stage 4 directory and breakdown query shapes can use their trip indexes", async () => {
+  await control.query("ANALYZE TABLE trips, trip_facts, source_messages");
+  const owners = [driver1Actor.userId, driver2Actor.userId];
+  const plans: Record<string, { sql: string; values: unknown[]; index: string }> = {
+    directory30d: {
+      sql: "SELECT owner_id, COUNT(*) trips, SUM(actual_distance_m) distance FROM trips WHERE owner_id IN (?,?) AND decision='accepted' AND alias_of IS NULL AND reporting_at >= ? AND reporting_at <= ? GROUP BY owner_id",
+      values: [...owners, "2026-09-22 00:00:00.000", "2026-10-22 00:00:00.000"],
+      index: "trip_owner_accepted_reporting",
+    },
+    directoryLastTrip: {
+      sql: "SELECT owner_id, MAX(reporting_at) last FROM trips WHERE owner_id IN (?,?) AND decision='accepted' AND alias_of IS NULL GROUP BY owner_id",
+      values: owners,
+      index: "trip_owner_accepted_reporting",
+    },
+    route: {
+      sql: "SELECT t.game, f.origin_city_id, f.destination_city_id, COUNT(*) trips, SUM(t.actual_distance_m) distance FROM trips t JOIN trip_facts f ON f.id=t.current_fact_id WHERE t.decision='accepted' AND t.alias_of IS NULL AND t.reporting_at >= ? AND t.reporting_at < ? GROUP BY t.game, f.origin_city_id, f.destination_city_id",
+      values: ["2026-10-19 21:00:00.000", "2026-10-21 21:00:00.000"],
+      index: "trip_analytics_reporting",
+    },
+    cargo: {
+      sql: "SELECT t.game, f.cargo_id, COUNT(*) trips, SUM(t.actual_distance_m) distance FROM trips t JOIN trip_facts f ON f.id=t.current_fact_id WHERE t.decision='accepted' AND t.alias_of IS NULL AND t.reporting_at >= ? AND t.reporting_at < ? GROUP BY t.game, f.cargo_id",
+      values: ["2026-10-19 21:00:00.000", "2026-10-21 21:00:00.000"],
+      index: "trip_analytics_reporting",
+    },
+    source: {
+      sql: "SELECT m.provider, COUNT(*) trips, SUM(t.actual_distance_m) distance FROM trips t JOIN trip_facts f ON f.id=t.current_fact_id JOIN source_messages m ON m.id=COALESCE(f.message_id, f.derived_source_message_id) WHERE t.decision='accepted' AND t.alias_of IS NULL AND t.reporting_at >= ? AND t.reporting_at < ? GROUP BY m.provider",
+      values: ["2026-10-19 21:00:00.000", "2026-10-21 21:00:00.000"],
+      index: "trip_analytics_reporting",
+    },
+  };
+  for (const [name, plan] of Object.entries(plans)) {
+    const [rows] = await control.query<RowDataPacket[]>(`EXPLAIN ${plan.sql}`, plan.values);
+    const trips = rows.find((row) => row.table === "trips" || row.table === "t");
+    expect(String(trips?.possible_keys), name).toContain(plan.index);
+    const [tree] = await control.query<RowDataPacket[]>(
+      `EXPLAIN FORMAT=TREE ${plan.sql}`,
+      plan.values,
+    );
+    // Synthetic plan evidence for review; generated IDs are masked before logging.
+    const text = String(tree[0]?.EXPLAIN)
+      .replace(/'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'/g, "'<id>'")
+      .replace(/0x[0-9a-f]+/g, "<id>");
+    console.info(JSON.stringify({ event: "stage4_explain", name, plan: text }));
+  }
+});

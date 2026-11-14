@@ -1837,3 +1837,57 @@ test("concurrent expired-generation reissue and cleanup preserve consistent resu
     instant = saved;
   }
 });
+
+test("Stage 4 referral fields and admissions routes stay inactive until VTC-140 and VTC-144", async () => {
+  const before = {
+    applications: await count("admissions_applications"),
+    receipts: await count("admissions_command_results"),
+  };
+  for (const extra of [
+    { referralSource: "discord" as const },
+    { referralSource: "other" as const, referralOther: "A fictional convoy poster" },
+  ])
+    expect(
+      await status(admissions.submit(`pre:${newId()}`, newId(), { ...input(), ...extra }, "en")),
+      JSON.stringify(extra),
+    ).toBe(422);
+  expect({
+    applications: await count("admissions_applications"),
+    receipts: await count("admissions_command_results"),
+  }).toEqual(before);
+  const [columns] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) AS n FROM admissions_applications WHERE referral_source IS NOT NULL OR referral_other IS NOT NULL",
+  );
+  expect(Number(columns[0]?.n)).toBe(0);
+  const { app: application } = await approved();
+  const app = await createApp({ identity, admissions, checkReadiness: async () => true });
+  const login = await identity.login("admissions-director@example.invalid", password);
+  const headers = { cookie: login.cookies.map((c) => c.split(";", 1)[0]).join("; ") };
+  try {
+    for (const url of ["/api/v1/admin/invitations", "/api/v1/admin/invitations?state=expired"])
+      expect((await app.inject({ url, headers })).statusCode, url).toBe(404);
+    const recheck = await app.inject({
+      method: "POST",
+      url: `/api/v1/admin/applications/${application.id}/truckersmp-checks`,
+      headers: { ...headers, "idempotency-key": newId() },
+    });
+    expect(recheck.statusCode).toBe(404);
+    const read = await app.inject({ url: `/api/v1/admin/applications/${application.id}`, headers });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().data).not.toHaveProperty("truckersmpCheck");
+    expect(Object.keys(read.json().data.fields).sort()).toEqual([
+      "discord",
+      "email",
+      "games",
+      "introduction",
+      "nickname",
+      "steamProfileUrl",
+    ]);
+  } finally {
+    await app.close();
+  }
+  const [checks] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) AS n FROM admissions_truckers_checks",
+  );
+  expect(Number(checks[0]?.n)).toBe(0);
+});

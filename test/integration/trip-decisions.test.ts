@@ -4999,3 +4999,15 @@ test("a later revision held by a held terminal's guards is never auto-accepted",
     await heldBy("actualDistanceM_conflict", first.tripId, await receive(corrected, who)),
   ).toMatchObject({ currentFactId: current, outcome: "open", actualDistanceM: null });
 });
+test("the author's private trip read adds no Stage 4 keys until VTC-141", async () => {
+  const telemetry = await receive(),
+    manualReport = await report();
+  for (const tripId of [telemetry.tripId, manualReport.tripId]) {
+    const view = await tripsService.detail(owner, tripId);
+    if (view.view !== "private") throw Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
+    expect(view).not.toHaveProperty("sources");
+    expect(view).not.toHaveProperty("qualificationCheck");
+    for (const key of ["cargoDamagePercent", "originCompany", "destinationCompany"])
+      expect(view.effectiveFacts ?? {}, key).not.toHaveProperty(key);
+  }
+});
