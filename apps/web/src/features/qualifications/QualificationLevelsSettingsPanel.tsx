@@ -115,6 +115,8 @@ function LadderSettings({ game, visible }: { game: Game; visible: boolean }) {
   const reasonId = useId();
   const archiveTrigger = useRef<HTMLButtonElement>(null);
   const ladderHeading = useRef<HTMLHeadingElement>(null);
+  // History or a game switch can hide the pane while its draft and command remain mounted.
+  if (!visible && archiveOpen) setArchiveOpen(false);
   const etag = ladder && query.data?.etag === `"v${ladder.revision}"` ? query.data.etag : null;
   const hold = !etag || command.pending || command.seconds > 0 || command.canRecover;
   const levels = ladder?.levels ?? [];
@@ -643,8 +645,18 @@ function ArchiveLevel({
   const selected = target ? available.find((row) => row.id === target) : defaultTarget;
   const label = (row: LadderLevel) =>
     t("ladderLevelPosition", { position: row.position, name: row.name });
+  const sourceLabel = label(level);
   const count = level.currentDriverCount;
-  const guard = JSON.stringify([etag, selected?.id, reason, count]);
+  // A level rename can change the reviewed labels without changing the ladder revision.
+  const guard = JSON.stringify([
+    etag,
+    level.id,
+    sourceLabel,
+    selected?.id,
+    selected && label(selected),
+    reason,
+    count,
+  ]);
   if (acknowledged !== null && acknowledged !== guard) setAcknowledged(null);
   const confirmed = acknowledged === guard;
   return (
@@ -665,7 +677,7 @@ function ArchiveLevel({
           onFocusReturn();
         }}
       >
-        <DialogTitle>{t("ladderArchiveName", { name: label(level) })}</DialogTitle>
+        <DialogTitle>{t("ladderArchiveName", { name: sourceLabel })}</DialogTitle>
         <DialogDescription>{t("ladderArchiveWarning")}</DialogDescription>
         <p>{t("ladderDriverCount", { count })}</p>
         <form

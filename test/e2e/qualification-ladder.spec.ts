@@ -69,6 +69,7 @@ async function mockLadder(page: Page, withDashboard = false) {
   let failNext = false;
   let ladderStatus = 200;
   let renameReplayStatus = 409;
+  const renamed = new Map<string, { name: string; version: number }>();
   const commands: { etag: string | undefined; key: string | undefined; input: unknown }[] = [];
   const renameCommands: typeof commands = [];
   await page.route("**/api/v1/admin/qualification-ladders/ats**", async (route) => {
@@ -101,6 +102,7 @@ async function mockLadder(page: Page, withDashboard = false) {
           requiredDistanceM: null,
           currentDriverCount:
             withDashboard && id === (order.includes(ids[2]) ? ids[2] : ids[1]) ? 1 : 0,
+          ...renamed.get(id),
         })),
       };
       return route.fulfill({ headers: { etag }, json: envelope(data) });
@@ -170,6 +172,9 @@ async function mockLadder(page: Page, withDashboard = false) {
     },
     ladderRead(status: number) {
       ladderStatus = status;
+    },
+    renameLevel(id: string, name: string) {
+      renamed.set(id, { name, version: (renamed.get(id)?.version ?? 1) + 1 });
     },
     renameReplay(status: number) {
       renameReplayStatus = status;
@@ -278,11 +283,84 @@ test(
 );
 
 test(
-  "P11 preserves archive context after a lost response, failed read and definite replay conflict",
+  "Archive requires acknowledgement after either reviewed level is renamed at the same ladder revision",
   browserCase(["@functional"]),
   async ({ page }) => {
     const server = await mockLadder(page);
     await page.goto(`${path}&game=ats`);
+    await page.getByRole("button", { name: "Archive Fictional level 3", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const acknowledgement = dialog.getByRole("checkbox", { name: labels.en.acknowledge });
+    const archive = dialog.getByRole("button", { name: labels.en.confirmArchive, exact: true });
+    const target = dialog.getByLabel(labels.en.target, { exact: true });
+    const reason = dialog.getByLabel("Reason (optional)", { exact: true });
+    await reason.fill("Fictional reason");
+    for (const id of [ids[2], ids[1]]) {
+      await acknowledgement.check();
+      await expect(archive).toBeEnabled();
+      const name = id === ids[2] ? "Fictional renamed source" : "Fictional renamed target";
+      server.renameLevel(id, name);
+      const refreshed = page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" && new URL(response.url()).pathname === api,
+      );
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      expect((await refreshed).headers().etag).toBe('"v1"');
+      if (id === ids[2]) await expect(dialog.getByRole("heading")).toContainText(name);
+      else await expect(target.locator("option:checked")).toContainText(name);
+      await expect(target).toHaveValue(ids[1]);
+      await expect(reason).toHaveValue("Fictional reason");
+      await expect(acknowledgement).not.toBeChecked();
+      await expect(archive).toBeDisabled();
+    }
+    expect(server.commands).toHaveLength(0);
+  },
+);
+
+test(
+  "Archive stays closed after Settings Back and Forward and retains an unsubmitted draft",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const server = await mockLadder(page);
+    await page.goto("/account/admin/settings?game=ats");
+    const general = page.getByRole("tab", { name: "General", exact: true });
+    const qualifications = page.getByRole("tab", { name: "Qualification levels", exact: true });
+    await qualifications.click();
+    const trigger = page.getByRole("button", { name: "Archive Fictional level 3", exact: true });
+    const dialog = page.getByRole("dialog");
+    const reason = dialog.getByLabel("Reason (optional)", { exact: true });
+    const acknowledgement = dialog.getByRole("checkbox", { name: labels.en.acknowledge });
+    await trigger.click();
+    await reason.fill("Fictional unsubmitted reason");
+    await acknowledgement.check();
+
+    await page.goBack();
+    await expect(general).toBeFocused();
+    await expect(dialog).toHaveCount(0);
+    await page.goForward();
+    await expect(qualifications).toHaveAttribute("aria-selected", "true");
+    await expect(trigger).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    await expect(general).toBeFocused();
+
+    await trigger.click();
+    await expect(reason).toHaveValue("Fictional unsubmitted reason");
+    await expect(acknowledgement).not.toBeChecked();
+    await expect(
+      dialog.getByRole("button", { name: labels.en.confirmArchive, exact: true }),
+    ).toBeDisabled();
+    expect(server.commands).toHaveLength(0);
+  },
+);
+
+test(
+  "P11 preserves archive context after a lost response, failed read and definite replay conflict",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const server = await mockLadder(page);
+    await page.goto("/account/admin/settings?game=ats");
+    const qualifications = page.getByRole("tab", { name: "Qualification levels", exact: true });
+    await qualifications.click();
     const panel = page.getByRole("region", { name: labels.en.ladder });
     const dialog = page.getByRole("dialog");
     const target = dialog.getByLabel(labels.en.target, { exact: true });
@@ -297,12 +375,16 @@ test(
     await dialog.getByRole("button", { name: labels.en.confirmArchive, exact: true }).click();
     await expect(dialog.getByRole("alert")).toContainText("The result is uncertain");
     expect(server.commands).toHaveLength(1);
-    await page.keyboard.press("Escape");
+    await page.goBack();
+    await expect(page.getByRole("tab", { name: "General", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     await expect(dialog).toHaveCount(0);
-    await expect(recover).toBeVisible();
     server.ladderRead(503);
-    await page.getByRole("tab", { name: "General", exact: true }).click();
-    await page.getByRole("tab", { name: "Qualification levels", exact: true }).click();
+    await page.goForward();
+    await expect(qualifications).toHaveAttribute("aria-selected", "true");
+    await expect(dialog).toHaveCount(0);
     await expect(panel.getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
     await expect(recover).toBeVisible();
     server.ladderRead(200);
