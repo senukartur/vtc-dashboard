@@ -1,12 +1,26 @@
 import { AccountFailure } from "../account/transport.js";
+import {
+  affectedPromotionRead,
+  promotionCandidatesPath,
+  promotionHistoryPath,
+} from "./promotion-transport.js";
 import { type DTO, type Game, schema } from "./transport.js";
 
 export type CommandOwner =
+  | { kind: "ladder"; game: Game }
   | { kind: "level"; id: string; game: Game }
   | { kind: "member"; id: string; game: Game; rolePromotionLevelId: string | null };
 export type Change =
-  | { kind: "level"; id: string; game: Game }
-  | { kind: "member"; id: string; game: Game; levelId: string; roleChange: boolean };
+  | { kind: "ladder"; game: Game; archive: boolean }
+  | { kind: "level"; id: string; game: Game; publication: boolean }
+  | {
+      kind: "member";
+      id: string;
+      game: Game;
+      levelId: string;
+      roleChange: boolean;
+      historical: boolean;
+    };
 const uncertain = () => new AccountFailure("uncertain");
 export function commandChange(
   owner: CommandOwner | undefined,
@@ -16,12 +30,23 @@ export function commandChange(
 ): Change | null {
   if (path === "/admin/qualification-rule-previews" && method === "POST" && !owner) return null;
   if (!owner || !body || typeof body !== "object") throw uncertain();
+  if (owner.kind === "ladder") {
+    const root = `/admin/qualification-ladders/${owner.game}`;
+    if (
+      (method === "PATCH" && path === `${root}/order`) ||
+      (method === "POST" &&
+        (path === `${root}/levels` ||
+          (path.startsWith(`${root}/levels/`) && path.endsWith("/archive"))))
+    )
+      return { kind: "ladder", game: owner.game, archive: path.endsWith("/archive") };
+    throw uncertain();
+  }
   if (
     owner.kind === "level" &&
     ((path === `/admin/qualification-levels/${owner.id}` && method === "PATCH") ||
       (path === `/admin/qualification-levels/${owner.id}/rule-versions` && method === "POST"))
   )
-    return { kind: "level", id: owner.id, game: owner.game };
+    return { kind: "level", id: owner.id, game: owner.game, publication: method === "POST" };
   const input = body as Record<string, unknown>,
     promotion = path === `/admin/members/${owner.id}/promotions`;
   if (
@@ -38,6 +63,7 @@ export function commandChange(
       game: owner.game,
       levelId,
       roleChange: promotion && levelId === owner.rolePromotionLevelId,
+      historical: !promotion && input.purpose === "historical_resolution",
     };
   }
   throw uncertain();
@@ -59,6 +85,16 @@ export function validateChangedResult(change: Change | null, name: keyof DTO, va
       throw uncertain();
     return level;
   }
+  if (change.kind === "ladder") {
+    const parsed = schema("EnvelopeQualificationLadderRevision").safeParse(value);
+    if (
+      name !== "EnvelopeQualificationLadderRevision" ||
+      !parsed.success ||
+      parsed.data.data.game !== change.game
+    )
+      throw uncertain();
+    return undefined;
+  }
   const parsed = schema("EnvelopeAssignment").safeParse(value),
     assignment = parsed.success ? parsed.data.data : undefined;
   if (
@@ -76,9 +112,29 @@ export function affectedRead(
   path: string,
   selfId: string | undefined,
   conflict = false,
+  refreshPromotions = true,
 ) {
   const url = new URL(path, "https://qualification.invalid"),
     game = url.searchParams.get("game");
+  if (url.pathname === `/admin/qualification-ladders/${change.game}`) return true;
+  if (
+    refreshPromotions &&
+    affectedPromotionRead(
+      url,
+      change.game,
+      change.kind === "member"
+        ? { history: true, memberId: change.id }
+        : { history: change.kind === "ladder" ? change.archive : !change.publication },
+    )
+  )
+    return true;
+  if (change.kind === "ladder")
+    return (
+      game === change.game &&
+      (url.pathname === "/qualification-levels" ||
+        (change.archive && url.pathname === "/admin/qualification-levels/archived") ||
+        /\/qualification-(?:progress|assignments|action-history)$/.test(url.pathname))
+    );
   if (change.kind === "level")
     return (
       (url.pathname === "/qualification-levels" && game === change.game) ||
@@ -98,10 +154,58 @@ export function affectedRead(
     ].includes(url.pathname.split("/").at(-1) ?? "")
   );
 }
+export function deferPagedQualificationRead(change: Change, path: string) {
+  const { pathname, searchParams } = new URL(path, "https://qualification.invalid");
+  return (
+    searchParams.has("cursor") &&
+    (pathname === promotionCandidatesPath ||
+      pathname === promotionHistoryPath ||
+      (change.kind !== "level" &&
+        (pathname === "/qualification-levels" ||
+          /\/qualification-(?:assignments|action-history)$/.test(pathname))))
+  );
+}
+
 export function isRuleHistory(id: string, path: string) {
   const pathname = new URL(path, "https://qualification.invalid").pathname;
   return [
     `/qualification-levels/${id}/rule-versions`,
     `/admin/qualification-levels/${id}/rule-versions`,
   ].includes(pathname);
+}
+
+export function affectedQualificationProjection(
+  change: Change,
+  key: readonly unknown[],
+  dashboardScope?: { memberId: string; generation: number; identityEpoch: number; access: string },
+) {
+  if (key[0] === "dashboard-my-progress") {
+    return (
+      dashboardScope !== undefined &&
+      key[1] === change.game &&
+      key[2] === dashboardScope.memberId &&
+      key[3] === dashboardScope.generation &&
+      key[4] === dashboardScope.identityEpoch &&
+      key[5] === dashboardScope.access &&
+      (change.kind !== "member" || (change.id === dashboardScope.memberId && !change.historical))
+    );
+  }
+  const path = String(key.at(-2) ?? "");
+  if (key[0] === "administration") {
+    if (path === "/admin/company-settings") return change.kind !== "member";
+    if (path.startsWith("/admin/audit")) return true;
+    if (path === "/admin/reinstatement-options") return change.kind !== "member";
+    return (
+      change.kind === "ladder" && change.archive && /^\/admin\/members(?:\?|\/[^/?]+$)/.test(path)
+    );
+  }
+  if (key[0] === "driver-progress") {
+    const target = change.kind === "member" ? `/members/${change.id}/` : "/members/";
+    const progress = String(key.at(-1) ?? "");
+    return (
+      progress.startsWith(target) &&
+      progress.endsWith(`/qualification-progress?game=${change.game}`)
+    );
+  }
+  return key[0] === "driver-profile" && change.kind === "ladder" && change.archive;
 }

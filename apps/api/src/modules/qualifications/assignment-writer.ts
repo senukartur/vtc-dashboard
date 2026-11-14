@@ -20,6 +20,7 @@ export function createAssignmentWriter(
     tx: TxContext,
     actor: Actor,
     input: Omit<Assignment, "id" | "actorId" | "revision">,
+    options?: { companyId: string | null; instant: string },
   ) => {
     const c = unit.client(tx);
     let [current] = await c
@@ -38,20 +39,19 @@ export function createAssignmentWriter(
         .insert(qualificationStates)
         .values({ userId: input.userId, game: input.game, ...current });
     }
-    let before = null;
+    let previous: Assignment | undefined;
     if (current.assignmentId && input.purpose !== "historical_resolution") {
-      const [old] = await c
+      [previous] = await c
         .select()
         .from(qualificationAssignments)
         .where(eq(qualificationAssignments.id, current.assignmentId))
         .for("update");
-      if (!old || old.assignedAt > input.assignedAt || input.purpose === "reinstatement")
+      if (!previous || previous.assignedAt > input.assignedAt || input.purpose === "reinstatement")
         throw identityError(409);
-      before = { game: old.game, assignmentId: old.id, levelId: old.levelId };
       await c
         .update(qualificationAssignments)
         .set({ endedAt: input.assignedAt })
-        .where(eq(qualificationAssignments.id, old.id));
+        .where(eq(qualificationAssignments.id, previous.id));
     }
     const row = { ...input, id: newId(), actorId: actor.userId, revision: 1 };
     await c.insert(qualificationAssignments).values(row);
@@ -69,19 +69,27 @@ export function createAssignmentWriter(
       .where(
         and(eq(qualificationStates.userId, input.userId), eq(qualificationStates.game, input.game)),
       );
-    await createAudit(unit).append(tx, {
+    const instant = options?.instant ?? now();
+    const audit = createAudit(unit);
+    const entry = {
       actorKind: "user",
       actorId: actor.userId,
+      reason: "operator_request",
+      occurredAt: instant,
+    } as const;
+    const snapshot = (assignment: Assignment) => ({
+      game: assignment.game,
+      assignmentId: assignment.id,
+      levelId: assignment.levelId,
+    });
+    await audit.append(tx, {
+      ...entry,
+      companyId: options?.companyId ?? null,
       operation:
         input.purpose === "promotion" ? "qualification.promoted" : "qualification.assigned",
       subjectKind: "qualification",
       subjectId: row.id,
-      details: {
-        before,
-        after: { game: row.game, assignmentId: row.id, levelId: row.levelId },
-      },
-      reason: "operator_request",
-      occurredAt: now(),
+      details: { before: previous ? snapshot(previous) : null, after: snapshot(row) },
     });
     const eventId = newId();
     await outbox.append(tx, {
@@ -89,7 +97,7 @@ export function createAssignmentWriter(
       type: "qualification.assigned",
       schemaVersion: 1,
       aggregate: { kind: "qualification", id: row.id, version: current.version + 1 },
-      occurredAt: now(),
+      occurredAt: instant,
       correlationId: eventId,
       causationId: null,
       data: { userId: input.userId, assignmentId: row.id },

@@ -15,9 +15,26 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { decimalColumn, idColumn, utcColumn } from "../../core/values.js";
+import { auditEntries } from "../audit.js";
 import { membership } from "../identity/index.js";
 
-export { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+export {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 
 export { alias } from "drizzle-orm/mysql-core";
 
@@ -38,19 +55,32 @@ const totalDistanceColumn = customType<{ data: string; driverData: string }>({
   },
 });
 const game = (name: string) => mysqlEnum(name, ["ets2", "ats"]);
-export const levelCodes = ["trainee", "driver_iii", "driver_ii", "driver_i"] as const;
+export const maxQualificationLevels = 25;
+const legacyLevelCodes = ["trainee", "driver_iii", "driver_ii", "driver_i"] as const;
 export const qualificationLevels = mysqlTable(
   "qualification_levels",
   {
     id: idColumn("id").primaryKey(),
     game: game("game").notNull(),
-    code: mysqlEnum("code", levelCodes).notNull(),
+    code: mysqlEnum("code", legacyLevelCodes),
     name: varchar("name", { length: 128 }).notNull(),
     version: int("version", { unsigned: true }).notNull(),
+    activePosition: int("active_position", { unsigned: true }),
+    ladderRevision: int("ladder_revision", { unsigned: true }).notNull().default(1),
+    promotionGeneration: int("promotion_generation", { unsigned: true }).notNull().default(1),
   },
   (t) => [
     uniqueIndex("qualification_level_code").on(t.game, t.code),
+    uniqueIndex("qualification_level_position").on(t.game, t.activePosition),
     check("qual_level_version_positive", sql`${t.version} > 0`),
+    check(
+      "qual_level_position_range",
+      sql`${t.activePosition} IS NULL OR ${t.activePosition} BETWEEN 1 AND ${sql.raw(String(maxQualificationLevels))}`,
+    ),
+    check(
+      "qual_level_revisions_positive",
+      sql`${t.ladderRevision} > 0 AND ${t.promotionGeneration} > 0`,
+    ),
   ],
 );
 export const qualificationRules = mysqlTable(
@@ -63,6 +93,7 @@ export const qualificationRules = mysqlTable(
     rules: json("rules").$type<unknown[]>().notNull(),
     requiredTrips: int("required_trips", { unsigned: true }),
     requiredDistanceM: decimalColumn("required_distance_m"),
+    promotionGeneration: int("promotion_generation", { unsigned: true }).notNull().default(1),
     actorId: idColumn("actor_id").notNull(),
     reason: varchar("reason", { length: 2048 }),
   },
@@ -77,14 +108,15 @@ export const qualificationRules = mysqlTable(
     ),
   ],
 );
-// Original onboarding evidence is retained unchanged after the additive history backfill.
+// The legacy label is retained on the original evidence. New evidence uses the canonical level.
 export const initialQualifications = mysqlTable(
   "qualification_initial_assignments",
   {
     id: idColumn("id").notNull(),
     userId: idColumn("user_id").notNull(),
     game: game("game").notNull(),
-    level: mysqlEnum("level", ["trainee"]).notNull(),
+    level: mysqlEnum("level", ["trainee"]),
+    levelId: idColumn("level_id"),
     assignedAt: utcColumn("assigned_at").notNull(),
   },
   (t) => [
@@ -95,6 +127,7 @@ export const initialQualifications = mysqlTable(
       foreignColumns: [membership.userId],
     }).onDelete("restrict"),
     uniqueIndex("qualification_initial_id").on(t.id),
+    fk("qual_initial_level_fk", t.levelId, qualificationLevels.id),
   ],
 );
 export const qualificationAssignments = mysqlTable(
@@ -113,6 +146,7 @@ export const qualificationAssignments = mysqlTable(
       "historical_resolution",
       "administrative_correction",
       "promotion",
+      "ladder_archive_transfer",
     ]).notNull(),
     actorId: idColumn("actor_id"),
     reason: varchar("reason", { length: 2048 }).notNull(),
@@ -143,8 +177,17 @@ export const qualificationStates = mysqlTable(
     fk("qual_state_member_fk", t.userId, membership.userId),
     fk("qual_state_assignment_fk", t.assignmentId, qualificationAssignments.id),
     primaryKey({ columns: [t.userId, t.game] }),
+    index("qualification_state_game_members").on(t.game, t.userId, t.assignmentId),
     check("qual_state_version_positive", sql`${t.version} > 0`),
   ],
+);
+export const qualificationLadderHistory = mysqlTable(
+  "qualification_ladder_history",
+  {
+    auditId: idColumn("audit_id").primaryKey(),
+    reason: varchar("reason", { length: 2048 }).notNull(),
+  },
+  (t) => [fk("qual_ladder_history_audit_fk", t.auditId, auditEntries.id)],
 );
 export const qualificationPromotions = mysqlTable(
   "qualification_promotions",

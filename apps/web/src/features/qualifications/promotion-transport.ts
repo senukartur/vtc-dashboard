@@ -21,6 +21,21 @@ export const promotionCandidatesPath = "/admin/promotion-candidates";
 export const promotionHistoryPath = "/admin/promotion-history";
 export const qualificationMembersPath = "/admin/qualification-members";
 
+export function affectedPromotionRead(
+  url: URL,
+  game: Candidate["game"],
+  { history, memberId }: { history: boolean; memberId?: string },
+) {
+  const selectedGame = url.searchParams.get("game");
+  if (url.pathname === promotionCandidatesPath) return selectedGame === game;
+  if (!history || url.pathname !== promotionHistoryPath) return false;
+  const selectedMember = url.searchParams.get("memberId");
+  return (
+    (!selectedGame || selectedGame === game) &&
+    (!memberId || !selectedMember || selectedMember === memberId)
+  );
+}
+
 function listPath(path: string, filters: Record<string, string>, cursor: string | null) {
   const params = new URLSearchParams({ ...filters, limit: "25" });
   if (cursor) params.set("cursor", cursor);

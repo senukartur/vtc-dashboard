@@ -18,6 +18,8 @@ export const browserFiles = {
   "test/e2e/qualifications-real.spec.ts": "qualifications-real",
   "test/e2e/qualifications-layout.spec.ts": "qualifications-layout",
   "test/e2e/qualifications-date-time.spec.ts": "qualifications-date-time",
+  "test/e2e/qualification-historical-assignment.spec.ts": "qualification-historical-assignment",
+  "test/e2e/qualification-ladder.spec.ts": "qualification-ladder",
   "test/e2e/qualifications-promotions.spec.ts": "qualifications-promotions",
   "test/e2e/qualifications-promotions-real.spec.ts": "qualifications-promotions-real",
   "test/e2e/trips-corrections.spec.ts": "trips-corrections",

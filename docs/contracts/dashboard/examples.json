@@ -2146,12 +2146,15 @@
               "id": "41000000-0000-4000-8000-000000000001",
               "version": 1,
               "game": "ets2",
-              "code": "trainee",
               "name": "synthetic-example",
               "ruleVersionId": null,
               "configured": false,
               "requiredTrips": null,
-              "requiredDistanceM": null
+              "requiredDistanceM": null,
+              "position": 1,
+              "terminal": false,
+              "promotionConfigured": false,
+              "freightRuleSummary": null
             }
           ],
           "nextCursor": null
@@ -2164,6 +2167,40 @@
     {
       "id": "listQualificationLevels:empty",
       "operationId": "listQualificationLevels",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listArchivedQualificationLevels:success",
+      "operationId": "listArchivedQualificationLevels",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "name": "Fictional archived level"
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listArchivedQualificationLevels:empty",
+      "operationId": "listArchivedQualificationLevels",
       "status": 200,
       "response": {
         "data": {
@@ -2349,7 +2386,8 @@
               "game": "ets2",
               "assignedAt": "2026-10-17T12:00:00.000Z",
               "periodId": "41000000-0000-4000-8000-000000000001",
-              "endedAt": null
+              "endedAt": null,
+              "levelName": "Fictional first level"
             }
           ],
           "nextCursor": null
@@ -2386,7 +2424,8 @@
               "game": "ets2",
               "assignedAt": "2026-10-17T12:00:00.000Z",
               "periodId": "41000000-0000-4000-8000-000000000001",
-              "endedAt": null
+              "endedAt": null,
+              "levelName": "Fictional first level"
             }
           ],
           "nextCursor": null
@@ -2423,7 +2462,8 @@
               "game": "ets2",
               "assignedAt": "2026-10-17T12:00:00.000Z",
               "periodId": "41000000-0000-4000-8000-000000000001",
-              "endedAt": null
+              "endedAt": null,
+              "levelName": "Fictional first level"
             }
           ],
           "nextCursor": null
@@ -2456,12 +2496,15 @@
           "id": "41000000-0000-4000-8000-000000000001",
           "version": 1,
           "game": "ets2",
-          "code": "trainee",
           "name": "synthetic-example",
           "ruleVersionId": null,
           "configured": false,
           "requiredTrips": null,
-          "requiredDistanceM": null
+          "requiredDistanceM": null,
+          "position": 1,
+          "terminal": false,
+          "promotionConfigured": false,
+          "freightRuleSummary": null
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -2480,12 +2523,15 @@
           "id": "41000000-0000-4000-8000-000000000001",
           "version": 1,
           "game": "ets2",
-          "code": "trainee",
           "name": "synthetic-example",
           "ruleVersionId": null,
           "configured": false,
           "requiredTrips": null,
-          "requiredDistanceM": null
+          "requiredDistanceM": null,
+          "position": 1,
+          "terminal": false,
+          "promotionConfigured": false,
+          "freightRuleSummary": null
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -5405,7 +5451,8 @@
               "promotion": {
                 "id": "00000000-0000-4000-8000-000000000001",
                 "confirmedAt": "2026-10-20T12:00:00.000Z"
-              }
+              },
+              "levelName": "Fictional first level"
             }
           ],
           "nextCursor": null
@@ -5585,50 +5632,50 @@
             {
               "id": "02800000-0000-4000-8000-000000000001",
               "game": "ets2",
-              "code": "trainee",
-              "name": "Fictional return level"
+              "name": "Fictional return level",
+              "position": 1
             },
             {
               "id": "02800000-0000-4000-8000-000000000002",
               "game": "ets2",
-              "code": "driver_iii",
-              "name": "Fictional return level"
+              "name": "Fictional return level",
+              "position": 2
             },
             {
               "id": "02800000-0000-4000-8000-000000000003",
               "game": "ets2",
-              "code": "driver_ii",
-              "name": "Fictional return level"
+              "name": "Fictional return level",
+              "position": 3
             },
             {
               "id": "02800000-0000-4000-8000-000000000004",
               "game": "ets2",
-              "code": "driver_i",
-              "name": "Fictional return level"
+              "name": "Fictional return level",
+              "position": 4
             },
             {
               "id": "02800000-0000-4000-8000-000000000005",
               "game": "ats",
-              "code": "trainee",
-              "name": "Fictional return level"
+              "name": "Fictional return level",
+              "position": 1
             },
             {
               "id": "02800000-0000-4000-8000-000000000006",
               "game": "ats",
-              "code": "driver_iii",
-              "name": "Fictional return level"
+              "name": "Fictional return level",
+              "position": 2
             },
             {
               "id": "02800000-0000-4000-8000-000000000007",
               "game": "ats",
-              "code": "driver_ii",
-              "name": "Fictional return level"
+              "name": "Fictional return level",
+              "position": 3
             },
             {
               "id": "02800000-0000-4000-8000-000000000008",
               "game": "ats",
-              "code": "driver_i",
-              "name": "Fictional return level"
+              "name": "Fictional return level",
+              "position": 4
             }
           ]
         },
@@ -8133,12 +8180,19 @@
           "id": "41000000-0000-4000-8000-000000000001",
           "version": 2,
           "game": "ets2",
-          "code": "trainee",
           "name": "synthetic-example",
           "ruleVersionId": "54000000-0000-4000-8000-000000000011",
           "configured": true,
           "requiredTrips": null,
-          "requiredDistanceM": null
+          "requiredDistanceM": null,
+          "position": 1,
+          "terminal": false,
+          "promotionConfigured": true,
+          "freightRuleSummary": {
+            "maxMassKg": null,
+            "allowedTrailerTypeCount": null,
+            "allowedAdrCategoryCount": null
+          }
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -10772,6 +10826,112 @@
         "meta": {
           "requestId": "synthetic-stage-3"
         }
+      }
+    },
+    {
+      "id": "getQualificationLadder:success",
+      "operationId": "getQualificationLadder",
+      "status": 200,
+      "response": {
+        "data": {
+          "game": "ets2",
+          "revision": 2,
+          "asOf": "2026-10-17T12:00:00.000Z",
+          "ladderEditsEnabled": true,
+          "levels": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "game": "ets2",
+              "name": "synthetic-example",
+              "ruleVersionId": null,
+              "configured": false,
+              "requiredTrips": null,
+              "requiredDistanceM": null,
+              "position": 1,
+              "terminal": false,
+              "promotionConfigured": false,
+              "currentDriverCount": 3,
+              "effectiveRule": null,
+              "freightRuleSummary": null
+            },
+            {
+              "id": "41000000-0000-4000-8000-000000000002",
+              "version": 1,
+              "game": "ets2",
+              "name": "Fictional second level",
+              "ruleVersionId": null,
+              "configured": false,
+              "requiredTrips": null,
+              "requiredDistanceM": null,
+              "position": 2,
+              "terminal": true,
+              "promotionConfigured": false,
+              "currentDriverCount": 0,
+              "effectiveRule": null,
+              "freightRuleSummary": null
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "addQualificationLadderLevel:success",
+      "operationId": "addQualificationLadderLevel",
+      "status": 201,
+      "response": {
+        "data": {
+          "game": "ets2",
+          "revision": 2
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "name": "Fictional second level",
+        "position": 2
+      }
+    },
+    {
+      "id": "reorderQualificationLadder:success",
+      "operationId": "reorderQualificationLadder",
+      "status": 200,
+      "response": {
+        "data": {
+          "game": "ets2",
+          "revision": 2
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "levelIds": [
+          "41000000-0000-4000-8000-000000000002",
+          "41000000-0000-4000-8000-000000000001"
+        ]
+      }
+    },
+    {
+      "id": "archiveQualificationLadderLevel:success",
+      "operationId": "archiveQualificationLadderLevel",
+      "status": 200,
+      "response": {
+        "data": {
+          "game": "ets2",
+          "revision": 2
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "targetLevelId": "41000000-0000-4000-8000-000000000002",
+        "observedDriverCount": 3
       }
     }
   ]

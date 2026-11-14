@@ -3,6 +3,53 @@
   min-width: 0;
   container: qualification-workspace / inline-size;
 }
+.qualification-ladder,
+.qualification-ladder :is(li, fieldset, input, select) {
+  min-width: 0;
+}
+.qualification-ladder :is(h3, p, code, li, button, th, td) {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.qualification-ladder-table .table {
+  font-size: var(--font-small);
+}
+.qualification-ladder-table .qualification-ladder-level {
+  width: 19%;
+}
+.qualification-ladder-table .qualification-ladder-controls {
+  width: 24%;
+}
+@media (max-width: 800px) {
+  .qualification-ladder-table :is(.qualification-ladder-level, .qualification-ladder-controls) {
+    grid-column: 1 / -1;
+  }
+}
+.qualification-ladder-meta,
+.qualification-ladder-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.qualification-ladder-level strong {
+  color: var(--foreground);
+}
+.qualification-ladder-meta {
+  color: var(--muted);
+}
+.qualification-ladder-row-actions button {
+  min-height: 44px;
+}
+.qualification-ladder-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr));
+  gap: var(--space);
+}
+.qualification-ladder select {
+  width: 100%;
+  max-width: 100%;
+}
 .qualification-workspace .card {
   gap: 8px;
   padding: 12px 14px;

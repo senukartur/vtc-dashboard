@@ -10,6 +10,11 @@ import {
 import { eventRevisions, events } from "@vtc/db/events-schema";
 import { and, company, eq, membership } from "@vtc/db/identity-schema";
 import {
+  desc,
+  gt,
+  isNull,
+  lte,
+  or,
   qualificationAssignments,
   qualificationRules,
   qualificationStates,
@@ -23,7 +28,7 @@ import {
 } from "@vtc/db/trips-schema";
 import { demoDataset, demoEpoch, demoId, demoMembers, games } from "./demo-dataset.js";
 import type { Identity } from "./modules/identity/service.js";
-import { structuralLevels } from "./modules/qualifications/initialization.js";
+import { activeLevels } from "./modules/qualifications/ladder.js";
 import type { Fact, NormalizedTripEvidence } from "./modules/sources/contracts/evidence.js";
 import { createContributionRegister } from "./modules/trips/contributions.js";
 import { createFactRepository } from "./modules/trips/facts.js";
@@ -78,6 +83,7 @@ export async function seedDashboard(
         throw new Error("DEMO_REFUSES_EXISTING_CATALOG");
     }
     if (!installed) {
+      const levels = await activeLevels(unit, tx);
       for (const member of adopted ? members.slice(1) : members) {
         await identity.insertWithCredential(tx, {
           userId: member.id,
@@ -108,16 +114,19 @@ export async function seedDashboard(
           .set({ reportingTimezone: "Europe/Moscow" })
           .where(eq(company.singleton, 1));
       for (const game of games) {
-        for (const [rank, levelId] of structuralLevels[game].entries()) {
+        const ladder = levels.filter((row) => row.game === game);
+        for (const [rank, level] of ladder.entries()) {
+          const terminal = rank === ladder.length - 1;
           await c.insert(qualificationRules).values({
             id: demoId(`rule/${game}/${rank}`),
-            levelId,
+            levelId: level.id,
             actorId: director.id,
             publishedAt: demoEpoch,
             effectiveAt: demoEpoch,
             rules: [],
-            requiredTrips: rank === 3 ? null : 20 + rank * 10,
-            requiredDistanceM: rank === 3 ? null : String((12000 + rank * 8000) * 1000),
+            requiredTrips: terminal ? null : 20 + rank * 10,
+            requiredDistanceM: terminal ? null : String((12000 + rank * 8000) * 1000),
+            promotionGeneration: level.promotionGeneration,
             reason: "Synthetic local demo thresholds; not company launch configuration",
           });
         }
@@ -130,7 +139,7 @@ export async function seedDashboard(
             );
           if (held) continue;
           const assignmentId = demoId(`assignment/${member.id}/${game}`);
-          const levelId = structuralLevels[game][member.rank];
+          const levelId = ladder[Math.min(member.rank, ladder.length - 1)]?.id;
           if (!levelId) throw new Error("DEMO_LEVEL_MISSING");
           await c.insert(qualificationAssignments).values({
             id: assignmentId,
@@ -203,31 +212,39 @@ export async function seedDashboard(
     }
     // A member's current assignment decides the credit, including one the director already held.
     // As in real attribution, a trip earns no credit without an assignment that existed at its start.
-    async function creditOf(
-      userId: string,
-      game: (typeof games)[number],
-      rank: number,
-      start: string,
-    ) {
-      const [current] = await c
+    async function creditOf(userId: string, game: (typeof games)[number], start: string) {
+      const [current, overlapping] = await c
         .select({
           id: qualificationAssignments.id,
           levelId: qualificationAssignments.levelId,
-          assignedAt: qualificationAssignments.assignedAt,
         })
-        .from(qualificationStates)
-        .innerJoin(
-          qualificationAssignments,
-          eq(qualificationAssignments.id, qualificationStates.assignmentId),
+        .from(qualificationAssignments)
+        .where(
+          and(
+            eq(qualificationAssignments.userId, userId),
+            eq(qualificationAssignments.game, game),
+            lte(qualificationAssignments.assignedAt, start),
+            or(
+              isNull(qualificationAssignments.endedAt),
+              gt(qualificationAssignments.endedAt, start),
+            ),
+          ),
         )
-        .where(and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, game)));
-      if (!current || new Date(current.assignedAt) > new Date(start)) return null;
-      const levels: readonly string[] = structuralLevels[game];
-      const held = levels.indexOf(current.levelId);
-      return {
-        assignmentId: current.id,
-        ruleVersionId: demoId(`rule/${game}/${held < 0 ? rank : held}`),
-      };
+        .orderBy(desc(qualificationAssignments.assignedAt))
+        .limit(2);
+      if (!current || overlapping) return null;
+      const [rule] = await c
+        .select({ id: qualificationRules.id })
+        .from(qualificationRules)
+        .where(
+          and(
+            eq(qualificationRules.levelId, current.levelId),
+            lte(qualificationRules.effectiveAt, start),
+          ),
+        )
+        .orderBy(desc(qualificationRules.effectiveAt))
+        .limit(1);
+      return rule ? { assignmentId: current.id, ruleVersionId: rule.id } : null;
     }
     let addedTrips = 0,
       addedEvents = 0;
@@ -346,9 +363,7 @@ export async function seedDashboard(
         reasons: reasonCodes,
         createdAt: trip.end,
       });
-      const credit = accepted
-        ? await creditOf(trip.ownerId, trip.game, member.rank, trip.start)
-        : null;
+      const credit = accepted ? await creditOf(trip.ownerId, trip.game, trip.start) : null;
       const [context] = await contributions.contexts(tx, [
         { tripId: trip.id, expectedTripVersion: 1, version: 1, factId },
       ]);

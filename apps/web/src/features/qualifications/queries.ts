@@ -1,13 +1,16 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "../../app/Session.js";
+import { refreshWorkspaceSummary } from "../../app/workspace-summary-cache.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
 import {
+  affectedQualificationProjection,
   affectedRead,
   type Change,
   type CommandOwner,
   commandChange,
+  deferPagedQualificationRead,
   isRuleHistory,
   validateChangedResult,
 } from "./changes.js";
@@ -66,6 +69,7 @@ export function useQualificationCommand(
     level: DTO["QualificationLevel"],
     operation: "rename" | "publish" | "schedule",
   ) => void,
+  options?: { preserveLimitedRecovery?: boolean; refreshPromotions?: boolean },
 ) {
   const session = useSession(),
     client = useQueryClient(),
@@ -83,6 +87,7 @@ export function useQualificationCommand(
     } | null>(null);
   const [pending, setPending] = useState(false),
     [failure, setFailure] = useState<AccountFailure | null>(null),
+    [recoveryLimited, setRecoveryLimited] = useState(false),
     [waitUntil, setWaitUntil] = useState(0),
     [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -113,7 +118,10 @@ export function useQualificationCommand(
   const pathOf = (key: readonly unknown[]) =>
     typeof key.at(-2) === "string" ? (key.at(-2) as string) : "";
   async function refresh(change: Change, level?: DTO["QualificationLevel"], conflict = false) {
-    await fenceQualificationReads(client, scope, change, session.self?.member.id, conflict);
+    const refreshPromotions = options?.refreshPromotions !== false;
+    const affected = (path: string) =>
+      affectedRead(change, path, session.self?.member.id, conflict, refreshPromotions);
+    await fenceQualificationReads(client, scope, affected);
     if (change.kind === "level")
       await client.invalidateQueries({
         queryKey: scope,
@@ -130,7 +138,7 @@ export function useQualificationCommand(
           queryKey: scope,
           predicate: (query) =>
             query.queryKey.at(-1) === "EnvelopeListQualificationLevel" &&
-            affectedRead(change, pathOf(query.queryKey), session.self?.member.id, conflict),
+            affected(pathOf(query.queryKey)),
         },
         (previous) =>
           previous
@@ -157,33 +165,49 @@ export function useQualificationCommand(
       const path = pathOf(key);
       if (change.kind === "level" && isRuleHistory(change.id, path)) return false;
       if (level && key.at(-1) === "EnvelopeListQualificationLevel") return false;
-      return affectedRead(change, path, session.self?.member.id, conflict);
+      return affected(path);
     };
     await client.invalidateQueries({
       queryKey: scope,
       predicate: (query) => dependent(query.queryKey),
       refetchType: "none",
     });
-    await client.refetchQueries(
-      {
-        queryKey: scope,
-        type: "active",
-        predicate: (query) => {
-          const path = pathOf(query.queryKey),
-            url = new URL(path, "https://qualification.invalid");
-          // State-bound history cursors are reset by the owner before refresh, never replayed after a write.
-          if (
-            change.kind === "member" &&
-            /\/qualification-(?:assignments|action-history)$/.test(url.pathname) &&
-            url.searchParams.has("cursor")
-          )
-            return false;
-          return dependent(query.queryKey);
+    await Promise.all([
+      client.refetchQueries(
+        {
+          queryKey: scope,
+          type: "active",
+          // Cursor pages stay stale until their owner navigates or starts at the first page.
+          predicate: (query) =>
+            dependent(query.queryKey) &&
+            !deferPagedQualificationRead(change, pathOf(query.queryKey)),
         },
-      },
-      // Older reads were fenced above; only another post-commit read may be coalesced here.
-      { cancelRefetch: false },
-    );
+        // Older reads were fenced above; only another post-commit read may be coalesced here.
+        { cancelRefetch: false },
+      ),
+      refreshPromotions &&
+      !conflict &&
+      (change.kind === "ladder" ||
+        (change.kind === "level" ? change.publication : !change.historical))
+        ? refreshWorkspaceSummary(client, session)
+        : undefined,
+    ]);
+    // The P10 provider owns its dashboard refresh after reloading session authority.
+    const dashboardScope =
+      refreshPromotions && session.self
+        ? {
+            memberId: session.self.member.id,
+            generation: session.generation,
+            identityEpoch: session.self.identityEpoch,
+            access: session.self.capabilities.join(","),
+          }
+        : undefined;
+    const projectionFilters = {
+      predicate: ({ queryKey }: { queryKey: readonly unknown[] }) =>
+        affectedQualificationProjection(change, queryKey, dashboardScope),
+    };
+    await client.cancelQueries(projectionFilters);
+    await client.invalidateQueries(projectionFilters, { cancelRefetch: false });
   }
   async function run<K extends keyof DTO>(
     path: string,
@@ -192,12 +216,14 @@ export function useQualificationCommand(
     etag?: string | null,
     method: "POST" | "PATCH" = "POST",
     fingerprint?: string,
+    recovering = false,
   ): Promise<{ data: DTO[K]; etag: string | null } | undefined> {
     if (!active.current || controller.current || waitUntil > Date.now()) return;
     const ctl = new AbortController();
     controller.current = ctl;
     setPending(true);
     setFailure(null);
+    setRecoveryLimited(false);
     const timeout = window.setTimeout(() => ctl.abort(), 15000);
     const previousAttempt = attempt.current,
       previousRequest = request.current;
@@ -241,6 +267,11 @@ export function useQualificationCommand(
       if (![200, 201, 202].includes(response.status)) fail(response);
       const parsed = schema(name).safeParse(await response.json());
       if (!parsed.success) throw new AccountFailure("uncertain");
+      if (change?.kind === "ladder") {
+        const receipt = schema("EnvelopeQualificationLadderRevision").safeParse(parsed.data);
+        if (!receipt.success || response.headers.get("ETag") !== `"v${receipt.data.data.revision}"`)
+          throw new AccountFailure("uncertain");
+      }
       const level = validateChangedResult(change, name, parsed.data);
       attempt.current = null;
       request.current = null;
@@ -256,7 +287,11 @@ export function useQualificationCommand(
           );
         onRefresh?.();
         // A replayed receipt is historical: reload current pointers instead of caching its old level.
-        if (change) await refresh(change, replay ? undefined : level);
+        if (change)
+          await refresh(
+            change,
+            replay || (level?.configured && level.freightRuleSummary === null) ? undefined : level,
+          );
         // Only Trainee completion can change roles, and only the current member owns this session.
         // change comes from the frozen request, so uncertain replay survives refreshed eligibility.
         if (
@@ -272,6 +307,8 @@ export function useQualificationCommand(
       const safe = error instanceof AccountFailure ? error : new AccountFailure("uncertain");
       if (active.current) {
         setFailure(safe);
+        if (options?.preserveLimitedRecovery && recovering && safe.kind === "limited")
+          setRecoveryLimited(true);
         if (safe.kind === "unauthorized") await session.confirmSessionLoss(ctl.signal);
         if (safe.kind === "forbidden") {
           client.removeQueries({
@@ -307,17 +344,20 @@ export function useQualificationCommand(
     failure,
     seconds: Math.max(0, Math.ceil((waitUntil - now) / 1000)),
     canRecover:
-      !!request.current && !!failure && ["uncertain", "unavailable"].includes(failure.kind),
+      !!request.current &&
+      !!failure &&
+      (["uncertain", "unavailable"].includes(failure.kind) || recoveryLimited),
     recover: () => {
       const saved = request.current;
       return saved
-        ? run(saved.path, saved.body, saved.name, saved.etag, saved.method, saved.fingerprint)
+        ? run(saved.path, saved.body, saved.name, saved.etag, saved.method, saved.fingerprint, true)
         : Promise.resolve(undefined);
     },
     reset: () => {
       attempt.current = null;
       request.current = null;
       setFailure(null);
+      setRecoveryLimited(false);
     },
   };
 }

@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 105 tables including the ledger and 31 migrations.
+// Fresh full-schema preparation now covers 106 tables including the ledger and 32 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -147,6 +147,7 @@ export async function reset(connection: Connection) {
     "qualification_states",
     "qualification_assignments",
     "qualification_rule_versions",
+    "qualification_initial_assignments",
     "qualification_levels",
     "trip_history",
     "trip_fact_trailers",
@@ -189,7 +190,6 @@ export async function reset(connection: Connection) {
     "admissions_decisions",
     "admissions_invitations",
     "admissions_applications",
-    "qualification_initial_assignments",
     "mail_commands",
     "mail_deliveries",
     "job_effect_receipts",
@@ -210,6 +210,7 @@ export async function reset(connection: Connection) {
     "identity_users",
     "synthetic_values",
     "synthetic_parent",
+    "qualification_ladder_history",
     "audit_entries",
     "synthetic_recovery_kept",
     "synthetic_recovery_missing",
@@ -281,7 +282,8 @@ async function publishedPrefixFolder(
     | 27
     | 28
     | 29
-    | 30,
+    | 30
+    | 31,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -337,6 +339,8 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_STAGE_3_PREFIX_REQUIRED");
   if (count === 30 && entries[29]?.tag !== "0029_orange_zaladane")
     throw new Error("PUBLISHED_ELIGIBILITY_TRACKING_PREFIX_REQUIRED");
+  if (count === 31 && entries[30]?.tag !== "0030_superb_monster_badoon")
+    throw new Error("PUBLISHED_QUALIFICATION_LADDER_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -472,4 +476,8 @@ export async function stage3PriorFolder(): Promise<string> {
 
 export async function qualificationEligibilityPriorFolder(): Promise<string> {
   return publishedPrefixFolder(30);
+}
+
+export async function qualificationLadderPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(31);
 }

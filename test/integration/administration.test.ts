@@ -197,10 +197,10 @@ test("member command journey preserves versions, idempotency and protected targe
     expect(choices.statusCode).toBe(200);
     expect(choices.json().data.levels).toHaveLength(8);
     expect(Object.keys(choices.json().data.levels[0]).sort()).toEqual([
-      "code",
       "game",
       "id",
       "name",
+      "position",
     ]);
     const detail = await app.inject({ url: `/api/v1/admin/members/${ordinary.id}`, headers });
     expect(detail.statusCode).toBe(200);

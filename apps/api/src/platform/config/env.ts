@@ -173,6 +173,13 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
   let qualifications: QualificationsConfig | undefined;
   if (![undefined, "true", "false"].includes(input.QUALIFICATIONS_ENABLED))
     throw new Error("Invalid environment fields: QUALIFICATIONS_ENABLED");
+  if (
+    ![undefined, "true", "false"].includes(input.QUALIFICATION_LADDER_EDITS_ENABLED) ||
+    (input.QUALIFICATION_LADDER_EDITS_ENABLED === "true" && input.QUALIFICATIONS_ENABLED !== "true")
+  )
+    throw new Error(
+      "Invalid environment fields: QUALIFICATION_LADDER_EDITS_ENABLED, QUALIFICATIONS_ENABLED",
+    );
   const eligibilityTracking = input.QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED;
   const eligibilitySince = input.QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE;
   if (
@@ -195,6 +202,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       if (!identity || !trips) throw new Error();
       qualifications = {
         cursorKey: input.QUALIFICATIONS_CURSOR_KEY ?? "",
+        ...(input.QUALIFICATION_LADDER_EDITS_ENABLED === "true" && { ladderEditsEnabled: true }),
         ...(eligibilityTracking === "true" && eligibilitySince !== undefined
           ? { eligibilityTrackingSince: eligibilitySince }
           : {}),

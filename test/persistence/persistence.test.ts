@@ -77,7 +77,7 @@ import {
   tripsPriorFolder,
 } from "./support.ts";
 
-const currentMigrationCount = 31;
+const currentMigrationCount = 32;
 
 const values = mysqlTable("synthetic_values", {
   id: idColumn("id").primaryKey(),
@@ -205,10 +205,10 @@ async function serializedFreshMigrations(
     })),
   );
   const expectedTables = Object.keys(
-    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0030_snapshot.json"), "utf8"))
+    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0031_snapshot.json"), "utf8"))
       .tables,
   ).sort();
-  assert.equal(expectedTables.length, 104);
+  assert.equal(expectedTables.length, 105);
   const gate = await journalAckGate("finalize", currentMigrationCount);
   const lock = migrationLockName(settings.database);
   const history = async () => {

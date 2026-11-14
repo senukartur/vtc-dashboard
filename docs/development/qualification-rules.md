@@ -120,4 +120,4 @@ The implementation is verified by:
 
 ## Persistent qualification integration
 
-[VTC-028](qualifications.md) now owns immutable effective rule publication, assignment intervals, synchronous register-based progress and confirmed promotion proofs. VTC-027 remains pure and receives historical pinned inputs. Its generic progress evaluator permits nullable conditions; the persistent promotion command additionally requires **both** configured count and distance thresholds and a nonterminal level, so unset configuration never authorizes promotion. VTC-032 owns later analytics projections, not promotion authority.
+[Qualifications](qualifications.md) owns immutable effective publication, assignment intervals, synchronous register-based progress and confirmed promotion proofs. The pure evaluator receives pinned inputs. Confirmation requires a successor in the current game and an effective rule in the current promotion generation. Every nonnull threshold must pass. Terminal levels and former terminal levels awaiting a new publication have no applicable promotion threshold. Freight rules remain effective at the historical trip attribution instant.

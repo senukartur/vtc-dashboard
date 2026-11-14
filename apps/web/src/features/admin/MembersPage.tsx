@@ -30,6 +30,7 @@ import {
   memberPanel,
   membershipChange,
   membershipOf,
+  normalizeSearch,
   orderedRoles,
   parseFilters,
   type Role,
@@ -38,7 +39,6 @@ import {
   roleDiff,
   roleFilters,
   rolesBody,
-  normalizeSearch,
   searchMaxLength,
 } from "./members-model.js";
 import { type DTO, useWorkspaceCommand, useWorkspaceQuery } from "./transport.js";
@@ -76,9 +76,7 @@ function LevelLabel({
   );
   return (
     <span>
-      {level
-        ? `${level.name} · ${t(`qualifications:${level.code}`)}`
-        : t(options.isPending ? "levelLabelLoading" : "levelLabelUnavailable")}
+      {level ? level.name : t(options.isPending ? "levelLabelLoading" : "levelLabelUnavailable")}
     </span>
   );
 }
@@ -643,7 +641,7 @@ function MemberPanel({
                     .filter((level) => level.game === game)
                     .map((level) => (
                       <option key={level.id} value={level.id}>
-                        {level.name} · {t(`qualifications:${level.code}`)}
+                        {level.name}
                       </option>
                     ))}
                 </select>

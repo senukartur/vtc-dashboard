@@ -237,12 +237,15 @@ test(
 );
 
 test(
-  "L2 row selection swaps panels without reads, supports the keyboard and keeps drafts",
+  "L2 row selection loads only the selected rule, supports the keyboard and keeps drafts",
   browserCase(["@functional"]),
   async ({ page }) => {
     await mockQualifications(page);
     await page.goto("/account/qualifications");
     await settled(page);
+    await expect(
+      panel(page, traineeId).getByRole("button", { name: "Edit rules", exact: true }),
+    ).toBeEnabled();
     const requests = recordRequests(page);
     const driverII = rowButton(page, "driver_ii");
     await driverII.click();
@@ -254,7 +257,12 @@ test(
     await expect(panel(page, traineeId)).toBeHidden();
     await expect(panel(page, driverIIId)).toBeVisible();
     await expect(driverII).toBeFocused();
-    expect(requests.map(String)).toEqual([]);
+    await expect(
+      panel(page, driverIIId).getByRole("button", { name: "Edit rules", exact: true }),
+    ).toBeEnabled();
+    expect(
+      requests.filter((url) => url.pathname.includes("/rule-versions/")).map((url) => url.pathname),
+    ).toEqual([`/api/v1/qualification-levels/${driverIIId}/rule-versions/${ruleId}`]);
 
     await page.keyboard.press("Tab");
     await expect(rowButton(page, "driver_i")).toBeFocused();
@@ -403,7 +411,7 @@ test(
 );
 
 test(
-  "L6 levels failure offers Refresh without a table; one rule failure stays in its row",
+  "L6 levels failure offers Refresh; selected detail failure keeps authoritative freight summaries",
   browserCase(["@functional"]),
   async ({ page }, info) => {
     await mockQualifications(page);
@@ -425,9 +433,12 @@ test(
     await capture(page, info, "qualifications-levels-error");
     failLevels = false;
     await region.getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(row(page, "driver_ii").getByRole("cell").nth(0)).toContainText("Unavailable");
+    await expect(row(page, "driver_ii").getByRole("cell").nth(0)).toContainText("0.01 t");
     await expect(row(page, "trainee").getByRole("cell").nth(0)).toContainText("0.01 t");
     await expect(row(page, "driver_iii").getByRole("cell").nth(0)).toContainText("0.01 t");
+    await rowButton(page, "driver_ii").click();
+    await expect(panel(page, driverIIId).getByRole("alert")).toBeVisible();
+    await expect(row(page, "driver_ii").getByRole("cell").nth(0)).toContainText("0.01 t");
   },
 );
 

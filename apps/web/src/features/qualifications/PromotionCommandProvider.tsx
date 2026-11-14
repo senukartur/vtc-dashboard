@@ -64,6 +64,8 @@ function usePromotionCommandState() {
       // The helper calls this only after validating a receipt or recognizing a conflict.
       refreshNeeded.current = true;
     },
+    undefined,
+    { refreshPromotions: false },
   );
 
   useEffect(() => {

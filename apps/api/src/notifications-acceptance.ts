@@ -1,37 +1,36 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { readFile, lstat } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
+import type { components } from "@vtc/contracts";
 import { createUnitOfWork, newId, type TxContext } from "@vtc/db";
 import { sql } from "@vtc/db/platform-schema";
+import type { Actor } from "./modules/identity/service.js";
 import {
   createQualificationInitialization,
   structuralLevels,
 } from "./modules/qualifications/initialization.js";
-import { readConfig } from "./platform/config/env.js";
-import { composeIdentity } from "./use-cases/identity-messaging.js";
-import { createOutbox, type TripEvent } from "./platform/outbox/events.js";
-import type { Actor } from "./modules/identity/service.js";
-import type { components } from "@vtc/contracts";
 import {
   acceptanceDeadlineRemaining,
   acceptanceDiagnostic,
-  acceptanceWorkerScope,
   acceptanceTeardown,
+  acceptanceWorkerScope,
 } from "./notifications-acceptance-diagnostics.js";
-
-import {
-  acceptanceSourcePayload,
-  acceptanceSourceStream,
-  type AcceptanceSourceKind,
-} from "./notifications-acceptance-sources.js";
 import {
   acceptanceInterruptionHandshake,
+  type InterruptionTarget,
   interruptionStartupAck,
   interruptionStopAck,
   writeAcceptanceSignal,
-  type InterruptionTarget,
 } from "./notifications-acceptance-handshake.js";
+import {
+  type AcceptanceSourceKind,
+  acceptanceSourcePayload,
+  acceptanceSourceStream,
+} from "./notifications-acceptance-sources.js";
+import { readConfig } from "./platform/config/env.js";
+import { createOutbox, type TripEvent } from "./platform/outbox/events.js";
+import { composeIdentity } from "./use-cases/identity-messaging.js";
 
 type S = components["schemas"];
 type FixtureActor = { id: string; email: string; password: string; cookie: string };
@@ -339,11 +338,11 @@ try {
       for (const level of (await composed.qualifications!.levels(director, game)).items) {
         const input: S["RulesInput"] = {
           rules: [{ type: "max_mass", maxKg: "50000" }],
-          requiredTrips: 2,
-          requiredDistanceM: "1000",
+          requiredTrips: level.terminal ? null : 2,
+          requiredDistanceM: level.terminal ? null : "1000",
           reason: "Fictional isolated acceptance limits",
         };
-        if (level.id === structuralLevels.ets2[0]) {
+        if (game === "ets2" && level.position === 1) {
           const keys = [newId(), newId()];
           const attempts = await Promise.allSettled(
             keys.map((key) =>

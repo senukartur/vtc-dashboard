@@ -21,7 +21,7 @@ export function browserTripConfig() {
         timeoutMs: 10000,
       },
     },
-    qualifications: { cursorKey: key("qualifications") },
+    qualifications: { cursorKey: key("qualifications"), ladderEditsEnabled: true },
     events: { cursorKey: key("events") },
     notifications: { cursorKey: key("notifications") },
     reconciliation: {

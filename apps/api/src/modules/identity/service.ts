@@ -113,6 +113,7 @@ export interface IdentityPorts {
       userId: string,
       assignments: readonly components["schemas"]["AssignmentInput"][],
       assignedAt: string,
+      companyId?: string,
     ): Promise<void>;
     currentAssignments?(
       tx: TxContext,
@@ -1481,6 +1482,7 @@ export function createIdentity(
                   targetId,
                   input.qualifications ?? [],
                   instant,
+                  current.id,
                 );
               }
               await invalidate(tx, target, input.kind !== "roles");
@@ -2055,7 +2057,7 @@ export function createIdentity(
       const member = locked.get(targetId);
       if (member?.status !== "active") throw identityError(409);
       const assigned = await memberRoles(tx, targetId, current);
-      if (!assigned.includes("trainee") && assigned.includes("driver")) return;
+      if (!assigned.includes("trainee")) return;
       await client(tx)
         .delete(roles)
         .where(and(eq(roles.userId, targetId), eq(roles.role, "trainee")));

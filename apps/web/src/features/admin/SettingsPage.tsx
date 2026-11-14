@@ -11,7 +11,7 @@ import {
 } from "../../shared/ui/dialog.js";
 import { Badge, Button, Card, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs.js";
-import { QualificationsPage } from "../qualifications/QualificationsPage.js";
+import { QualificationLevelsSettingsPanel } from "../qualifications/QualificationLevelsSettingsPanel.js";
 import {
   CommandFeedback,
   Confirmation,
@@ -680,10 +680,10 @@ function SettingsGeneral({
   );
 }
 
-function SettingsQualificationLevels() {
+function SettingsQualificationLevels({ visible }: { visible: boolean }) {
   const session = useSession();
   return session.self?.capabilities.includes("qualifications.manage") ? (
-    <QualificationsPage embedded />
+    <QualificationLevelsSettingsPanel visible={visible} />
   ) : (
     <SettingsRestricted />
   );
@@ -701,6 +701,7 @@ function Settings() {
     root = useRef<HTMLDivElement>(null),
     lastFocused = useRef<HTMLElement | null>(null),
     [generalOpened, setGeneralOpened] = useState(tab === "general"),
+    [qualificationsOpened, setQualificationsOpened] = useState(tab === "qualifications"),
     canReadAudit = !!session.self?.capabilities.includes("members.manage"),
     settings = useWorkspaceQuery(
       "/admin/company-settings",
@@ -709,12 +710,16 @@ function Settings() {
     );
   // General holds the timezone command and protected transfer flow for this page visit.
   if (tab === "general" && !generalOpened) setGeneralOpened(true);
+  if (tab === "qualifications" && !qualificationsOpened) setQualificationsOpened(true);
   useEffect(() => {
     function trackFocus(event: FocusEvent) {
       const target = event.target;
       if (!(target instanceof HTMLElement) || target === document.body) return;
       lastFocused.current =
-        root.current?.contains(target) || target.closest(".dialog-content:has(.settings-dialog)")
+        root.current?.contains(target) ||
+        target.closest(
+          ".dialog-content:has(.settings-dialog), .qualification-settings-confirmation",
+        )
           ? target
           : null;
     }
@@ -769,8 +774,10 @@ function Settings() {
             <SettingsGeneral visible={tab === "general"} settings={settings} />
           )}
         </TabsContent>
-        <TabsContent value="qualifications">
-          <SettingsQualificationLevels />
+        <TabsContent value="qualifications" forceMount hidden={tab !== "qualifications"}>
+          {(qualificationsOpened || tab === "qualifications") && (
+            <SettingsQualificationLevels visible={tab === "qualifications"} />
+          )}
         </TabsContent>
         <TabsContent value="audit">
           {canReadAudit ? (

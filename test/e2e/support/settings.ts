@@ -88,7 +88,6 @@ export type SettingsOptions = {
   role?: "director" | "deputy" | "driver";
   emailVerified?: boolean;
   omitCapabilities?: string[];
-  delegateQualifications?: boolean;
   reportingTimezone?: string | null;
   missingSetup?: string[];
   /** Starts with a usable code for Volga Ray. */
@@ -176,7 +175,6 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
       url = new URL(request.url()),
       path = url.pathname.replace("/api/v1", ""),
       method = request.method();
-    if (options.delegateQualifications && path.includes("qualification")) return route.fallback();
     if (path === "/me") {
       if (state.transferred) {
         state.selfReadsAfterTransfer++;
@@ -189,6 +187,36 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
     if (path === "/auth/csrf")
       return route.fulfill({ json: envelope({ token: "NONFUNCTIONAL_FIXTURE" }) });
     if (method === "GET") state.reads.push(`${path}${url.search}`);
+    if (method === "GET" && /^\/admin\/qualification-ladders\/(ats|ets2)$/.test(path)) {
+      if (!self().data.capabilities.includes("qualifications.manage"))
+        return route.fulfill(failure(403));
+      const game = path.endsWith("/ats") ? "ats" : "ets2";
+      const ladder: S["QualificationLadder"] = {
+        game,
+        asOf: iso(clock()),
+        revision: 1,
+        ladderEditsEnabled: true,
+        levels: [
+          {
+            id: "d6500000-0000-4000-8000-000000000001",
+            game,
+            name: game === "ats" ? "Fictional ATS starter" : "Fictional ETS2 starter",
+            position: 1,
+            version: 1,
+            terminal: true,
+            configured: false,
+            promotionConfigured: false,
+            ruleVersionId: null,
+            effectiveRule: null,
+            freightRuleSummary: null,
+            requiredTrips: null,
+            requiredDistanceM: null,
+            currentDriverCount: 0,
+          },
+        ],
+      };
+      return route.fulfill({ json: envelope(ladder), headers: { ETag: '"v1"' } });
+    }
     if (path === "/admin/company-settings") {
       if (method === "GET") {
         if (state.settingsStatus !== 200) return route.fulfill(failure(state.settingsStatus));

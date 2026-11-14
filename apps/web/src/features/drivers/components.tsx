@@ -25,7 +25,6 @@ import {
   type Game,
   type GameFilter,
   initial,
-  LEVEL_ORDER,
   type Level,
   ladderFor,
   monthLabel,
@@ -265,7 +264,15 @@ export function DriverKpis({
   );
 }
 
-function ProgressRows({ progress, locale }: { progress: Progress; locale: Locale }) {
+function ProgressRows({
+  progress,
+  locale,
+  level,
+}: {
+  progress: Progress;
+  locale: Locale;
+  level: Level | undefined;
+}) {
   const { t } = useTranslation("drivers");
   const rows = [
     {
@@ -290,7 +297,8 @@ function ProgressRows({ progress, locale }: { progress: Progress; locale: Locale
       percent: progressPercent(progress.actualDistanceM, progress.requiredDistanceM),
     },
   ];
-  const unconfigured = progress.requiredTrips === null || progress.requiredDistanceM === null;
+  const unconfigured =
+    level?.id === progress.assignment.levelId && !level.terminal && !level.promotionConfigured;
   return (
     <>
       <dl className="driver-progress">
@@ -355,7 +363,8 @@ export function QualificationCard({
   const failure = !progress.data && progress.isError ? failureView(progress.error) : null;
 
   let body: ReactNode;
-  if (progress.data) body = <ProgressRows progress={progress.data} locale={locale} />;
+  if (progress.data)
+    body = <ProgressRows progress={progress.data} locale={locale} level={resolved} />;
   else if (failure === "setup") body = <p className="driver-muted">{t("qualification.none")}</p>;
   else if (failure) body = <p className="driver-muted">{t("qualification.progressUnavailable")}</p>;
   else body = <p className="driver-muted">{t("qualification.progressLoading")}</p>;
@@ -380,7 +389,7 @@ export function QualificationCard({
         <ol className="driver-ladder" aria-label={t("qualification.ladder")}>
           {ladder.map((level, index) => {
             const current = level.id === resolved.id;
-            const passed = LEVEL_ORDER.indexOf(level.code) < LEVEL_ORDER.indexOf(resolved.code);
+            const passed = level.position < resolved.position;
             return (
               <li
                 key={level.id}
