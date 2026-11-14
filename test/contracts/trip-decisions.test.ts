@@ -335,3 +335,135 @@ test("Stage 3 review compares independently present manual and telemetry sources
     }
   }
 });
+
+type Row = Record<string, unknown>;
+type StageTrip = Row & {
+  sources: Row[];
+  qualificationCheck: Row & { rules: [Row, Row & { allowedTrailerTypes: Row[] }, Row] };
+  effectiveFacts: Row & { originCompany: Row };
+};
+test("the author's Stage 4 trip view adds safe sources, rule values, damage and companies only", async () => {
+  const { readFileSync } = await import("node:fs");
+  const cases = JSON.parse(
+    readFileSync(new URL("../../docs/contracts/dashboard/examples.json", import.meta.url), "utf8"),
+  ).cases as { id: string; response: { data: Record<string, unknown> } }[];
+  const data = (id: string) => {
+    const found = cases.find((item) => item.id === id);
+    if (!found) throw new Error(`MISSING_FIXTURE ${id}`);
+    return structuredClone(found.response.data) as StageTrip;
+  };
+  const trip = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/TripPrivate" });
+  const telemetry = data("getTrip:stage-4-private-telemetry");
+  const manual = data("getTrip:stage-4-private-manual-unresolved");
+  expect(trip(telemetry)).toBe(true);
+  expect(trip(manual)).toBe(true);
+  const { sources, qualificationCheck, ...legacy } = telemetry;
+  const { cargoDamagePercent, originCompany, destinationCompany, ...legacyFacts } =
+    telemetry.effectiveFacts;
+  expect(
+    [sources, qualificationCheck, cargoDamagePercent, originCompany, destinationCompany].every(
+      (value) => value !== undefined,
+    ),
+  ).toBe(true);
+  expect(trip({ ...legacy, effectiveFacts: legacyFacts })).toBe(true);
+  expect(trip({ ...telemetry, qualificationCheck: null })).toBe(true);
+  expect(trip({ ...telemetry, sources: [] })).toBe(true);
+  // The event link stays the existing summary.event field.
+  expect(trip({ ...telemetry, event: { id: newId(), title: "Fictional Convoy" } })).toBe(false);
+
+  const [telemetrySource, manualSource] = sources;
+  const [mass, trailers, adr] = qualificationCheck.rules;
+  const mutations: [string, Row][] = [
+    ["three sources", { ...telemetry, sources: [...sources, manualSource] }],
+    [
+      "reviewer confidence",
+      { ...telemetry, sources: [{ ...telemetrySource, confidence: "high" }] },
+    ],
+    ["candidate id", { ...telemetry, sources: [{ ...manualSource, candidateId: newId() }] }],
+    ["source state", { ...telemetry, sources: [{ ...telemetrySource, state: "accepted" }] }],
+    ["acceptance", { ...telemetry, qualificationCheck: { ...qualificationCheck, acceptance: {} } }],
+    ["canDecide", { ...telemetry, qualificationCheck: { ...qualificationCheck, canDecide: true } }],
+    [
+      "blocked reasons",
+      { ...telemetry, qualificationCheck: { ...qualificationCheck, blockedReasonCodes: ["x"] } },
+    ],
+    [
+      "mass variant with trailers",
+      {
+        ...telemetry,
+        qualificationCheck: {
+          ...qualificationCheck,
+          rules: [{ ...mass, allowedTrailerTypes: trailers.allowedTrailerTypes }],
+        },
+      },
+    ],
+    [
+      "trailer variant labelled adr",
+      {
+        ...telemetry,
+        qualificationCheck: {
+          ...qualificationCheck,
+          rules: [{ ...trailers, ruleType: "allowed_adr_categories" }],
+        },
+      },
+    ],
+    [
+      "101 trailer labels",
+      {
+        ...telemetry,
+        qualificationCheck: {
+          ...qualificationCheck,
+          rules: [
+            {
+              ...trailers,
+              allowedTrailerTypes: Array.from(
+                { length: 101 },
+                () => trailers.allowedTrailerTypes[0],
+              ),
+            },
+          ],
+        },
+      },
+    ],
+    [
+      "unknown adr class",
+      {
+        ...telemetry,
+        qualificationCheck: { ...qualificationCheck, rules: [{ ...adr, observedAdrClass: "5" }] },
+      },
+    ],
+    [
+      "unknown rule type",
+      {
+        ...telemetry,
+        qualificationCheck: { ...qualificationCheck, rules: [{ ...mass, ruleType: "max_length" }] },
+      },
+    ],
+    [
+      "damage above 100",
+      { ...telemetry, effectiveFacts: { ...telemetry.effectiveFacts, cargoDamagePercent: 100.5 } },
+    ],
+    [
+      "unresolved company with an id",
+      {
+        ...telemetry,
+        effectiveFacts: {
+          ...telemetry.effectiveFacts,
+          originCompany: { state: "unresolved", code: null, companyId: newId() },
+        },
+      },
+    ],
+    [
+      "resolved company without depot",
+      {
+        ...telemetry,
+        effectiveFacts: {
+          ...telemetry.effectiveFacts,
+          originCompany: { ...originCompany, depotId: undefined },
+        },
+      },
+    ],
+    ["reviewer decision note", { ...telemetry, reviewerNote: "Fictional private note" }],
+  ];
+  for (const [label, value] of mutations) expect(trip(value), label).toBe(false);
+});

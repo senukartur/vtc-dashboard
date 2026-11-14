@@ -356,6 +356,15 @@
               }
             }
           }
+        },
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-144",
+          "parameters": [],
+          "fields": [
+            "ApplicationInput.referralSource",
+            "ApplicationInput.referralOther"
+          ],
+          "description": "Accepts optional referralSource and referralOther. Until VTC-144 activates them the route rejects them with 422 INVALID_PAYLOAD."
         }
       }
     },
@@ -649,7 +658,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnvelopeSelf"
+                  "$ref": "#/components/schemas/SelfStage4Envelope"
                 }
               }
             },
@@ -665,6 +674,14 @@
           "default": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-142",
+          "parameters": [],
+          "fields": [
+            "PreferencesStage4.displayTimezone"
+          ],
+          "description": "preferences.displayTimezone can be null (as on the device)."
         }
       }
     },
@@ -786,7 +803,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnvelopePreferences"
+                  "$ref": "#/components/schemas/PreferencesStage4Envelope"
                 }
               }
             },
@@ -820,6 +837,15 @@
               }
             }
           }
+        },
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-142",
+          "parameters": [],
+          "fields": [
+            "PreferencesInput.displayTimezone",
+            "PreferencesStage4.displayTimezone"
+          ],
+          "description": "displayTimezone accepts null (as on the device). Until VTC-142 activates it the route rejects null with 422."
         }
       }
     },
@@ -1246,7 +1272,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListMemberSummary"
+                  "$ref": "#/components/schemas/MemberStage4DirectoryListEnvelope"
                 }
               }
             }
@@ -1261,8 +1287,99 @@
           },
           {
             "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive nickname substring; surrounding whitespace is ignored and a blank term is rejected. Same rules as listAdminMembers. Filters before pagination; bound into the signed cursor.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "description": "Current role. Director matches only the serving director pointer. Filters before pagination; bound into the signed cursor.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "trainee",
+                "driver",
+                "dispatcher",
+                "deputy_director",
+                "director"
+              ]
+            }
+          },
+          {
+            "name": "ets2Level",
+            "in": "query",
+            "required": false,
+            "description": "Current ETS2 qualification level ID, one of the levels listQualificationLevels returns to this reader for ets2; any other ID returns 422.",
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          },
+          {
+            "name": "atsLevel",
+            "in": "query",
+            "required": false,
+            "description": "Current ATS qualification level ID, one of the levels listQualificationLevels returns to this reader for ats; any other ID returns 422.",
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "nickname, 30-day accepted distance, 30-day accepted trips or last accepted trip time. Ties break by member ID. Omitted keeps ascending member ID order.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "nickname",
+                "distance30d",
+                "trips30d",
+                "lastTrip"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Defaults to asc for nickname and desc for the other sorts. Members without an accepted trip sort last for lastTrip in either order.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
           }
-        ]
+        ],
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-140",
+          "parameters": [
+            "search",
+            "role",
+            "ets2Level",
+            "atsLevel",
+            "sort",
+            "order"
+          ],
+          "fields": [
+            "MemberStage4DirectoryList.windowEndsAt",
+            "MemberStage4DirectoryEntry.last30Days",
+            "MemberStage4DirectoryEntry.lastAcceptedTripAt"
+          ],
+          "description": "Stage 4 directory: optional nickname search, role and per-game level filters, sort and order, and 30-day accepted totals with the last accepted trip time per row. Filters apply before paging. Omitting sort keeps the existing ascending member ID order. Until VTC-140 activates them the route rejects the new parameters with 422 and returns the existing rows."
+        },
+        "description": "Company member directory. Filters and the optional nickname search apply before paging. Omitted sort keeps ascending member ID order; each sort is a stable keyset on (sort value, member ID). Signed cursors bind the actor, session, access epoch, normalized filters, sort, order and windowEndsAt; mismatches return 409 VERSION_CONFLICT. last30Days counts accepted canonical trips whose reportingAt lies in [windowEndsAt - 30 days, windowEndsAt], including zeros."
       }
     },
     "/api/v1/members/{memberId}": {
@@ -1310,7 +1427,16 @@
             }
           }
         ],
-        "x-contract-stage": "VTC-123 Step 1"
+        "x-contract-stage": "VTC-123 Step 1",
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-140",
+          "parameters": [],
+          "fields": [
+            "MemberProfile.memberSince",
+            "MemberProfile.lastAcceptedTripAt"
+          ],
+          "description": "Profile gains memberSince (latest join or return) and lastAcceptedTripAt."
+        }
       }
     },
     "/api/v1/admin/members": {
@@ -2069,7 +2195,17 @@
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           }
-        ]
+        ],
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-144",
+          "parameters": [],
+          "fields": [
+            "Application.truckersmpCheck",
+            "ApplicationInput.referralSource",
+            "ApplicationInput.referralOther"
+          ],
+          "description": "Adds truckersmpCheck and the referral fields; lists may omit the check."
+        }
       }
     },
     "/api/v1/admin/applications/{applicationId}/decisions": {
@@ -4401,7 +4537,19 @@
             }
           }
         ],
-        "x-contract-stage": "VTC-123 Step 1"
+        "x-contract-stage": "VTC-123 Step 1",
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-141",
+          "parameters": [],
+          "fields": [
+            "TripPrivate.sources",
+            "TripPrivate.qualificationCheck",
+            "EffectiveTripFacts.cargoDamagePercent",
+            "EffectiveTripFacts.originCompany",
+            "EffectiveTripFacts.destinationCompany"
+          ],
+          "description": "The private author view gains an author-safe source list, the qualification check with configured rule values, cargo damage and resolved origin and destination companies from the effective fact. The event link stays summary.event."
+        }
       }
     },
     "/api/v1/me/trip-status-summary": {
@@ -8260,7 +8408,15 @@
               "default": 25
             }
           }
-        ]
+        ],
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-142",
+          "parameters": [],
+          "fields": [
+            "Notification.category"
+          ],
+          "description": "Adds the trip.accepted and event.published categories listed in NotificationStage4Category."
+        }
       }
     },
     "/api/v1/notifications/history": {
@@ -8304,7 +8460,15 @@
           {
             "$ref": "#/components/parameters/Cursor"
           }
-        ]
+        ],
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-142",
+          "parameters": [],
+          "fields": [
+            "Notification.category"
+          ],
+          "description": "Adds the trip.accepted and event.published categories listed in NotificationStage4Category."
+        }
       }
     },
     "/api/v1/notifications/{notificationId}/read": {
@@ -8449,6 +8613,17 @@
           "default": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-142",
+          "parameters": [],
+          "fields": [
+            "NotificationPreferences.reviewQueue",
+            "NotificationPreferences.newApplications",
+            "NotificationPreferences.tripAccepted",
+            "NotificationPreferences.newEvent"
+          ],
+          "description": "Adds reviewQueue, newApplications, tripAccepted and newEvent toggles filtered by viewer capability."
         }
       },
       "put": {
@@ -8507,6 +8682,17 @@
               }
             }
           }
+        },
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-142",
+          "parameters": [],
+          "fields": [
+            "NotificationPreferences.reviewQueue",
+            "NotificationPreferences.newApplications",
+            "NotificationPreferences.tripAccepted",
+            "NotificationPreferences.newEvent"
+          ],
+          "description": "Accepts the Stage 4 toggles the read returned. Until VTC-142 activates them the route rejects them with 422."
         }
       }
     },
@@ -8537,7 +8723,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnvelopeAnalytics"
+                  "$ref": "#/components/schemas/AnalyticsStage4CompanyEnvelope"
                 }
               }
             }
@@ -8562,20 +8748,22 @@
           {
             "name": "fromDate",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string",
               "format": "date"
-            }
+            },
+            "description": "Required unless period=all_time; must be absent with it."
           },
           {
             "name": "toDateExclusive",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string",
               "format": "date"
-            }
+            },
+            "description": "Required unless period=all_time; must be absent with it."
           },
           {
             "name": "granularity",
@@ -8588,8 +8776,37 @@
                 "month"
               ]
             }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "description": "range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the actually covered range.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "range",
+                "all_time"
+              ]
+            }
           }
-        ]
+        ],
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-143",
+          "parameters": [
+            "period",
+            "fromDate",
+            "toDateExclusive"
+          ],
+          "fields": [
+            "AnalyticsStage4Company.period",
+            "AnalyticsStage4Company.activeDrivers",
+            "AnalyticsStage4Company.activeMembers",
+            "AnalyticsStage4Company.byGame"
+          ],
+          "description": "Adds period=all_time and activeDrivers, activeMembers and byGame totals. Until VTC-143 activates them the route rejects period with 422."
+        },
+        "description": "period=all_time forces month granularity (day returns 422). activeDrivers counts distinct members with at least one accepted trip in the period; activeMembers counts active memberships of any role at computedAt; byGame lists ets2 then ats with zeros, or only the filtered game."
       }
     },
     "/api/v1/members/{memberId}/analytics": {
@@ -8738,20 +8955,22 @@
           {
             "name": "fromDate",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string",
               "format": "date"
-            }
+            },
+            "description": "Required unless period=all_time; must be absent with it."
           },
           {
             "name": "toDateExclusive",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string",
               "format": "date"
-            }
+            },
+            "description": "Required unless period=all_time; must be absent with it."
           },
           {
             "name": "granularity",
@@ -8764,8 +8983,39 @@
                 "month"
               ]
             }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "description": "range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the actually covered range.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "range",
+                "all_time"
+              ]
+            }
           }
-        ]
+        ],
+        "x-stage-4-changes": {
+          "x-owner-card": "VTC-143",
+          "parameters": [
+            "period",
+            "fromDate",
+            "toDateExclusive"
+          ],
+          "fields": [
+            "ListLeaderboardEntry.rankedMembers",
+            "ListLeaderboardEntry.viewer",
+            "ListLeaderboardEntry.period",
+            "ListLeaderboardEntry.fromDate",
+            "ListLeaderboardEntry.toDateExclusive",
+            "LeaderboardEntry.position"
+          ],
+          "description": "Adds period=all_time, the viewer's position and rankedMembers, also when the viewer is off-page. Until VTC-143 activates them the route rejects period with 422."
+        },
+        "description": "Order and ties are unchanged: actual distance descending, accepted trips descending, then member ID. position is the 1-based ordinal under that order. The signed cursor also binds period."
       }
     },
     "/api/v1/admin/company-settings": {
@@ -13111,6 +13361,264 @@
           }
         }
       }
+    },
+    "/api/v1/admin/invitations": {
+      "get": {
+        "operationId": "listInvitations",
+        "tags": [
+          "admissions"
+        ],
+        "summary": "List current invitations",
+        "description": "Current invitation generation per approved application. active: unused, active state and expiresAt after now (the invited counter definition), ordered by expiresAt ascending then ID. expired: unused, active state and expiresAt at or before now, ordered by expiresAt descending then ID. total counts the selected state before paging. Signed cursors bind the actor, session, access epoch and state; mismatches return 409 VERSION_CONFLICT. Never returns the link, token, secret hash or ciphertext.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "admissions",
+        "x-owner-card": "VTC-140",
+        "x-capability": "applications.manage",
+        "x-guards": [
+          "current_authority",
+          "current_generation_only",
+          "no_store",
+          "no_invitation_secret"
+        ],
+        "x-contract-stage": "VTC-150 Step 1",
+        "responses": {
+          "200": {
+            "description": "List current invitations",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationStage4ListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "Defaults to active.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "expired"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/analytics/company/breakdown": {
+      "get": {
+        "operationId": "getCompanyAnalyticsBreakdown",
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Company analytics breakdown",
+        "description": "Same access, setup errors and filters as getCompanyAnalytics over accepted unique canonical trips in the company reporting time zone. route groups by canonical origin and destination city IDs; A to B and B to A are separate routes. cargo groups by canonical cargo ID. Rows with an unresolved city or cargo are excluded from items and counted in undetermined. Items rank by accepted trips descending, then actual distance descending, then IDs; trips beyond limit are counted in remainder. source splits by the provider of the effective fact (derived facts use their source message) and always returns ets2telemetry and manual; limit is rejected with 422 for source. Labels use locale or the saved locale and keep hidden catalog entries with hidden true.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "analytics",
+        "x-owner-card": "VTC-112",
+        "x-capability": "company.read",
+        "x-guards": [
+          "accepted_canonical_only",
+          "actual_distance_only",
+          "company_timezone_required",
+          "source_specific_periods"
+        ],
+        "x-contract-stage": "VTC-150 Step 1",
+        "responses": {
+          "200": {
+            "description": "Company analytics breakdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsStage4BreakdownEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "dimension",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "route",
+                "cargo",
+                "source"
+              ]
+            }
+          },
+          {
+            "name": "game",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ets2",
+                "ats"
+              ]
+            }
+          },
+          {
+            "name": "fromDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Required unless period=all_time; must be absent with it."
+          },
+          {
+            "name": "toDateExclusive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Required unless period=all_time; must be absent with it."
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "description": "range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the actually covered range.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "range",
+                "all_time"
+              ]
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "description": "Label language; defaults to the viewer's saved locale.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ru"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Top items for route and cargo; defaults to 5. Rejected with 422 for source.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 5
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/applications/{applicationId}/truckersmp-checks": {
+      "post": {
+        "operationId": "recheckApplicationTruckersmp",
+        "tags": [
+          "admissions"
+        ],
+        "summary": "Recheck the applicant on TruckersMP",
+        "description": "Bodyless command. Requires current applications.manage, exact Origin, session-bound CSRF and a UUID Idempotency-Key; no If-Match. Starts a new check generation and returns 202 with state checking; while a check is already running the current check is returned unchanged. A Steam /id/ vanity link returns 409 STATE_CONFLICT. A missing provider adapter returns 503. An identical retry rechecks current authority and returns the recorded result.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "admissions",
+        "x-owner-card": "VTC-144",
+        "x-capability": "applications.manage",
+        "x-guards": [
+          "current_authority",
+          "no_store",
+          "idempotency_recheck",
+          "private_provider_payload"
+        ],
+        "x-contract-stage": "VTC-150 Step 1",
+        "responses": {
+          "202": {
+            "description": "Recheck the applicant on TruckersMP",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationStage4TruckersmpCheckEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          }
+        },
+        "parameters": [
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -13535,9 +14043,17 @@
             ]
           },
           "displayTimezone": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "IANA time zone for displayed times. Null means as on the device; server-generated texts use the company reporting time zone."
           }
         },
         "required": [],
@@ -13653,6 +14169,24 @@
                 "type": "null"
               }
             ]
+          },
+          "referralSource": {
+            "type": "string",
+            "enum": [
+              "truckersmp",
+              "discord",
+              "friend_or_member",
+              "youtube_or_twitch",
+              "other"
+            ],
+            "description": "Optional answer to how the applicant found the company."
+          },
+          "referralOther": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S",
+            "description": "Free text, only with referralSource other; any other source returns 422."
           }
         },
         "required": [
@@ -13661,7 +14195,12 @@
           "steamProfileUrl",
           "games"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "dependentRequired": {
+          "referralOther": [
+            "referralSource"
+          ]
+        }
       },
       "Application": {
         "type": "object",
@@ -13725,6 +14264,9 @@
                 "type": "null"
               }
             ]
+          },
+          "truckersmpCheck": {
+            "$ref": "#/components/schemas/ApplicationStage4TruckersmpCheck"
           }
         },
         "required": [
@@ -13907,6 +14449,21 @@
           "lifetimeTotals": {
             "$ref": "#/components/schemas/LifetimeTripTotals",
             "description": "All-game lifetime accepted canonical trip count and exact actual distance in metres for this visible member profile."
+          },
+          "memberSince": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Latest join or return to the company. After a reinstatement this is the return time; the first join stays in membership history."
+          },
+          "lastAcceptedTripAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "reportingAt of the member's latest accepted canonical trip; null when none."
           }
         },
         "required": [
@@ -15367,6 +15924,25 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/EffectiveTripFacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TripStage4Source"
+            },
+            "minItems": 0,
+            "maxItems": 2,
+            "description": "At most one telemetry source (the selected telemetry fact revision) followed by at most one manual source (the current revision); each can be absent."
+          },
+          "qualificationCheck": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TripStage4QualificationCheck"
               },
               {
                 "type": "null"
@@ -17543,6 +18119,22 @@
           },
           "qualificationChanges": {
             "type": "boolean"
+          },
+          "reviewQueue": {
+            "type": "boolean",
+            "description": "Review queue items; returned only with trips.review."
+          },
+          "newApplications": {
+            "type": "boolean",
+            "description": "New admission applications; returned only with applications.manage."
+          },
+          "tripAccepted": {
+            "type": "boolean",
+            "description": "The viewer's own trip was accepted."
+          },
+          "newEvent": {
+            "type": "boolean",
+            "description": "A new event visible to the viewer was published."
           }
         },
         "required": [
@@ -17553,7 +18145,8 @@
           "eventReminders",
           "qualificationChanges"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "description": "The six existing toggles are always present. Stage 4 toggles appear only when the viewer can use them; a write must send exactly the keys the read returned, otherwise 422."
       },
       "ReadAllInput": {
         "type": "object",
@@ -17673,6 +18266,12 @@
             "type": "string",
             "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
             "maxLength": 64
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "1-based ordinal under the leaderboard order."
           }
         },
         "required": [
@@ -19545,6 +20144,40 @@
                 "type": "null"
               }
             ]
+          },
+          "rankedMembers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Members ranked in this period."
+          },
+          "viewer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalyticsStage4LeaderboardViewer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the viewer is not ranked."
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "range",
+              "all_time"
+            ]
+          },
+          "fromDate": {
+            "type": "string",
+            "format": "date",
+            "description": "Actually covered range start."
+          },
+          "toDateExclusive": {
+            "type": "string",
+            "format": "date",
+            "description": "Actually covered range end (exclusive)."
           }
         },
         "required": [
@@ -21075,6 +21708,39 @@
               "hardModeResult"
             ],
             "additionalProperties": false
+          },
+          "cargoDamagePercent": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cargo damage percentage of the effective fact. Null when unknown."
+          },
+          "originCompany": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TripStage4CompanyRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destinationCompany": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TripStage4CompanyRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -30885,6 +31551,1451 @@
           "maxMassKg",
           "allowedTrailerTypeCount",
           "allowedAdrCategoryCount"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyticsStage4Totals": {
+        "type": "object",
+        "properties": {
+          "acceptedTrips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          }
+        },
+        "required": [
+          "acceptedTrips",
+          "actualDistanceM"
+        ],
+        "additionalProperties": false,
+        "description": "Accepted unique canonical trips and their exact actual distance in metres. Zero is a computed zero; an unavailable value is an absent property, never zero."
+      },
+      "MemberStage4DirectoryEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "nickname": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "formerMember": {
+            "type": "boolean"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "trainee",
+                "driver",
+                "dispatcher",
+                "deputy_director",
+                "director"
+              ]
+            }
+          },
+          "last30Days": {
+            "$ref": "#/components/schemas/AnalyticsStage4Totals",
+            "description": "Accepted canonical trips and actual distance with reportingAt in the 30-day window ending at the list windowEndsAt. Zero rows are included."
+          },
+          "lastAcceptedTripAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "reportingAt of the member's latest accepted canonical trip; null when none."
+          }
+        },
+        "required": [
+          "id",
+          "nickname",
+          "formerMember",
+          "roles"
+        ],
+        "additionalProperties": false,
+        "description": "MemberSummary plus optional Stage 4 directory facts. Once VTC-140 activates them every row carries both."
+      },
+      "MemberStage4DirectoryList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberStage4DirectoryEntry"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "windowEndsAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "End of the 30-day window used by every row of this page and bound into the cursor."
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "MemberStage4DirectoryListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemberStage4DirectoryList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "InvitationStage4Applicant": {
+        "type": "object",
+        "properties": {
+          "nickname": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "\\S"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          }
+        },
+        "required": [
+          "nickname",
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "InvitationStage4ListItem": {
+        "type": "object",
+        "properties": {
+          "invitation": {
+            "$ref": "#/components/schemas/Invitation"
+          },
+          "applicant": {
+            "$ref": "#/components/schemas/InvitationStage4Applicant"
+          }
+        },
+        "required": [
+          "invitation",
+          "applicant"
+        ],
+        "additionalProperties": false,
+        "description": "The current invitation generation of one approved application and its applicant. Never contains the link, token, secret hash or ciphertext."
+      },
+      "InvitationStage4List": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvitationStage4ListItem"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Matching current generations before paging."
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "InvitationStage4ListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/InvitationStage4List"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "TripStage4Source": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ets2telemetry",
+              "manual"
+            ]
+          },
+          "receivedAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Receipt of the selected telemetry source message, or submission of the current manual revision."
+          },
+          "actualDistanceM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "delivered",
+              "cancelled",
+              "none"
+            ],
+            "description": "Persisted outcome of this source's fact."
+          },
+          "effective": {
+            "type": "boolean",
+            "description": "True when this source's fact is the trip's current fact or the base of the derived current fact."
+          }
+        },
+        "required": [
+          "kind",
+          "receivedAt",
+          "actualDistanceM",
+          "state",
+          "effective"
+        ],
+        "additionalProperties": false,
+        "description": "One author-safe source of the trip. Reconciliation candidates, dismissals, confidence and reasons are reviewer-only and never appear here."
+      },
+      "TripStage4RuleCheck": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ruleType": {
+                "const": "max_mass"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              "bypassedByEvent": {
+                "type": "boolean"
+              },
+              "limitMassKg": {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              "observedMassKg": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Decimal"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "ruleType",
+              "outcome",
+              "bypassedByEvent",
+              "limitMassKg",
+              "observedMassKg"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ruleType": {
+                "const": "allowed_trailer_types"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              "bypassedByEvent": {
+                "type": "boolean"
+              },
+              "allowedTrailerTypes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CatalogLabel"
+                },
+                "maxItems": 100,
+                "description": "Configured trailer types in the viewer locale, truncated at 100."
+              },
+              "allowedTrailerTypeCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000,
+                "description": "Full number of configured trailer types."
+              },
+              "offendingTrailerTypes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CatalogLabel"
+                },
+                "maxItems": 10
+              }
+            },
+            "required": [
+              "ruleType",
+              "outcome",
+              "bypassedByEvent",
+              "allowedTrailerTypes",
+              "allowedTrailerTypeCount",
+              "offendingTrailerTypes"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ruleType": {
+                "const": "allowed_adr_categories"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              "bypassedByEvent": {
+                "type": "boolean"
+              },
+              "allowedAdrClasses": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "6",
+                    "8"
+                  ]
+                },
+                "maxItems": 6,
+                "uniqueItems": true
+              },
+              "observedAdrClass": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "1",
+                      "2",
+                      "3",
+                      "4",
+                      "6",
+                      "8"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "ruleType",
+              "outcome",
+              "bypassedByEvent",
+              "allowedAdrClasses",
+              "observedAdrClass"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "One historical rule applied to the effective fact with its configured value. Unknown observed values are null, never zero."
+      },
+      "TripStage4QualificationCheck": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "resolved",
+              "unresolved"
+            ]
+          },
+          "reasonCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TripStage4RuleCheck"
+            },
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "status",
+          "reasonCode",
+          "rules"
+        ],
+        "additionalProperties": false,
+        "description": "Author-safe qualification check of the effective fact. Unresolved history has a reason code and no rules. Acceptance, decision authority and blocked reasons are reviewer-only."
+      },
+      "TripStage4CompanyRef": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "const": "resolved"
+              },
+              "companyId": {
+                "$ref": "#/components/schemas/Id"
+              },
+              "depotId": {
+                "$ref": "#/components/schemas/Id"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "logo": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CatalogLogo"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "companyId",
+              "depotId",
+              "name",
+              "code",
+              "hidden",
+              "logo"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "const": "unresolved"
+              },
+              "code": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "code"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "Origin or destination company of the effective fact. Unresolved keeps the raw provider code when one was reported."
+      },
+      "PreferencesStage4": {
+        "type": "object",
+        "properties": {
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en",
+              "ru"
+            ]
+          },
+          "displayTimezone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "IANA time zone for displayed times. Null means as on the device; server-generated texts use the company reporting time zone."
+          }
+        },
+        "required": [
+          "locale",
+          "displayTimezone"
+        ],
+        "additionalProperties": false,
+        "description": "Preferences whose displayTimezone can be null. Until VTC-142 activates it the server never stores or returns null."
+      },
+      "PreferencesStage4Envelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PreferencesStage4"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SelfStage4": {
+        "type": "object",
+        "properties": {
+          "member": {
+            "$ref": "#/components/schemas/MemberSummary"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "emailVerified": {
+            "type": "boolean"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "preferences": {
+            "$ref": "#/components/schemas/PreferencesStage4"
+          },
+          "steamVerified": {
+            "type": "boolean"
+          },
+          "identityEpoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "missingSetup": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        "required": [
+          "member",
+          "email",
+          "emailVerified",
+          "capabilities",
+          "preferences",
+          "steamVerified",
+          "identityEpoch",
+          "missingSetup"
+        ],
+        "additionalProperties": false,
+        "description": "Self with the Stage 4 nullable display time zone."
+      },
+      "SelfStage4Envelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SelfStage4"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "NotificationStage4Category": {
+        "type": "string",
+        "enum": [
+          "trip.started",
+          "trip.finished",
+          "trip.cancelled",
+          "trip.rejected",
+          "trip.review_required",
+          "trip.correction_requested",
+          "event.start_changed",
+          "event.route_changed",
+          "event.cancelled",
+          "event.reminder",
+          "qualification.assigned",
+          "qualification.promoted",
+          "promotion.eligible",
+          "promotion.review_required",
+          "application.submitted",
+          "application.decided",
+          "member.access_changed",
+          "trip.accepted",
+          "event.published"
+        ],
+        "description": "Known notification categories; messageKey is notifications.<category>. Notification.category stays a free string so clients ignore unknown values."
+      },
+      "AnalyticsStage4GameTotals": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "acceptedTrips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          }
+        },
+        "required": [
+          "game",
+          "acceptedTrips",
+          "actualDistanceM"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyticsStage4Company": {
+        "type": "object",
+        "properties": {
+          "acceptedTrips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualDistanceM": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+            "maxLength": 64
+          },
+          "reportingTimezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "fromDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "toDateExclusive": {
+            "type": "string",
+            "format": "date"
+          },
+          "granularity": {
+            "type": "string",
+            "enum": [
+              "day",
+              "month"
+            ]
+          },
+          "buckets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "acceptedTrips": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "actualDistanceM": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                  "maxLength": 64
+                }
+              },
+              "required": [
+                "date",
+                "acceptedTrips",
+                "actualDistanceM"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "computedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "projectionVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "projectionPending": {
+            "type": "boolean"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "range",
+              "all_time"
+            ]
+          },
+          "activeDrivers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Distinct members with at least one accepted canonical trip in the period."
+          },
+          "activeMembers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Active memberships of any role at computedAt."
+          },
+          "byGame": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsStage4GameTotals"
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "description": "ets2 then ats including zeros; only the filtered game when game is set."
+          }
+        },
+        "required": [
+          "acceptedTrips",
+          "actualDistanceM",
+          "reportingTimezone",
+          "fromDate",
+          "toDateExclusive",
+          "granularity",
+          "buckets",
+          "computedAt",
+          "projectionVersion",
+          "projectionPending"
+        ],
+        "additionalProperties": false,
+        "description": "Company analytics with optional Stage 4 aggregates. Once VTC-143 activates them each is always returned; absence means not available, never zero."
+      },
+      "AnalyticsStage4CompanyEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AnalyticsStage4Company"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyticsStage4LeaderboardViewer": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "acceptedTrips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          }
+        },
+        "required": [
+          "position",
+          "acceptedTrips",
+          "actualDistanceM"
+        ],
+        "additionalProperties": false,
+        "description": "The viewer's own ranked row, returned also when it is not on this page."
+      },
+      "AnalyticsStage4RouteItem": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CatalogLabel"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CatalogLabel"
+          },
+          "acceptedTrips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          }
+        },
+        "required": [
+          "game",
+          "origin",
+          "destination",
+          "acceptedTrips",
+          "actualDistanceM"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyticsStage4CargoItem": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "cargo": {
+            "$ref": "#/components/schemas/CatalogLabel"
+          },
+          "acceptedTrips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          }
+        },
+        "required": [
+          "game",
+          "cargo",
+          "acceptedTrips",
+          "actualDistanceM"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyticsStage4SourceItem": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "ets2telemetry",
+              "manual"
+            ]
+          },
+          "acceptedTrips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          }
+        },
+        "required": [
+          "source",
+          "acceptedTrips",
+          "actualDistanceM"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyticsStage4RouteBreakdown": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "const": "route"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "range",
+              "all_time"
+            ]
+          },
+          "fromDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "toDateExclusive": {
+            "type": "string",
+            "format": "date"
+          },
+          "reportingTimezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "game": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Game"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "computedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "projectionVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "projectionPending": {
+            "type": "boolean"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/AnalyticsStage4Totals"
+          },
+          "undetermined": {
+            "$ref": "#/components/schemas/AnalyticsStage4Totals"
+          },
+          "remainder": {
+            "$ref": "#/components/schemas/AnalyticsStage4Totals"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsStage4RouteItem"
+            },
+            "maxItems": 10
+          }
+        },
+        "required": [
+          "dimension",
+          "period",
+          "fromDate",
+          "toDateExclusive",
+          "reportingTimezone",
+          "game",
+          "limit",
+          "computedAt",
+          "projectionVersion",
+          "projectionPending",
+          "totals",
+          "undetermined",
+          "remainder",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyticsStage4CargoBreakdown": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "const": "cargo"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "range",
+              "all_time"
+            ]
+          },
+          "fromDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "toDateExclusive": {
+            "type": "string",
+            "format": "date"
+          },
+          "reportingTimezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "game": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Game"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "computedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "projectionVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "projectionPending": {
+            "type": "boolean"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/AnalyticsStage4Totals"
+          },
+          "undetermined": {
+            "$ref": "#/components/schemas/AnalyticsStage4Totals"
+          },
+          "remainder": {
+            "$ref": "#/components/schemas/AnalyticsStage4Totals"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsStage4CargoItem"
+            },
+            "maxItems": 10
+          }
+        },
+        "required": [
+          "dimension",
+          "period",
+          "fromDate",
+          "toDateExclusive",
+          "reportingTimezone",
+          "game",
+          "limit",
+          "computedAt",
+          "projectionVersion",
+          "projectionPending",
+          "totals",
+          "undetermined",
+          "remainder",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyticsStage4SourceBreakdown": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "const": "source"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "range",
+              "all_time"
+            ]
+          },
+          "fromDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "toDateExclusive": {
+            "type": "string",
+            "format": "date"
+          },
+          "reportingTimezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "game": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Game"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "computedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "projectionVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "projectionPending": {
+            "type": "boolean"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/AnalyticsStage4Totals"
+          },
+          "undetermined": {
+            "$ref": "#/components/schemas/AnalyticsStage4Totals"
+          },
+          "remainder": {
+            "$ref": "#/components/schemas/AnalyticsStage4Totals"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsStage4SourceItem"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "ets2telemetry then manual, including zeros."
+          }
+        },
+        "required": [
+          "dimension",
+          "period",
+          "fromDate",
+          "toDateExclusive",
+          "reportingTimezone",
+          "game",
+          "computedAt",
+          "projectionVersion",
+          "projectionPending",
+          "totals",
+          "undetermined",
+          "remainder",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyticsStage4Breakdown": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AnalyticsStage4RouteBreakdown"
+          },
+          {
+            "$ref": "#/components/schemas/AnalyticsStage4CargoBreakdown"
+          },
+          {
+            "$ref": "#/components/schemas/AnalyticsStage4SourceBreakdown"
+          }
+        ],
+        "description": "Top routes, top cargo or the source split of accepted unique canonical trips. Invariant: the sum of items plus remainder plus undetermined equals totals, and totals equal getCompanyAnalytics for the same filters."
+      },
+      "AnalyticsStage4BreakdownEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AnalyticsStage4Breakdown"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ApplicationStage4TruckersmpCheck": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "checking",
+              "completed",
+              "not_checked",
+              "failed"
+            ]
+          },
+          "notCheckedReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "steam_vanity_url",
+                  "not_requested"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "found": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "playerId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,19}$",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profileUrl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri",
+                "maxLength": 64,
+                "pattern": "^https://truckersmp\\.com/user/[1-9][0-9]{0,19}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bans": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "any": {
+                    "type": "boolean"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "any",
+                  "count"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vtc": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "inVtc": {
+                    "type": "boolean"
+                  },
+                  "id": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[1-9][0-9]{0,19}$",
+                        "maxLength": 20
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 128
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "tag": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 128
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "inVtc",
+                  "id",
+                  "name",
+                  "tag"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checkedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastAttemptAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "transport",
+                  "timeout",
+                  "rate_limited",
+                  "unavailable",
+                  "invalid_response"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "notCheckedReason",
+          "found",
+          "playerId",
+          "displayName",
+          "profileUrl",
+          "bans",
+          "vtc",
+          "checkedAt",
+          "lastAttemptAt",
+          "failure"
+        ],
+        "additionalProperties": false,
+        "description": "The applicant's TruckersMP check, visible only with applications.manage. not_checked covers Steam /id/ vanity links. Successful absence (found false), no VTC and provider failure stay distinct. Never contains the raw provider payload."
+      },
+      "ApplicationStage4TruckersmpCheckEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ApplicationStage4TruckersmpCheck"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "additionalProperties": false
       }

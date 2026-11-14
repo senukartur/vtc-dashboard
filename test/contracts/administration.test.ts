@@ -296,3 +296,150 @@ test("Stage 3 audit validates action- and object-specific closed snapshots", () 
     false,
   );
 });
+
+const stage4Spec = dashboardContract("openapi.json") as {
+  paths: Record<string, Record<string, Record<string, unknown>>>;
+  components: { schemas: Record<string, { properties?: object; required?: string[] }> };
+};
+const stage4Operations = Object.values(stage4Spec.paths).flatMap((methods) =>
+  Object.values(methods),
+) as {
+  operationId: string;
+  parameters?: { name?: string; $ref?: string }[];
+  "x-contract-stage"?: string;
+  "x-owner-card"?: string;
+  "x-capability"?: string;
+  "x-stage-4-changes"?: {
+    "x-owner-card": string;
+    parameters: string[];
+    fields: string[];
+    description: string;
+  };
+}[];
+
+test("Stage 4 additions are optional, owned and confined to their named operations", () => {
+  const changed = stage4Operations.filter((item) => item["x-stage-4-changes"]);
+  expect(changed.map((item) => item.operationId).sort()).toEqual([
+    "getApplication",
+    "getCompanyAnalytics",
+    "getLeaderboard",
+    "getMe",
+    "getMember",
+    "getNotificationPreferences",
+    "getTrip",
+    "listMembers",
+    "listNotificationHistory",
+    "pollNotifications",
+    "setNotificationPreferences",
+    "submitApplication",
+    "updatePreferences",
+  ]);
+  for (const item of changed) {
+    const changes = item["x-stage-4-changes"];
+    if (!changes) throw new Error("UNREACHABLE");
+    expect(["VTC-140", "VTC-141", "VTC-142", "VTC-143", "VTC-144"]).toContain(
+      changes["x-owner-card"],
+    );
+    expect(changes.description.length).toBeGreaterThan(0);
+    const names = new Set((item.parameters ?? []).map((parameter) => parameter.name));
+    for (const parameter of changes.parameters) expect(names.has(parameter), parameter).toBe(true);
+    for (const field of changes.fields) {
+      const [schema = "", property = ""] = field.split(".");
+      const target = stage4Spec.components.schemas[schema];
+      expect(target?.properties, field).toHaveProperty(property);
+      // Existing callers keep validating; once activated a lane always returns the field.
+      if (schema !== "Notification" && !schema.endsWith("Stage4"))
+        expect(target?.required ?? [], field).not.toContain(property);
+    }
+  }
+  const staged = stage4Operations.filter((item) => item["x-contract-stage"] === "VTC-150 Step 1");
+  expect(
+    staged.map((item) => [item.operationId, item["x-owner-card"], item["x-capability"]]).sort(),
+  ).toEqual([
+    ["getCompanyAnalyticsBreakdown", "VTC-112", "company.read"],
+    ["listInvitations", "VTC-140", "applications.manage"],
+    ["recheckApplicationTruckersmp", "VTC-144", "applications.manage"],
+  ]);
+  // Decision: no combined roles and membership command; setRoles stays the atomic role save.
+  expect(
+    Object.keys(stage4Spec.paths).filter((path) => /roles.*membership|access-change/.test(path)),
+  ).toEqual([]);
+  // listQualificationMembers keeps the unchanged ListMemberSummary shape.
+  expect(stage4Spec.components.schemas.ListMemberSummary?.properties).not.toHaveProperty(
+    "windowEndsAt",
+  );
+});
+
+test("the member directory returns 30-day totals with zero rows and a bounded window", () => {
+  const list = valid("MemberStage4DirectoryList");
+  const sorted = stageFixture("listMembers:stage-4-sorted-filtered").response.data;
+  expect(list(sorted)).toBe(true);
+  expect(list(stageFixture("listMembers:stage-4-empty-level-filter").response.data)).toBe(true);
+  const [active, quiet] = sorted.items;
+  expect(quiet.last30Days).toEqual({ acceptedTrips: 0, actualDistanceM: "0" });
+  expect(quiet.lastAcceptedTripAt).toBeNull();
+  expect(valid("ListMemberSummary")(sorted)).toBe(false);
+  const { last30Days: _totals, lastAcceptedTripAt: _last, ...summary } = active;
+  expect(valid("MemberSummary")(summary)).toBe(true);
+  expect(list({ items: [summary], nextCursor: null })).toBe(true);
+  for (const row of [
+    { ...active, email: "member@example.invalid" },
+    { ...active, last30Days: { acceptedTrips: -1, actualDistanceM: "0" } },
+    { ...active, last30Days: { acceptedTrips: 1 } },
+    { ...active, last30Days: { acceptedTrips: 1, actualDistanceM: "-1" } },
+    { ...active, lastAcceptedTripAt: "2026-11-10" },
+  ])
+    expect(list({ ...sorted, items: [row] }), JSON.stringify(row)).toBe(false);
+  expect(list({ ...sorted, windowEndsAt: "2026-11-14" })).toBe(false);
+  const listMembers = stage4Operations.find((item) => item.operationId === "listMembers");
+  const parameters = (listMembers?.parameters ?? []).map(
+    (parameter) => parameter.name ?? parameter.$ref,
+  );
+  expect(parameters).toEqual([
+    "#/components/parameters/Limit",
+    "#/components/parameters/Cursor",
+    "search",
+    "role",
+    "ets2Level",
+    "atsLevel",
+    "sort",
+    "order",
+  ]);
+});
+
+test("member profiles add the latest join and last accepted trip", () => {
+  const profile = valid("MemberProfile");
+  expect(profile(stageFixture("getMember:stage-4-returned-member").response.data)).toBe(true);
+  const quiet = stageFixture("getMember:stage-4-no-accepted-trip").response.data;
+  expect(profile(quiet)).toBe(true);
+  expect(profile({ ...quiet, memberSince: null })).toBe(false);
+  expect(profile({ ...quiet, firstJoinedAt: quiet.memberSince })).toBe(false);
+  const { memberSince: _since, lastAcceptedTripAt: _last, ...legacy } = quiet;
+  expect(profile(legacy)).toBe(true);
+});
+
+test("the invitation list exposes current generations without any link secret", () => {
+  const list = valid("InvitationStage4List");
+  const active = stageFixture("listInvitations:stage-4-active").response.data;
+  expect(list(active)).toBe(true);
+  expect(list(stageFixture("listInvitations:stage-4-expired-empty").response.data)).toBe(true);
+  const [item] = active.items;
+  for (const field of ["link", "token", "secretHash", "ciphertext", "url"]) {
+    expect(list({ ...active, items: [{ ...item, [field]: "PRIVATE_PLACEHOLDER" }] }), field).toBe(
+      false,
+    );
+    expect(
+      list({
+        ...active,
+        items: [{ ...item, invitation: { ...item.invitation, [field]: "PRIVATE_PLACEHOLDER" } }],
+      }),
+      field,
+    ).toBe(false);
+  }
+  expect(
+    list({ ...active, items: [{ ...item, applicant: { ...item.applicant, steamId: "1" } }] }),
+  ).toBe(false);
+  const { total: _total, ...withoutTotal } = active;
+  expect(list(withoutTotal)).toBe(false);
+  expect(list({ ...active, total: -1 })).toBe(false);
+});
