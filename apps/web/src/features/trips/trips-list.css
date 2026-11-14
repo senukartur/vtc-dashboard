@@ -57,8 +57,7 @@
 .trip-page .trips-filter-fields {
   display: contents;
 }
-.trip-page .trips-filter-toggle,
-.trip-page .trips-filter-order {
+.trip-page .trips-filter-toggle {
   display: none;
 }
 .trip-page .trips-search,
@@ -124,22 +123,6 @@
   color: var(--muted);
   font-size: var(--font-small);
 }
-.trip-page .trips-column-label {
-  display: none;
-}
-.trip-page .trips-sort {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  min-height: var(--target-min);
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-}
 .trip-page .trips-number {
   color: var(--focus);
   font-variant-numeric: tabular-nums;
@@ -193,44 +176,18 @@
     display: none;
   }
 }
-@media (max-width: 800px) {
-  .trip-page .trips-filter-order {
-    display: block;
-  }
-}
 .trip-page .trips-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
+/* The DataTable inside draws the frame, states and pager (shared/ui/data-table.css). */
 .trip-page .trips-list-area {
   /* Containing block of last resort: a row-link overlay can never cover the app chrome. */
   position: relative;
   display: grid;
-  gap: 8px;
   min-width: 0;
-  padding: 4px 12px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-.trip-page .trips-list-area > .button {
-  justify-self: start;
-}
-.trip-page .trips-empty {
-  margin: 8px 0;
-  color: var(--secondary);
-}
-.trip-page .trips-list-footer {
-  display: flex;
-  justify-content: flex-end;
-}
-.trip-page .trips-list-footer .trip-actions {
-  gap: 6px;
-}
-.trip-page .trips-table {
-  table-layout: fixed;
 }
 .trip-page .trips-table th,
 .trip-page .trips-table td {
@@ -245,10 +202,6 @@
 .trip-page .trips-table td {
   padding-block: 2px;
   vertical-align: middle;
-}
-.trip-page .trips-table th:first-child,
-.trip-page .trips-table td:first-child {
-  padding-left: 8px;
 }
 .trip-page .trips-col-route {
   width: 25%;
@@ -288,15 +241,8 @@
 .trip-page .trips-layout[data-panel] .trips-col-time {
   width: 17%;
 }
-.trip-page .trips-table .trips-numeric {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.trip-page .trips-muted {
+.trip-page td.trips-muted {
   color: var(--secondary);
-}
-.trip-page .trips-cell-label {
-  display: none;
 }
 /* The route link is the row's only control. Its overlay fills the route cell in the table
    (WebKit ignores position: relative on table rows) and the whole card on phones. */
@@ -504,72 +450,19 @@
   margin: 0;
   color: var(--secondary);
 }
-/* Narrow cards: same table semantics, block layout with visible per-cell labels. */
+/* Narrow cards (DataTable cardsBelow 800): the route spans the card and its link overlay covers
+   the whole card; labels, the hidden header and the pager come from the shared table. */
 @media (max-width: 800px) {
-  .trip-page .trips-list-area {
-    padding: 0;
-    border: 0;
-    background: transparent;
-  }
-  .trip-page .trips-table,
-  .trip-page .trips-table tbody,
-  .trip-page .trips-table td {
-    display: block;
-  }
-  .trip-page .trips-table thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  .trip-page .trips-table tr.trips-row {
-    position: relative;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 12px;
-    margin-bottom: 8px;
-    padding: 8px 12px 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-  }
-  .trip-page .trips-table td,
-  .trip-page .trips-table td:first-child,
-  .trip-page .trips-table td:last-child,
-  .trip-page .trips-table .trips-row:hover td,
-  .trip-page .trips-table .trips-row[data-selected] td {
-    padding: 0;
-    border: 0;
+  .trip-page .trips-table .table tbody tr.trips-row td,
+  .trip-page .trips-table .table tbody tr.trips-row[data-selected] td {
     background: transparent;
     box-shadow: none;
   }
-  .trip-page .trips-table td.trips-route {
+  .trip-page .trips-table .table tbody td.trips-route {
     position: static;
     grid-column: 1 / -1;
   }
-  .trip-page .trips-table .trips-numeric {
-    text-align: left;
-  }
-  .trip-page .trips-cell-label {
-    display: block;
-    color: var(--muted);
-    font-size: var(--font-badge);
-  }
   .trip-page .trips-timezone {
     margin-left: 0;
-  }
-  .trip-page .trips-sort {
-    display: none;
-  }
-  .trip-page .trips-column-label {
-    display: inline;
-  }
-  .trip-page .trips-list-footer {
-    justify-content: stretch;
-  }
-  .trip-page .trips-list-footer .trip-actions {
-    flex: 1;
   }
 }

@@ -2,7 +2,7 @@ import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, type To } from "react-router-dom";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
-import { Table } from "../../shared/ui/primitives.js";
+import { DataTable, type DataTableColumn, type DataTableProps } from "../../shared/ui/DataTable.js";
 import { CatalogName, GameChip } from "../trips/TripTable.js";
 import type { DTO } from "../trips/transport.js";
 import { CodeLabel, DispatchDecisionBadge } from "./decision-parts.js";
@@ -23,6 +23,12 @@ export function ReviewReasonList({ codes }: { codes: string[] }) {
   );
 }
 
+type ReviewItem = DTO["TripStage3ReviewItem"];
+type QueueState = Pick<
+  DataTableProps<ReviewItem>,
+  "status" | "busy" | "error" | "onRetry" | "empty" | "filtered" | "pagination"
+>;
+
 export function DispatchQueueTable({
   rows,
   resolved,
@@ -31,91 +37,105 @@ export function DispatchQueueTable({
   timezone,
   linkFor,
   onLinkClick,
+  state,
 }: {
-  rows: DTO["TripStage3ReviewItem"][];
+  rows: ReviewItem[] | undefined;
   resolved: boolean;
   selected: string | null;
   computedAt: string | undefined;
   timezone: string;
   linkFor: (id: string) => To;
   onLinkClick: (event: MouseEvent<HTMLAnchorElement>, id: string) => void;
+  state: QueueState;
 }) {
   const { t, i18n } = useTranslation("trips");
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const now = computedAt ? Date.parse(computedAt) : Date.now();
+  const columns: DataTableColumn<ReviewItem>[] = [
+    {
+      id: "age",
+      header: t(resolved ? "dispatchDecisionTime" : "dispatchWaitAge"),
+      cardLabel: false,
+      className: "dispatch-age review-muted",
+      cell: (item) => {
+        const timestamp = item.state === "resolved" ? item.decidedAt : item.queuedAt;
+        const age = Math.floor((now - Date.parse(timestamp)) / 1000);
+        const time = formatUtc(timestamp, locale, timezone);
+        return (
+          <time dateTime={timestamp} title={time}>
+            {item.state === "waiting" && Number.isFinite(age)
+              ? queueAge(Math.max(age, 0), locale)
+              : time}
+          </time>
+        );
+      },
+    },
+    {
+      id: "driver",
+      header: t("owner"),
+      cardLabel: false,
+      className: "review-driver",
+      cell: ({ trip }) => <span className="review-break">{trip.owner.nickname}</span>,
+    },
+    {
+      id: "route",
+      header: t("route"),
+      cardLabel: false,
+      className: "review-route",
+      cell: ({ trip }) => (
+        <Link
+          id={`trip-link-${trip.id}`}
+          className="review-link review-break"
+          to={linkFor(trip.id)}
+          aria-current={selected === trip.id ? "true" : undefined}
+          onClick={(event) => onLinkClick(event, trip.id)}
+        >
+          <span>
+            <CatalogName value={trip.origin} /> → <CatalogName value={trip.destination} />
+          </span>
+        </Link>
+      ),
+    },
+    {
+      id: "game",
+      header: t("game"),
+      cardLabel: false,
+      className: "dispatch-game",
+      cell: ({ trip }) => <GameChip game={trip.game} />,
+    },
+    {
+      id: "distance",
+      header: t("dispatchDistance"),
+      cardLabel: false,
+      className: "dispatch-distance review-muted",
+      cell: ({ trip }) => formatQuantity(trip.actualDistanceM, "km", locale),
+    },
+    {
+      id: "reason",
+      header: t("dispatchReason"),
+      cardLabel: false,
+      className: "dispatch-reason review-muted",
+      cell: (item) => (
+        <>
+          {item.state === "resolved" && <DispatchDecisionBadge decision={item.outcome} />}
+          <ReviewReasonList codes={item.reasonCodes} />
+        </>
+      ),
+    },
+  ];
   return (
-    <Table id="review-queue-table" className="review-table dispatch-table" tabIndex={-1}>
-      <caption className="visually-hidden">
-        {t(resolved ? "dispatchResolved" : "queueLabel")}
-      </caption>
-      <thead>
-        <tr>
-          <th scope="col" className="dispatch-col-age">
-            {t(resolved ? "dispatchDecisionTime" : "dispatchWaitAge")}
-          </th>
-          <th scope="col" className="dispatch-col-driver">
-            {t("owner")}
-          </th>
-          <th scope="col" className="dispatch-col-route">
-            {t("route")}
-          </th>
-          <th scope="col" className="dispatch-col-game">
-            {t("game")}
-          </th>
-          <th scope="col" className="dispatch-col-distance">
-            {t("dispatchDistance")}
-          </th>
-          <th scope="col" className="dispatch-col-reason">
-            {t("dispatchReason")}
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((item) => {
-          const { state, trip, reasonCodes } = item;
-          const timestamp = state === "resolved" ? item.decidedAt : item.queuedAt;
-          const age = Math.floor((now - Date.parse(timestamp)) / 1000);
-          const time = formatUtc(timestamp, locale, timezone);
-          const current = selected === trip.id;
-          return (
-            <tr key={trip.id} className="review-row" data-selected={current ? "true" : undefined}>
-              <td className="dispatch-age review-muted">
-                <time dateTime={timestamp} title={time}>
-                  {state === "waiting" && Number.isFinite(age)
-                    ? queueAge(Math.max(age, 0), locale)
-                    : time}
-                </time>
-              </td>
-              <td className="review-driver">
-                <span className="review-break">{trip.owner.nickname}</span>
-              </td>
-              <td className="review-route">
-                <Link
-                  id={`trip-link-${trip.id}`}
-                  className="review-link review-break"
-                  to={linkFor(trip.id)}
-                  aria-current={current ? "true" : undefined}
-                  onClick={(event) => onLinkClick(event, trip.id)}
-                >
-                  <span>
-                    <CatalogName value={trip.origin} /> → <CatalogName value={trip.destination} />
-                  </span>
-                </Link>
-              </td>
-              <td className="dispatch-game">
-                <GameChip game={trip.game} />
-              </td>
-              <td className="dispatch-distance review-muted">
-                {formatQuantity(trip.actualDistanceM, "km", locale)}
-              </td>
-              <td className="dispatch-reason review-muted">
-                {state === "resolved" && <DispatchDecisionBadge decision={item.outcome} />}
-                <ReviewReasonList codes={reasonCodes} />
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </Table>
+    <DataTable
+      caption={t(resolved ? "dispatchResolved" : "queueLabel")}
+      columns={columns}
+      rows={rows}
+      rowKey={({ trip }) => trip.id}
+      rowAttributes={({ trip }) => ({
+        className: "review-row",
+        "data-selected": selected === trip.id ? "true" : undefined,
+      })}
+      className="review-table dispatch-table"
+      tableProps={{ id: "review-queue-table", tabIndex: -1 }}
+      {...state}
+    />
   );
 }

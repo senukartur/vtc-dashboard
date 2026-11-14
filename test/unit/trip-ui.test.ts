@@ -12,7 +12,6 @@ import {
   canonicalDecimal,
   filterSearch,
   proposalResult,
-  queryString,
   revisionFields,
   schema,
   selectedTrip,
@@ -20,6 +19,7 @@ import {
   tripFilters,
   tripSources,
 } from "../../apps/web/src/features/trips/transport.ts";
+import { queryString } from "../../apps/web/src/shared/paging.ts";
 
 const cases = JSON.parse(
   readFileSync(new URL("../../docs/contracts/dashboard/examples.json", import.meta.url), "utf8"),

@@ -107,11 +107,11 @@ test(
         { key: "mine:ats:accepted", cursor: null },
       ]);
     await expect(page.getByRole("alert")).toHaveCount(0);
-    // Any other failure shows an alert, and Refresh restarts at the first page.
+    // Any other failure shows an alert in the table, and Retry restarts at the first page.
     failNext = 503;
     await next.click();
     await expect(page.getByRole("alert")).toBeVisible();
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect.poll(() => requests.at(-1)).toEqual({ key: "mine:ats:accepted", cursor: null });
     await expect(page.getByRole("alert")).toHaveCount(0);
     expect(requests.every((r) => !r.cursor || r.cursor === r.key)).toBe(true);
@@ -435,9 +435,14 @@ test(
     await history.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect.poll(() => cursors.at(-1)).toBeNull();
     await expect(history.getByRole("alert")).toHaveCount(0);
+    // Back on the only page: a pager outside a table renders only when another page exists, and
+    // it would while a previous page remained.
     await expect(
-      history.getByRole("button", { name: "Previous page", exact: true }),
-    ).toBeDisabled();
+      history.getByRole("navigation", { name: "Reconciliation history pages", exact: true }),
+    ).toHaveCount(0);
+    await expect(history.getByRole("button", { name: "Previous page", exact: true })).toHaveCount(
+      0,
+    );
     await expect(history.locator("summary").filter({ hasText: secondId })).toContainText(
       "Reversed",
     );
@@ -584,3 +589,79 @@ for (const { mode, manual } of [
       }
     },
   );
+
+test(
+  "corrective reconciliation history keeps Previous focused while the first page reloads",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    const firstId = "4a000000-0000-4000-8000-000000000001",
+      secondId = "4a000000-0000-4000-8000-000000000002";
+    const operation = (opId: string) => ({
+      id: opId,
+      version: 1,
+      primaryTripId: id,
+      secondaryTripId: targetA,
+      primaryVersion: 1,
+      secondaryVersion: 1,
+      state: "applied",
+    });
+    const cursors: (string | null)[] = [];
+    let hold: Promise<void> | null = null;
+    await page.route("**/api/v1/reconciliation-candidates?*", (route) =>
+      route.fulfill({ json: list([]) }),
+    );
+    await page.route(`**/api/v1/trips/${id}/reconciliations?*`, async (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor");
+      cursors.push(cursor);
+      // The first page answers late once Previous was pressed, like a slow network.
+      if (!cursor && hold) await hold;
+      await route
+        .fulfill({
+          json: envelope({
+            items: [operation(cursor ? secondId : firstId)],
+            nextCursor: cursor ? null : "root-version-one",
+          }),
+        })
+        .catch(() => {});
+    });
+    for (const tripId of [id, targetA])
+      await page.route(`**/api/v1/trips/${tripId}`, (route) => {
+        const view = example("getTrip:extended-manual-revision");
+        view.data.summary.id = tripId;
+        view.data.summary.owner = { ...view.data.summary.owner, id: targetB };
+        view.data.summary.sourceKinds = ["ets2telemetry"];
+        return route.fulfill({ json: view, headers: { ETag: '"v1"' } });
+      });
+    await page.goto(`/account/review/reconciliation?trip=${id}`);
+    await catalogLanguage(page);
+    const summary = page.locator("summary").filter({ hasText: "Reconciliation history" });
+    await summary.click();
+    const history = page.locator("details").filter({ has: summary }).first();
+    const pager = history.getByRole("navigation", {
+      name: "Reconciliation history pages",
+      exact: true,
+    });
+    const previous = pager.getByRole("button", { name: "Previous page", exact: true });
+    const next = pager.getByRole("button", { name: "Next page", exact: true });
+    await next.click();
+    await expect.poll(() => cursors.at(-1)).toBe("root-version-one");
+    await expect(history.locator("summary").filter({ hasText: secondId })).toBeVisible();
+    let release = () => {};
+    hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => cursors.at(-1)).toBeNull();
+    // While page one loads, the pager stays mounted and focus stays on the unavailable button.
+    await expect(pager).toHaveCount(1);
+    await expect(previous).toHaveAttribute("aria-disabled", "true");
+    await expect(previous).toBeFocused();
+    release();
+    await expect(history.locator("summary").filter({ hasText: firstId })).toBeVisible();
+    await expect(pager).toHaveCount(1);
+    await expect(previous).toBeFocused();
+    await expect(next).toBeEnabled();
+  },
+);

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { decimalShift, formatQuantity } from "../../shared/formatting.js";
-import { Table } from "../../shared/ui/primitives.js";
+import { DataTable, type DataTableColumn } from "../../shared/ui/DataTable.js";
 import { formatDamage } from "../manual-reports/model.js";
 import { RecordedTelemetryFields } from "../trips/components.js";
 import { type DTO, revisionFields } from "../trips/transport.js";
@@ -79,7 +79,8 @@ export function SourceComparison({
   const trailers = telemetry?.trailers ?? [];
   const trailerId =
     telemetry?.trailersComplete && trailers.length === 1 ? trailers[0]?.entityId : null;
-  const rows: [string, Cell, Cell][] = [
+  type ComparisonRow = [string, Cell, Cell];
+  const rows: ComparisonRow[] = [
     [
       "actualDistanceDisplay",
       quantity(fields?.actualDistanceM, "km"),
@@ -102,55 +103,62 @@ export function SourceComparison({
     ],
     ["trailerType", manualLabel(fields?.trailerType, "trailer"), label(trailerId, "trailer")],
   ];
+  function compare(report: Cell, recorded: Cell) {
+    if (report.comparable === null || recorded.comparable === null)
+      return report.comparable !== recorded.comparable ? "unavailable" : "unknown";
+    return report.comparable !== recorded.comparable ? "different" : "same";
+  }
+  function show(cell: Cell) {
+    return cell.dateTime ? <time dateTime={cell.dateTime}>{cell.text}</time> : cell.text;
+  }
+  const columns: DataTableColumn<ComparisonRow>[] = [
+    {
+      id: "field",
+      header: t("field"),
+      rowHeader: true,
+      cardLabel: false,
+      className: "dispatch-comparison-field",
+      cell: ([name, report, recorded]) => {
+        const status = compare(report, recorded);
+        return (
+          <>
+            {t(name)}
+            {status === "different" && (
+              <span className="review-changed">{t("dispatchSourceDifference")}</span>
+            )}
+            {status === "unavailable" && (
+              <span className="review-muted">{t("dispatchComparisonUnavailable")}</span>
+            )}
+          </>
+        );
+      },
+    },
+    {
+      id: "manual",
+      header: t("type_manual"),
+      cell: ([, report]) => show(report),
+    },
+    {
+      id: "telemetry",
+      header: t("ets2telemetry"),
+      cell: ([, , recorded]) => show(recorded),
+    },
+  ];
   if (!manual && !telemetry) return null;
   return (
     <ReviewSection title={t("dispatchSourceComparison")} note={t("timesIn", { timezone })}>
       {!manual && <p className="review-muted">{t("dispatchNoManualSource")}</p>}
       {!telemetry && <p className="review-muted">{t("dispatchNoTelemetrySource")}</p>}
-      <Table className="review-diff dispatch-comparison">
-        <thead>
-          <tr>
-            <th scope="col">{t("field")}</th>
-            <th scope="col">{t("type_manual")}</th>
-            <th scope="col">{t("ets2telemetry")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([name, report, recorded]) => {
-            const bothKnown = report.comparable !== null && recorded.comparable !== null;
-            const different = bothKnown && report.comparable !== recorded.comparable;
-            const unavailable =
-              !bothKnown && (report.comparable !== null || recorded.comparable !== null);
-            return (
-              <tr key={name} data-changed={different ? "true" : undefined}>
-                <th scope="row">
-                  {t(name)}
-                  {different && (
-                    <span className="review-changed">{t("dispatchSourceDifference")}</span>
-                  )}
-                  {unavailable && (
-                    <span className="review-muted">{t("dispatchComparisonUnavailable")}</span>
-                  )}
-                </th>
-                <td>
-                  {report.dateTime ? (
-                    <time dateTime={report.dateTime}>{report.text}</time>
-                  ) : (
-                    report.text
-                  )}
-                </td>
-                <td>
-                  {recorded.dateTime ? (
-                    <time dateTime={recorded.dateTime}>{recorded.text}</time>
-                  ) : (
-                    recorded.text
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </Table>
+      <DataTable
+        caption={t("dispatchSourceComparison")}
+        className="dispatch-comparison"
+        rows={rows}
+        columns={columns}
+        rowKey={([name]) => name}
+        rowAttributes={([, report, recorded]) => ({
+          "data-changed": compare(report, recorded) === "different" ? "true" : undefined,
+        })}
+      />
       <div className="stack">
         <h4>{t(telemetry ? "dispatchTelemetryConditions" : "dispatchGameConditions")}</h4>
         <dl className="review-facts">

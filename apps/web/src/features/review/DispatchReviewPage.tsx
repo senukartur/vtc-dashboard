@@ -1,20 +1,15 @@
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { isPlainSelfClick } from "../../app/Navigation.js";
 import { useSession } from "../../app/Session.js";
-import { Button, Label, Select } from "../../shared/ui/primitives.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Label, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
-import { PageNav, State } from "../trips/components.js";
+import { failureKey, State } from "../trips/components.js";
 import { useWideLayout } from "../trips/layout.js";
 import { useTripQuery } from "../trips/queries.js";
-import {
-  queryString,
-  rejectedCursor,
-  selectionSearch,
-  tripSourceLabels,
-  tripSources,
-} from "../trips/transport.js";
+import { selectionSearch, tripSourceLabels, tripSources } from "../trips/transport.js";
 import { DecisionPanel } from "./DecisionPanel.js";
 import { DispatchDuplicates } from "./DispatchDuplicates.js";
 import { DispatchQueueTable } from "./DispatchQueueTable.js";
@@ -29,7 +24,7 @@ import {
   reviewReasons,
 } from "./dispatch-model.js";
 import { ReconciliationHistory } from "./reconciliation-parts.js";
-import { selfReviewCode } from "./review-model.js";
+import { pageSize, selfReviewCode } from "./review-model.js";
 import "../trips/trips.css";
 import "../trips/trips-list.css";
 import "./review.css";
@@ -52,18 +47,16 @@ export function DispatchReviewPage({
   const params = reconciliationAlias ? { ...raw, tab: "duplicates" as const } : raw;
   const duplicates = params.tab === "duplicates";
   const resolved = params.tab === "resolved";
-  const key = queryString(dispatchListQuery(params, null, locale));
-  const [pagination, setPagination] = useState({ key, stack: [] as string[] });
-  const stack = pagination.key === key ? pagination.stack : [];
-  const cursor = stack.at(-1) ?? null;
+  const pages = useCursorPages(queryString(dispatchListQuery(params, null, locale)));
   const summary = useTripQuery("/trips/review-summary", "TripStage3ReviewSummaryEnvelope");
   const query = useTripQuery(
-    `/trips?${queryString(dispatchListQuery(params, cursor, locale))}`,
+    `/trips?${queryString(dispatchListQuery(params, pages.cursor, locale))}`,
     "TripStage3ReviewListEnvelope",
     !duplicates,
+    false,
+    true,
   );
-  if (pagination.key !== key || rejectedCursor(cursor, query.error))
-    setPagination({ key, stack: [] });
+  pages.recover(query.error);
 
   const data = query.data?.data.data;
   const rows = data?.items.filter(
@@ -86,7 +79,7 @@ export function DispatchReviewPage({
     const next = new URLSearchParams(window.location.search);
     update(next);
     next.delete("cursor");
-    setPagination({ key, stack: [] });
+    pages.restart();
     setSearch(next);
   }
   function filter(name: string, value: string) {
@@ -268,65 +261,44 @@ export function DispatchReviewPage({
       ) : (
         <div className="review-layout" data-panel={selected ? "open" : undefined}>
           <div id="dispatch-list" tabIndex={-1} className="review-list-area">
-            <State
-              query={query}
-              refresh={() => {
-                setPagination({ key, stack: [] });
-                if (!cursor) void query.refetch();
+            <DispatchQueueTable
+              rows={rows}
+              resolved={resolved}
+              selected={selected}
+              computedAt={totals?.computedAt}
+              timezone={timezone}
+              linkFor={(id) =>
+                wide
+                  ? { pathname: location.pathname, search: selectionSearch(search, id) }
+                  : `/account/review/${id}${back}`
+              }
+              onLinkClick={select}
+              state={{
+                status: query.isError ? "error" : data ? "ready" : "loading",
+                busy: query.isPlaceholderData,
+                error: t(failureKey(query.error)),
+                onRetry: () => {
+                  pages.restart();
+                  if (!pages.cursor) void query.refetch();
+                },
+                empty: { message: t(resolved ? "dispatchNoResolved" : "emptyAwaiting") },
+                ...(filtered
+                  ? {
+                      filtered: {
+                        message: t("emptyFiltered"),
+                        onReset: () => {
+                          document.getElementById("dispatch-game")?.focus();
+                          change((next) => {
+                            for (const name of ["game", "source", "reasonCode", "ownerId", "order"])
+                              next.delete(name);
+                          });
+                        },
+                      },
+                    }
+                  : {}),
+                pagination: { pages, nextCursor: data?.nextCursor, pageSize },
               }}
             />
-            {rows &&
-              (rows.length ? (
-                <DispatchQueueTable
-                  rows={rows}
-                  resolved={resolved}
-                  selected={selected}
-                  computedAt={totals?.computedAt}
-                  timezone={timezone}
-                  linkFor={(id) =>
-                    wide
-                      ? { pathname: location.pathname, search: selectionSearch(search, id) }
-                      : `/account/review/${id}${back}`
-                  }
-                  onLinkClick={select}
-                />
-              ) : (
-                <div className="review-empty">
-                  <p>
-                    {t(
-                      filtered
-                        ? "emptyFiltered"
-                        : resolved
-                          ? "dispatchNoResolved"
-                          : "emptyAwaiting",
-                    )}
-                  </p>
-                  {filtered && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={() => {
-                        document.getElementById("dispatch-game")?.focus();
-                        change((next) => {
-                          for (const name of ["game", "source", "reasonCode", "ownerId", "order"])
-                            next.delete(name);
-                        });
-                      }}
-                    >
-                      {t("resetFilters")}
-                    </Button>
-                  )}
-                </div>
-              ))}
-            {data && (
-              <PageNav
-                next={data.nextCursor}
-                hasPrevious={stack.length > 0}
-                onNext={(next) => setPagination({ key, stack: [...stack, next] })}
-                onPrevious={() => setPagination({ key, stack: stack.slice(0, -1) })}
-              />
-            )}
           </div>
           {selected && (
             <DecisionPanel

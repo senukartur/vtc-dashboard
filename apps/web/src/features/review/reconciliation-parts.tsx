@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { type WorkspaceSummary, useWorkspaceSummary } from "../../app/workspace-summary.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Button, Card, Label } from "../../shared/ui/primitives.js";
 import {
   Confirm,
   EffectiveFacts,
   Failure,
   Fields,
-  PageNav,
   State,
   TripSummary,
 } from "../trips/components.js";
@@ -155,10 +156,9 @@ export function ReconciliationHistory({ tripId }: { tripId: string }) {
   const { t } = useTranslation("trips"),
     { dispatchMode } = useWorkspaceSummary(),
     [open, setOpen] = useState(false),
-    [cursor, setCursor] = useState<string | null>(null),
-    [history, setHistory] = useState<string[]>([]),
+    pages = useCursorPages(`/trips/${tripId}/reconciliations`),
     query = useTripQuery(
-      `/trips/${tripId}/reconciliations?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+      `/trips/${tripId}/reconciliations?${queryString({ limit: 25, cursor: pages.cursor })}`,
       "EnvelopeListReconciliation",
       open,
     );
@@ -172,26 +172,18 @@ export function ReconciliationHistory({ tripId }: { tripId: string }) {
             <State
               query={query}
               refresh={() => {
-                setCursor(null);
-                setHistory([]);
-                if (!cursor) void query.refetch();
+                pages.restart();
+                if (!pages.cursor) void query.refetch();
               }}
             />
             {query.data && !query.data.data.data.items.length && <p>{t("empty")}</p>}
             {query.data?.data.data.items.map((r) => (
               <ReverseMerge key={r.id} reconciliation={r} dispatchMode={dispatchMode} />
             ))}
-            <PageNav
-              next={query.data?.data.data.nextCursor}
-              hasPrevious={history.length > 0}
-              onNext={(c) => {
-                setHistory([...history, cursor ?? ""]);
-                setCursor(c);
-              }}
-              onPrevious={() => {
-                setCursor(history.at(-1) || null);
-                setHistory(history.slice(0, -1));
-              }}
+            <Pager
+              pages={pages}
+              nextCursor={query.data?.data.data.nextCursor}
+              label={t("reconciliationPages")}
             />
           </div>
         )}

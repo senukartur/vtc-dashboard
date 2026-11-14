@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { useWorkspaceSummary } from "../../app/workspace-summary.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
-import { Codes, Fields, PageNav, State } from "../trips/components.js";
+import { Codes, Fields, State } from "../trips/components.js";
 import { useTripQuery } from "../trips/queries.js";
 import { type DTO, validId } from "../trips/transport.js";
 import { DispatchReviewPage } from "./DispatchReviewPage.js";
@@ -30,12 +32,11 @@ export function ReconciliationPage() {
 function LegacyReconciliationPage() {
   const { t } = useTranslation("trips"),
     [params] = useSearchParams(),
-    [cursor, setCursor] = useState<string | null>(null),
-    [history, setHistory] = useState<string[]>([]),
+    pages = useCursorPages("/reconciliation-candidates"),
     [pair, setPair] = useState<DTO["MergeCandidate"] | null>(null),
     [merged, setMerged] = useState<string | null>(null),
     query = useTripQuery(
-      `/reconciliation-candidates?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+      `/reconciliation-candidates?${queryString({ limit: 25, cursor: pages.cursor })}`,
       "EnvelopeListMergeCandidate",
     ),
     historyTrip = params.get("trip");
@@ -47,9 +48,8 @@ function LegacyReconciliationPage() {
         <State
           query={query}
           refresh={() => {
-            setCursor(null);
-            setHistory([]);
-            if (!cursor) void query.refetch();
+            pages.restart();
+            if (!pages.cursor) void query.refetch();
           }}
         />
         {query.data && !query.data.data.data.items.length && <p>{t("empty")}</p>}
@@ -64,17 +64,10 @@ function LegacyReconciliationPage() {
             </Button>
           </article>
         ))}
-        <PageNav
-          next={query.data?.data.data.nextCursor}
-          hasPrevious={history.length > 0}
-          onNext={(c) => {
-            setHistory([...history, cursor ?? ""]);
-            setCursor(c);
-          }}
-          onPrevious={() => {
-            setCursor(history.at(-1) || null);
-            setHistory(history.slice(0, -1));
-          }}
+        <Pager
+          pages={pages}
+          nextCursor={query.data?.data.data.nextCursor}
+          label={t("candidatePages")}
         />
       </Card>
       {pair && (

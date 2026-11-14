@@ -1,21 +1,16 @@
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { isPlainSelfClick } from "../../app/Navigation.js";
 import { useSession } from "../../app/Session.js";
 import { useWorkspaceSummary } from "../../app/workspace-summary.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Button, Card, Label, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
-import { PageNav, State } from "../trips/components.js";
+import { failureKey } from "../trips/components.js";
 import { useWideLayout } from "../trips/layout.js";
 import { useTripQuery } from "../trips/queries.js";
-import {
-  queryString,
-  rejectedCursor,
-  selectionSearch,
-  tripSourceLabels,
-  tripSources,
-} from "../trips/transport.js";
+import { selectionSearch, tripSourceLabels, tripSources } from "../trips/transport.js";
 import { DecisionPanel } from "./DecisionPanel.js";
 import { DispatchReviewPage } from "./DispatchReviewPage.js";
 import { ReviewAccessState } from "./ReviewAccessState.js";
@@ -70,23 +65,19 @@ function LegacyReviewQueuePage() {
     timezone = session.self?.preferences.displayTimezone ?? "UTC",
     params = queueParams(search),
     listLocale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    filterKey = queryString(listQuery(params, null, listLocale));
-  const [page, setPage] = useState<{ key: string; cursor: string | null; cursors: string[] }>({
-    key: filterKey,
-    cursor: null,
-    cursors: [],
-  });
-  const { cursor, cursors } = page.key === filterKey ? page : { cursor: null, cursors: [] };
-  useEffect(() => setPage({ key: filterKey, cursor: null, cursors: [] }), [filterKey]);
+    pages = useCursorPages(queryString(listQuery(params, null, listLocale)));
   const query = useTripQuery(
-    `/trips?${queryString(listQuery(params, cursor, listLocale))}`,
+    `/trips?${queryString(listQuery(params, pages.cursor, listLocale))}`,
     "EnvelopeListTripSummary",
+    true,
+    false,
+    true,
   );
   const summary = useWorkspaceSummary();
   const locale = i18n.resolvedLanguage ?? "ru";
   // A cursor the server no longer accepts restarts at the first page of the same filters. The
   // reset happens during render, so the rejected page never shows its error.
-  if (rejectedCursor(cursor, query.error)) setPage({ key: filterKey, cursor: null, cursors: [] });
+  pages.recover(query.error);
   const selected = wide ? params.trip : null,
     heading = useRef<HTMLHeadingElement>(null),
     // Focus intent from a plain row click; Back/Forward and deep links leave focus alone.
@@ -147,14 +138,16 @@ function LegacyReviewQueuePage() {
     next.delete("trip");
     setSearch(next);
   }
-  const items = query.data?.data.data.items,
+  const list = query.data?.data.data,
+    items = list?.items,
+    stale = query.isPlaceholderData,
     back = queueSearch(search),
     filtered = !!params.game || !!params.source || !!params.decision || search.has("order"),
     // Own trips on the awaiting page are listed but never counted; the header says so.
     header = queueHeaderState(
       summary.data?.reviewQueue,
       summary.isPending,
-      params.tab === "awaiting" ? items : undefined,
+      params.tab === "awaiting" && !stale ? items : undefined,
       session.self?.member.id,
     );
   return (
@@ -261,84 +254,68 @@ function LegacyReviewQueuePage() {
       </div>
       <div className="review-layout" data-panel={selected ? "open" : undefined}>
         <div className="review-list-area">
-          <State
-            query={query}
-            refresh={() => {
-              setPage({ key: filterKey, cursor: null, cursors: [] });
-              if (!cursor) void query.refetch();
+          <ReviewQueueTable
+            items={items}
+            selectedId={selected}
+            memberId={session.self?.member.id}
+            timezone={timezone}
+            linkFor={(id) =>
+              wide
+                ? { pathname: location.pathname, search: selectionSearch(search, id) }
+                : `/account/review/${id}${back}`
+            }
+            onLinkClick={select}
+            state={{
+              status: query.isError ? "error" : list ? "ready" : "loading",
+              busy: stale,
+              error: t(failureKey(query.error)),
+              onRetry: () => {
+                pages.restart();
+                if (!pages.cursor) void query.refetch();
+              },
+              empty:
+                params.tab === "awaiting" && !filtered && !pages.cursor
+                  ? {
+                      message: t("emptyAwaiting"),
+                      action: (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          onClick={() => {
+                            // This button unmounts with the empty state; keep focus on the chosen tab.
+                            const label = t("decidedTab");
+                            Array.from(
+                              document.querySelectorAll<HTMLElement>(".review-tabs button"),
+                            )
+                              .find((button) => button.textContent === label)
+                              ?.focus();
+                            tab("decided");
+                          }}
+                        >
+                          {t("showDecided")}
+                        </Button>
+                      ),
+                    }
+                  : { message: t("emptyFiltered") },
+              ...(filtered
+                ? {
+                    filtered: {
+                      message: t("emptyFiltered"),
+                      onReset: () => {
+                        // This button unmounts with the empty state; keep focus on the first filter.
+                        document.getElementById("review-game")?.focus();
+                        reset();
+                      },
+                    },
+                  }
+                : {}),
+              pagination: { pages, nextCursor: list?.nextCursor, pageSize: 25 },
+              footer: list && (
+                <small className="review-muted review-list-footer">{t("queueNote")}</small>
+              ),
             }}
           />
-          {items &&
-            (items.length ? (
-              <ReviewQueueTable
-                items={items}
-                selectedId={selected}
-                memberId={session.self?.member.id}
-                timezone={timezone}
-                linkFor={(id) =>
-                  wide
-                    ? { pathname: location.pathname, search: selectionSearch(search, id) }
-                    : `/account/review/${id}${back}`
-                }
-                onLinkClick={select}
-              />
-            ) : params.tab === "awaiting" && !filtered && !cursor ? (
-              <div className="review-empty">
-                <p>{t("emptyAwaiting")}</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={() => {
-                    // This button unmounts with the empty state; keep focus on the chosen tab.
-                    const label = t("decidedTab");
-                    Array.from(document.querySelectorAll<HTMLElement>(".review-tabs button"))
-                      .find((button) => button.textContent === label)
-                      ?.focus();
-                    tab("decided");
-                  }}
-                >
-                  {t("showDecided")}
-                </Button>
-              </div>
-            ) : (
-              <div className="review-empty">
-                <p>{t("emptyFiltered")}</p>
-                {filtered && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={() => {
-                      // This button unmounts with the empty state; keep focus on the first filter.
-                      document.getElementById("review-game")?.focus();
-                      reset();
-                    }}
-                  >
-                    {t("resetFilters")}
-                  </Button>
-                )}
-              </div>
-            ))}
-          {query.data && (
-            <div className="review-list-footer">
-              <small className="review-muted">{t("queueNote")}</small>
-              <PageNav
-                next={query.data.data.data.nextCursor}
-                hasPrevious={cursors.length > 0}
-                onNext={(next) =>
-                  setPage({ key: filterKey, cursors: [...cursors, cursor ?? ""], cursor: next })
-                }
-                onPrevious={() =>
-                  setPage({
-                    key: filterKey,
-                    cursor: cursors.at(-1) || null,
-                    cursors: cursors.slice(0, -1),
-                  })
-                }
-              />
-            </div>
-          )}
         </div>
         {selected && (
           <DecisionPanel

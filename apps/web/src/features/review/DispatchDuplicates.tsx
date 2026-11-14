@@ -2,11 +2,13 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Button, Card, Label, Select } from "../../shared/ui/primitives.js";
-import { Confirm, Failure, PageNav, State } from "../trips/components.js";
+import { Confirm, Failure, State } from "../trips/components.js";
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
 import { CatalogName, DecisionBadge, GameChip } from "../trips/TripTable.js";
-import { type DTO, queryString, rejectedCursor } from "../trips/transport.js";
+import type { DTO } from "../trips/transport.js";
 import { ReviewReasonList } from "./DispatchQueueTable.js";
 import type { dispatchParams } from "./dispatch-model.js";
 import { MergePair } from "./reconciliation-parts.js";
@@ -148,10 +150,11 @@ export function DispatchDuplicates({
   changeStatus: (status: Params["duplicateStatus"]) => void;
   back: string;
 }) {
-  const { t } = useTranslation("trips");
+  const { t, i18n } = useTranslation("trips");
   const statusId = useId();
-  const filterKey = `${game ?? ""}:${status}`;
-  const [pagination, setPagination] = useState({ key: filterKey, stack: [] as string[] });
+  const filters = { view: "stage3", status, game };
+  const filterKey = queryString({ ...filters, locale: i18n.resolvedLanguage });
+  const pages = useCursorPages(filterKey);
   const [selection, setSelection] = useState<{
     key: string;
     candidate: Duplicate;
@@ -159,21 +162,23 @@ export function DispatchDuplicates({
   } | null>(null);
   const [saved, setSaved] = useState<DTO["TripStage3DuplicateDismissal"] | null>(null);
   const [merged, setMerged] = useState<string | null>(null);
-  const stack = pagination.key === filterKey ? pagination.stack : [];
-  const cursor = stack.at(-1) ?? null;
   const query = useTripQuery(
-    `/reconciliation-candidates?${queryString({ view: "stage3", status, game, limit: pageSize, cursor })}`,
+    `/reconciliation-candidates?${queryString({ ...filters, limit: pageSize, cursor: pages.cursor })}`,
     "TripStage3DuplicateListEnvelope",
+    true,
+    false,
+    true,
   );
-  if (pagination.key !== filterKey || rejectedCursor(cursor, query.error))
-    setPagination({ key: filterKey, stack: [] });
+  pages.recover(query.error);
   const data = query.data?.data.data;
   const items = data?.items.filter(
     ({ primaryTrip, secondaryTrip }) =>
       primaryTrip.owner.id !== memberId && secondaryTrip.owner.id !== memberId,
   );
   const selected = selection?.key === filterKey ? selection : null;
-  const current = items?.find((candidate) => candidate.id === selected?.candidate.id);
+  const current = query.isPlaceholderData
+    ? undefined
+    : items?.find((candidate) => candidate.id === selected?.candidate.id);
   const canAct =
     !!current &&
     current.dismissed === selected?.candidate.dismissed &&
@@ -207,8 +212,8 @@ export function DispatchDuplicates({
       <State
         query={query}
         refresh={() => {
-          setPagination({ key: filterKey, stack: [] });
-          if (!cursor) void query.refetch();
+          pages.restart();
+          if (!pages.cursor) void query.refetch();
         }}
       />
       {saved && (
@@ -233,7 +238,7 @@ export function DispatchDuplicates({
             document.getElementById(statusId)?.focus();
             setSaved(result);
             setSelection(null);
-            setPagination({ key: filterKey, stack: [] });
+            pages.restart();
           }}
         />
       )}
@@ -259,7 +264,7 @@ export function DispatchDuplicates({
                 document.getElementById(statusId)?.focus();
                 setMerged(id);
                 setSelection(null);
-                setPagination({ key: filterKey, stack: [] });
+                pages.restart();
               }}
             />
           ) : (
@@ -285,7 +290,11 @@ export function DispatchDuplicates({
         </p>
       )}
       {items?.map((candidate) => (
-        <Card className="stack dispatch-duplicate" key={candidate.id}>
+        <Card
+          className="stack dispatch-duplicate"
+          key={candidate.id}
+          aria-busy={query.isPlaceholderData || undefined}
+        >
           <header className="trip-actions">
             <GameChip game={candidate.game} />
             <ReviewReasonList codes={candidate.reasonCodes} />
@@ -300,6 +309,7 @@ export function DispatchDuplicates({
               type="button"
               size="sm"
               variant="outline"
+              disabled={query.isPlaceholderData}
               aria-expanded={
                 selected?.candidate.id === candidate.id && selected.action === "dismiss"
               }
@@ -317,6 +327,7 @@ export function DispatchDuplicates({
                 type="button"
                 size="sm"
                 variant="ghost"
+                disabled={query.isPlaceholderData}
                 aria-expanded={
                   selected?.candidate.id === candidate.id && selected.action === "merge"
                 }
@@ -332,14 +343,12 @@ export function DispatchDuplicates({
           </div>
         </Card>
       ))}
-      {data && (
-        <PageNav
-          next={data.nextCursor}
-          hasPrevious={stack.length > 0}
-          onNext={(next) => setPagination({ key: filterKey, stack: [...stack, next] })}
-          onPrevious={() => setPagination({ key: filterKey, stack: stack.slice(0, -1) })}
-        />
-      )}
+      <Pager
+        pages={pages}
+        nextCursor={data?.nextCursor}
+        busy={query.isPlaceholderData}
+        label={t("candidatePages")}
+      />
     </div>
   );
 }

@@ -16,21 +16,20 @@ import { Badge, Button, Card } from "../../shared/ui/primitives.js";
 import type { AccountFailure } from "../account/transport.js";
 import { referenceFields } from "../manual-reports/model.js";
 import { type DTO, revisionFields, TripFailure } from "./transport.js";
+/** Translation key ("trips" namespace) of a safe failure message; never the raw error. */
+export function failureKey(error: unknown) {
+  return error instanceof TripFailure && error.status === 410
+    ? "expired"
+    : error instanceof TripFailure && error.status === 404
+      ? "notFound"
+      : (error as AccountFailure | null | undefined)?.kind || "unavailable";
+}
 export function Failure({ error, seconds = 0 }: { error: unknown; seconds?: number }) {
   const { t } = useTranslation("trips");
   if (!error) return null;
-  const safe = error as AccountFailure;
   return (
     <div role="alert" className="field-error">
-      <p>
-        {t(
-          error instanceof TripFailure && error.status === 410
-            ? "expired"
-            : error instanceof TripFailure && error.status === 404
-              ? "notFound"
-              : safe.kind || "unavailable",
-        )}
-      </p>
+      <p>{t(failureKey(error))}</p>
       {seconds > 0 && <p>{t("wait", { seconds })}</p>}
     </div>
   );
@@ -378,28 +377,5 @@ export function Revision({
           </div>
         ))}
     </section>
-  );
-}
-export function PageNav({
-  next,
-  onNext,
-  onPrevious,
-  hasPrevious,
-}: {
-  next: string | null | undefined;
-  onNext: (cursor: string) => void;
-  onPrevious: () => void;
-  hasPrevious: boolean;
-}) {
-  const { t } = useTranslation("trips");
-  return (
-    <div className="trip-actions">
-      <Button type="button" variant="outline" disabled={!hasPrevious} onClick={onPrevious}>
-        {t("previous")}
-      </Button>
-      <Button type="button" variant="outline" disabled={!next} onClick={() => next && onNext(next)}>
-        {t("next")}
-      </Button>
-    </div>
   );
 }

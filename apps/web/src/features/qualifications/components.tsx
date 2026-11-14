@@ -4,12 +4,14 @@ import { useSession } from "../../app/Session.js";
 import { itemSchema } from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Button } from "../../shared/ui/primitives.js";
-import { Confirm, Failure, PageNav, State } from "../trips/components.js";
+import { Confirm, Failure, State } from "../trips/components.js";
 import { type useQualificationCommand, useQualificationQuery } from "./queries.js";
-import type { DTO, Game } from "./transport.js";
+import { type DTO, type Game, qualificationCursorRejected } from "./transport.js";
 
-export { Confirm, Failure, PageNav, State };
+export { Confirm, Failure, State };
 export function MemberContext({ name, id }: { name: string; id: string }) {
   const { t } = useTranslation("qualifications");
   return (
@@ -243,12 +245,14 @@ export function RuleHistory({
 }) {
   const { t } = useTranslation("qualifications"),
     [open, setOpen] = useState(false),
-    [cursors, setCursors] = useState<string[]>([]);
+    path = `${manage ? "/admin" : ""}/qualification-levels/${level.id}/rule-versions`,
+    pages = useCursorPages(path, { rejects: qualificationCursorRejected });
   const query = useQualificationQuery(
-    `${manage ? "/admin" : ""}/qualification-levels/${level.id}/rule-versions?limit=25${cursors.length ? `&cursor=${encodeURIComponent(cursors.at(-1) ?? "")}` : ""}`,
+    `${path}?${queryString({ limit: 25, cursor: pages.cursor })}`,
     manage ? "EnvelopeListQualificationRuleHistory" : "EnvelopeListQualificationRuleVersion",
     open,
   );
+  pages.recover(query.error);
   return (
     <details onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>{t("rulesHistory")}</summary>
@@ -284,11 +288,10 @@ export function RuleHistory({
               <Thresholds requiredTrips={r.requiredTrips} requiredDistanceM={r.requiredDistanceM} />
             </article>
           ))}
-          <PageNav
-            next={query.data?.data.data.nextCursor}
-            hasPrevious={cursors.length > 0}
-            onNext={(c) => setCursors((prev) => [...prev, c])}
-            onPrevious={() => setCursors((prev) => prev.slice(0, -1))}
+          <Pager
+            pages={pages}
+            nextCursor={query.data?.data.data.nextCursor}
+            label={t("rulePages")}
           />
         </div>
       )}

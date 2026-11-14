@@ -1,9 +1,10 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { queryString, useCursorPages } from "../../shared/paging.js";
+import { Pager } from "../../shared/ui/pager.js";
 import { Button, Input, Label, Select } from "../../shared/ui/primitives.js";
-import { PageNav, State } from "../trips/components.js";
+import { State } from "../trips/components.js";
 import { useTripQuery } from "../trips/queries.js";
-import { queryString, rejectedCursor } from "../trips/transport.js";
 import { pageSize } from "./review-model.js";
 
 export function DriverFilter({
@@ -19,14 +20,15 @@ export function DriverFilter({
   const id = useId();
   const [open, setOpen] = useState(false);
   const [term, setTerm] = useState("");
-  const [page, setPage] = useState<string[]>([]);
-  const cursor = page.at(-1);
+  const pages = useCursorPages(`/members:${i18n.resolvedLanguage}`);
   const query = useTripQuery(
-    `/members?${queryString({ limit: pageSize, cursor })}`,
+    `/members?${queryString({ limit: pageSize, cursor: pages.cursor })}`,
     "EnvelopeListMemberSummary",
     open,
+    false,
+    true,
   );
-  if (rejectedCursor(cursor ?? null, query.error)) setPage([]);
+  pages.recover(query.error);
   const items = query.data?.data.data.items;
   const selected = items?.find((item) => item.id === ownerId);
   const profile = useTripQuery(
@@ -69,6 +71,7 @@ export function DriverFilter({
             <Select
               id={`${id}-driver`}
               value={ownerId ?? ""}
+              disabled={query.isPlaceholderData}
               onChange={(event) => change(event.target.value)}
             >
               <option value="">{t("dispatchAllDrivers")}</option>
@@ -83,11 +86,10 @@ export function DriverFilter({
             </Select>
             {matches?.length === 0 && <small>{t("dispatchNoDriversOnPage")}</small>}
             <State query={query} />
-            <PageNav
-              hasPrevious={page.length > 0}
-              next={query.data?.data.data.nextCursor}
-              onPrevious={() => setPage(page.slice(0, -1))}
-              onNext={(next) => setPage([...page, next])}
+            <Pager
+              pages={pages}
+              nextCursor={query.data?.data.data.nextCursor}
+              busy={query.isPlaceholderData}
             />
           </>
         )}
