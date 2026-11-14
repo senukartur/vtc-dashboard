@@ -1,5 +1,6 @@
 import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { envelope } from "./support/catalogs.ts";
+import { fillDateTime } from "./support/date-time.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { mockQualifications } from "./support/qualifications.ts";
 
@@ -99,8 +100,8 @@ test(
     await purpose.selectOption("historical_resolution");
     await expect(archived).toHaveValue("");
     await archived.selectOption(archivedId);
-    await page.locator("#assignment-start").fill("2020-01-01T00:00");
-    await page.locator("#assignment-end").fill("2020-01-02T00:00");
+    await fillDateTime(page, "Interval start (UTC)", "2020-01-01T00:00");
+    await fillDateTime(page, "Exclusive interval end (UTC)", "2020-01-02T00:00");
     await page.locator("#assignment-reason").fill("Fictional historical assignment");
     await page.getByRole("button", { name: "Assign qualification", exact: true }).click();
     const dialog = page.getByRole("dialog");
