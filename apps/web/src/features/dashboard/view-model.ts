@@ -5,10 +5,7 @@
 import { formatQuantity, formatUtc, type Locale } from "../../shared/formatting.js";
 import { AccountFailure } from "../account/transport.js";
 import type { EventPhase, ResponseValue } from "../events/view-model.js";
-import {
-  type PromotionWorkspaceSummary,
-  promotionReadyCount,
-} from "../qualifications/promotion-summary.js";
+import { promotionReadyCount } from "../qualifications/promotion-summary.js";
 import { dashboardTranslations } from "./translations.js";
 import type { DTO } from "./transport.js";
 
@@ -211,14 +208,18 @@ const actionSections: readonly { key: ActionKey; capability: string }[] = [
   { key: "applications", capability: "applications.manage" },
   { key: "promotions", capability: "qualifications.manage" },
 ];
-const actionCount = (summary: PromotionWorkspaceSummary, key: ActionKey) =>
+type ActionSummary = DTO["WorkspaceSummary"] & {
+  promotionsReady?: Parameters<typeof promotionReadyCount>[0];
+};
+
+const actionCount = (summary: ActionSummary, key: ActionKey) =>
   ({
     fixes: summary.tripsNeedingFixes?.count,
     drafts: summary.unfinishedManualDrafts?.count,
     events: summary.unansweredUpcomingEvents?.count,
     review: summary.reviewQueue?.count,
     applications: summary.newApplicationsCount,
-    promotions: promotionReadyCount(summary),
+    promotions: promotionReadyCount(summary.promotionsReady),
   })[key];
 
 /**
@@ -226,7 +227,7 @@ const actionCount = (summary: PromotionWorkspaceSummary, key: ActionKey) =>
  * the viewer has no access or its module is off, is simply not mentioned: it is not a failure.
  */
 export function visibleActionSections(
-  summary: PromotionWorkspaceSummary,
+  summary: ActionSummary,
   capabilities: readonly string[],
 ): { key: ActionKey; count: number }[] {
   return actionSections.flatMap(({ key, capability }) => {

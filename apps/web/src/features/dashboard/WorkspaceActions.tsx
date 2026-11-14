@@ -8,7 +8,6 @@ import { formatUtc, type Locale } from "../../shared/formatting.js";
 import { Card } from "../../shared/ui/primitives.js";
 import { KeepFocusButton } from "../events/components.js";
 import { eventTime } from "../events/model.js";
-import type { PromotionWorkspaceSummary } from "../qualifications/promotion-summary.js";
 import { useBlockRetry } from "./blocks.js";
 import { type ActionKey, visibleActionSections } from "./view-model.js";
 
@@ -22,7 +21,7 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
     refetch: () => query.refetch({ cancelRefetch: false }),
   });
   const id = useId();
-  const summary: PromotionWorkspaceSummary | undefined = query.data;
+  const summary = query.data;
   const fixes = summary?.tripsNeedingFixes;
   const drafts = summary?.unfinishedManualDrafts;
   const events = summary?.unansweredUpcomingEvents;
