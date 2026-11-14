@@ -25,6 +25,7 @@ export const paths = {
   reconciliation: "/account/review/reconciliation",
   reviewTrip: "/account/review/:tripId",
   applications: "/account/admin/applications",
+  promotions: "/account/admin/promotions",
   members: "/account/admin/members",
   catalogs: "/account/catalogs",
   settings: "/account/admin/settings",
@@ -42,6 +43,7 @@ export type NavItemId =
   | "dispatch"
   | "reconciliation"
   | "applications"
+  | "promotions"
   | "members"
   | "catalogs"
   | "settings";
@@ -84,6 +86,7 @@ export const navGroups: readonly NavGroup[] = [
     id: "management",
     items: [
       { id: "applications", route: "applications", capability: "applications.manage" },
+      { id: "promotions", route: "promotions", capability: "qualifications.manage" },
       { id: "members", route: "members", capability: "members.manage" },
       { id: "catalogs", route: "catalogs", capability: "qualifications.manage" },
       { id: "settings", route: "settings", capability: "company.configure" },
@@ -127,6 +130,7 @@ export const routeMeta: Record<RouteId, RouteMeta> = {
   reconciliation: item("review", "reconciliation"),
   reviewTrip: item("review", "dispatch", "tripReview"),
   applications: item("management", "applications"),
+  promotions: item("management", "promotions"),
   members: item("management", "members"),
   catalogs: item("management", "catalogs"),
   settings: item("management", "settings"),

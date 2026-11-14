@@ -186,6 +186,7 @@ describe("needs attention sections", () => {
     "events.respond",
     "trips.review",
     "applications.manage",
+    "qualifications.manage",
   ];
   const summary: components["schemas"]["WorkspaceSummary"] = {
     computedAt: "2026-11-12T12:00:00.000Z",
@@ -203,6 +204,17 @@ describe("needs attention sections", () => {
       { key: "applications", count: 3 },
     ]);
     expect(visibleActionSections(summary, ["trips.review"])).toEqual([{ key: "review", count: 4 }]);
+  });
+  it("sums promotion readiness across games for staff and hides zero or omitted counts", () => {
+    const loaded = { computedAt: summary.computedAt, promotionsReady: { ets2: 2, ats: 4 } };
+    expect(visibleActionSections(loaded, ["qualifications.manage"])).toEqual([
+      { key: "promotions", count: 6 },
+    ]);
+    expect(visibleActionSections(loaded, ["trips.review"])).toEqual([]);
+    expect(visibleActionSections({ ...loaded, promotionsReady: { ets2: 0, ats: 0 } }, all)).toEqual(
+      [],
+    );
+    expect(visibleActionSections({ computedAt: summary.computedAt }, all)).toEqual([]);
   });
   it("never treats a count the summary omits as a failure: the section is simply absent", () => {
     // Applications module off: the director's summary has no application count at all.

@@ -1,6 +1,7 @@
 import { type ReactNode, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { paths } from "../../app/navigation-model.js";
 import { useSession } from "../../app/Session.js";
 import { useWorkspaceSummary } from "../../app/workspace-summary.js";
 import { formatUtc, type Locale } from "../../shared/formatting.js";
@@ -69,6 +70,12 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
     },
     review: { destination: "/account/review" },
     applications: { destination: "/account/admin/applications?status=submitted" },
+    promotions: {
+      destination:
+        summary?.promotionsReady?.ats && !summary.promotionsReady.ets2
+          ? `${paths.promotions}?game=ats`
+          : paths.promotions,
+    },
   };
   // "Unavailable" is only a failed load; an omitted count is not mentioned at all.
   const actionable = summary ? visibleActionSections(summary, self?.capabilities ?? []) : [];
