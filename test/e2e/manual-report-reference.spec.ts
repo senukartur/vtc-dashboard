@@ -9,6 +9,7 @@ import {
   entityId,
   envelope,
 } from "./support/catalogs.ts";
+import { expectDateTime, fillDateTime } from "./support/date-time.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import {
   cargoId,
@@ -57,21 +58,21 @@ test(
     const damage = page.getByLabel("Cargo damage (%) (optional)", { exact: true });
     const submit = page.getByRole("button", { name: "Submit for review", exact: true });
 
-    await start.fill("2025-03-30T02:30");
+    await fillDateTime(page, "Trip start", "2025-03-30T02:30");
     await expect(start).toHaveAttribute("aria-invalid", "true");
     await expect(start).toHaveAccessibleDescription(/Europe\/Warsaw.*exists/);
     await expect(page.getByRole("alert")).toContainText("exists in the displayed time zone");
     await expect(submit).toBeDisabled();
 
-    await start.fill("2025-10-26T02:30");
-    await end.fill("2099-01-01T01:30");
+    await fillDateTime(page, "Trip start", "2025-10-26T02:30");
+    await fillDateTime(page, "Trip completion", "2099-01-01T01:30");
     await expect(end).toHaveAccessibleDescription(/at or before now/);
     await expect(submit).toBeDisabled();
-    await end.fill("2025-10-26T02:30");
+    await fillDateTime(page, "Trip completion", "2025-10-26T02:30");
     await expect(end).toHaveAccessibleDescription(/completion time after the start/);
     await expect(submit).toBeDisabled();
 
-    await end.fill("2025-10-26T03:00");
+    await fillDateTime(page, "Trip completion", "2025-10-26T03:00");
     await damage.fill("100,1");
     await expect(damage).toHaveAccessibleDescription("Enter a number from 0 to 100.");
     await expect(page.getByRole("alert")).toContainText("Enter a number from 0 to 100.");
@@ -541,7 +542,7 @@ test(
 
     await reload.click();
     await expect(comment).toHaveValue("Fictional draft v8");
-    await expect(page.getByLabel("Trip start", { exact: true })).toHaveValue("2025-10-26T00:30");
+    await expectDateTime(page, "Trip start", "2025-10-26T00:30");
     await expect(reload).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "New report", level: 1 })).toBeFocused();
     await deleteDraft.click();

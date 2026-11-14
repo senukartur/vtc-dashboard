@@ -1,0 +1,196 @@
+/* Shared date and time field (shadcn "Input" date-picker layout) with its popover calendar. */
+.date-time-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.date-time-date {
+  position: relative;
+  flex: 1 1 9rem;
+  min-width: 0;
+}
+.date-time-date-input.input {
+  /* The widest date text or placeholder plus the overlaid calendar button stay unclipped. */
+  min-width: calc(6.4em + 12px + var(--field-h-sm));
+  padding-right: calc(var(--field-h-sm) + 2px);
+  font-variant-numeric: tabular-nums;
+}
+.date-time-trigger.button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--field-h-sm);
+  min-height: var(--field-h-sm);
+  padding: 0;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  color: var(--secondary);
+  background: transparent;
+}
+.date-time-trigger.button:disabled {
+  background: transparent;
+  border-color: transparent;
+}
+/* The border is an inset shadow so segments fill the whole control height as touch targets. */
+.date-time-time.input {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  width: auto;
+  padding: 0 8px;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--control-border);
+  font-variant-numeric: tabular-nums;
+}
+.date-time-time:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}
+.date-time-time[data-invalid="true"] {
+  box-shadow: inset 0 0 0 1px var(--destructive);
+}
+.date-time-time.date-time-disabled {
+  color: var(--muted);
+  background: #28364a;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.date-time-segment {
+  width: calc(1.8em + 4px);
+  min-height: var(--field-h-sm);
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  background-clip: content-box;
+  color: inherit;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.date-time-segment[data-segment="milliseconds"] {
+  width: calc(2.2em + 4px);
+}
+.date-time-segment::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.date-time-segment:focus,
+.date-time-segment:focus-visible {
+  outline: none;
+  background: var(--accent-soft);
+}
+.date-time-segment:disabled {
+  background: transparent;
+}
+.date-time-separator {
+  color: var(--muted);
+}
+.date-time-zone {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+  overflow-wrap: anywhere;
+}
+
+.popover-content {
+  z-index: 70;
+  max-width: calc(100vw - 16px);
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: 0 16px 40px #00000066;
+}
+.calendar {
+  --cell: 32px;
+}
+.calendar-months {
+  position: relative;
+}
+.calendar-nav {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  justify-content: space-between;
+}
+.calendar-nav-button.button {
+  width: var(--cell);
+  min-height: var(--cell);
+  padding: 0;
+}
+.calendar-nav-button.button[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.calendar-caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--cell);
+  padding: 0 var(--cell);
+}
+.calendar-caption-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.calendar-grid {
+  margin-top: 8px;
+  border-collapse: collapse;
+}
+.calendar-weekday {
+  width: var(--cell);
+  padding-bottom: 4px;
+  color: var(--muted);
+  font-size: var(--font-small);
+  font-weight: 400;
+}
+.calendar-day {
+  padding: 1px;
+  text-align: center;
+}
+.calendar-day-button.button {
+  width: var(--cell);
+  min-height: var(--cell);
+  padding: 0;
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  font-weight: 400;
+}
+.calendar-outside .calendar-day-button.button {
+  color: var(--muted);
+}
+.calendar-today .calendar-day-button.button {
+  border-color: var(--control-border);
+  font-weight: 600;
+}
+.calendar-day-button.button[data-selected-single] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+.calendar-day-button.button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.calendar-day-button.button:disabled,
+.calendar-day-button.button[aria-disabled="true"] {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+@media (pointer: coarse) {
+  .calendar {
+    --cell: 40px;
+  }
+  /* Scoped to the group so host resets such as `.host input { min-width: 0 }` cannot shrink touch targets. */
+  .date-time-time .date-time-segment {
+    min-width: var(--target-min);
+  }
+}

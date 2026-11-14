@@ -19,6 +19,7 @@ import {
   write,
 } from "./support/account.ts";
 import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
+import { fillDateTime } from "./support/date-time.ts";
 import { startStage2EventsServer } from "./support/events-stage-2-real.ts";
 import { selectPastReportEvent } from "./support/events.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
@@ -49,8 +50,8 @@ async function create(
   await page.getByLabel("Visibility", { exact: true }).selectOption(visibility);
   const start = new Date(Date.now() + (started ? -60000 : 86400000)).toISOString().slice(0, 16),
     meeting = new Date(Date.parse(`${start}Z`) - 60000).toISOString().slice(0, 16);
-  await page.getByLabel("Meeting time (UTC)", { exact: true }).fill(meeting);
-  await page.getByLabel("Start time (UTC)", { exact: true }).fill(start);
+  await fillDateTime(page, "Meeting time (UTC)", meeting);
+  await fillDateTime(page, "Start time (UTC)", start);
   if (fixture) {
     await page.getByRole("button", { name: "Choose catalog selections", exact: true }).click();
     await chooseCatalogRow(page, "Prescribed cargo", "Fictional fixture_crates", "fixture_crates");
@@ -442,9 +443,11 @@ test(
       await manager.getByRole("button", { name: "Edit event", exact: true }).click();
       const dialog = manager.getByRole("dialog");
       await dialog.getByLabel("Route", { exact: true }).fill("Fictional revised route");
-      await dialog
-        .getByLabel("Start time (UTC)", { exact: true })
-        .fill(new Date(Date.now() + 172800000).toISOString().slice(0, 16));
+      await fillDateTime(
+        dialog,
+        "Start time (UTC)",
+        new Date(Date.now() + 172800000).toISOString().slice(0, 16),
+      );
       await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
       await expect(dialog.getByText("Changes saved.", { exact: true })).toBeVisible();
       await manager.keyboard.press("Escape");

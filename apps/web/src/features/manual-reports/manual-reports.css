@@ -244,7 +244,7 @@
   min-width: 0;
 }
 .manual-report .manual-company-field .input,
-.manual-report input[type="datetime-local"] {
+.manual-report .date-time-field {
   width: 100%;
   min-width: 0;
 }

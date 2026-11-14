@@ -45,7 +45,7 @@ import {
   validateEventEditor,
 } from "./model.js";
 import { EditorPreview } from "./preview.js";
-import { rebaseEventEditor } from "./rebase.js";
+import { incompleteOverlapTime, rebaseEventEditor } from "./rebase.js";
 import { useEditorText } from "./text.js";
 import "./editor.css";
 
@@ -435,6 +435,7 @@ function EventEditorForm({
 
   function overlapLabel(field: FieldName, value: string | null, side: "local" | "saved") {
     if (value === null) return text.noValue;
+    if (incompleteOverlapTime(field, value)) return text.conflictIncompleteTime;
     if (field === "prescribedMassKg") return `${shiftMass(value, -3)} ${text.tonnes}`;
     if (field === "requiredDlcIds") {
       const entries = side === "local" ? dlcs : savedDlcs;

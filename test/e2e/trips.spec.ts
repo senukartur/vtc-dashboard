@@ -52,7 +52,7 @@ test(
       await page.screenshot({ path: info.outputPath(`report-${locale}.png`), fullPage: true });
     }
     await catalogLanguage(page);
-    await expect(page.locator('input[type="datetime-local"]')).toHaveCount(2);
+    await expect(page.locator(".date-time-date-input")).toHaveCount(2);
     await page.getByRole("button", { name: "Submit for review", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText("result is uncertain");

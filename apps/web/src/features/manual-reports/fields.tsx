@@ -5,6 +5,8 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
 import { formatUtc } from "../../shared/formatting.js";
+import { todayIn } from "../../shared/ui/date-time.js";
+import { DateTimeField } from "../../shared/ui/date-time-field.js";
 import { Button, FieldError, Input, Label } from "../../shared/ui/primitives.js";
 import { AccountFailure } from "../account/transport.js";
 import { Failure, State } from "../trips/components.js";
@@ -14,28 +16,49 @@ export function ReferenceTimeField({
   name,
   value,
   noteId,
+  timezone,
   error,
   onChange,
+  onLeave,
 }: {
   name: "startedAt" | "completedAt";
   value: string;
   noteId: string;
+  /** Account display timezone; the report has no future dates in it. */
+  timezone: string;
   error: "referenceInvalid" | "referenceFuture" | "referenceOrder" | undefined;
   onChange: (value: string) => void;
+  /** Focus left the date, calendar and time controls of this field. */
+  onLeave: () => void;
 }) {
   const { t } = useTranslation("trips");
   const errorId = `manual-${name}-error`;
   return (
-    <div className="field">
+    // biome-ignore lint/a11y/noStaticElementInteractions: it only observes focus leaving its controls.
+    <div
+      className="field"
+      onBlur={(event) => {
+        // Focus moving between the field's controls or into its portaled calendar stays inside.
+        const next = event.relatedTarget;
+        if (
+          next instanceof Element &&
+          (event.currentTarget.contains(next) || next.closest(".date-time-popover"))
+        )
+          return;
+        onLeave();
+      }}
+    >
       <Label htmlFor={name}>{t(name)}</Label>
-      <Input
+      <DateTimeField
         id={name}
-        type="datetime-local"
+        fieldName={t(name)}
         value={value}
+        timeZone={timezone}
+        max={todayIn(timezone, Date.now())}
         aria-required="true"
-        aria-invalid={!!error || undefined}
+        invalid={!!error}
         aria-describedby={error ? `${noteId} ${errorId}` : noteId}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
       />
       <FieldError id={errorId}>{error && t(error)}</FieldError>
     </div>

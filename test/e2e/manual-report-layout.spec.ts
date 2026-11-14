@@ -272,10 +272,13 @@ test(
       const control = page.locator(from);
       await control.focus();
       await page.keyboard.press("Tab");
-      // Chromium exposes the segments of a native date/time input as separate tab stops.
-      if ((await control.getAttribute("type")) === "datetime-local") {
-        for (let segment = 0; segment < 8; segment++) {
-          if (!(await control.evaluate((input) => document.activeElement === input))) break;
+      // The date and time field tabs through its calendar button and time segments.
+      if (await control.evaluate((input) => input.classList.contains("date-time-date-input"))) {
+        for (let stop = 0; stop < 3; stop++) {
+          const inside = await control.evaluate(
+            (input) => !!input.closest(".date-time-field")?.contains(document.activeElement),
+          );
+          if (!inside) break;
           await page.keyboard.press("Tab");
         }
       }

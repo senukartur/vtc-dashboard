@@ -3,6 +3,7 @@ import type { components } from "@vtc/contracts";
 import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { stage2Fixture } from "../fixtures/events-stage-2.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
+import { fillDate, fillTime, timeField } from "./support/date-time.ts";
 import { eventFixture, eventId, mockEvents } from "./support/events.ts";
 import {
   coverCaption,
@@ -120,19 +121,20 @@ test(
     await expect(members).toHaveAttribute("aria-pressed", "false");
 
     const schedule = main.getByRole("group", { name: "Когда", exact: true });
-    await schedule.getByRole("textbox", { name: "Дата", exact: true }).fill("2099-10-25");
+    await fillDate(schedule, "Дата", "2099-10-25");
     await schedule.getByRole("button", { name: "+ Указать окончание", exact: true }).click();
     const end = schedule.getByRole("group", { name: "Окончание", exact: true });
     const date = end.getByRole("textbox", { name: "Дата", exact: true });
-    const time = end.getByRole("textbox", { name: "Окончание", exact: true });
+    const time = timeField(end, "Окончание");
     const dateBox = await box(date);
-    const timeBox = await box(time);
+    const timeBox = await box(time.time);
     expect(dateBox.x + dateBox.width).toBeLessThanOrEqual(timeBox.x);
     expect(dateBox.y).toBeCloseTo(timeBox.y, 0);
-    await date.fill("2099-10-26");
-    await time.fill("01:15");
-    await expect(date).toHaveValue("2099-10-26");
-    await expect(time).toHaveValue("01:15");
+    await date.fill("26.10.2099");
+    await fillTime(end, "Окончание", "01:15");
+    await expect(date).toHaveValue("26.10.2099");
+    await expect(time.segment("hours")).toHaveValue("01");
+    await expect(time.segment("minutes")).toHaveValue("15");
     const remove = schedule.getByRole("button", { name: "Убрать окончание", exact: true });
     await expect(remove).toHaveCSS("font-weight", "400");
     await expect(remove).toHaveCSS("padding-inline-start", "12px");

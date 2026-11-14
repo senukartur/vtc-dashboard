@@ -1,3 +1,4 @@
+import { decodeIncomplete } from "../../../shared/ui/date-time.js";
 import { canonicalDecimal } from "../../trips/transport.js";
 import { utcInput } from "../model.js";
 import {
@@ -38,6 +39,18 @@ function canonical(field: ScalarField, value: string | null) {
   if (field === "meetingAt" || field === "startsAt" || field === "endsAt")
     return utcInput(clean) ?? clean;
   return clean;
+}
+
+/**
+ * An overlapping time that is still an incomplete entry of the date and time field. The conflict
+ * list shows it as translated text; the rebased form keeps the entry so it can be restored.
+ */
+export function incompleteOverlapTime(field: FieldName, value: string | null) {
+  return (
+    (field === "meetingAt" || field === "startsAt" || field === "endsAt") &&
+    value !== null &&
+    decodeIncomplete(value) !== undefined
+  );
 }
 
 function sameEndpoint(a: EditorEndpoint, b: EditorEndpoint) {

@@ -5,6 +5,7 @@ import { deferred } from "../support/concurrency.ts";
 import { csrf, origin, resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage, envelope, mockCatalogs } from "./support/catalogs.ts";
 import { makeProgressFixture, mockDashboardRoutes } from "./support/dashboard-ui.ts";
+import { dateTimeField } from "./support/date-time.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -357,6 +358,43 @@ test(
     await expect(panel.getByLabel(labels.en.name, { exact: true })).toHaveValue("");
     await expect(recovery).toHaveCount(0);
     expect(server.commands).toHaveLength(1);
+  },
+);
+
+test(
+  "P11 keeps scheduled effective time touch targets inside the ladder level editor",
+  browserCase(["@layout", "@viewport-mobile"]),
+  async ({ page }) => {
+    await mockLadder(page);
+    await page.goto(`${path}&game=ats`);
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    const panel = page.getByRole("region", { name: labels.en.ladder });
+    await panel.getByRole("button", { name: "Edit Fictional level 1", exact: true }).click();
+    await panel.locator(`#mode-${ids[0]}`).selectOption("schedule");
+    // The ladder resets `input { min-width: 0 }`; the shared field keeps its own touch minimums.
+    const effective = dateTimeField(panel, "Effective time (UTC) (required)");
+    const segments = effective.time.getByRole("spinbutton");
+    await expect(segments).toHaveCount(2);
+    await effective.field.scrollIntoViewIfNeeded();
+    for (const target of [effective.calendarButton, ...(await segments.all())]) {
+      const box = await target.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(40);
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(40);
+    }
+    const date = await effective.date.evaluate((element) => ({
+      minWidth: Number.parseFloat(getComputedStyle(element).minWidth),
+      width: element.getBoundingClientRect().width,
+      height: element.getBoundingClientRect().height,
+      fits: element.scrollWidth <= element.clientWidth,
+    }));
+    // Room for the placeholder plus the overlaid 40 px calendar button.
+    expect(date.minWidth).toBeGreaterThan(80);
+    expect(date.width).toBeGreaterThanOrEqual(date.minWidth);
+    expect(date.height).toBeGreaterThanOrEqual(40);
+    expect(date.fits).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
   },
 );
 

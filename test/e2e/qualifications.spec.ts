@@ -7,6 +7,7 @@ import {
   safeQualificationPhase,
 } from "../../scripts/browser-diagnostics.mjs";
 import { catalogLanguage, list } from "./support/catalogs.ts";
+import { fillDateTime } from "./support/date-time.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { mockQualifications } from "./support/qualifications.ts";
 import { countInsertedAlerts } from "./support/trip-ui.ts";
@@ -428,7 +429,7 @@ test(
     await editor.locator('[id^="sample-mass-"]').fill("12");
     await editor.locator('[id^="reason-"]').fill("Fictional retained future publication");
     await editor.locator('[id^="mode-"]').selectOption("schedule");
-    await editor.locator('[id^="effective-"]').fill("2099-01-01T12:00");
+    await fillDateTime(editor, "Effective time (UTC) (required)", "2099-01-01T12:00");
     await preview.click();
     await expect(publish).toBeEnabled();
     state.scheduledPointer = "d3300000-0000-4000-8000-000000000004";
@@ -1037,8 +1038,8 @@ test(
     ).toBeVisible();
     await page.locator("#assignment-purpose").selectOption("historical_resolution");
     await page.locator("#assignment-level").selectOption("d3400000-0000-4000-8000-000000000001");
-    await page.locator("#assignment-start").fill("2025-01-01T00:00");
-    await page.locator("#assignment-end").fill("2025-02-01T00:00");
+    await fillDateTime(page, "Interval start (UTC)", "2025-01-01T00:00");
+    await fillDateTime(page, "Exclusive interval end (UTC)", "2025-02-01T00:00");
     await page.locator("#assignment-reason").fill("Fictional supported historical interval");
     await page.getByRole("button", { name: "Assign qualification", exact: true }).click();
     const dialog = page.getByRole("dialog");
