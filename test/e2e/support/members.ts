@@ -229,7 +229,12 @@ export async function mockMembers(page: Page, options: MembersOptions = {}) {
       return route.fulfill({
         json: envelope({
           levels: (["ets2", "ats"] as const).flatMap((game) =>
-            codes.map((code) => ({ id: levelId(game, code), game, code, name: levelNames[code] })),
+            codes.map((code, index) => ({
+              id: levelId(game, code),
+              game,
+              position: index + 1,
+              name: levelNames[code],
+            })),
           ),
         }),
       });

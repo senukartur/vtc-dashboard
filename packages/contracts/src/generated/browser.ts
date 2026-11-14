@@ -868,6 +868,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/qualification-ladders/{game}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** getQualificationLadder */
+        get: operations["getQualificationLadder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/qualification-ladders/{game}/levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** addQualificationLadderLevel */
+        post: operations["addQualificationLadderLevel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/qualification-ladders/{game}/levels/{levelId}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** archiveQualificationLadderLevel */
+        post: operations["archiveQualificationLadderLevel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/qualification-ladders/{game}/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** reorderQualificationLadder */
+        patch: operations["reorderQualificationLadder"];
+        trace?: never;
+    };
     "/api/v1/admin/qualification-levels/{levelId}": {
         parameters: {
             query?: never;
@@ -900,6 +968,26 @@ export interface paths {
          * @description Publishes an immutable qualification rule version. The reason is optional and must be nonblank when supplied. Both promotion threshold keys are required and accept null to disable the corresponding minimum. Authorization and effective-time guards apply.
          */
         post: operations["publishQualificationRules"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/qualification-levels/archived": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listArchivedQualificationLevels
+         * @description Archived choices for a historical qualification assignment in one game.
+         */
+        get: operations["listArchivedQualificationLevels"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2903,6 +2991,7 @@ export interface components {
             id: string;
             /** Format: uuid */
             levelId: string;
+            levelName: string;
             /** Format: uuid */
             periodId: string;
         };
@@ -3870,6 +3959,10 @@ export interface components {
             data: components["schemas"]["ListQualificationActionHistory"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeListQualificationArchivedLevel: {
+            data: components["schemas"]["ListQualificationArchivedLevel"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeListQualificationLevel: {
             data: components["schemas"]["ListQualificationLevel"];
             meta: components["schemas"]["Meta"];
@@ -3964,6 +4057,14 @@ export interface components {
         };
         EnvelopeProgressPublic: {
             data: components["schemas"]["ProgressPublic"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeQualificationLadder: {
+            data: components["schemas"]["QualificationLadder"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeQualificationLadderRevision: {
+            data: components["schemas"]["QualificationLadderRevision"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeQualificationLevel: {
@@ -4578,6 +4679,7 @@ export interface components {
         };
         LevelInput: {
             name: string;
+            reason?: string;
         };
         LifetimeTripTotals: {
             acceptedTrips: number;
@@ -4652,6 +4754,10 @@ export interface components {
         };
         ListQualificationActionHistory: {
             items: components["schemas"]["QualificationActionHistory"][];
+            nextCursor: string | null;
+        };
+        ListQualificationArchivedLevel: {
+            items: components["schemas"]["QualificationArchivedLevel"][];
             nextCursor: string | null;
         };
         ListQualificationLevel: {
@@ -5237,6 +5343,7 @@ export interface components {
             id: string;
             /** Format: uuid */
             levelId: string;
+            levelName: string;
             /** Format: uuid */
             periodId: string;
             promotion: {
@@ -5246,7 +5353,12 @@ export interface components {
                 id: string;
             } | null;
             /** @enum {string} */
-            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion";
+            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion" | "ladder_archive_transfer";
+        };
+        QualificationArchivedLevel: {
+            game: components["schemas"]["Game"];
+            id: components["schemas"]["Id"];
+            name: string;
         };
         /** @description Historical qualification rules evaluated for the reviewed fact. Unresolved history has a reason code and no rules. */
         QualificationCheck: {
@@ -5255,18 +5367,69 @@ export interface components {
             /** @enum {string} */
             status: "resolved" | "unresolved";
         };
-        QualificationLevel: {
-            /** @enum {string} */
-            code: "trainee" | "driver_iii" | "driver_ii" | "driver_i";
+        QualificationFreightRuleSummary: {
+            allowedAdrCategoryCount: number | null;
+            allowedTrailerTypeCount: number | null;
+            maxMassKg: string | null;
+        };
+        QualificationLadder: {
+            /** Format: date-time */
+            asOf: string;
+            game: components["schemas"]["Game"];
+            ladderEditsEnabled: boolean;
+            levels: components["schemas"]["QualificationLadderLevel"][];
+            revision: number;
+        };
+        QualificationLadderAddInput: {
+            name: string;
+            position: number;
+            reason?: string;
+        };
+        QualificationLadderArchiveInput: {
+            observedDriverCount: number;
+            reason?: string;
+            targetLevelId: components["schemas"]["Id"];
+        };
+        QualificationLadderLevel: {
             configured: boolean;
+            currentDriverCount: number;
+            effectiveRule: components["schemas"]["QualificationRuleVersion"] | null;
+            freightRuleSummary: components["schemas"]["QualificationFreightRuleSummary"] | null;
             /** @enum {string} */
             game: "ets2" | "ats";
             /** Format: uuid */
             id: string;
             name: string;
+            position: number;
+            promotionConfigured: boolean;
             requiredDistanceM: string | null;
             requiredTrips: number | null;
             ruleVersionId: string | null;
+            terminal: boolean;
+            version: number;
+        };
+        QualificationLadderOrderInput: {
+            levelIds: components["schemas"]["Id"][];
+            reason?: string;
+        };
+        QualificationLadderRevision: {
+            game: components["schemas"]["Game"];
+            revision: number;
+        };
+        QualificationLevel: {
+            configured: boolean;
+            freightRuleSummary: components["schemas"]["QualificationFreightRuleSummary"] | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            /** Format: uuid */
+            id: string;
+            name: string;
+            position: number;
+            promotionConfigured: boolean;
+            requiredDistanceM: string | null;
+            requiredTrips: number | null;
+            ruleVersionId: string | null;
+            terminal: boolean;
             version: number;
         };
         QualificationPreview: {
@@ -5371,7 +5534,7 @@ export interface components {
                 reason: string | null;
             } | null;
             /** @enum {string} */
-            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion";
+            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion" | "ladder_archive_transfer";
         };
         QualificationStage3ActionHistoryList: {
             items: components["schemas"]["QualificationStage3ActionHistory"][];
@@ -5393,7 +5556,7 @@ export interface components {
             level: components["schemas"]["QualificationStage3LevelSummary"];
             member: components["schemas"]["MemberSummary"];
             /** @enum {string} */
-            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction";
+            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "ladder_archive_transfer";
             reason: string | null;
         };
         QualificationStage3CompanyAction: components["schemas"]["QualificationStage3PromotionHistory"] | components["schemas"]["QualificationStage3AssignmentHistory"];
@@ -5489,12 +5652,11 @@ export interface components {
         };
         ReinstatementLevelOption: {
             /** @enum {string} */
-            code: "trainee" | "driver_iii" | "driver_ii" | "driver_i";
-            /** @enum {string} */
             game: "ets2" | "ats";
             /** Format: uuid */
             id: string;
             name: string;
+            position: number;
         };
         ReinstatementOptions: {
             levels: components["schemas"]["ReinstatementLevelOption"][];
@@ -7860,6 +8022,128 @@ export interface operations {
             default: components["responses"]["PrivateNoStoreError"];
         };
     };
+    getQualificationLadder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game: components["schemas"]["Game"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current bounded qualification ladder for the selected game. */
+            200: {
+                headers: {
+                    /** @description Strong authoritative aggregate version, for the next command. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeQualificationLadder"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    addQualificationLadderLevel: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                game: components["schemas"]["Game"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualificationLadderAddInput"];
+            };
+        };
+        responses: {
+            /** @description Committed ladder revision. */
+            201: {
+                headers: {
+                    /** @description Strong authoritative aggregate version, for the next command. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeQualificationLadderRevision"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    archiveQualificationLadderLevel: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                game: components["schemas"]["Game"];
+                levelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualificationLadderArchiveInput"];
+            };
+        };
+        responses: {
+            /** @description Committed ladder revision. */
+            200: {
+                headers: {
+                    /** @description Strong authoritative aggregate version, for the next command. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeQualificationLadderRevision"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    reorderQualificationLadder: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                game: components["schemas"]["Game"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualificationLadderOrderInput"];
+            };
+        };
+        responses: {
+            /** @description Committed ladder revision. */
+            200: {
+                headers: {
+                    /** @description Strong authoritative aggregate version, for the next command. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeQualificationLadderRevision"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     renameQualificationLevel: {
         parameters: {
             query?: never;
@@ -7945,6 +8229,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeQualificationLevel"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listArchivedQualificationLevels: {
+        parameters: {
+            query: {
+                cursor?: components["parameters"]["Cursor"];
+                game: components["schemas"]["Game"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bounded archived level choices for the selected game. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListQualificationArchivedLevel"];
                 };
             };
             default: components["responses"]["Error"];

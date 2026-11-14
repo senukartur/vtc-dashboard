@@ -14,6 +14,23 @@ const sample = {
     adr: { status: "unknown", adrClass: null },
   },
 };
+test("archived assignment choices expose only bounded same-game level labels", () => {
+  const parse = valid("EnvelopeListQualificationArchivedLevel");
+  const item = {
+    id: "41000000-0000-4000-8000-000000000001",
+    game: "ats",
+    name: "Fictional archived level",
+  };
+  const reply = (items: unknown[]) => ({
+    data: { items, nextCursor: null },
+    meta: { requestId: "synthetic-request" },
+  });
+  expect(parse(reply([item]))).toBe(true);
+  expect(parse(reply(Array(101).fill(item)))).toBe(false);
+  expect(parse(reply([{ ...item, game: "other" }]))).toBe(false);
+  for (const property of ["code", "position", "reason", "rules", "currentDriverCount"])
+    expect(parse(reply([{ ...item, [property]: null }]))).toBe(false);
+});
 test("preview wire facts and safe results are closed, bounded and carry no decision authority", () => {
   expect(valid("QualificationPreviewInput")(sample)).toBe(true);
   for (const field of ["ownerId", "sourcePayload", "accepted", "confirmedEvent", "assignmentId"])
@@ -57,6 +74,7 @@ test("staff action projections are additive and closed without extending existin
     periodId: id,
     game: "ets2",
     levelId: id,
+    levelName: "Fictional level",
     assignedAt: instant,
     endedAt: null,
   };
@@ -70,6 +88,13 @@ test("staff action projections are additive and closed without extending existin
   expect(valid("AssignmentHistory")(history)).toBe(true);
   expect(valid("AssignmentHistory")(action)).toBe(false);
   expect(valid("QualificationActionHistory")(action)).toBe(true);
+  expect(
+    valid("QualificationActionHistory")({
+      ...action,
+      purpose: "ladder_archive_transfer",
+      promotion: null,
+    }),
+  ).toBe(true);
   expect(valid("QualificationActionHistory")({ ...action, actor: null, promotion: null })).toBe(
     true,
   );
@@ -100,6 +125,25 @@ test("staff action projections are additive and closed without extending existin
   expect(valid("QualificationRuleHistory")({ ...rule, publisher: actor, reason: "private" })).toBe(
     false,
   );
+});
+
+test("freight summary keeps omitted restrictions and empty allowlists distinct and exposes no row IDs", () => {
+  const validate = valid("QualificationFreightRuleSummary");
+  const unrestricted = {
+    maxMassKg: null,
+    allowedTrailerTypeCount: null,
+    allowedAdrCategoryCount: null,
+  };
+  expect(validate(unrestricted)).toBe(true);
+  expect(
+    validate({
+      ...unrestricted,
+      maxMassKg: "10000.000000000000000001",
+      allowedTrailerTypeCount: 0,
+    }),
+  ).toBe(true);
+  expect(validate({ ...unrestricted, allowedTrailerTypeCount: 1001 })).toBe(false);
+  expect(validate({ ...unrestricted, entityIds: [] })).toBe(false);
 });
 
 test("staged qualification publication accepts an optional nonempty reason and keeps preview separate", () => {

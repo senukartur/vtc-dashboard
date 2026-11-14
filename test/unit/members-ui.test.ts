@@ -20,9 +20,9 @@ import {
 import { administrationTranslations } from "../../apps/web/src/features/admin/translations.ts";
 
 const levels = [
-  { id: "l-ets2-trainee", game: "ets2", code: "trainee", name: "Trainee" },
-  { id: "l-ets2-d3", game: "ets2", code: "driver_iii", name: "Driver III" },
-  { id: "l-ats-d2", game: "ats", code: "driver_ii", name: "Driver II" },
+  { id: "l-ets2-trainee", game: "ets2", position: 1, name: "Trainee" },
+  { id: "l-ets2-d3", game: "ets2", position: 2, name: "Driver III" },
+  { id: "l-ats-d2", game: "ats", position: 3, name: "Driver II" },
 ] as const;
 
 describe("membership and roles", () => {
@@ -172,7 +172,7 @@ describe("cells and dates", () => {
     );
     expect(levelCell(assignments, "ets2", levels, false, false)).toEqual({
       name: "Driver III",
-      code: "driver_iii",
+      position: 2,
     });
   });
   test("lastTrip keeps null distinct from a date", () => {

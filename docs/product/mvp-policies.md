@@ -114,13 +114,14 @@ The members administration list shows each member's most recent accepted trip as
 
 Trainees and drivers have the same basic dashboard capabilities. Qualification rules determine which loads, trailers, and other supported trip conditions are permitted; trainee status does not impose an additional set of website restrictions.
 
-Qualifications remain separate for ETS2 and ATS. The confirmed initial progression in each game is **Trainee → Driver III → Driver II → Driver I**, with configurable names and requirements. MVP promotion progress uses accepted-trip count and total distance. Minimum tenure, cargo-damage criteria, and other promotion metrics are outside the initial MVP promotion requirements. Future reputation and spendable points must not be used as implicit MVP permissions.
+Qualifications remain separate for ETS2 and ATS. Both ladders start with **Trainee → Driver III → Driver II → Driver I**. The director or deputy may add, rename, reorder or archive levels independently in each game. Each game has one to 25 active levels. New members start at the first active level in each admitted game. MVP promotion progress uses accepted-trip count and total distance. Minimum tenure, cargo-damage criteria, and other promotion metrics are outside the initial MVP promotion requirements. Future reputation and spendable points must not be used as implicit MVP permissions.
 
 ## Qualification configuration before launch
 
 - The initial supported qualification restrictions are maximum cargo mass, allowed trailer types, and hazardous-cargo category permissions (ADR), configured separately for each level and game.
 - Keep restriction types extensible as specified in the planning baseline. The initial set is not a hard-coded limit on future rule types.
 - The director configures actual qualification limits and accepted-trip/distance promotion thresholds before launch. No concrete numeric values have been supplied or approved during this clarification.
+- The highest level has freight restrictions and no promotion thresholds. A former highest level needs a new effective publication before drivers can advance from it.
 - Implementation may proceed with the agreed configuration model and clearly identified test fixtures; actual production values remain a director-owned launch prerequisite rather than invented defaults.
 
 ## Qualification timing and promotion
@@ -132,7 +133,8 @@ Qualifications remain separate for ETS2 and ATS. The confirmed initial progressi
 - Director/deputy confirmation applies both to the transition from trainee to driver and to subsequent qualification levels.
 - Each level has a separate promotion-progress period beginning when that level is assigned in the relevant game. For telemetry trips, count accepted trips started after that assignment; trips from earlier levels remain in historical statistics but are not reused for the next promotion.
 - For manual reports, use the qualification and rule versions effective at staff confirmation. Attribute progress to the game-specific qualification level assigned at that confirmation time. Driver-supplied reference dates remain private report facts.
-- After director/deputy-confirmed completion of the trainee stage in at least one game, the user receives the global Driver role instead of Trainee. The other game's qualification and restrictions remain unchanged; the driver may therefore have Driver III in ETS2 and Trainee qualification in ATS. The director or deputy may also set the global Trainee or Driver role directly; that change leaves every game-specific qualification and its progress period unchanged.
+- When the director or deputy confirms a promotion from the first active level in either game, the user’s Trainee role becomes Driver if they currently hold Trainee. Other global roles and the other game's qualification stay as recorded. The director or deputy may also set Trainee or Driver directly without changing any qualification or progress period.
+- Reordering preserves current assignments and roles. Archiving moves all current assignees to the explicitly selected active level in the same game and starts new progress periods. The original assignments, rule versions and credited trips remain in history. The director or deputy reviews the affected driver count and confirms the archive.
 - When an accepted trip is corrected or its acceptance is revoked, recalculate affected statistics and qualification progress. If the change invalidates the requirements for a previously confirmed promotion, notify the director and retain the assigned qualification until the director decides what to do. Never automatically demote a driver.
 
 ## Qualification exceptions for company events
@@ -254,9 +256,9 @@ The current manual form requires game, origin and destination cities, cargo, car
 12. A rule or qualification changes after a trip starts but before it finishes or is submitted. The assessment uses the historical versions effective at the start.
 13. A driver meets the configured promotion requirements. The system shows eligibility, but the role/qualification changes only after director/deputy confirmation.
 14. A trainee selects a company-wide event on a report for its prescribed load, and the director confirms actual participation. Ordinary qualification restrictions do not prevent that load; once accepted, the trip also contributes to qualification progress. An RSVP without actual-participation confirmation does not authorize the exception.
-15. ETS2 and ATS each expose the configurable initial sequence Trainee → Driver III → Driver II → Driver I. Qualification progress in one game must not silently promote the driver's qualification in the other game.
+15. ETS2 and ATS each start with Trainee → Driver III → Driver II → Driver I and can be configured independently. A new member receives the current first level in each admitted game. Reordering changes the next promotion without moving any current driver, and archived levels remain in history.
 16. A director confirms promotion to Driver III in ETS2. Progress toward Driver II uses accepted telemetry trips started after the Driver III assignment and manual reports confirmed while that level is assigned; earlier credited trips remain in lifetime statistics. The same progression rules apply independently in ATS.
-17. A member finishes the trainee stage in ETS2 but remains a trainee in ATS. Their global role becomes Driver, while the ATS qualification remains Trainee with its restrictions.
+17. A member with Trainee receives a confirmed promotion from the current first level in ETS2. Their global role becomes Driver, and their ATS qualification and other global roles stay as recorded.
 18. A director configures the production limits and promotion thresholds independently for each level and game before launch; implementation fixtures are not presented as approved company limits.
 19. A corrected or revoked trip reduces the progress that justified an existing promotion. The system recalculates the affected totals and alerts the director, while retaining the assigned qualification pending the director's decision.
 20. Before an event starts, a member changes Participating to Declined and supplies a reason. After the start, response editing is closed and the director records actual attendance separately.

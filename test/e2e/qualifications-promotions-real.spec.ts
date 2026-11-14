@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Response } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import {
   createQualificationInitialization,
@@ -205,6 +205,292 @@ test(
       await staff?.dispose();
       await fixture.close();
     }
+  },
+);
+
+test(
+  "Live ladder edits invalidate ETS2 promotion intent and expose archive history without changing ATS",
+  browserCase(["@real"]),
+  async ({ page, context }) => {
+    test.setTimeout(90_000);
+    await resetAccountLimits();
+    const fixture = await tripBrowserFixture();
+    let staff: APIRequestContext | undefined;
+    const { identity, qualifications } = fixture.composed;
+    const ladderPath = "/api/v1/admin/qualification-ladders/ets2";
+    const suffix = randomUUID().slice(0, 8);
+    const name = "Fictional next " + suffix;
+    const sourceName = "Fictional source " + suffix;
+    const nickname = "Fictional ladder driver " + suffix;
+    const userId = randomUUID();
+    const candidateList = (game: "ets2" | "ats") => candidatesPath + "?game=" + game;
+    const promotionsPage = "/account/admin/promotions";
+    const roles = () =>
+      fixture.unit.run(async (tx) =>
+        (await identity.memberSummariesInTransaction(tx, [userId])).get(userId)?.roles.toSorted(),
+      );
+    const candidate = async (api: APIRequestContext) =>
+      (
+        await read<S["QualificationStage3PromotionCandidateList"]>(
+          api,
+          candidateList("ets2") + "&limit=100",
+        )
+      ).items.find((row) => row.member.id === userId);
+    const responseAt = (expected: string, method: string) => (response: Response) => {
+      const { pathname, search } = new URL(response.url());
+      return pathname + search === expected && response.request().method() === method;
+    };
+    let cleanupFailed = false;
+    let originalFirstId: string | undefined;
+    let atsOnlyId: string | undefined;
+    try {
+      const api = await staffContext();
+      staff = api;
+      if (!qualifications) throw new Error("PROMOTION_BROWSER_COMPOSITION_MISSING");
+      const original = await qualifications.ladder(fixture.staff, "ets2");
+      const successor = original.data.levels[0];
+      if (!successor) throw new Error("PROMOTION_BROWSER_LADDER_MISSING");
+      originalFirstId = successor.id;
+      await qualifications.changeLadder(fixture.staff, "ets2", randomUUID(), original.version, {
+        type: "add",
+        input: { position: 1, name: sourceName },
+      });
+      const source = (await qualifications.ladder(fixture.staff, "ets2")).data.levels[0];
+      if (!source || source.name !== sourceName)
+        throw new Error("PROMOTION_BROWSER_SOURCE_MISSING");
+      await qualifications.publish(fixture.staff, source.id, randomUUID(), source.version, {
+        rules: [],
+        requiredTrips: 1,
+        requiredDistanceM: null,
+      });
+      const credentials = await identity.prepareCredential(fixture.password);
+      const initialize = createQualificationInitialization(fixture.unit);
+      const secondDriver = randomUUID();
+      await fixture.unit.run(async (tx) => {
+        for (const member of [
+          { id: userId, name: nickname, games: ["ets2", "ats"] as const },
+          { id: secondDriver, name: "Fictional ATS fixture " + suffix, games: ["ats"] as const },
+        ]) {
+          await identity.insertWithCredential(tx, {
+            userId: member.id,
+            email: member.id + "@example.invalid",
+            name: member.name,
+            roles: ["trainee", "dispatcher"],
+            ...credentials,
+          });
+          await initialize.initialize(tx, {
+            userId: member.id,
+            games: member.games,
+            assignedAt: new Date(Date.now() - 86_400_000).toISOString(),
+          });
+        }
+      });
+      atsOnlyId = secondDriver;
+      const atsStart = await qualifications.progress(fixture.staff, userId, "ats", "admin");
+      const [ets2Page, atsPage] = await Promise.all(
+        (["ets2", "ats"] as const).map((game) =>
+          read<S["QualificationStage3PromotionCandidateList"]>(
+            api,
+            candidateList(game) + "&status=all&limit=1",
+          ),
+        ),
+      );
+      if (!ets2Page?.nextCursor || !atsPage?.nextCursor)
+        throw new Error("PROMOTION_BROWSER_CURSOR_MISSING");
+      const ets2Cursor = encodeURIComponent(ets2Page.nextCursor);
+      const atsCursor = encodeURIComponent(atsPage.nextCursor);
+      const atsBefore = await read<S["QualificationStage3PromotionCandidateList"]>(
+        api,
+        candidateList("ats") + "&status=all&limit=1&cursor=" + atsCursor,
+      );
+      const beforePublication = await readyCounts(api);
+      await context.addCookies((await api.storageState()).cookies);
+      await page.goto("/account/admin/settings?tab=qualifications");
+      await switchLanguage(page, "en");
+      const settings = page.getByRole("region", { name: "Qualification ladder" });
+      const navigation = page.getByRole("navigation", { name: "Main navigation" });
+      const attention = (count: number) =>
+        navigation.getByRole("link", {
+          name: count ? "Promotions (ready: " + count + ")" : "Promotions",
+          exact: true,
+        });
+      await expect(attention(beforePublication.ets2 + beforePublication.ats)).toBeVisible();
+      await settings.getByRole("button", { name: "Edit " + source.name, exact: true }).click();
+      await settings.getByLabel("Minimum trips", { exact: true }).fill("");
+      await settings.getByLabel("Minimum actual distance (km)", { exact: true }).fill("");
+      await settings.getByRole("button", { name: "Publish rule version", exact: true }).click();
+      const publishDialog = page.getByRole("dialog");
+      const publication = page.waitForResponse(
+        responseAt("/api/v1/admin/qualification-levels/" + source.id + "/rule-versions", "POST"),
+      );
+      const publishedSummary = page.waitForResponse(responseAt(summaryPath, "GET"));
+      await publishDialog.getByRole("button", { name: "Confirm", exact: true }).click();
+      expect((await publication).status()).toBe(201);
+      const published = (
+        (await (await publishedSummary).json()).data as S["WorkspaceStage3Summary"]
+      ).promotionsReady;
+      if (!published) throw new Error("PROMOTIONS_READY_MISSING");
+      expect(published.ets2).toBe(beforePublication.ets2 + 1);
+      expect(published.ats).toBe(beforePublication.ats);
+      await expect(attention(published.ets2 + published.ats)).toBeVisible();
+      const old = await candidate(api);
+      if (!old?.nextLevel) throw new Error("PROMOTION_BROWSER_CANDIDATE_MISSING");
+      expect(old.nextLevel.id).toBe(successor.id);
+
+      await settings.getByLabel("Level name", { exact: true }).fill(name);
+      await settings.getByLabel("Position", { exact: true }).selectOption(successor.id);
+      await settings.getByRole("button", { name: "Add level", exact: true }).click();
+      const add = page.waitForResponse(responseAt(ladderPath + "/levels", "POST"));
+      await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+      expect((await add).status()).toBe(201);
+      const table = settings.getByRole("table", { name: "Qualification ladder" });
+      await expect(table.getByRole("rowheader", { name: new RegExp(name) })).toBeVisible();
+      const changed = await candidate(api);
+      if (!changed?.nextLevel) throw new Error("PROMOTION_BROWSER_NEXT_MISSING");
+      expect(changed.nextLevel.name).toBe(name);
+      expect(changed.version).toBe(old.version + 1);
+      expect(changed.assignmentId).toBe(old.assignmentId);
+      const stale = await write(
+        api,
+        "/admin/members/" + userId + "/promotions",
+        {
+          game: "ets2",
+          assignmentId: old.assignmentId,
+          targetLevelId: old.nextLevel.id,
+          reason: "Fictional stale review",
+        },
+        '"v' + old.version + '"',
+      );
+      expect(stale.status()).toBe(409);
+      expect((await stale.json()).error.code).toBe("VERSION_CONFLICT");
+      expect(
+        await read<S["QualificationStage3PromotionCandidateList"]>(
+          api,
+          candidateList("ats") + "&status=all&limit=1&cursor=" + atsCursor,
+        ),
+      ).toEqual(atsBefore);
+
+      const staleCursorResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === candidatesPath && url.searchParams.get("cursor") === ets2Page.nextCursor
+        );
+      });
+      await page.goto(promotionsPage + "?game=ets2&tab=all&cursor=" + ets2Cursor);
+      expect((await staleCursorResponse).status()).toBe(409);
+      await expect(
+        page.getByText("This page has expired. Return to the first page to continue."),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "First page", exact: true }).click();
+      await expect(page).toHaveURL(/game=ets2&tab=all$/);
+      await page.getByRole("link", { name: "Ready", exact: true }).click();
+      const driver = page
+        .getByRole("table", { name: "Promotion candidates" })
+        .getByRole("row")
+        .filter({ hasText: nickname });
+      await driver.getByRole("button", { name: "Promote " + nickname, exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Confirm promotion" });
+      await expect(dialog).toContainText(source.name + " → " + name);
+      await dialog.getByRole("textbox", { name: "Reason" }).fill(promotionReason);
+      const promotion = page.waitForResponse(
+        responseAt("/api/v1/admin/members/" + userId + "/promotions", "POST"),
+      );
+      await dialog.getByRole("button", { name: "Confirm promotion", exact: true }).click();
+      const confirmed = await promotion;
+      expect(confirmed.status()).toBe(200);
+      expect(confirmed.request().headers()["if-match"]).toBe('"v' + changed.version + '"');
+      expect(confirmed.request().postDataJSON()).toMatchObject({
+        targetLevelId: changed.nextLevel.id,
+        assignmentId: changed.assignmentId,
+      });
+      await expect(page.getByText(nickname + " was promoted in ETS2.")).toBeVisible();
+      expect(await roles()).toEqual(["dispatcher", "driver"]);
+
+      await page.goto("/account/admin/settings?tab=qualifications");
+      await settings.getByRole("button", { name: "Archive " + name, exact: true }).click();
+      await expect(settings.getByLabel("Transfer drivers to")).toHaveValue(source.id);
+      await settings.getByRole("button", { name: "Review archive", exact: true }).click();
+      const archived = page.waitForResponse(
+        responseAt(ladderPath + "/levels/" + changed.nextLevel.id + "/archive", "POST"),
+      );
+      const archivedSummary = page.waitForResponse(responseAt(summaryPath, "GET"));
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Archive level", exact: true })
+        .click();
+      expect((await archived).status()).toBe(200);
+      const afterArchive = (
+        (await (await archivedSummary).json()).data as S["WorkspaceStage3Summary"]
+      ).promotionsReady;
+      if (!afterArchive) throw new Error("PROMOTIONS_READY_MISSING");
+      await expect(attention(afterArchive.ets2 + afterArchive.ats)).toBeVisible();
+      await expect(table.getByRole("rowheader", { name: new RegExp(name) })).toHaveCount(0);
+      expect(afterArchive).toEqual(published);
+      expect(await roles()).toEqual(["dispatcher", "driver"]);
+      const atsEnd = await qualifications.progress(fixture.staff, userId, "ats", "admin");
+      expect(atsEnd.version).toBe(atsStart.version);
+      expect(atsEnd.data.assignment).toEqual(atsStart.data.assignment);
+      await page.goto(promotionsPage + "?game=ets2&tab=history&memberId=" + userId);
+      const history = page.getByRole("table", { name: "Company qualification history" });
+      const transfer = history.getByRole("row").filter({ hasText: "Transfer from archived level" });
+      await expect(transfer).toContainText(nickname);
+      await expect(transfer).toContainText(source.name);
+      await expect(history.getByRole("row").filter({ hasText: promotionReason })).toContainText(
+        name,
+      );
+      await switchLanguage(page, "ru");
+      const russianHistory = page.getByRole("table", { name: "История квалификаций в компании" });
+      await expect(
+        russianHistory.getByRole("row").filter({ hasText: "Перевод с архивного уровня" }),
+      ).toContainText(nickname);
+      await expect(
+        russianHistory.getByText("ladder_archive_transfer", { exact: true }),
+      ).toHaveCount(0);
+    } finally {
+      try {
+        if (qualifications && originalFirstId) {
+          for (const temporaryName of [name, sourceName]) {
+            const current = await qualifications.ladder(fixture.staff, "ets2");
+            const temporary = current.data.levels.find((row) => row.name === temporaryName);
+            if (temporary)
+              await qualifications.changeLadder(
+                fixture.staff,
+                "ets2",
+                randomUUID(),
+                current.version,
+                {
+                  type: "archive",
+                  levelId: temporary.id,
+                  input: {
+                    targetLevelId: originalFirstId,
+                    observedDriverCount: temporary.currentDriverCount,
+                  },
+                },
+              );
+          }
+        }
+        for (const id of [userId, atsOnlyId]) {
+          if (!id) continue;
+          const member = await fixture.unit.run(async (tx) =>
+            (await identity.memberSummariesInTransaction(tx, [id])).get(id),
+          );
+          if (!member || member.formerMember) continue;
+          const actor = await fixtureActor(identity, id + "@example.invalid", fixture.password);
+          const current = await identity.current(actor);
+          await identity.administer(fixture.staff, id, randomUUID(), current.version, {
+            kind: "deactivate",
+          });
+        }
+      } catch {
+        cleanupFailed = true;
+      }
+      const closed = await Promise.allSettled([staff?.dispose(), fixture.close()]);
+      if (cleanupFailed || closed.some((result) => result.status === "rejected")) {
+        cleanupFailed = true;
+        console.error("PROMOTION_BROWSER_FIXTURE_CLEANUP_FAILED");
+      }
+    }
+    if (cleanupFailed) throw new Error("PROMOTION_BROWSER_FIXTURE_CLEANUP_FAILED");
   },
 );
 

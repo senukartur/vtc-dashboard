@@ -14,6 +14,130 @@ import { owningMemberPages, QualificationMemberPicker } from "./support/qualific
 import { tripBrowserFixture } from "./support/trips.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
+
+test(
+  "real 25-level ladder renders freight summaries within the shared read allowance",
+  browserCase(["@real"]),
+  async ({ page, context }) => {
+    test.setTimeout(60_000);
+    const fixture = await tripBrowserFixture();
+    const staff = await staffContext();
+    const q = fixture.composed.qualifications;
+    if (!q) throw new Error("QUALIFICATION_NORMAL_COMPOSITION_MISSING");
+    const game = "ats";
+    const original = (await q.ladder(fixture.staff, game)).data;
+    const added = new Set<string>();
+    const qualificationReads: { path: string; status: number }[] = [];
+    page.on("response", (response) => {
+      const path = new URL(response.url()).pathname;
+      if (
+        response.request().method() === "GET" &&
+        (path === "/api/v1/me" || path.includes("qualification"))
+      )
+        qualificationReads.push({ path, status: response.status() });
+    });
+    try {
+      for (let position = original.levels.length + 1; position <= 25; position++) {
+        const current = await q.ladder(fixture.staff, game);
+        await q.changeLadder(fixture.staff, game, randomUUID(), current.version, {
+          type: "add",
+          input: { name: `Fictional capacity level ${position}`, position },
+        });
+        const newLevel = (await q.ladder(fixture.staff, game)).data.levels.at(-1);
+        if (!newLevel) throw new Error("SYNTHETIC_LEVEL_MISSING");
+        added.add(newLevel.id);
+      }
+      for (const level of (await q.ladder(fixture.staff, game)).data.levels) {
+        if (level.configured && (level.promotionConfigured || level.terminal)) continue;
+        await q.publish(fixture.staff, level.id, randomUUID(), level.version, {
+          rules:
+            level.position === 24
+              ? []
+              : [
+                  { type: "max_mass", maxKg: "10000" },
+                  { type: "allowed_trailer_types", entityIds: [] },
+                  { type: "allowed_adr_categories", classes: [] },
+                ],
+          requiredTrips: null,
+          requiredDistanceM: null,
+        });
+      }
+      const staffLevels = (await q.ladder(fixture.staff, game)).data.levels;
+      expect(staffLevels.filter((level) => level.configured)).toHaveLength(25);
+      expect(staffLevels[23]?.freightRuleSummary).toEqual({
+        maxMassKg: null,
+        allowedTrailerTypeCount: null,
+        allowedAdrCategoryCount: null,
+      });
+      expect(staffLevels[24]?.freightRuleSummary).toEqual({
+        maxMassKg: "10000",
+        allowedTrailerTypeCount: 0,
+        allowedAdrCategoryCount: 0,
+      });
+      await context.addCookies((await staff.storageState()).cookies);
+      await resetAccountLimits();
+      await page.goto("/account/qualifications?game=ats");
+      await catalogLanguage(page, "en");
+      const table = page.getByRole("table", { name: "Levels and effective rules" });
+      await expect(table.getByRole("row")).toHaveCount(26);
+      const rowFor = (position: number) =>
+        table.getByRole("row").filter({
+          has: page.getByRole("rowheader", {
+            name: `Fictional capacity level ${position}`,
+            exact: true,
+          }),
+        });
+      const last = rowFor(25);
+      await expect(last.getByRole("cell", { name: "10 t", exact: true })).toBeVisible();
+      await expect(last.getByRole("cell", { name: "None allowed", exact: true })).toHaveCount(2);
+      await expect(
+        rowFor(24).getByRole("cell", { name: "No restriction", exact: true }),
+      ).toHaveCount(3);
+      const selected = last.getByRole("button", {
+        name: "Fictional capacity level 25",
+        exact: true,
+      });
+      const lastRuleResponse = page.waitForResponse((response) =>
+        new URL(response.url()).pathname.includes(
+          `/qualification-levels/${staffLevels.at(-1)?.id}/rule-versions/`,
+        ),
+      );
+      await selected.click();
+      expect((await lastRuleResponse).status()).toBe(200);
+      await expect(
+        page.getByRole("heading", { name: "Fictional capacity level 25 · ATS" }),
+      ).toBeVisible();
+      const detailReads = qualificationReads.filter(({ path }) => /\/rule-versions\//.test(path));
+      const limited = qualificationReads.filter(({ status }) => status === 429).length;
+      console.log(
+        JSON.stringify({
+          event: "qualification_full_ladder_read_budget",
+          total: qualificationReads.length,
+          details: detailReads.length,
+          limited,
+        }),
+      );
+      expect(detailReads.length).toBeLessThanOrEqual(3);
+      expect(qualificationReads.length).toBeLessThanOrEqual(20);
+      expect(limited).toBe(0);
+    } finally {
+      for (const id of [...added].reverse()) {
+        const current = await q.ladder(fixture.staff, game);
+        const source = current.data.levels.find((row) => row.id === id);
+        const target = current.data.levels[0];
+        if (!source || !target) continue;
+        await q.changeLadder(fixture.staff, game, randomUUID(), current.version, {
+          type: "archive",
+          levelId: source.id,
+          input: { targetLevelId: target.id, observedDriverCount: source.currentDriverCount },
+        });
+      }
+      await staff.dispose();
+      await fixture.close();
+    }
+  },
+);
+
 async function confirm(page: Page, label: string, scope: Page | Locator = page) {
   await scope.getByRole("button", { name: label, exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
@@ -75,8 +199,8 @@ test(
       for (const level of (await q.levels(fixture.staff, "ets2")).items)
         await q.publish(fixture.staff, level.id, randomUUID(), level.version, {
           rules: [{ type: "max_mass", maxKg: "20000" }],
-          requiredTrips: 2,
-          requiredDistanceM: "100",
+          requiredTrips: level.terminal ? null : 2,
+          requiredDistanceM: level.terminal ? null : "100",
           reason: "Fictional four-level configuration",
         });
       expect(

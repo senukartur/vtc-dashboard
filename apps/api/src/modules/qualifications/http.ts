@@ -40,6 +40,7 @@ export async function registerQualificationRoutes(
   const owned = (path: string) =>
     path.startsWith("/api/v1/qualification-levels") ||
     path.startsWith("/api/v1/admin/qualification-levels") ||
+    path.startsWith("/api/v1/admin/qualification-ladders/") ||
     [
       "/api/v1/admin/qualification-members",
       "/api/v1/admin/promotion-candidates",
@@ -99,6 +100,59 @@ export async function registerQualificationRoutes(
     data,
     meta: { requestId: request.id },
   });
+  const ladderPath = "/api/v1/admin/qualification-ladders/:game";
+  const ladderParams = object({ game }, ["game"]);
+  app.get<{ Params: { game: Game } }>(
+    ladderPath,
+    {
+      schema: {
+        params: ladderParams,
+        querystring: object({}),
+        response: { 200: ref("EnvelopeQualificationLadder") },
+      },
+    },
+    async (request, reply) => {
+      const result = await qualifications.ladder(await actor(request), request.params.game);
+      reply.header("ETag", `"v${result.version}"`);
+      return envelope(request, result.data);
+    },
+  );
+  for (const [type, method, path, body, status] of [
+    ["add", "POST", "/levels", "QualificationLadderAddInput", 201],
+    ["reorder", "PATCH", "/order", "QualificationLadderOrderInput", 200],
+    ["archive", "POST", "/levels/:levelId/archive", "QualificationLadderArchiveInput", 200],
+  ] as const) {
+    app.route<{ Params: { game: Game; levelId?: string }; Body: S[typeof body] }>({
+      method,
+      url: ladderPath + path,
+      schema: {
+        params:
+          type === "archive" ? object({ game, levelId: id }, ["game", "levelId"]) : ladderParams,
+        querystring: object({}),
+        body: ref(body),
+        response: { [status]: ref("EnvelopeQualificationLadderRevision") },
+      },
+      handler: async (request, reply) => {
+        const result = await qualifications.changeLadder(
+          await actor(request),
+          request.params.game,
+          key(request),
+          expected(request),
+          type === "archive"
+            ? {
+                type,
+                levelId: request.params.levelId as string,
+                input: request.body as S["QualificationLadderArchiveInput"],
+              }
+            : type === "add"
+              ? { type, input: request.body as S["QualificationLadderAddInput"] }
+              : { type, input: request.body as S["QualificationLadderOrderInput"] },
+        );
+        reply.header("ETag", `"v${result.version}"`);
+        return reply.code(status).send(envelope(request, result.data));
+      },
+    });
+  }
   const memberEnvelope = stage3Envelope(
     "EnvelopeListMemberSummary",
     "QualificationStage3MemberSearchListEnvelope",
@@ -189,6 +243,24 @@ export async function registerQualificationRoutes(
       reply.header("ETag", `"v${result.version}"`);
       return actionEnvelope(request.query.view === "stage3", envelope(request, result.data));
     },
+  );
+  app.get<{ Querystring: Page & { game: Game } }>(
+    "/api/v1/admin/qualification-levels/archived",
+    {
+      schema: {
+        querystring: object({ ...page, game }, ["game"]),
+        response: { 200: ref("EnvelopeListQualificationArchivedLevel") },
+      },
+    },
+    async (request) =>
+      envelope(
+        request,
+        await qualifications.archivedLevels(
+          await actor(request),
+          request.query.game,
+          request.query,
+        ),
+      ),
   );
   app.get<{ Params: { levelId: string }; Querystring: Page }>(
     "/api/v1/admin/qualification-levels/:levelId/rule-versions",

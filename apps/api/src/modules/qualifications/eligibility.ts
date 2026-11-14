@@ -8,7 +8,6 @@ import {
   gt,
   inArray,
   isNull,
-  levelCodes,
   lte,
   qualificationAssignments,
   qualificationLevels,
@@ -22,6 +21,7 @@ import { canonicalDecimal } from "../qualification-rules/decimal.js";
 import { evaluateQualificationProgress } from "../qualification-rules/index.js";
 import { type ContributionRegister, emptyTotals } from "../trips/contributions.js";
 import type { Game } from "./initialization.js";
+import { activeLevels, type ActiveLevel } from "./ladder.js";
 import type { Position } from "./pagination.js";
 
 type S = components["schemas"];
@@ -41,16 +41,11 @@ type Assignment = {
   eligibilityEvaluatedAt: string | null;
 };
 
-export function nextLevel(code: Level["code"]): Level["code"] | null {
-  const position = levelCodes.indexOf(code);
-  return position < 0 ? null : (levelCodes[position + 1] ?? null);
-}
-
-// This is the game/ID-scoped successor used by readers and confirmation.
 export function successor(levels: readonly Level[], game: Game, levelId: string) {
   const level = levels.find((row) => row.game === game && row.id === levelId);
-  const code = level ? nextLevel(level.code) : null;
-  return levels.find((row) => row.game === game && row.code === code) ?? null;
+  if (level?.activePosition == null) return null;
+  const position = level.activePosition + 1;
+  return levels.find((row) => row.game === game && row.activePosition === position) ?? null;
 }
 
 export const levelSummary = ({ id, name }: Pick<Level, "id" | "name">) => ({ id, name });
@@ -94,13 +89,7 @@ export function createEligibility(
   };
   const batchSize = 100;
 
-  async function levels(tx: TxContext, game: Game) {
-    return c(tx)
-      .select()
-      .from(qualificationLevels)
-      .where(eq(qualificationLevels.game, game))
-      .for("share");
-  }
+  const levels = (tx: TxContext, game: Game) => activeLevels(unit, tx, game);
 
   async function currentAssignments(
     tx: TxContext,
@@ -184,7 +173,11 @@ export function createEligibility(
     }
   }
 
-  async function readRules(tx: TxContext, levelId: string, instant: string, oldest: string) {
+  async function readRules(tx: TxContext, level: Level, instant: string, oldest: string) {
+    const applicable = and(
+      eq(qualificationRules.levelId, level.id),
+      eq(qualificationRules.promotionGeneration, level.promotionGeneration),
+    );
     const fields = {
       effectiveAt: qualificationRules.effectiveAt,
       requiredTrips: qualificationRules.requiredTrips,
@@ -193,9 +186,7 @@ export function createEligibility(
     const [first] = await c(tx)
       .select(fields)
       .from(qualificationRules)
-      .where(
-        and(eq(qualificationRules.levelId, levelId), lte(qualificationRules.effectiveAt, oldest)),
-      )
+      .where(and(applicable, lte(qualificationRules.effectiveAt, oldest)))
       .orderBy(desc(qualificationRules.effectiveAt))
       .limit(1)
       .for("share");
@@ -208,7 +199,7 @@ export function createEligibility(
         .from(qualificationRules)
         .where(
           and(
-            eq(qualificationRules.levelId, levelId),
+            applicable,
             gt(qualificationRules.effectiveAt, after),
             lte(qualificationRules.effectiveAt, instant),
           ),
@@ -232,6 +223,7 @@ export function createEligibility(
     includeOnset: boolean,
   ) {
     const histories = new Map<string, Rule[]>();
+    const byId = new Map(gameLevels.map((level) => [level.id, level]));
     const oldest = new Map<string, string>();
     const epoch = includeOnset && tracking(instant) ? cutoff : undefined;
     for (const row of rows) {
@@ -239,15 +231,19 @@ export function createEligibility(
       const previous = oldest.get(row.levelId);
       if (previous === undefined || start < previous) oldest.set(row.levelId, start);
     }
-    for (const [levelId, start] of oldest)
-      histories.set(levelId, await readRules(tx, levelId, instant, start));
+    for (const [levelId, start] of oldest) {
+      const current = byId.get(levelId);
+      if (!current) throw new Error("QUALIFICATION_LEVEL_MISSING");
+      if (successor(gameLevels, game, levelId))
+        histories.set(levelId, await readRules(tx, current, instant, start));
+    }
     const totals = await contributions.totalsByAssignment(
       tx,
       rows.map(({ id }) => id),
       "share",
     );
     return rows.map((row) => {
-      const current = gameLevels.find((level) => level.id === row.levelId);
+      const current = byId.get(row.levelId);
       if (!current) throw new Error("QUALIFICATION_LEVEL_MISSING");
       const next = successor(gameLevels, game, row.levelId);
       const total = totals.get(row.id) ?? emptyTotals;
@@ -346,6 +342,39 @@ export function createEligibility(
   return {
     levels,
     prepareContributionBatch,
+    async applyTopology(
+      tx: TxContext,
+      game: Game,
+      changedLevels: readonly ActiveLevel[],
+      gameLevels: readonly ActiveLevel[],
+      instant: string,
+    ) {
+      if (cutoff === undefined || !tracking(instant)) return;
+      for (const level of changedLevels) {
+        const next = successor(gameLevels, game, level.id);
+        const rule = next ? (await readRules(tx, level, instant, instant))[0] : undefined;
+
+        for await (const rows of activeAssignments(tx, game, instant, { levelId: level.id })) {
+          const totals = rule
+            ? await contributions.totalsByAssignment(
+                tx,
+                rows.map(({ id }) => id),
+                "share",
+              )
+            : new Map<string, QualificationProgressTotals>();
+          for (const row of rows) {
+            trackingStart(row, cutoff, instant);
+            const eligible = promotionEligible(
+              next !== null,
+              rule,
+              totals.get(row.id) ?? emptyTotals,
+            );
+            // The previous successor does not establish onset for this edge.
+            await save(tx, game, row, eligible ? instant : null, instant);
+          }
+        }
+      }
+    },
     async applyImmediateRule(tx: TxContext, level: Level, instant: string, rule: Threshold) {
       if (!tracking(instant)) return;
       const gameLevels = await levels(tx, level.game);
@@ -378,10 +407,10 @@ export function createEligibility(
       instant: string,
       after: Position | null,
       limit: number,
+      gameLevels: ActiveLevel[],
     ) {
       let total = 0;
       let page: (S["QualificationStage3PromotionCandidate"] & { id: string })[] = [];
-      const gameLevels = await levels(tx, game);
       for await (const rows of activeAssignments(tx, game, instant)) {
         const candidates = await evaluate(tx, game, rows, gameLevels, instant, true);
         for (const item of candidates) {

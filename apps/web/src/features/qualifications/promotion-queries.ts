@@ -2,10 +2,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../../app/Session.js";
 import { refreshWorkspaceSummary } from "../../app/workspace-summary-cache.js";
 import {
+  affectedPromotionRead,
   type Candidate,
-  promotionCandidatesPath,
   promotionCandidatesUrl,
-  promotionHistoryPath,
   promotionHistoryUrl,
   promotionMemberSearchUrl,
   qualificationMembersPath,
@@ -56,16 +55,10 @@ export function useRefreshPromotionReads() {
           if (key[1] !== selfId || key[2] !== session.generation || typeof key[5] !== "string")
             return false;
           const url = new URL(key[5], "https://qualification.invalid");
-          const filterGame = url.searchParams.get("game");
-          const filterMember = url.searchParams.get("memberId");
-          if (url.pathname === promotionCandidatesPath) return filterGame === game;
-          if (url.pathname === promotionHistoryPath)
-            return (
-              (!filterGame || filterGame === game) && (!filterMember || filterMember === member.id)
-            );
-          if (url.pathname === qualificationMembersPath)
-            return url.searchParams.get("view") === "stage3";
-          return false;
+          return (
+            affectedPromotionRead(url, game, { history: true, memberId: member.id }) ||
+            (url.pathname === qualificationMembersPath && url.searchParams.get("view") === "stage3")
+          );
         }
         if (key[0] === "dashboard-my-progress")
           return (

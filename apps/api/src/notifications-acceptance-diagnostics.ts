@@ -63,6 +63,7 @@ const tables = [
   "outbox_routing_scans",
   "qualification_assignments",
   "qualification_initial_assignments",
+  "qualification_ladder_history",
   "qualification_levels",
   "qualification_promotion_reviews",
   "qualification_promotions",

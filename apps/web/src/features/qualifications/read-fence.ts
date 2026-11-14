@@ -1,17 +1,14 @@
 import { isCancelledError, type QueryClient } from "@tanstack/react-query";
-import { affectedRead, type Change } from "./changes.js";
 
 export async function fenceQualificationReads(
   client: QueryClient,
   scope: readonly unknown[],
-  change: Change,
-  selfId: string | undefined,
-  conflict: boolean,
+  affected: (path: string) => boolean,
 ) {
   const filters = {
     queryKey: scope,
     predicate: (query: { queryKey: readonly unknown[] }) =>
-      affectedRead(change, String(query.queryKey.at(-2) ?? ""), selfId, conflict),
+      affected(String(query.queryKey.at(-2) ?? "")),
   };
   const pending = client
     .getQueryCache()

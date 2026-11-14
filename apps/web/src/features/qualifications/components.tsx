@@ -1,4 +1,11 @@
-import { type ReactNode, useId, useState } from "react";
+import {
+  type ComponentProps,
+  createContext,
+  type ReactNode,
+  useContext,
+  useId,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { itemSchema } from "../../shared/catalog-selectors/contracts.js";
@@ -7,11 +14,23 @@ import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Pager } from "../../shared/ui/pager.js";
 import { Button } from "../../shared/ui/primitives.js";
-import { Confirm, Failure, State } from "../trips/components.js";
+import { Failure, State, Confirm as TripConfirm } from "../trips/components.js";
 import { type useQualificationCommand, useQualificationQuery } from "./queries.js";
 import { type DTO, type Game, qualificationCursorRejected } from "./transport.js";
 
-export { Confirm, Failure, State };
+export { Failure, State };
+export const QualificationSettingsVisibility = createContext<boolean | undefined>(undefined);
+
+export function Confirm(props: ComponentProps<typeof TripConfirm>) {
+  const visible = useContext(QualificationSettingsVisibility);
+  return (
+    <TripConfirm
+      {...props}
+      visible={visible ?? true}
+      {...(visible !== undefined && { dialogClassName: "qualification-settings-confirmation" })}
+    />
+  );
+}
 export function MemberContext({ name, id }: { name: string; id: string }) {
   const { t } = useTranslation("qualifications");
   return (
@@ -27,7 +46,7 @@ export function LevelContext({ level }: { level: DTO["QualificationLevel"] | und
   return level ? (
     <p className="qualification-command-context">
       <strong>
-        {level.game.toUpperCase()} · {t("stage")}: {t(level.code)}
+        {level.game.toUpperCase()} · {t("stage")} {level.position}
       </strong>
       <span>{level.name}</span>
       <code>{level.id}</code>
@@ -36,9 +55,11 @@ export function LevelContext({ level }: { level: DTO["QualificationLevel"] | und
 }
 export function Recovery({
   command,
+  onAttempt,
   onRecovered,
 }: {
   command: ReturnType<typeof useQualificationCommand>;
+  onAttempt?: (() => void) | undefined;
   onRecovered: () => void | Promise<void>;
 }) {
   const { t } = useTranslation("qualifications");
@@ -48,6 +69,7 @@ export function Recovery({
       variant="outline"
       disabled={command.pending || command.seconds > 0}
       onClick={async () => {
+        onAttempt?.();
         if (await command.recover()) await onRecovered();
       }}
     >
@@ -239,9 +261,11 @@ export function ActionActor({ actor }: { actor: DTO["QualificationActionActor"] 
 export function RuleHistory({
   level,
   manage = false,
+  visible = true,
 }: {
   level: DTO["QualificationLevel"];
   manage?: boolean;
+  visible?: boolean;
 }) {
   const { t } = useTranslation("qualifications"),
     [open, setOpen] = useState(false),
@@ -250,7 +274,7 @@ export function RuleHistory({
   const query = useQualificationQuery(
     `${path}?${queryString({ limit: 25, cursor: pages.cursor })}`,
     manage ? "EnvelopeListQualificationRuleHistory" : "EnvelopeListQualificationRuleVersion",
-    open,
+    open && visible,
   );
   pages.recover(query.error);
   return (

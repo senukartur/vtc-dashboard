@@ -756,7 +756,7 @@ for (const locale of ["en", "ru"] as const)
         promotionDialog.getByText("d3400000-0000-4000-8000-000000000002", { exact: true }),
       ).toBeVisible();
       await expect(promotionDialog).toContainText(
-        locale === "en" ? "Progression stage: Driver III" : "Ступень квалификации: Водитель III",
+        locale === "en" ? "Progression stage 2" : "Ступень квалификации 2",
       );
       await promotionDialog.screenshot({
         path: info.outputPath(`qualification-promotion-context-${locale}.png`),
@@ -786,9 +786,7 @@ for (const locale of ["en", "ru"] as const)
         renameDialog.getByText("d3400000-0000-4000-8000-000000000001", { exact: true }),
       ).toBeVisible();
       await expect(renameDialog).toContainText(
-        locale === "en"
-          ? "ETS2 · Progression stage: Trainee"
-          : "ETS2 · Ступень квалификации: Стажёр",
+        locale === "en" ? "ETS2 · Progression stage 1" : "ETS2 · Ступень квалификации 1",
       );
       await renameDialog.screenshot({
         path: info.outputPath(`qualification-rename-context-${locale}.png`),
@@ -832,9 +830,7 @@ for (const locale of ["en", "ru"] as const)
         dialog.getByText("d3400000-0000-4000-8000-000000000001", { exact: true }),
       ).toBeVisible();
       await expect(dialog).toContainText(
-        locale === "en"
-          ? "ETS2 · Progression stage: Trainee"
-          : "ETS2 · Ступень квалификации: Стажёр",
+        locale === "en" ? "ETS2 · Progression stage 1" : "ETS2 · Ступень квалификации 1",
       );
       await dialog.screenshot({
         path: info.outputPath(`qualification-publication-context-${locale}.png`),

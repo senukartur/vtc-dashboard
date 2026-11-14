@@ -1,6 +1,6 @@
 import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { formatQuantity } from "../../shared/formatting.js";
 import { queryString, useCursorPages } from "../../shared/paging.js";
@@ -27,23 +27,19 @@ const games = [
 ] as const;
 
 /** Gate: without company.read no workspace query hook mounts, so nothing is requested. */
-export function QualificationsPage({ embedded = false }: { embedded?: boolean } = {}) {
+export function QualificationsPage() {
   const session = useSession(),
     { t } = useTranslation("qualifications"),
     [params, setParams] = useSearchParams(),
-    { hash } = useLocation(),
-    navigate = useNavigate(),
     game: Game = params.get("game") === "ats" ? "ats" : "ets2";
   if (!session.self?.capabilities.includes("company.read"))
     return (
       <div className="qualification-workspace stack">
-        {!embedded && (
-          <header className="qualification-header">
-            <div className="qualification-title">
-              <h1>{t("title")}</h1>
-            </div>
-          </header>
-        )}
+        <header className="qualification-header">
+          <div className="qualification-title">
+            <h1>{t("title")}</h1>
+          </div>
+        </header>
         <Card>
           <p>{t("forbidden")}</p>
         </Card>
@@ -59,7 +55,7 @@ export function QualificationsPage({ embedded = false }: { embedded?: boolean } 
     <div className="qualification-workspace stack">
       <header className="qualification-header">
         <div className="qualification-title">
-          {!embedded && <h1>{t("title")}</h1>}
+          <h1>{t("title")}</h1>
           <p className="qualification-intro">{t("intro")}</p>
           <p className="qualification-roles">{t("roles")}</p>
         </div>
@@ -67,12 +63,7 @@ export function QualificationsPage({ embedded = false }: { embedded?: boolean } 
           aria-label={t("game")}
           value={game}
           options={games}
-          onValueChange={(value) => {
-            if (!embedded) return setParams({ game: value });
-            const next = new URLSearchParams(params);
-            next.set("game", value);
-            navigate({ search: next.toString(), hash });
-          }}
+          onValueChange={(value) => setParams({ game: value })}
         />
       </header>
       <Workspace key={`${scope}:${game}`} game={game} />
@@ -251,7 +242,7 @@ function MemberQualification({
       progress.error.setupRequired;
   pages.recover(history.error);
   // Progress and the level pointer can describe different instants.
-  const terminal = level?.code === "driver_i";
+  const terminal = level?.terminal;
   const hasEffectiveRuleAtProgress =
     !!p && (p.requiredTrips !== null || p.requiredDistanceM !== null || p.eligibleForConfirmation);
   const absentMinimum = t(
@@ -267,7 +258,7 @@ function MemberQualification({
       ? "eligible"
       : hasEffectiveRuleAtProgress
         ? "ineligible"
-        : level && !level.ruleVersionId
+        : level && !level.promotionConfigured
           ? "progressUnconfigured"
           : "progressUnavailable";
   const currentRules = useQualificationQuery(
@@ -370,7 +361,7 @@ function MemberQualification({
         {history.data && history.data.data.data.items.length === 0 && <p>{t("emptyHistory")}</p>}
         {history.data?.data.data.items.map((a) => (
           <article className="qualification-history" key={a.id}>
-            <strong>{levels.find((l) => l.id === a.levelId)?.name ?? a.levelId}</strong>
+            <strong>{a.levelName}</strong>
             {manage && "purpose" in a && (
               <>
                 <p>
