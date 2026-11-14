@@ -40,6 +40,12 @@ interface WorkspaceSources {
       computedAt: string,
     ): Promise<NonNullable<Stage3Summary["reviewQueue"]>>;
   };
+  qualifications?: {
+    workspacePromotionsReadyInTransaction(
+      tx: TxContext,
+      computedAt: string,
+    ): Promise<NonNullable<Stage3Summary["promotionsReady"]>>;
+  };
   admissions?: {
     submittedCountInTransaction(tx: TxContext, actor: Actor): Promise<number>;
   };
@@ -118,9 +124,14 @@ export function createWorkspaceSummary(
       }
       if (!stage3) return summary;
       const { reviewQueue: legacyReviewQueue, ...sections } = summary;
+      const promotionsReady =
+        sources.qualifications && allowed("qualifications.manage")
+          ? await sources.qualifications.workspacePromotionsReadyInTransaction(tx, computedAt)
+          : undefined;
       return {
         ...sections,
         ...(review ? { reviewQueue: review } : legacyReviewQueue ? { legacyReviewQueue } : {}),
+        ...(promotionsReady ? { promotionsReady } : {}),
       };
     });
   }

@@ -17,7 +17,9 @@ import {
 import { decimalColumn, idColumn, utcColumn } from "../../core/values.js";
 import { membership } from "../identity/index.js";
 
-export { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+export { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+
+export { alias } from "drizzle-orm/mysql-core";
 
 const fk = (name: string, column: AnyMySqlColumn, target: AnyMySqlColumn) =>
   foreignKey({ name, columns: [column], foreignColumns: [target] }).onDelete("restrict");
@@ -134,6 +136,7 @@ export const qualificationStates = mysqlTable(
     game: game("game").notNull(),
     assignmentId: idColumn("assignment_id"),
     eligibleSince: utcColumn("eligible_since"),
+    eligibilityEvaluatedAt: utcColumn("eligibility_evaluated_at"),
     version: int("version", { unsigned: true }).notNull(),
   },
   (t) => [
