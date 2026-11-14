@@ -103,24 +103,62 @@ for (const route of ["/foundation", "/foundation/member"]) {
           name: ru ? "Состояние примера" : "Example state",
           exact: true,
         });
-        for (const item of ["loading", "empty", "error", "partial", "forbidden"]) {
+        const trips = page.getByRole("table", {
+          name: ru
+            ? "Вымышленные сводки рейсов без доказательств и закрытых подробностей проверки."
+            : "Fictional trip summaries. No report evidence or private review details.",
+          exact: true,
+        });
+        const available = ru ? "Показать доступный пример" : "Show available example";
+        for (const item of ["loading", "empty", "filtered", "error", "partial", "forbidden"]) {
           await state.selectOption(item);
-          if (item === "loading")
+          if (item === "loading") {
+            // Skeleton rows keep the headers; the busy table announces loading once.
+            await expect(trips).toHaveAttribute("aria-busy", "true");
             await expect(
-              page.getByText(ru ? "Загружаем синтетические рейсы…" : "Loading synthetic trips…", {
+              trips.getByRole("columnheader", {
+                name: ru ? "Водитель / игра" : "Driver / game",
                 exact: true,
               }),
-            ).toBeVisible();
-          if (item === "empty")
+            ).toBeAttached();
+            await expect(trips.locator("tbody.data-table-skeleton tr")).toHaveCount(3);
+            await expect(trips.locator("tbody.data-table-skeleton")).toHaveAttribute(
+              "aria-hidden",
+              "true",
+            );
+            await expect(
+              page.getByRole("status").filter({ hasText: ru ? "Загрузка…" : "Loading…" }),
+            ).toHaveCount(1);
+            await expect(page.getByText("Fixture Driver", { exact: true })).toHaveCount(0);
+          }
+          if (item === "empty") {
             await expect(
               page.getByRole("heading", {
                 name: ru ? "В этом примере нет рейсов" : "No trips in this example",
               }),
             ).toBeVisible();
-          if (item === "error")
+            await expect(trips).not.toHaveAttribute("aria-busy", "true");
+            await expect(page.getByRole("button", { name: available, exact: true })).toBeVisible();
+          }
+          if (item === "filtered") {
+            await expect(trips).toContainText(ru ? "Ничего не найдено" : "Nothing found");
+            await expect(
+              page.getByRole("button", {
+                name: ru ? "Сбросить фильтры" : "Reset filters",
+                exact: true,
+              }),
+            ).toBeVisible();
+          }
+          if (item === "error") {
             await expect(page.getByRole("alert")).toContainText(
               ru ? "Не удалось загрузить пример" : "Could not load this example",
             );
+            await expect(
+              page
+                .getByRole("alert")
+                .getByRole("button", { name: ru ? "Повторить" : "Retry", exact: true }),
+            ).toBeVisible();
+          }
           if (item === "partial") {
             await expect(
               page.getByRole("cell", { name: ru ? /Недоступно$/ : /Unavailable$/ }),
@@ -140,6 +178,22 @@ for (const route of ["/foundation", "/foundation/member"]) {
           }
           await noOverflow(page);
           await capture(page, info, `${locale}-${item}`);
+          if (item === "filtered") {
+            // Reset unmounts with the empty row, so focus moves to the stable state selector.
+            await page
+              .getByRole("button", { name: ru ? "Сбросить фильтры" : "Reset filters", exact: true })
+              .click();
+            await expect(state).toBeFocused();
+            await expect(state).toHaveValue("success");
+            await expect(page.getByText("Fixture Driver", { exact: true })).toBeVisible();
+          }
+          if (item === "error") {
+            await page
+              .getByRole("button", { name: ru ? "Повторить" : "Retry", exact: true })
+              .click();
+            await expect(page.getByRole("alert")).toHaveCount(0);
+            await expect(page.getByText("Fixture Driver", { exact: true })).toBeVisible();
+          }
         }
         await state.selectOption("success");
         await expect(city).toHaveValue(selected);
@@ -162,6 +216,182 @@ for (const route of ["/foundation", "/foundation/member"]) {
       },
     );
   }
+}
+
+for (const locale of ["ru", "en"]) {
+  test(
+    `shared server table ${locale}: header sort, cursor pages, busy state and phone cards`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const ru = locale === "ru";
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto("/foundation");
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption(locale);
+      const cards = await page.evaluate(() => matchMedia("(max-width: 760px)").matches);
+      const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+      expect(cards).toBe(info.project.name === "mobile-chromium");
+      const region = page.getByRole("region", {
+        name: ru ? "Таблица с сервера" : "Server table",
+        exact: true,
+      });
+      const table = region.getByRole("table", {
+        name: ru
+          ? "Синтетические рейсы компании, сортировка и страницы в браузере"
+          : "Synthetic company trips, sorted and paged locally",
+        exact: true,
+      });
+      const header = (name: string) => table.getByRole("columnheader", { name, exact: true });
+      const completed = header(ru ? "Завершён" : "Completed");
+      const distance = header(ru ? "Пробег" : "Distance");
+      const firstRow = table.locator("tbody tr").first();
+      const pager = region.getByRole("navigation", {
+        name: ru ? "Страницы" : "Pages",
+        exact: true,
+      });
+      const previous = pager.getByRole("button", {
+        name: ru ? "Предыдущая страница" : "Previous page",
+        exact: true,
+      });
+      const next = pager.getByRole("button", {
+        name: ru ? "Следующая страница" : "Next page",
+        exact: true,
+      });
+      const summary = pager.locator(".pager-summary");
+      const range = (from: number, to: number) =>
+        ru ? `${from}–${to} из 11` : `${from}–${to} of 11`;
+      await expect(table.locator("tbody tr")).toHaveCount(4);
+      await expect(firstRow).toContainText("#1046");
+      await expect(summary).toHaveText(range(1, 4));
+      await expect(previous).toHaveAttribute("aria-disabled", "true");
+      await expect(previous).toBeDisabled();
+      await expect(next).toBeEnabled();
+      // Only API-sortable columns carry aria-sort; the active one names its direction.
+      await expect(completed).toHaveAttribute("aria-sort", "descending");
+      await expect(distance).toHaveAttribute("aria-sort", "none");
+      await expect(header(ru ? "Водитель" : "Driver")).not.toHaveAttribute("aria-sort", /.*/);
+      for (const button of [previous, next]) {
+        const size = await button.boundingBox();
+        expect(size?.height ?? 0).toBeGreaterThanOrEqual(coarse ? 40 : 29.5);
+        expect(size?.width ?? 0).toBeGreaterThanOrEqual(coarse ? 40 : 29.5);
+      }
+      await noOverflow(page);
+      await capture(page, info, `server-table-${locale}`);
+
+      if (!cards) {
+        const sortCompleted = completed.getByRole("button", {
+          name: ru ? "Завершён" : "Completed",
+          exact: true,
+        });
+        const sortDistance = distance.getByRole("button", {
+          name: ru ? "Пробег" : "Distance",
+          exact: true,
+        });
+        await expect(completed.locator(".data-table-sort-icon")).toHaveAttribute(
+          "data-direction",
+          "desc",
+        );
+        await expect(distance.locator(".data-table-sort-icon")).toHaveAttribute(
+          "data-direction",
+          "none",
+        );
+        await expect(region.getByRole("combobox")).toBeHidden();
+        // Keyboard only: Enter flips the active column, Tab reaches the next sortable header.
+        await sortCompleted.focus();
+        await page.keyboard.press("Enter");
+        await expect(completed).toHaveAttribute("aria-sort", "ascending");
+        await expect(sortCompleted).toBeFocused();
+        await expect(firstRow).toContainText("#1036");
+        await page.keyboard.press("Tab");
+        await expect(sortDistance).toBeFocused();
+        await page.keyboard.press("Enter");
+        // Another column starts in its default direction.
+        await expect(distance).toHaveAttribute("aria-sort", "descending");
+        await expect(completed).toHaveAttribute("aria-sort", "none");
+        await expect(distance.locator(".data-table-sort-icon")).toHaveAttribute(
+          "data-direction",
+          "desc",
+        );
+        await expect(sortDistance).toBeFocused();
+        await expect(firstRow).toContainText("#1038");
+        await capture(page, info, `server-table-sorted-${locale}`);
+        await sortCompleted.click();
+        await expect(completed).toHaveAttribute("aria-sort", "descending");
+      } else {
+        // Phone cards: headers are hidden, rows carry labels and a select replaces header sort.
+        await expect(completed.getByRole("button")).toBeHidden();
+        await expect(firstRow.locator(".data-table-label").nth(1)).toBeVisible();
+        await expect(firstRow.locator(".data-table-label").nth(1)).toHaveText(
+          ru ? "Завершён" : "Completed",
+        );
+        const [cellBox, cardBox] = [
+          await firstRow.locator("td").nth(1).boundingBox(),
+          await firstRow.boundingBox(),
+        ];
+        expect(cellBox?.width ?? 0).toBeGreaterThanOrEqual((cardBox?.width ?? 0) * 0.4);
+        const sort = region.getByRole("combobox", {
+          name: ru ? "Сортировка" : "Sort",
+          exact: true,
+        });
+        await expect(sort).toBeVisible();
+        await expect(sort.locator("option")).toHaveText(
+          ru
+            ? [
+                "Завершён, сначала новые",
+                "Завершён, сначала старые",
+                "Пробег, сначала больше",
+                "Пробег, сначала меньше",
+              ]
+            : [
+                "Completed, newest first",
+                "Completed, oldest first",
+                "Distance, longest first",
+                "Distance, shortest first",
+              ],
+        );
+        await sort.selectOption("completed:asc");
+        await expect(completed).toHaveAttribute("aria-sort", "ascending");
+        await expect(firstRow).toContainText("#1036");
+        await sort.selectOption("distance:desc");
+        await expect(distance).toHaveAttribute("aria-sort", "descending");
+        await expect(firstRow).toContainText("#1038");
+        await sort.selectOption("completed:desc");
+        const nextText = pager.locator(".pager-next .pager-text");
+        await expect(nextText).toBeVisible();
+        await expect(nextText).toHaveText(ru ? "Следующая" : "Next");
+        await capture(page, info, `server-table-cards-${locale}`);
+      }
+      await expect(firstRow).toContainText("#1046");
+
+      // Next keeps the previous rows dimmed under a busy table, then shows the next range.
+      await next.click();
+      await expect(table).toHaveAttribute("aria-busy", "true");
+      await expect(region.locator(".data-table")).toHaveAttribute("data-busy", "true");
+      await expect(next).toHaveAttribute("aria-disabled", "true");
+      await expect(previous).toHaveAttribute("aria-disabled", "true");
+      await expect(next).toBeFocused();
+      await expect(summary).toHaveText(range(5, 8));
+      await expect(table).not.toHaveAttribute("aria-busy", "true");
+      await expect(firstRow).toContainText("#1042");
+      await next.click();
+      await expect(summary).toHaveText(range(9, 11));
+      await expect(table.locator("tbody tr")).toHaveCount(3);
+      // The last page: Next stays focused but unavailable, and a click does nothing.
+      await expect(next).toHaveAttribute("aria-disabled", "true");
+      await expect(next).toBeFocused();
+      await next.click({ force: true });
+      await expect(summary).toHaveText(range(9, 11));
+      await expect(previous).toBeEnabled();
+      await capture(page, info, `server-table-last-${locale}`);
+      await region
+        .getByRole("button", { name: ru ? "Без общего числа" : "Without total", exact: true })
+        .click();
+      await expect(summary).toHaveText(ru ? "Стр. 3" : "Page 3");
+      await previous.click();
+      await expect(summary).toHaveText(ru ? "Стр. 2" : "Page 2");
+      await noOverflow(page);
+    },
+  );
 }
 
 test(
@@ -1091,7 +1321,7 @@ test(
     await expect(chart.getByRole("rowheader", { name: "2026-10-17", exact: true })).toBeVisible();
     await expect(chart.getByRole("cell", { name: "12.5005 km", exact: true })).toBeVisible();
     await page.getByRole("combobox", { name: "Example state", exact: true }).selectOption("error");
-    await page.getByRole("button", { name: "Retry example", exact: true }).click();
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(page.getByText("Fixture Driver", { exact: true })).toBeVisible();
   },
 );

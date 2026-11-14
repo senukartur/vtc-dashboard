@@ -36,6 +36,7 @@ export function TripListFilters({
     filters.period,
     filters.ownerId,
   ].filter(Boolean).length;
+  // The completion order lives in the table header (or its phone select); Reset restores it too.
   const canReset = filterCount > 0 || !!search || filters.order !== "completion_desc";
   return (
     <fieldset className="trips-filter-group" aria-label={t("filters")}>
@@ -132,19 +133,6 @@ export function TripListFilters({
                   {t(period)}
                 </option>
               ))}
-            </Select>
-          </div>
-          <div className="trips-filter trips-filter-order">
-            <Label htmlFor="trip-order" className="visually-hidden">
-              {t("completionOrder")}
-            </Label>
-            <Select
-              id="trip-order"
-              value={filters.order}
-              onChange={(e) => onChange("order", e.target.value)}
-            >
-              <option value="completion_desc">{t("newestFirst")}</option>
-              <option value="completion_asc">{t("oldestFirst")}</option>
             </Select>
           </div>
           {canReset && (

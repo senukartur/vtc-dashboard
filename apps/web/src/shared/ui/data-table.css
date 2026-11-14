@@ -1,0 +1,401 @@
+/* Shared DataTable and Pager (VTC-155). Selectors stay low in specificity so a feature can scope
+   column widths and phone card layouts under its page class. Phone cards apply at and below
+   760px, or 800px for tables marked data-cards="800"; the two media blocks below match. */
+.data-table {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.data-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+.data-table .table td {
+  vertical-align: middle;
+}
+.data-table .table :is(th, td):first-child {
+  padding-left: 12px;
+}
+.data-table .table :is(th, td):last-child {
+  padding-right: 12px;
+}
+.data-table .table caption:not(.visually-hidden) {
+  padding: 10px 12px 0;
+}
+.data-table .table .data-table-end {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.data-table-label,
+.data-table-head-text,
+.data-table-sort-select {
+  display: none;
+}
+
+/* Sortable header: the button carries the header text and an arrow (active) or a neutral icon. */
+.data-table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--target-min);
+  margin: 0 -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-badge);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.data-table-end .data-table-sort {
+  flex-direction: row-reverse;
+}
+.data-table-sort[data-active] {
+  color: var(--foreground);
+}
+.data-table-sort-icon {
+  flex-shrink: 0;
+}
+@media (hover: hover) {
+  .data-table-sort:hover {
+    background: var(--surface-hover);
+    color: var(--foreground);
+  }
+}
+
+/* First load keeps the headers and shows placeholder rows. */
+.data-table .table .data-table-skeleton td {
+  height: 34px;
+}
+.data-table-bone {
+  display: block;
+  max-width: 100%;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--surface-active);
+}
+.data-table-end .data-table-bone {
+  margin-inline-start: auto;
+}
+
+/* Next page or new sort: the previous rows stay dimmed under a thin progress line. */
+.data-table[data-busy] tbody {
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.data-table-progress {
+  position: absolute;
+  top: var(--data-table-head, 0px);
+  right: 0;
+  left: 0;
+  z-index: 2;
+  height: 2px;
+  overflow: hidden;
+  background: var(--surface-active);
+  pointer-events: none;
+}
+.data-table-progress::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 35%;
+  background: var(--accent);
+  animation: data-table-progress 1.1s ease-in-out infinite;
+}
+@keyframes data-table-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .data-table[data-busy] tbody {
+    transition: none;
+  }
+  .data-table-progress::after {
+    width: 100%;
+    animation: none;
+  }
+}
+
+/* Error, empty and empty-after-filters rows span the table with a next step. */
+.data-table .table tbody tr.data-table-state > td {
+  padding: 40px 12px;
+  text-align: center;
+  overflow-wrap: break-word;
+}
+.data-table-message {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 48ch;
+  color: var(--secondary);
+}
+.data-table-error {
+  color: var(--destructive);
+}
+
+.data-table-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 16px;
+  padding: 8px 12px;
+}
+.data-table-footer > :not(.pager) {
+  flex: 1 1 240px;
+}
+
+/* Pager: icon buttons with full names; phone widths show text buttons at touch size. */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+.pager-summary {
+  margin-inline-end: 4px;
+  color: var(--muted);
+  font-size: var(--font-small);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pager .pager-button {
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  padding-inline: 0;
+  font-size: 15px;
+  line-height: 1;
+}
+.pager-text {
+  display: none;
+}
+.pager .pager-button[aria-disabled="true"] {
+  border-color: var(--border-strong);
+  background: #28364a;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+@media (max-width: 760px) {
+  .pager {
+    display: grid;
+    flex: 1 1 100%;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    width: 100%;
+  }
+  .pager .pager-button {
+    gap: 6px;
+    padding-inline: 12px;
+    font-size: 13px;
+  }
+  .pager-previous {
+    order: 1;
+  }
+  .pager-summary {
+    order: 2;
+    margin: 0;
+    text-align: center;
+  }
+  .pager-next {
+    order: 3;
+  }
+  .pager-text {
+    display: inline;
+  }
+}
+
+/* Phone cards. Keep the two blocks below identical apart from the breakpoint and selector. */
+@media (max-width: 800px) {
+  .data-table[data-cards="800"] {
+    gap: 8px;
+    border: 0;
+    background: transparent;
+  }
+  .data-table[data-cards="800"] .data-table-scroll {
+    overflow: visible;
+  }
+  /* A block table would otherwise shrink a visible caption to a narrow column. */
+  .data-table[data-cards="800"] .table caption:not(.visually-hidden) {
+    display: block;
+    padding: 0 0 4px;
+    text-align: start;
+  }
+  .data-table[data-cards="800"] :is(.table, tbody, tbody tr, tbody td, tbody th) {
+    display: block;
+  }
+  .data-table[data-cards="800"] thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .data-table[data-cards="800"] .data-table-sort {
+    display: none;
+  }
+  .data-table[data-cards="800"] :is(.data-table-head-text, .data-table-label) {
+    display: block;
+  }
+  .data-table[data-cards="800"] .data-table-label {
+    color: var(--muted);
+    font-size: var(--font-badge);
+    font-weight: 400;
+  }
+  .data-table[data-cards="800"] .data-table-sort-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .data-table[data-cards="800"] .data-table-sort-select select {
+    flex: 1;
+    min-width: 0;
+  }
+  .data-table[data-cards="800"] .table tbody tr {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+    margin-bottom: 8px;
+    padding: 8px 12px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .data-table[data-cards="800"] .table tbody :is(td, th),
+  .data-table[data-cards="800"] .table tbody :is(td, th):is(:first-child, :last-child) {
+    padding: 0;
+    /* Feature column widths size the table; in a card each cell takes its grid area. */
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    border: 0;
+    text-align: start;
+  }
+  .data-table[data-cards="800"] .table tbody tr.data-table-state > td {
+    grid-column: 1 / -1;
+    padding: 24px 0;
+    text-align: center;
+  }
+  .data-table[data-cards="800"] .data-table-footer {
+    padding: 0;
+  }
+  .data-table[data-cards="800"] .data-table-progress {
+    top: 0;
+  }
+  .data-table[data-cards="800"] .pager {
+    display: grid;
+    flex: 1 1 100%;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    width: 100%;
+  }
+  .data-table[data-cards="800"] .pager .pager-button {
+    gap: 6px;
+    padding-inline: 12px;
+    font-size: 13px;
+  }
+  .data-table[data-cards="800"] .pager-previous {
+    order: 1;
+  }
+  .data-table[data-cards="800"] .pager-summary {
+    order: 2;
+    margin: 0;
+    text-align: center;
+  }
+  .data-table[data-cards="800"] .pager-next {
+    order: 3;
+  }
+  .data-table[data-cards="800"] .pager-text {
+    display: inline;
+  }
+}
+@media (max-width: 760px) {
+  .data-table {
+    gap: 8px;
+    border: 0;
+    background: transparent;
+  }
+  .data-table .data-table-scroll {
+    overflow: visible;
+  }
+  /* A block table would otherwise shrink a visible caption to a narrow column. */
+  .data-table .table caption:not(.visually-hidden) {
+    display: block;
+    padding: 0 0 4px;
+    text-align: start;
+  }
+  .data-table :is(.table, tbody, tbody tr, tbody td, tbody th) {
+    display: block;
+  }
+  .data-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .data-table .data-table-sort {
+    display: none;
+  }
+  .data-table :is(.data-table-head-text, .data-table-label) {
+    display: block;
+  }
+  .data-table .data-table-label {
+    color: var(--muted);
+    font-size: var(--font-badge);
+    font-weight: 400;
+  }
+  .data-table .data-table-sort-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .data-table .data-table-sort-select select {
+    flex: 1;
+    min-width: 0;
+  }
+  .data-table .table tbody tr {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+    margin-bottom: 8px;
+    padding: 8px 12px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .data-table .table tbody :is(td, th),
+  .data-table .table tbody :is(td, th):is(:first-child, :last-child) {
+    padding: 0;
+    /* Feature column widths size the table; in a card each cell takes its grid area. */
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    border: 0;
+    text-align: start;
+  }
+  .data-table .table tbody tr.data-table-state > td {
+    grid-column: 1 / -1;
+    padding: 24px 0;
+    text-align: center;
+  }
+  .data-table .data-table-footer {
+    padding: 0;
+  }
+  .data-table .data-table-progress {
+    top: 0;
+  }
+}

@@ -24,6 +24,7 @@ Read the relevant card, [architecture](../../../docs/architecture/README.md), [b
 - Pass cancellation signals to transport, debounce search when appropriate, and discard obsolete requests. Cancel timers/subscriptions on cleanup.
 - Invalidate affected lists/details/totals after a successful command. Show server-confirmed results for report decisions, promotions, reconciliation and leadership transfer; speculative UI must not claim those decisions succeeded.
 - Use contract-defined pagination. Do not fetch every trip or catalog entry into the browser to filter it. Display labels are localized presentation; selection values remain canonical IDs.
+- Every cabinet table uses the shared `DataTable`; `<table>` and the `Table` primitive stay inside `shared/ui/`. Every paged server list uses the shared `Pager` with `useCursorPages`. Call `recover()` where a 409 means a stale cursor, and add `keepPreviousPage` placeholder data where the list's query hook supports it. Lists whose 409 means stale data keep their visible conflict, and pickers and the notification feed are excluded; ui-foundation.md lists them. See [ui-foundation.md](../../../docs/development/ui-foundation.md#data-tables-and-cursor-pages).
 
 ## Forms and content states
 
