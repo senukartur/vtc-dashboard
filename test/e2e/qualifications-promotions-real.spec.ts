@@ -240,7 +240,7 @@ test(
       const { pathname, search } = new URL(response.url());
       return pathname + search === expected && response.request().method() === method;
     };
-    let succeeded = false;
+    let cleanupFailed = false;
     let originalFirstId: string | undefined;
     let atsOnlyId: string | undefined;
     try {
@@ -446,7 +446,6 @@ test(
       await expect(
         russianHistory.getByText("ladder_archive_transfer", { exact: true }),
       ).toHaveCount(0);
-      succeeded = true;
     } finally {
       try {
         if (qualifications && originalFirstId) {
@@ -483,13 +482,15 @@ test(
           });
         }
       } catch {
-        if (succeeded) throw new Error("PROMOTION_BROWSER_FIXTURE_CLEANUP_FAILED");
+        cleanupFailed = true;
+      }
+      const closed = await Promise.allSettled([staff?.dispose(), fixture.close()]);
+      if (cleanupFailed || closed.some((result) => result.status === "rejected")) {
+        cleanupFailed = true;
         console.error("PROMOTION_BROWSER_FIXTURE_CLEANUP_FAILED");
-      } finally {
-        await staff?.dispose();
-        await fixture.close();
       }
     }
+    if (cleanupFailed) throw new Error("PROMOTION_BROWSER_FIXTURE_CLEANUP_FAILED");
   },
 );
 
