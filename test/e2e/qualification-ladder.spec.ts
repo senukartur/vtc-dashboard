@@ -187,8 +187,10 @@ test(
     await review.click();
     server.failResponse();
     await dialog.getByRole("button", { name: labels.en.confirmArchive, exact: true }).click();
-    await expect.poll(() => server.commands.length).toBe(1);
+    await expect(dialog.getByRole("alert")).toContainText("The result is uncertain");
+    expect(server.commands).toHaveLength(1);
     await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
     await expect(recover).toBeVisible();
     server.ladderRead(503);
     await page.getByRole("tab", { name: "General", exact: true }).click();
