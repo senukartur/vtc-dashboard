@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
-import { createUnitOfWork, newId, settingsFromEnvironment } from "@vtc/db";
+import { createUnitOfWork, newId, settingsFromEnvironment, utcIso } from "@vtc/db";
 import { reconciliationCandidates, reconciliationRules } from "@vtc/db/reconciliation-schema";
 import { eq, sourceMessages, sourceTrips, tripContributions, trips } from "@vtc/db/trips-schema";
 import {
@@ -36,6 +36,8 @@ const unit = createUnitOfWork(settingsFromEnvironment()),
       .digest("hex"),
   password = "Fictional-manual-rehearsal-passphrase-42",
   origin = "http://127.0.0.1:4173";
+// The preceding produce phase has completed before this isolated worker is launched.
+const eligibilityTrackingSince = phase === "worker" ? new Date().toISOString() : undefined;
 const compose = (stage3 = false) =>
   composeIdentity(
     unit,
@@ -47,7 +49,10 @@ const compose = (stage3 = false) =>
     { cursorKey: key("trips") },
     undefined,
     { key: key("manual"), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
-    { cursorKey: key("qualifications") },
+    {
+      cursorKey: key("qualifications"),
+      ...(eligibilityTrackingSince && { eligibilityTrackingSince }),
+    },
     { cursorKey: key("events") },
     { key: key("reconciliation") },
     { key: key("decisions") },
@@ -504,28 +509,49 @@ try {
           connection.query("UPDATE manual_correction_requests SET status=status"),
           (e) => [1044, 1142, 1143, 1227].includes(e.errno),
         );
+        step = "worker_eligibility_before";
+        assert.ok(eligibilityTrackingSince);
+        const readCredit = async (tripId) => {
+          const [row] = await unit.run((tx) =>
+            unit
+              .client(tx)
+              .select()
+              .from(tripContributions)
+              .where(eq(tripContributions.tripId, tripId)),
+          );
+          return row;
+        };
+        const readEligibility = async ({ ownerId, game }) => {
+          const [rows] = await connection.execute(
+            "SELECT CAST(assignment_id AS CHAR) assignmentId, CAST(eligible_since AS CHAR) eligible_since, CAST(eligibility_evaluated_at AS CHAR) eligibility_evaluated_at FROM qualification_states WHERE user_id=? AND game=?",
+            [ownerId, game],
+          );
+          assert.equal(rows.length, 1);
+          return rows[0];
+        };
+        const runtimeCredit = await readCredit(refs.runtimeTripId);
+        assert.equal(runtimeCredit.credited, true);
+        assert.ok(runtimeCredit.assignmentId);
+        assert.deepEqual(await readEligibility(runtimeCredit), {
+          assignmentId: runtimeCredit.assignmentId,
+          eligible_since: null,
+          eligibility_evaluated_at: null,
+        });
+
         step = "worker_catchup";
         await service.catchup();
         await runPass(createQueue(unit, [service.handler]), new AbortController().signal);
-        const [credit] = await unit.run((tx) =>
-          unit
-            .client(tx)
-            .select()
-            .from(tripContributions)
-            .where(eq(tripContributions.tripId, refs.workerTripId)),
-        );
+        const credit = await readCredit(refs.workerTripId);
         assert.equal(credit.credited, true);
         assert.equal(credit.actualDistanceM, "123400.000000000000000000");
-        const before = JSON.stringify(credit);
+        assert.equal(credit.assignmentId, runtimeCredit.assignmentId);
+        const before = await readEligibility(credit);
+        assert.equal(before.assignmentId, credit.assignmentId);
+        assert.equal(before.eligible_since, null);
+        assert.ok(utcIso(before.eligibility_evaluated_at) >= eligibilityTrackingSince);
         await runPass(createQueue(unit, [service.handler]), new AbortController().signal);
-        const [after] = await unit.run((tx) =>
-          unit
-            .client(tx)
-            .select()
-            .from(tripContributions)
-            .where(eq(tripContributions.tripId, refs.workerTripId)),
-        );
-        assert.equal(JSON.stringify(after), before);
+        assert.deepEqual(await readCredit(refs.workerTripId), credit);
+        assert.deepEqual(await readEligibility(credit), before);
       }
       step = "immutable_denials";
       for (const statement of [

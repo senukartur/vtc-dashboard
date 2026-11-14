@@ -26,7 +26,11 @@
     "trip_event_associations": ["SELECT", "INSERT", "UPDATE"],
     "trip_decision_catchup": ["SELECT", "INSERT", "UPDATE"],
     "trip_contributions": ["SELECT", "INSERT", "UPDATE"],
-    "qualification_states": ["SELECT", "INSERT", "UPDATE(version)"],
+    "qualification_states": [
+      "SELECT",
+      "INSERT",
+      "UPDATE(eligible_since,eligibility_evaluated_at,version)"
+    ],
     "qualification_promotion_reviews": ["SELECT", "INSERT", "UPDATE"],
     "manual_review_gates": ["SELECT", "INSERT", "UPDATE"],
     "trips": ["SELECT", "UPDATE"],

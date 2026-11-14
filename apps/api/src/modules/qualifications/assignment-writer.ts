@@ -14,6 +14,7 @@ export function createAssignmentWriter(
   unit: UnitOfWork,
   outbox: Pick<ReturnType<typeof createOutbox>, "append"> = createOutbox(unit),
   now = () => new Date().toISOString(),
+  trackEligibility = false,
 ) {
   return async (
     tx: TxContext,
@@ -22,22 +23,22 @@ export function createAssignmentWriter(
   ) => {
     const c = unit.client(tx);
     let [current] = await c
-      .select()
+      .select({
+        assignmentId: qualificationStates.assignmentId,
+        version: qualificationStates.version,
+      })
       .from(qualificationStates)
       .where(
         and(eq(qualificationStates.userId, input.userId), eq(qualificationStates.game, input.game)),
       )
       .for("update");
     if (!current) {
-      current = {
-        userId: input.userId,
-        game: input.game,
-        assignmentId: null,
-        eligibleSince: null,
-        version: 1,
-      };
-      await c.insert(qualificationStates).values(current);
+      current = { assignmentId: null, version: 1 };
+      await c
+        .insert(qualificationStates)
+        .values({ userId: input.userId, game: input.game, ...current });
     }
+    let before = null;
     if (current.assignmentId && input.purpose !== "historical_resolution") {
       const [old] = await c
         .select()
@@ -46,6 +47,7 @@ export function createAssignmentWriter(
         .for("update");
       if (!old || old.assignedAt > input.assignedAt || input.purpose === "reinstatement")
         throw identityError(409);
+      before = { game: old.game, assignmentId: old.id, levelId: old.levelId };
       await c
         .update(qualificationAssignments)
         .set({ endedAt: input.assignedAt })
@@ -56,7 +58,12 @@ export function createAssignmentWriter(
     await c
       .update(qualificationStates)
       .set({
-        ...(input.purpose === "historical_resolution" ? {} : { assignmentId: row.id }),
+        ...(input.purpose === "historical_resolution"
+          ? {}
+          : {
+              assignmentId: row.id,
+              ...(trackEligibility ? { eligibleSince: null, eligibilityEvaluatedAt: null } : {}),
+            }),
         version: current.version + 1,
       })
       .where(
@@ -65,9 +72,14 @@ export function createAssignmentWriter(
     await createAudit(unit).append(tx, {
       actorKind: "user",
       actorId: actor.userId,
-      operation: "membership.changed",
-      subjectKind: "user",
-      subjectId: input.userId,
+      operation:
+        input.purpose === "promotion" ? "qualification.promoted" : "qualification.assigned",
+      subjectKind: "qualification",
+      subjectId: row.id,
+      details: {
+        before,
+        after: { game: row.game, assignmentId: row.id, levelId: row.levelId },
+      },
       reason: "operator_request",
       occurredAt: now(),
     });
