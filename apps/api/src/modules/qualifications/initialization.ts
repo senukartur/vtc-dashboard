@@ -34,6 +34,7 @@ export const structuralLevels = {
 export function createQualificationInitialization(
   unit: UnitOfWork,
   outbox?: Pick<ReturnType<typeof createOutbox>, "append">,
+  eligibilityTrackingSince?: string,
 ) {
   return {
     async administrationLevels(tx: TxContext) {
@@ -151,7 +152,12 @@ export function createQualificationInitialization(
           .limit(1)
           .for("update");
         if (open) throw identityError(409);
-        await createAssignmentWriter(unit, outbox, () => assignedAt)(tx, actor, {
+        await createAssignmentWriter(
+          unit,
+          outbox,
+          () => assignedAt,
+          eligibilityTrackingSince !== undefined,
+        )(tx, actor, {
           userId,
           game: input.game,
           levelId: input.levelId,
@@ -201,7 +207,10 @@ export function createQualificationInitialization(
       for (const game of ["ats", "ets2"] as const) {
         const [state] = await unit
           .client(tx)
-          .select()
+          .select({
+            assignmentId: qualificationStates.assignmentId,
+            version: qualificationStates.version,
+          })
           .from(qualificationStates)
           .where(and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, game)))
           .for("update");
@@ -222,7 +231,13 @@ export function createQualificationInitialization(
         await unit
           .client(tx)
           .update(qualificationStates)
-          .set({ assignmentId: null, version: state.version + 1 })
+          .set({
+            assignmentId: null,
+            version: state.version + 1,
+            ...(eligibilityTrackingSince !== undefined
+              ? { eligibleSince: null, eligibilityEvaluatedAt: null }
+              : {}),
+          })
           .where(and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, game)));
       }
     },

@@ -293,6 +293,85 @@ test.each([
   },
 );
 
+test("Stage 3 workspace scopes ready counts independently of the dispatch selector", async () => {
+  const { actor, identity, now, tx } = workspaceFixture(["director"]);
+  const ready = vi.fn(async () => ({ ets2: 0, ats: 0 }));
+  const legacyQueue = vi.fn(async () => ({ count: 4, oldestCreatedAt: null }));
+  const reviewQueue = {
+    computedAt: snapshot,
+    waitingCount: 3,
+    duplicateCount: 1,
+    oldestAgeSeconds: null,
+    oldestQueuedAt: null,
+  };
+  const dispatch = vi.fn(async () => reviewQueue);
+  const sources = {
+    trips: { workspaceReviewQueueInTransaction: legacyQueue },
+    admissions: { submittedCountInTransaction: vi.fn(async () => 2) },
+  };
+  const legacy = {
+    computedAt: snapshot,
+    reviewQueue: { count: 4, oldestAgeSeconds: null },
+    newApplicationsCount: 2,
+  };
+  const staged = {
+    computedAt: snapshot,
+    legacyReviewQueue: legacy.reviewQueue,
+    newApplicationsCount: 2,
+  };
+
+  const withoutDispatch = createWorkspaceSummary(
+    identity,
+    { ...sources, qualifications: { workspacePromotionsReadyInTransaction: ready } },
+    now,
+  );
+  const withDispatch = createWorkspaceSummary(
+    identity,
+    {
+      ...sources,
+      qualifications: { workspacePromotionsReadyInTransaction: ready },
+      dispatch: { summaryInTransaction: dispatch },
+    },
+    now,
+  );
+  expect(await withDispatch.read(actor)).toEqual(legacy);
+  expect(dispatch).not.toHaveBeenCalled();
+  expect(ready).not.toHaveBeenCalled();
+
+  expect(await withoutDispatch.readStage3(actor)).toEqual({
+    ...staged,
+    promotionsReady: { ets2: 0, ats: 0 },
+  });
+  expect(ready).toHaveBeenCalledExactlyOnceWith(tx, snapshot);
+  expect(legacyQueue).toHaveBeenCalledTimes(2);
+
+  ready.mockResolvedValueOnce({ ets2: 2, ats: 5 });
+  expect(await withDispatch.readStage3(actor)).toEqual({
+    computedAt: snapshot,
+    newApplicationsCount: 2,
+    reviewQueue,
+    promotionsReady: { ets2: 2, ats: 5 },
+  });
+  expect(ready).toHaveBeenLastCalledWith(tx, snapshot);
+  expect(dispatch).toHaveBeenCalledExactlyOnceWith(tx, actor.userId, snapshot);
+  expect(legacyQueue).toHaveBeenCalledTimes(2);
+  expect(await createWorkspaceSummary(identity, sources, now).readStage3(actor)).toEqual(staged);
+  expect(ready).toHaveBeenCalledTimes(2);
+
+  const unauthorized = workspaceFixture(["dispatcher"]);
+  expect(
+    await createWorkspaceSummary(
+      unauthorized.identity,
+      {
+        qualifications: { workspacePromotionsReadyInTransaction: ready },
+        dispatch: { summaryInTransaction: dispatch },
+      },
+      now,
+    ).readStage3(unauthorized.actor),
+  ).toEqual({ computedAt: snapshot, reviewQueue });
+  expect(ready).toHaveBeenCalledTimes(2);
+});
+
 test("workspace route applies current session authority and no-store to success and failures", async () => {
   const { actor, identity, now } = workspaceFixture(["director"]);
   const submittedCountInTransaction = vi.fn(async () => 0);

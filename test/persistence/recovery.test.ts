@@ -22,6 +22,7 @@ import {
   manualReferencePriorFolder,
   notificationMaterialPriorFolder,
   notificationsPriorFolder,
+  qualificationEligibilityPriorFolder,
   qualificationRuleEditingPriorFolder,
   reconciliationPriorFolder,
   reset,
@@ -130,7 +131,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 30);
+      assert.equal(await runMigrations(settings), 31);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -187,7 +188,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 30);
+      assert.equal(await runMigrations(settings), 31);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -370,7 +371,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 30);
+      assert.equal(await runMigrations(guardedSettings()), 31);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_adr_requires_cargo','trip_trailer_shape')",
@@ -465,7 +466,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 30);
+        assert.equal(await runMigrations(settings), 31);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -523,7 +524,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 30);
+      assert.equal(await runMigrations(guardedSettings()), 31);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -578,7 +579,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 30);
+      assert.equal(await runMigrations(guardedSettings()), 31);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -632,7 +633,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 30);
+      assert.equal(await runMigrations(guardedSettings()), 31);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -715,7 +716,7 @@ await recoveryTest(
       // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
       // This is not a live backup/restore procedure and never stamps or replays the partial schema.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 30);
+      assert.equal(await runMigrations(settings), 31);
       assert.equal(await runMigrations(settings), 0);
       const [columns] = await connection.query<RowDataPacket[]>(
         "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
@@ -1159,7 +1160,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 19);
       await seedCatalogUpgradeRows(connection);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_facts"), 1);
-      assert.equal(await runMigrations(settings), 11);
+      assert.equal(await runMigrations(settings), 12);
       assert.equal(await runMigrations(settings), 0);
 
       for (const table of [
@@ -1242,7 +1243,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 30);
+      assert.equal(history.length, 31);
       assert.ok(history.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -2362,8 +2363,13 @@ await recoveryTest(
         })),
       );
 
-      assert.equal(await runMigrations(settings), 1);
-      assert.equal(await runMigrations(settings), 0);
+      const stage3Folder = await qualificationEligibilityPriorFolder();
+      try {
+        assert.equal(await runMigrations(settings, { folder: stage3Folder }), 1);
+        assert.equal(await runMigrations(settings, { folder: stage3Folder }), 0);
+      } finally {
+        await rm(stage3Folder, { recursive: true });
+      }
       const applied = await history();
       assert.equal(applied.length, 30);
       assert.deepEqual(applied.slice(0, -1), prefix);
@@ -2508,8 +2514,10 @@ await recoveryTest(
       const journal = JSON.parse(
         await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
       );
+      journal.entries = journal.entries.slice(0, 30);
       const entry = journal.entries.at(-1);
       assert.equal(entry.idx, 29);
+      assert.equal(entry.tag, "0029_orange_zaladane");
       const filename = `${entry.tag}.sql`;
       const sql = await readFile(join(migrationFolder, filename), "utf8");
       const boundary = sql.indexOf("-- Backfill the published queue clock");
@@ -2556,15 +2564,69 @@ await recoveryTest(
     try {
       // Reconstruct the known empty synthetic baseline used by the sticky-failure case.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 30);
+      assert.equal(await runMigrations(settings), 31);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(recovered.length, 30);
+      assert.equal(recovered.length, 31);
       assert.ok(recovered.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "eligibility tracking migration preserves qualification state with a null checkpoint",
+  async () => {
+    const connection = await testConnection();
+    const settings = guardedSettings();
+    let folder: string | undefined;
+    const userId = "e1340000-0000-4000-8000-000000000001";
+    const assignmentId = "e1340000-0000-4000-8000-000000000002";
+    const assignedAt = "2026-01-02 00:00:00.123";
+    const eligibleSince = "2026-02-03 00:00:00.456";
+    const state = async (checkpoint: boolean) => {
+      const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT CAST(user_id AS CHAR) userId, game, CAST(assignment_id AS CHAR) assignmentId,
+          version, CAST(eligible_since AS CHAR) eligibleSince
+          ${checkpoint ? ", CAST(eligibility_evaluated_at AS CHAR) eligibilityEvaluatedAt" : ""}
+          FROM qualification_states WHERE user_id=?`,
+        [userId],
+      );
+      return rows;
+    };
+    try {
+      await reset(connection);
+      folder = await qualificationEligibilityPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 30);
+      await connection.execute(
+        "INSERT INTO identity_users (id,name,email,created_at,updated_at) VALUES (?,'Fictional member','eligibility@example.invalid',?,?)",
+        [userId, assignedAt, assignedAt],
+      );
+      await connection.execute(
+        "INSERT INTO identity_memberships (user_id,status) VALUES (?,'active')",
+        [userId],
+      );
+      await connection.execute(
+        "INSERT INTO qualification_assignments (id,user_id,game,level_id,assigned_at,purpose,reason) VALUES (?,?,'ets2','02800000-0000-4000-8000-000000000001',?,'initial','Fictional assignment')",
+        [assignmentId, userId, assignedAt],
+      );
+      await connection.execute(
+        "INSERT INTO qualification_states (user_id,game,assignment_id,version,eligible_since) VALUES (?,'ets2',?,5,?)",
+        [userId, assignmentId, eligibleSince],
+      );
+      const before = { userId, game: "ets2", assignmentId, version: 5, eligibleSince };
+      assert.deepEqual(await state(false), [before]);
+      assert.equal(await runMigrations(settings), 1);
+      assert.deepEqual(await state(true), [{ ...before, eligibilityEvaluatedAt: null }]);
+      assert.equal(await runMigrations(settings), 0);
+      assert.deepEqual(await state(true), [{ ...before, eligibilityEvaluatedAt: null }]);
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
     }
   },
   SCHEMA_SETUP_TIMEOUT_MS,
