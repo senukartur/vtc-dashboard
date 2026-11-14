@@ -38,6 +38,7 @@ import type { Trips } from "./modules/trips/service.js";
 import { registerWorkspaceSummaryRoutes } from "./modules/workspace-summary/http.js";
 import { assetCache, keepsCacheControl } from "./platform/http/cache.js";
 import { ingressTrust } from "./platform/http/ingress.js";
+import { logRequestFailure } from "./platform/http/request-failure.js";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
 import type { Administration } from "./use-cases/administration.js";
 import type { createWorkspaceSummary } from "./use-cases/workspace-summary.js";
@@ -97,6 +98,7 @@ export async function createApp(options: AppOptions) {
   const app = Fastify({
     logger: false,
     bodyLimit: 64 * 1024,
+    requestIdHeader: false,
     genReqId: () => randomUUID(),
     trustProxy: ingressTrust(options.proxyAddress),
   });
@@ -159,8 +161,7 @@ export async function createApp(options: AppOptions) {
           : "60",
       );
     if (status === 503) reply.header("Retry-After", "1");
-    if (status >= 500)
-      console.error(JSON.stringify({ event: "request_failed", requestId: request.id, code }));
+    if (status >= 500) logRequestFailure(request, status, code, error);
     reply.code(status).send({
       error: {
         code,

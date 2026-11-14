@@ -1,6 +1,7 @@
 import type { components } from "@vtc/contracts";
 import { applicationId } from "@vtc/db";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { logRequestFailure } from "../../platform/http/request-failure.js";
 import { csrfProtection } from "../identity/http.js";
 import { type Identity, identityError } from "../identity/service.js";
 import {
@@ -134,6 +135,7 @@ export async function registerTelemetryRoutes(
             : new TelemetryError(503, "TEMPORARILY_UNAVAILABLE");
       if (e.statusCode === 401) reply.header("WWW-Authenticate", 'Bearer realm="telemetry"');
       if (e.statusCode === 429) reply.header("Retry-After", String(e.retryAfter ?? 1));
+      if (e.statusCode >= 500) logRequestFailure(r, e.statusCode, "TEMPORARILY_UNAVAILABLE", error);
       return reply.code(e.statusCode).send({
         error: { code: e.publicCode, retryable: e.statusCode === 429 || e.statusCode >= 500 },
         requestId: r.id,
