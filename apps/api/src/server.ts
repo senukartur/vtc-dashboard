@@ -33,6 +33,7 @@ try {
             config.analytics,
             config.notifications,
             config.eventMedia,
+            config.dispatchReviewStage3Enabled,
           ),
         }
       : {}),

@@ -19,6 +19,8 @@ import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
+import { queueClock, syncReviewReasons } from "./review-queue.js";
+import { ingestionConflictCodes } from "./service.js";
 export interface GroupSnapshot {
   before: TripState[];
   after: TripState[];
@@ -66,7 +68,20 @@ export function tripMatchDiscovery(
     .limit(limit)
     .for("update");
 }
-export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
+// Like the trip decisions worker: a source revision that ingestion held (not current, carrying
+// its conflict codes) is never selected by a merge or reversal; its codes stay review reasons.
+function heldCodes(f: NormalizedTripEvidence, current: readonly (string | null)[]) {
+  return current.includes(f.factRevisionId)
+    ? []
+    : f.reasonCodes.filter((code) => ingestionConflictCodes.has(code));
+}
+function withoutHeld(all: readonly NormalizedTripEvidence[], current: readonly (string | null)[]) {
+  return {
+    selectable: all.filter((f) => !heldCodes(f, current).length),
+    held: [...new Set(all.flatMap((f) => heldCodes(f, current)))],
+  };
+}
+export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stage3Enabled = false) {
   const c = (tx: TxContext) => unit.client(tx),
     groups = createTripGroups(unit),
     facts = createFactRepository(unit);
@@ -117,12 +132,19 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
   }
   async function write(tx: TxContext, row: TripState, patch: Partial<TripState>) {
     if (row.version >= 2147483647) throw identityError(409);
+    const at = now().toISOString();
     await c(tx)
       .update(trips)
-      .set({ ...patch, version: row.version + 1, assessmentPending: true })
+      .set({
+        ...patch,
+        ...queueClock(row, patch, at),
+        version: row.version + 1,
+        assessmentPending: true,
+      })
       .where(eq(trips.id, row.id));
     const [after] = await c(tx).select().from(trips).where(eq(trips.id, row.id)).for("update");
     if (!after) throw new Error("TRIP_GROUP_WRITE_MISSING");
+    if (stage3Enabled) await syncReviewReasons(c(tx), after);
     if (after.currentFactId)
       await c(tx).insert(tripHistory).values({
         id: newId(),
@@ -131,7 +153,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
         factId: after.currentFactId,
         outcome: after.outcome,
         reasons: after.reviewReasons,
-        createdAt: now().toISOString(),
+        createdAt: at,
       });
     return after;
   }
@@ -179,7 +201,11 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
         : undefined;
       if (retained && !all.some((f) => f.factRevisionId === retained.factRevisionId))
         all.push(retained);
-      const selected = selectQuality(all, primary.currentFactId);
+      const { selectable, held } = withoutHeld(all, [
+          primary.currentFactId,
+          secondary.currentFactId,
+        ]),
+        selected = selectQuality(selectable, primary.currentFactId);
       if (!selected.selected || !primary.currentFactId || !secondary.currentFactId)
         throw identityError(409);
       const credits = await c(tx)
@@ -200,6 +226,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
           ...primary.reviewReasons,
           ...secondary.reviewReasons,
           ...selected.reasons,
+          ...held,
           ...(primary.decision === "accepted" &&
           selected.selected.factRevisionId !== primary.currentFactId
             ? ["confirmed_facts_require_review"]
@@ -216,11 +243,15 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
               ? {
                   ...change,
                   reviewReasons: reasons,
-                  reviewHold: before.some((t) => t.reviewHold) || selected.reasons.length > 0,
+                  reviewHold:
+                    before.some((t) => t.reviewHold) ||
+                    selected.reasons.length > 0 ||
+                    held.length > 0,
                   correctionPending:
                     primary.correctionPending ||
                     (primary.decision === "accepted" &&
                       (selected.reasons.length > 0 ||
+                        held.length > 0 ||
                         selected.selected.factRevisionId !== primary.currentFactId)),
                 }
               : { aliasOf: primary.id },
@@ -239,7 +270,11 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
                 >),
                 alternatives: all.map((f) => f.factRevisionId).sort(),
               }
-            : selected.provenance,
+            : // Held facts are not selectable but remain recorded alternatives.
+              {
+                ...(selected.provenance as NonNullable<GroupSnapshot["selection"]>),
+                alternatives: all.map((f) => f.factRevisionId).sort(),
+              },
       };
     },
     async reverse(tx: TxContext, snapshot: GroupSnapshot): Promise<TripState[]> {
@@ -304,14 +339,15 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
             members.map((t) => t.id),
           );
         if (all.some((f) => !snapshot.facts.includes(f.factRevisionId))) {
-          const choice = selectQuality(all, root.currentFactId);
+          const { selectable, held } = withoutHeld(all, [root.currentFactId]),
+            choice = selectQuality(selectable, root.currentFactId);
           const patch =
             root.decision === "accepted"
               ? {
                   correctionPending: true,
                   reviewHold: true,
                   reviewReasons: [
-                    ...new Set([...root.reviewReasons, "reversed_group_new_evidence"]),
+                    ...new Set([...root.reviewReasons, ...held, "reversed_group_new_evidence"]),
                   ].sort(),
                 }
               : {
@@ -321,12 +357,18 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
                     ...new Set([
                       ...root.reviewReasons,
                       ...choice.reasons,
+                      ...held,
                       "reversed_group_new_evidence",
                     ]),
                   ].sort(),
                 };
-          await c(tx).update(trips).set(patch).where(eq(trips.id, root.id));
-          Object.assign(root, patch);
+          const clock = queueClock(root, patch, now().toISOString());
+          await c(tx)
+            .update(trips)
+            .set({ ...patch, ...clock })
+            .where(eq(trips.id, root.id));
+          Object.assign(root, patch, clock);
+          if (stage3Enabled) await syncReviewReasons(c(tx), root);
           await c(tx)
             .update(tripHistory)
             .set({
@@ -344,16 +386,18 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
       // Diagnostic state changes neither the fact/version epoch nor adjudication/credit.
       const reasons = row.reviewReasons.filter((r) => r !== "candidate_search_overflow");
       if (pending) reasons.push("candidate_search_overflow");
+      const reviewReasons = [...new Set(reasons)].sort();
       await c(tx)
         .update(trips)
         .set({
-          reviewReasons: [...new Set(reasons)].sort(),
+          reviewReasons,
           assessmentPending:
             row.reviewReasons.includes("candidate_search_overflow") !== pending
               ? true
               : row.assessmentPending,
         })
         .where(eq(trips.id, row.id));
+      if (stage3Enabled) await syncReviewReasons(c(tx), { ...row, reviewReasons });
     },
     async searchEpoch(tx: TxContext, ownerId: string, game: "ets2" | "ats") {
       const [rows] = await c(tx)

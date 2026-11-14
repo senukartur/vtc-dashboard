@@ -92,6 +92,7 @@ export async function runJobsWorker(): Promise<void> {
           config.analytics,
           config.notifications,
           config.eventMedia,
+          config.dispatchReviewStage3Enabled,
         )
       : undefined;
     phase("jobs_trip_catchup");

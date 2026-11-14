@@ -21,6 +21,7 @@ import {
   tripHistory,
   trips,
 } from "@vtc/db/trips-schema";
+import { count, min } from "drizzle-orm";
 import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
 import { createOutbox, type TripEvent } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
@@ -38,7 +39,7 @@ import { telemetryAdapter } from "../sources/contracts/telemetry.js";
 import { createTripAdjudication } from "./adjudication.js";
 import { createContributionRegister } from "./contributions.js";
 import { createFactRepository, effectiveGameMode } from "./facts.js";
-import { createTripGroups } from "./groups.js";
+import { createTripGroups, type TripState } from "./groups.js";
 import {
   type ListOptions,
   normalizeListOptions,
@@ -47,6 +48,13 @@ import {
   tripSearchCondition,
 } from "./list-query.js";
 import { createTripReconciliation } from "./reconciliation.js";
+import {
+  createReviewQueueRepair,
+  queueClock,
+  type ReviewFilters,
+  reviewRoots,
+  syncReviewReasons,
+} from "./review-queue.js";
 
 export { type ListOptions, type TripSource, tripListQuery, tripSources } from "./list-query.js";
 
@@ -65,11 +73,13 @@ type SummaryRead = {
 
 export interface TripsConfig {
   cursorKey: string;
+  dispatchReviewStage3Enabled?: boolean;
 }
 export function validateTripsConfig(config: TripsConfig) {
   if (!/^[0-9a-f]{64}$/.test(config.cursorKey)) throw new Error("INVALID_TRIPS_CONFIG");
 }
 export interface TripsPorts {
+  adjudicationChanged?: (tx: TxContext, before: TripState, after: TripState) => Promise<void>;
   prepare?: (tx: TxContext, ownerId: string, game: "ets2" | "ats") => Promise<void>;
   decisionProjection?: (tx: TxContext, id: string, actor: Actor) => Promise<S["TripPrivate"]>;
   correctionRequested?: (
@@ -669,17 +679,22 @@ export function createTrips(
           reportingAt:
             fact.provider === "ets2telemetry" && fact.end.verifiedActual ? fact.end.utc : null,
         };
+    const reviewHold = trip.reviewHold || conflicts.length > 0 || confirmed;
+    const clock = queueClock(trip, { reviewHold }, at());
     await c(tx)
       .update(trips)
       .set({
         ...update,
+        ...clock,
         version,
         assessmentPending: true,
         reviewReasons: reasons,
-        reviewHold: trip.reviewHold || conflicts.length > 0 || confirmed,
+        reviewHold,
         correctionPending: trip.correctionPending || confirmed,
       })
       .where(eq(trips.id, tripId));
+    if (config.dispatchReviewStage3Enabled)
+      await syncReviewReasons(c(tx), { ...trip, reviewHold, reviewReasons: reasons });
     await c(tx)
       .insert(tripHistory)
       .values({
@@ -716,10 +731,9 @@ export function createTrips(
   ): Promise<S["TripSummary"][]> {
     if (!rows.length) return [];
     const ids = rows.map((row) => row.id);
-    const members = await ports.identity.memberSummariesInTransaction(
-      tx,
-      rows.map((row) => row.ownerId),
-    );
+    const members = await ports.identity.memberSummariesInTransaction(tx, [
+      ...new Set(rows.map((row) => row.ownerId)),
+    ]);
     const facts = await factsRepository.read(
       tx,
       rows.flatMap((row) => (row.currentFactId ? [row.currentFactId] : [])),
@@ -834,8 +848,92 @@ export function createTrips(
   return {
     config,
     groups,
-    adjudication: createTripAdjudication(unit, ports.catalogs),
-    reconciliation: createTripReconciliation(unit, now),
+    reviewQueueRepair: createReviewQueueRepair(unit),
+    adjudication: createTripAdjudication(
+      unit,
+      ports.catalogs,
+      now,
+      config.dispatchReviewStage3Enabled,
+      ports.adjudicationChanged,
+    ),
+    reconciliation: createTripReconciliation(unit, now, config.dispatchReviewStage3Enabled),
+    reviewRootsInTransaction(
+      tx: TxContext,
+      viewerId: string,
+      waiting: boolean,
+      filters?: ReviewFilters,
+    ) {
+      return c(tx)
+        .select({
+          id: trips.id,
+          ownerId: trips.ownerId,
+          game: trips.game,
+          decision: trips.decision,
+          queuedAt: trips.queuedAt,
+          reasonCodes: trips.reviewReasons,
+        })
+        .from(trips)
+        .where(reviewRoots(c(tx), viewerId, waiting, filters));
+    },
+    async waitingReviewTotalsInTransaction(tx: TxContext, viewerId: string, game?: "ets2" | "ats") {
+      const waiting = c(tx)
+        .select({ queuedAt: trips.queuedAt })
+        .from(trips)
+        .where(reviewRoots(c(tx), viewerId, true, game ? { game } : {}))
+        .as("waiting_review");
+      const [totals] = await c(tx)
+        .select({ waitingCount: count(), oldestQueuedAt: min(waiting.queuedAt) })
+        .from(waiting);
+      return {
+        waitingCount: totals?.waitingCount ?? 0,
+        oldestQueuedAt: totals?.oldestQueuedAt ?? null,
+      };
+    },
+    reviewCandidateRootsInTransaction(tx: TxContext, viewerId: string, name: string) {
+      return c(tx)
+        .select({ id: trips.id, version: trips.version, ownerId: trips.ownerId, game: trips.game })
+        .from(trips)
+        .where(and(isNull(trips.aliasOf), ne(trips.ownerId, viewerId)))
+        .as(name);
+    },
+    async reviewSummariesInTransaction(
+      tx: TxContext,
+      ids: string[],
+      actor: Actor & { locale: "en" | "ru" },
+    ) {
+      const result = new Map<
+        string,
+        {
+          trip: S["TripStage3ReviewQueueTrip"];
+          manualRevision: S["TripReviewRevision"] | null;
+        }
+      >();
+      const unique = [...new Set(ids)].sort();
+      for (let offset = 0; offset < unique.length; offset += 100) {
+        const batch = unique.slice(offset, offset + 100);
+        const rows = await groups.membersOfRoots(tx, batch, "share");
+        const roots = rows.filter((row) => row.aliasOf === null && row.ownerId !== actor.userId);
+        if (roots.length !== batch.length) throw new Error("TRIP_REVIEW_ROOTS_INVALID");
+        const manual = await manualMetadata(tx, batch);
+        const projected = await summaries(tx, roots, actor.locale, {
+          manual,
+          privateViewer: actor,
+        });
+        for (const [index, row] of roots.entries()) {
+          const summary = projected[index];
+          if (!summary) throw new Error("TRIP_SUMMARY_MISSING");
+          const revision = manual.get(row.id);
+          result.set(row.id, {
+            trip: { ...summary, createdAt: row.createdAt, number: row.number },
+            manualRevision: revision
+              ? { number: revision.number, submittedAt: revision.submittedAt }
+              : null,
+          });
+        }
+      }
+      return result;
+    },
+    projectReviewSourceInTransaction: factsRepository.projectEffective,
     prepareSourceInTransaction: async (tx: TxContext, owner: string, game: "ets2" | "ats") => {
       await ports.prepare?.(tx, owner, game);
     },
@@ -971,11 +1069,16 @@ export function createTrips(
         .update(trips)
         .set({
           reviewHold: true,
+          ...queueClock(row, { reviewHold: true }, at()),
           ...(correction
             ? { correctionPending: true, version: row.version + 1 }
             : { decision: "pending_review" as const }),
         })
         .where(eq(trips.id, tripId));
+      if (config.dispatchReviewStage3Enabled)
+        await syncReviewReasons(c(tx), { ...row, reviewHold: true });
+      if (correction)
+        await ports.adjudicationChanged?.(tx, row, { ...row, version: row.version + 1 });
       return correction ? row.version + 1 : row.version;
     },
     supersedeManualInTransaction(
