@@ -349,7 +349,9 @@ beforeAll(async () => {
 }, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
   service = createQualifications(unit, config, { identity, trips: tripService }, now);
+  // Each test starts its own synthetic clock and request budget.
   for (const table of [
+    "identity_limits",
     "trip_contribution_history",
     "trip_contributions",
     "qualification_promotion_reviews",
@@ -1026,9 +1028,12 @@ test("stage 3 member search and action history opt in to exact private represent
     expect(staged.headers.etag).toBe(legacy.headers.etag);
     expect(staged.headers["cache-control"]).toBe("no-store");
     const legacyAction = legacy.json().data.items[0];
+    expect(legacyAction).toHaveProperty("levelName");
     expect(legacyAction).not.toHaveProperty("assignmentReason");
     expect(Object.keys(legacyAction.promotion).sort()).toEqual(["confirmedAt", "id"]);
-    expect(staged.json().data.items[0]).toMatchObject({
+    const stagedAction = staged.json().data.items[0];
+    expect(stagedAction).not.toHaveProperty("levelName");
+    expect(stagedAction).toMatchObject({
       id: promotedId,
       assignmentReason: "Fictional promotion confirmation",
       promotion: {
@@ -3116,14 +3121,12 @@ test("HTTP routes enforce CSRF, strict inputs, ETags, scoped cursors, private DT
         })
       ).json().data,
     ).not.toHaveProperty("reviewRequired");
-    expect(
-      (
-        await app.inject({
-          url: "/api/v1/me/qualification-progress?game=ets2",
-          headers: { cookie: ownerCookie },
-        })
-      ).json().data,
-    ).toHaveProperty("reviewRequired", false);
+    const self = await app.inject({
+      url: "/api/v1/me/qualification-progress?game=ets2",
+      headers: { cookie: ownerCookie },
+    });
+    expect(self.statusCode).toBe(200);
+    expect(self.json().data).toHaveProperty("reviewRequired", false);
     expect(
       (
         await app.inject({

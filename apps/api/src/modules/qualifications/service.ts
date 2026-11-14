@@ -1402,13 +1402,13 @@ export function createQualifications(
             const common = {
               ...assignmentDto(row),
               endedAt: row.endedAt,
-              levelName: row.levelName,
               purpose: row.purpose,
               actor: qualificationActor(members, row.actorId),
             };
             if (!stage3)
               return {
                 ...common,
+                levelName: row.levelName,
                 promotion: proof ? { id: proof.id, confirmedAt: proof.confirmedAt } : null,
               };
             return {
