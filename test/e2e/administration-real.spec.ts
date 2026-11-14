@@ -531,14 +531,33 @@ test(
       await page.keyboard.press("Tab");
       await page.keyboard.press("Shift+Tab");
       await expect(audit).toBeFocused();
-      const initialLeft = await audit.evaluate((element) => element.scrollLeft);
-      await page.keyboard.press("ArrowRight");
-      await expect
-        .poll(() => audit.evaluate((element) => element.scrollLeft))
-        .toBeGreaterThan(initialLeft);
-      const right = await audit.evaluate((element) => element.scrollLeft);
-      await page.keyboard.press("ArrowLeft");
-      await expect.poll(() => audit.evaluate((element) => element.scrollLeft)).toBeLessThan(right);
+      // Native keyboard scrolling can report intermediate positions before it settles.
+      async function pressAndWaitForScroll(key: "ArrowRight" | "ArrowLeft") {
+        const observation = await audit.evaluateHandle((element) => {
+          const state = { start: element.scrollLeft, end: element.scrollLeft, finished: false };
+          const listener = () => {
+            state.end = element.scrollLeft;
+            state.finished = true;
+          };
+          element.addEventListener("scrollend", listener, { once: true });
+          return { state, stop: () => element.removeEventListener("scrollend", listener) };
+        });
+        try {
+          await page.keyboard.press(key);
+          await expect.poll(() => observation.evaluate(({ state }) => state.finished)).toBe(true);
+          return await observation.evaluate(({ state }) => state);
+        } finally {
+          try {
+            await observation.evaluate(({ stop }) => stop());
+          } finally {
+            await observation.dispose();
+          }
+        }
+      }
+      const right = await pressAndWaitForScroll("ArrowRight");
+      expect(right.end).toBeGreaterThan(right.start);
+      const left = await pressAndWaitForScroll("ArrowLeft");
+      expect(left.end).toBeLessThan(right.end);
       expect(await audit.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe(
         "none",
       );

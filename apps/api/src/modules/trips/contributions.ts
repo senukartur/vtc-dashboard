@@ -9,11 +9,12 @@ import {
   trips,
 } from "@vtc/db/trips-schema";
 import { identityError } from "../identity/service.js";
-import { compareDecimal } from "../qualification-rules/decimal.js";
+import type { QualificationProgressTotals } from "../qualification-rules/contracts.js";
+import { canonicalDecimal, compareDecimal } from "../qualification-rules/decimal.js";
 import { canonicalJson, contentHash, decimal } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
-import { createTripGroups } from "./groups.js";
 import { createFactRepository } from "./facts.js";
+import { createTripGroups } from "./groups.js";
 export interface ContributionChange {
   tripId: string;
   expectedTripVersion: number;
@@ -33,10 +34,53 @@ export interface ContributionContext {
   trip: typeof trips.$inferSelect;
   evidence: NormalizedTripEvidence;
 }
+export const emptyTotals: QualificationProgressTotals = {
+  completedTrips: 0,
+  completedDistanceM: "0",
+};
 export function createContributionRegister(unit: UnitOfWork) {
   const c = (tx: TxContext) => unit.client(tx),
     facts = createFactRepository(unit),
     groups = createTripGroups(unit);
+  async function totalsByAssignment(
+    tx: TxContext,
+    assignmentIds: readonly string[],
+    mode: "update" | "share",
+  ) {
+    if (assignmentIds.length > 100) throw new Error("CONTRIBUTION_TOTALS_BOUND_EXCEEDED");
+    if (!assignmentIds.length) return new Map<string, QualificationProgressTotals>();
+    // Use a locking read even when the caller already holds the member/qualification fence.
+    // The enclosing transaction may have established a REPEATABLE READ snapshot before it.
+    const rows = await c(tx)
+      .select({
+        assignmentId: tripContributions.assignmentId,
+        count: sql<string | number>`COUNT(*)`,
+        measured: sql<string | number>`COUNT(${tripContributions.actualDistanceM})`,
+        distance: sql<string | null>`SUM(${tripContributions.actualDistanceM})`,
+      })
+      .from(tripContributions)
+      .where(
+        and(
+          inArray(tripContributions.assignmentId, assignmentIds),
+          eq(tripContributions.credited, true),
+        ),
+      )
+      .groupBy(tripContributions.assignmentId)
+      .for(mode);
+    const totals = new Map<string, QualificationProgressTotals>();
+    for (const row of rows) {
+      const completedTrips = Number(row.count);
+      if (!row.assignmentId || !Number.isSafeInteger(completedTrips))
+        throw new Error("INVALID_CONTRIBUTION_TOTALS");
+      if (completedTrips !== Number(row.measured) || row.distance === null)
+        throw new Error("CREDIT_DISTANCE_MISSING");
+      totals.set(row.assignmentId, {
+        completedTrips,
+        completedDistanceM: canonicalDecimal(row.distance),
+      });
+    }
+    return totals;
+  }
   return {
     async contexts(tx: TxContext, changes: readonly ContributionChange[]) {
       if (
@@ -173,32 +217,12 @@ export function createContributionRegister(unit: UnitOfWork) {
         ),
       ];
     },
-    async totals(tx: TxContext, assignmentId: string, mode: "update" | "share" = "update") {
-      // All writers hold the same member/qualification lock. Locking reads avoid stale RR snapshots.
-      const rows = await c(tx)
-        .select({ distance: tripContributions.actualDistanceM })
-        .from(tripContributions)
-        .where(
-          and(
-            eq(tripContributions.assignmentId, assignmentId),
-            eq(tripContributions.credited, true),
-          ),
-        )
-        .for(mode);
-      let total = 0n;
-      for (const row of rows) {
-        if (row.distance === null) throw new Error("CREDIT_DISTANCE_MISSING");
-        const [whole = "0", fraction = ""] = row.distance.split(".");
-        total += BigInt(whole) * 10n ** 18n + BigInt(fraction.padEnd(18, "0"));
-      }
-      return {
-        completedTrips: rows.length,
-        completedDistanceM: (() => {
-          const fraction = (total % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/, "");
-          return `${total / 10n ** 18n}${fraction ? `.${fraction}` : ""}`;
-        })(),
-      };
+    totals(tx: TxContext, assignmentId: string, mode: "update" | "share" = "update") {
+      return totalsByAssignment(tx, [assignmentId], mode).then(
+        (totals) => totals.get(assignmentId) ?? emptyTotals,
+      );
     },
+    totalsByAssignment,
     async owners(tx: TxContext, tripIds: string[]) {
       const rows = await c(tx)
         .select({ id: trips.id, ownerId: trips.ownerId, game: trips.game })
