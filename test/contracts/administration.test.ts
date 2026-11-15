@@ -329,6 +329,7 @@ test("Stage 4 additions are optional, owned and confined to their named operatio
     "getTrip",
     "listMembers",
     "listNotificationHistory",
+    "login",
     "pollNotifications",
     "setNotificationPreferences",
     "submitApplication",
@@ -442,4 +443,27 @@ test("the invitation list exposes current generations without any link secret", 
   const { total: _total, ...withoutTotal } = active;
   expect(list(withoutTotal)).toBe(false);
   expect(list({ ...active, total: -1 })).toBe(false);
+});
+
+test("login and getMe return the same Stage 4 self envelope with a nullable zone", () => {
+  const responses = stage4Operations as unknown as {
+    operationId: string;
+    responses: Record<string, { content?: Record<string, { schema: { $ref?: string } }> }>;
+  }[];
+  for (const id of ["getMe", "login"]) {
+    const item = responses.find((entry) => entry.operationId === id);
+    expect(item?.responses["200"]?.content?.["application/json"]?.schema.$ref, id).toBe(
+      "#/components/schemas/SelfStage4Envelope",
+    );
+  }
+  const envelope = valid("SelfStage4Envelope");
+  for (const id of ["getMe:stage-4-device-timezone", "login:stage-4-device-timezone"]) {
+    const fixture = stageFixture(id).response;
+    expect(envelope(fixture), id).toBe(true);
+    expect((fixture.data as { preferences: { displayTimezone: null } }).preferences, id).toEqual({
+      locale: "ru",
+      displayTimezone: null,
+    });
+    expect(valid("EnvelopeSelf")(fixture), id).toBe(false);
+  }
 });

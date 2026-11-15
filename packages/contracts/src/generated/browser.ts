@@ -1146,7 +1146,7 @@ export interface paths {
         };
         /**
          * getCompanyAnalytics
-         * @description period=all_time forces month granularity (day returns 422). activeDrivers counts distinct members with at least one accepted trip in the period; activeMembers counts active memberships of any role at computedAt; byGame lists ets2 then ats with zeros, or only the filtered game.
+         * @description period=all_time uses month granularity in the company reporting time zone. fromDate is the first day of the month of the earliest accepted unique trip that matches the filters, and toDateExclusive is the first day of the month after the current month. Without such a trip fromDate is the first day of the current month. granularity=day returns 422 with it. Buckets are zero-filled for every month of the covered range, so a company without accepted trips returns one zero bucket. activeDrivers counts distinct members with at least one accepted trip in the period; activeMembers counts active memberships of any role at computedAt; byGame lists ets2 then ats with zeros, or only the filtered game.
          */
         get: operations["getCompanyAnalytics"];
         put?: never;
@@ -1166,7 +1166,7 @@ export interface paths {
         };
         /**
          * Company analytics breakdown
-         * @description Same access, setup errors and filters as getCompanyAnalytics over accepted unique canonical trips in the company reporting time zone. route groups by canonical origin and destination city IDs; A to B and B to A are separate routes. cargo groups by canonical cargo ID. Rows with an unresolved city or cargo are excluded from items and counted in undetermined. Items rank by accepted trips descending, then actual distance descending, then IDs; trips beyond limit are counted in remainder. source splits by the provider of the effective fact (derived facts use their source message) and always returns ets2telemetry and manual; limit is rejected with 422 for source. Labels use locale or the saved locale and keep hidden catalog entries with hidden true.
+         * @description Same access, setup errors and filters as getCompanyAnalytics over accepted unique canonical trips in the company reporting time zone. route groups by canonical origin and destination city IDs; A to B and B to A are separate routes. cargo groups by canonical cargo ID. Rows with an unresolved city or cargo are excluded from items and counted in undetermined. Items rank by accepted trips descending, then actual distance descending, then IDs; trips beyond limit are counted in remainder. source splits by the provider of the effective fact (derived facts use their source message) and always returns ets2telemetry and manual; limit is rejected with 422 for source. Labels use locale or the saved locale and keep hidden catalog entries with hidden true. period=all_time covers the same month-aligned range as getCompanyAnalytics: fromDate is the first day of the month of the earliest accepted unique trip that matches the filters, and toDateExclusive is the first day of the month after the current month. Without such a trip fromDate is the first day of the current month.
          */
         get: operations["getCompanyAnalyticsBreakdown"];
         put?: never;
@@ -1186,7 +1186,7 @@ export interface paths {
         };
         /**
          * getLeaderboard
-         * @description Order and ties are unchanged: actual distance descending, accepted trips descending, then member ID. position is the 1-based ordinal under that order. The signed cursor also binds period.
+         * @description Order and ties are unchanged: actual distance descending, accepted trips descending, then member ID. position is the 1-based ordinal under that order. The signed cursor also binds period. period=all_time covers the same month-aligned range as getCompanyAnalytics, without buckets: fromDate is the first day of the month of the earliest accepted unique trip that matches the filters, and toDateExclusive is the first day of the month after the current month. Without such a trip fromDate is the first day of the current month.
          */
         get: operations["getLeaderboard"];
         put?: never;
@@ -8913,7 +8913,7 @@ export interface operations {
                 fromDate?: string;
                 game?: "ets2" | "ats";
                 granularity?: "day" | "month";
-                /** @description range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the actually covered range. */
+                /** @description range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the month-aligned covered range described on the operation. */
                 period?: "range" | "all_time";
                 /** @description Required unless period=all_time; must be absent with it. */
                 toDateExclusive?: string;
@@ -8947,7 +8947,7 @@ export interface operations {
                 limit?: number;
                 /** @description Label language; defaults to the viewer's saved locale. */
                 locale?: "en" | "ru";
-                /** @description range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the actually covered range. */
+                /** @description range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the month-aligned covered range described on the operation. */
                 period?: "range" | "all_time";
                 /** @description Required unless period=all_time; must be absent with it. */
                 toDateExclusive?: string;
@@ -8979,7 +8979,7 @@ export interface operations {
                 game?: "ets2" | "ats";
                 granularity?: "day" | "month";
                 limit?: components["parameters"]["Limit"];
-                /** @description range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the actually covered range. */
+                /** @description range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the month-aligned covered range described on the operation. */
                 period?: "range" | "all_time";
                 /** @description Required unless period=all_time; must be absent with it. */
                 toDateExclusive?: string;
@@ -9042,7 +9042,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeSelf"];
+                    "application/json": components["schemas"]["SelfStage4Envelope"];
                 };
             };
             default: components["responses"]["Error"];

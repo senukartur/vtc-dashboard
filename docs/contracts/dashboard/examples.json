@@ -11448,6 +11448,45 @@
       }
     },
     {
+      "id": "login:stage-4-device-timezone",
+      "operationId": "login",
+      "status": 200,
+      "response": {
+        "data": {
+          "member": {
+            "id": "41500000-0000-4000-8000-000000000001",
+            "nickname": "Fictional Stage Four Driver",
+            "formerMember": false,
+            "roles": [
+              "driver"
+            ]
+          },
+          "email": "driver@example.invalid",
+          "emailVerified": true,
+          "capabilities": [
+            "company.read",
+            "trips.submit_own",
+            "trips.read_own_private",
+            "events.respond"
+          ],
+          "preferences": {
+            "locale": "ru",
+            "displayTimezone": null
+          },
+          "steamVerified": true,
+          "identityEpoch": 1,
+          "missingSetup": []
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      },
+      "request": {
+        "email": "driver@example.invalid",
+        "password": "NONFUNCTIONAL_EXAMPLE_ONLY"
+      }
+    },
+    {
       "id": "updatePreferences:stage-4-device-timezone",
       "operationId": "updatePreferences",
       "status": 200,
@@ -11577,14 +11616,29 @@
           "acceptedTrips": 3,
           "actualDistanceM": "2400000",
           "reportingTimezone": "Europe/Berlin",
-          "fromDate": "2023-01-01",
+          "fromDate": "2026-08-01",
           "toDateExclusive": "2026-12-01",
           "granularity": "month",
           "buckets": [
             {
-              "date": "2023-01-01",
-              "acceptedTrips": 3,
-              "actualDistanceM": "2400000"
+              "date": "2026-08-01",
+              "acceptedTrips": 2,
+              "actualDistanceM": "1600000"
+            },
+            {
+              "date": "2026-09-01",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            },
+            {
+              "date": "2026-10-01",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            },
+            {
+              "date": "2026-11-01",
+              "acceptedTrips": 1,
+              "actualDistanceM": "800000"
             }
           ],
           "computedAt": "2026-11-14T12:00:00.000Z",
@@ -11598,6 +11652,52 @@
               "game": "ats",
               "acceptedTrips": 3,
               "actualDistanceM": "2400000"
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getCompanyAnalytics:stage-4-all-time-empty",
+      "operationId": "getCompanyAnalytics",
+      "status": 200,
+      "query": {
+        "period": "all_time"
+      },
+      "response": {
+        "data": {
+          "acceptedTrips": 0,
+          "actualDistanceM": "0",
+          "reportingTimezone": "Europe/Berlin",
+          "fromDate": "2026-11-01",
+          "toDateExclusive": "2026-12-01",
+          "granularity": "month",
+          "buckets": [
+            {
+              "date": "2026-11-01",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            }
+          ],
+          "computedAt": "2026-11-14T12:00:00.000Z",
+          "projectionVersion": 7,
+          "projectionPending": false,
+          "period": "all_time",
+          "activeDrivers": 0,
+          "activeMembers": 1,
+          "byGame": [
+            {
+              "game": "ets2",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            },
+            {
+              "game": "ats",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
             }
           ]
         },
@@ -11704,7 +11804,7 @@
           },
           "period": "all_time",
           "fromDate": "2023-01-01",
-          "toDateExclusive": "2026-11-15"
+          "toDateExclusive": "2026-12-01"
         },
         "meta": {
           "requestId": "synthetic-stage-4"

@@ -217,6 +217,7 @@ New operations are staged in OpenAPI and stay unmounted until their feature lane
 | `GET /api/v1/trips/{tripId}` | `getTrip` | `company.read`, private view for the author | VTC-141 |
 | `GET /api/v1/me/notification-preferences` | `getNotificationPreferences` | `session`, Stage 4 toggles by capability | VTC-142 |
 | `PUT /api/v1/me/notification-preferences` | `setNotificationPreferences` | `session` | VTC-142 |
+| `POST /api/v1/auth/login` | `login` | `public` | VTC-142 |
 | `GET /api/v1/me` | `getMe` | `session` | VTC-142 |
 | `PATCH /api/v1/me/preferences` | `updatePreferences` | `session` | VTC-142 |
 | `GET /api/v1/notifications` | `pollNotifications` | `session` | VTC-142 |

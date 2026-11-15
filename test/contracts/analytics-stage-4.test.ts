@@ -183,3 +183,59 @@ test("breakdown variants are closed by dimension and reconcile with their totals
   expect(staged["x-contract-stage"]).toBe("VTC-150 Step 1");
   expect(spec.paths["/api/v1/analytics/company/breakdown"]?.get).toBe(staged);
 });
+
+test("all_time ranges are month-aligned from the earliest trip and zero-filled through the current month", () => {
+  const company = valid("AnalyticsStage4Company");
+  const firstOfNextMonth = (date: string) => {
+    const next = new Date(`${date}T00:00:00.000Z`);
+    next.setUTCMonth(next.getUTCMonth() + 1, 1);
+    return next.toISOString().slice(0, 10);
+  };
+  // The fixtures compute at 2026-11-14 in Europe/Berlin, so the current month is November.
+  const currentMonth = "2026-11-01";
+  for (const id of [
+    "getCompanyAnalytics:stage-4-all-time",
+    "getCompanyAnalytics:stage-4-all-time-empty",
+  ]) {
+    const data = fixture(id) as {
+      fromDate: string;
+      toDateExclusive: string;
+      granularity: string;
+      period: string;
+      acceptedTrips: number;
+      actualDistanceM: string;
+      buckets: { date: string; acceptedTrips: number; actualDistanceM: string }[];
+      byGame: { acceptedTrips: number; actualDistanceM: string }[];
+    };
+    expect(company(data), id).toBe(true);
+    expect([data.period, data.granularity], id).toEqual(["all_time", "month"]);
+    expect(data.fromDate.endsWith("-01"), id).toBe(true);
+    expect(data.toDateExclusive, id).toBe(firstOfNextMonth(currentMonth));
+    const months = [data.fromDate];
+    while (firstOfNextMonth(months.at(-1) ?? "") !== data.toDateExclusive && months.length < 1200)
+      months.push(firstOfNextMonth(months.at(-1) ?? ""));
+    expect(
+      data.buckets.map((bucket) => bucket.date),
+      id,
+    ).toEqual(months);
+    const totals = { acceptedTrips: data.acceptedTrips, actualDistanceM: data.actualDistanceM };
+    expect(sum(data.buckets), id).toEqual(totals);
+    expect(sum(data.byGame), id).toEqual(totals);
+  }
+  const empty = fixture("getCompanyAnalytics:stage-4-all-time-empty") as {
+    fromDate: string;
+    buckets: object[];
+  };
+  expect([empty.fromDate, empty.buckets]).toEqual([
+    currentMonth,
+    [{ date: currentMonth, acceptedTrips: 0, actualDistanceM: "0" }],
+  ]);
+  for (const id of [
+    "getLeaderboard:stage-4-all-time",
+    "getCompanyAnalyticsBreakdown:stage-4-source",
+  ]) {
+    const data = fixture(id) as { fromDate: string; toDateExclusive: string };
+    expect(data.fromDate.endsWith("-01"), id).toBe(true);
+    expect(data.toDateExclusive, id).toBe(firstOfNextMonth(currentMonth));
+  }
+});
