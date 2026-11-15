@@ -35,21 +35,32 @@ ALTER TABLE `admissions_truckers_checks` ADD CONSTRAINT `admissions_truckers_che
 CREATE INDEX `admissions_truckers_check_lease` ON `admissions_truckers_checks` (`lease_until`);--> statement-breakpoint
 ALTER TABLE `admissions_applications` ADD CONSTRAINT `admissions_referral_other_requires_other` CHECK (`admissions_applications`.`referral_other` IS NULL OR `admissions_applications`.`referral_source` <=> 'other');--> statement-breakpoint
 ALTER TABLE `admissions_applications` ADD CONSTRAINT `admissions_referral_other_nonblank` CHECK (`admissions_applications`.`referral_other` IS NULL OR REGEXP_LIKE(`admissions_applications`.`referral_other`, '[^[:space:]]'));--> statement-breakpoint
-ALTER TABLE `trip_facts` ADD CONSTRAINT `trip_fact_origin_depot_fk` FOREIGN KEY (`origin_depot_id`) REFERENCES `catalog_company_cities`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `trip_facts` ADD CONSTRAINT `trip_fact_destination_depot_fk` FOREIGN KEY (`destination_depot_id`) REFERENCES `catalog_company_cities`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+-- Both depot keys share one statement so trip_facts is copied once.
+ALTER TABLE `trip_facts` ADD CONSTRAINT `trip_fact_origin_depot_fk` FOREIGN KEY (`origin_depot_id`) REFERENCES `catalog_company_cities`(`id`) ON DELETE restrict ON UPDATE no action, ADD CONSTRAINT `trip_fact_destination_depot_fk` FOREIGN KEY (`destination_depot_id`) REFERENCES `catalog_company_cities`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX `trip_owner_accepted_reporting` ON `trips` (`owner_id`,`decision`,`alias_of`,`reporting_at`,`actual_distance_m`);
 --> statement-breakpoint
 -- Stage 4 backfill: drain writers throughout. Both updates are deterministic and idempotent.
 START TRANSACTION;
 --> statement-breakpoint
--- memberSince is the latest join or return: registration, a recorded reinstatement assignment
--- or an audited inactive-to-active membership change, whichever is latest.
+-- memberSince is the latest join or return, never earlier than registration. An audited
+-- inactive-to-active membership change is authoritative. A reinstatement assignment is legacy
+-- evidence only when a membership change for the same user was audited within one second of
+-- it (details may be null); a general assignment with that purpose to an active member is not
+-- a return.
 UPDATE `identity_memberships` AS m
 JOIN `identity_users` AS u ON u.`id` = m.`user_id`
 LEFT JOIN (
   SELECT a.`user_id`, MAX(a.`assigned_at`) AS `returned_at`
   FROM `qualification_assignments` AS a
   WHERE a.`purpose` = 'reinstatement'
+    AND EXISTS (
+      SELECT 1
+      FROM `audit_entries` AS r
+      WHERE r.`subject_kind` = 'user'
+        AND r.`subject_id` = a.`user_id`
+        AND r.`operation` = 'membership.changed'
+        AND r.`occurred_at` BETWEEN a.`assigned_at` AND a.`assigned_at` + INTERVAL 1 SECOND
+    )
   GROUP BY a.`user_id`
 ) AS assigned ON assigned.`user_id` = m.`user_id`
 LEFT JOIN (

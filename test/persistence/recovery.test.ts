@@ -2649,6 +2649,7 @@ await recoveryTest(
       audited = id(3),
       departed = id(4),
       director = id(5),
+      legacy = id(7),
       trip = id(10),
       sourceTrip = id(11),
       message = id(12),
@@ -2715,6 +2716,7 @@ await recoveryTest(
         [audited, "America/Chicago"],
         [departed, "UTC"],
         [director, "UTC"],
+        [legacy, "UTC"],
       ] as const) {
         await connection.execute(
           "INSERT INTO identity_users (id,name,email,created_at,updated_at) VALUES (?,'Fictional member',?,?,?)",
@@ -2725,12 +2727,21 @@ await recoveryTest(
           [userId, userId === departed ? "inactive" : "active", zone],
         );
       }
-      // An audited return is older than the recorded reinstatement assignment.
+      const reinstatementAssignment = (n: number, userId: string, at: string) =>
+        connection.execute(
+          "INSERT INTO qualification_assignments (id,user_id,game,level_id,assigned_at,purpose,reason) VALUES (?,?,'ets2','02800000-0000-4000-8000-000000000001',?,'reinstatement','Fictional return')",
+          [id(n), userId, at],
+        );
+      // The audited return counts. A later general assignment with the reinstatement purpose to
+      // the then active member has no membership change beside it and does not move joined_at.
       await membershipAudit(40, returned, t2, { before: "inactive", after: "active" });
-      await connection.execute(
-        "INSERT INTO qualification_assignments (id,user_id,game,level_id,assigned_at,purpose,reason) VALUES (?,?,'ets2','02800000-0000-4000-8000-000000000001',?,'reinstatement','Fictional return')",
-        [id(41), returned, t3],
-      );
+      await reinstatementAssignment(41, returned, t3);
+      // A legacy reinstatement counts when its membership change was audited within one second,
+      // even without details; a change audited later than that does not prove the return.
+      await reinstatementAssignment(45, legacy, t3);
+      await membershipAudit(46, legacy, "2026-03-04 00:00:01.189", null);
+      await reinstatementAssignment(47, registered, t4);
+      await membershipAudit(48, registered, "2026-04-05 00:00:01.512", null);
       // An audited return without an assignment counts; a later legacy row without details does not.
       await membershipAudit(42, audited, t4, { before: "inactive", after: "active" });
       await membershipAudit(43, audited, t5, null);
@@ -2787,10 +2798,11 @@ await recoveryTest(
     }
     const expectedJoined = [
       { id: registered, joinedAt: t1 },
-      { id: returned, joinedAt: t3 },
+      { id: returned, joinedAt: t2 },
       { id: audited, joinedAt: t4 },
       { id: departed, joinedAt: t1 },
       { id: director, joinedAt: t1 },
+      { id: legacy, joinedAt: t3 },
     ];
     // trip_rejected, event_changes, review_queue, new_applications, trip_accepted, new_event
     const expectedToggles = [
