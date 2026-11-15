@@ -1316,3 +1316,50 @@ test("a null display time zone stays rejected without a write until VTC-142", as
   );
   expect(rows.map((row) => [row.zone, Number(row.joined)])).toEqual([["UTC", 1]]);
 });
+
+test("a null display time zone is rejected over HTTP after session, CSRF and version checks", async () => {
+  const login = await signIn((await addMember()).email);
+  const before = await safe(identity.current(login.actor));
+  const app = await createApp({ checkReadiness: async () => true, identity });
+  const receipts = async () => {
+    const [rows] = await control.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM identity_command_results",
+    );
+    return Number(rows[0]?.n);
+  };
+  try {
+    const cookie = cookies(login.cookies);
+    const bound = await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie } });
+    const headers = {
+      cookie,
+      origin: config.origin,
+      "x-csrf-token": bound.json().data.token as string,
+      "if-match": `"v${before.version}"`,
+    };
+    const patch = (extra: Record<string, string>, payload: Record<string, unknown>) =>
+      app.inject({
+        method: "PATCH",
+        url: "/api/v1/me/preferences",
+        headers: { ...headers, "idempotency-key": newId(), ...extra },
+        payload,
+      });
+    const stored = await receipts();
+    // The input schema admits null, so CSRF and the version precondition answer before the fence.
+    expect((await patch({ "x-csrf-token": "invalid" }, { displayTimezone: null })).statusCode).toBe(
+      403,
+    );
+    for (const payload of [{ displayTimezone: null }, { locale: "en", displayTimezone: null }]) {
+      const response = await patch({}, payload);
+      expect(response.statusCode, JSON.stringify(payload)).toBe(422);
+      expect(response.json().error.code).toBe("INVALID_PAYLOAD");
+    }
+    expect(await receipts()).toBe(stored);
+  } finally {
+    await app.close();
+  }
+  const after = await safe(identity.current(login.actor));
+  expect([after.version, after.data.preferences]).toEqual([
+    before.version,
+    before.data.preferences,
+  ]);
+});

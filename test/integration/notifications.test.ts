@@ -2548,3 +2548,50 @@ test("Stage 4 toggles stay hidden and rejected for every viewer until VTC-142", 
     ]);
   }
 });
+
+test("Stage 4 toggles are rejected over HTTP without a change or receipt until VTC-142", async () => {
+  const app = await createApp({
+    identity,
+    notifications: service,
+    checkReadiness: async () => true,
+  });
+  try {
+    const person = await member(["driver", "dispatcher"]);
+    const read = await app.inject({
+      url: "/api/v1/me/notification-preferences",
+      headers: { cookie: person.cookie },
+    });
+    expect(read.statusCode).toBe(200);
+    const issued = csrfProtection(identityConfig).issue({}, person.actor);
+    const headers = {
+      cookie: `${person.cookie}; ${issued.cookie.split(";", 1)[0]}`,
+      origin,
+      "x-csrf-token": issued.token,
+      "if-match": String(read.headers.etag),
+    };
+    for (const extra of [
+      { reviewQueue: true },
+      { newApplications: false },
+      { tripAccepted: false },
+      { newEvent: true },
+    ]) {
+      const response = await app.inject({
+        method: "PUT",
+        url: "/api/v1/me/notification-preferences",
+        headers: { ...headers, "idempotency-key": newId() },
+        payload: { ...read.json().data, ...extra },
+      });
+      expect(response.statusCode, JSON.stringify(extra)).toBe(422);
+      expect(response.json().error.code).toBe("INVALID_PAYLOAD");
+    }
+    const [rows] = await control.execute<RowDataPacket[]>(
+      "SELECT version,review_queue,new_applications,trip_accepted,new_event,(SELECT COUNT(*) FROM notification_commands WHERE recipient_id=?) receipts FROM notification_recipients WHERE recipient_id=?",
+      [person.actor.userId, person.actor.userId],
+    );
+    expect(rows.map((row) => Object.values(row).map(Number))).toEqual([
+      [Number(String(read.headers.etag).slice(2, -1)), 1, 1, 1, 1, 0],
+    ]);
+  } finally {
+    await app.close();
+  }
+});

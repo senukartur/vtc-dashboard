@@ -1891,3 +1891,43 @@ test("Stage 4 referral fields and admissions routes stay inactive until VTC-140 
   );
   expect(Number(checks[0]?.n)).toBe(0);
 });
+
+test("Stage 4 referral fields are rejected over HTTP without a row or receipt until VTC-144", async () => {
+  const saved = instant;
+  instant += 60000;
+  const app = await createApp({
+    identity,
+    admissions,
+    messaging,
+    checkReadiness: async () => true,
+  });
+  try {
+    const issued = await app.inject({ url: "/api/v1/auth/csrf" });
+    const cookie = String(issued.headers["set-cookie"]).split(";", 1)[0] as string;
+    const headers = { cookie, origin, "x-csrf-token": issued.json().data.token as string };
+    const before = {
+      applications: await count("admissions_applications"),
+      receipts: await count("admissions_command_results"),
+    };
+    for (const extra of [
+      { referralSource: "discord" },
+      { referralSource: "other", referralOther: "A fictional convoy poster" },
+    ]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/public/applications",
+        headers: { ...headers, "idempotency-key": newId() },
+        payload: { ...input(), ...extra },
+      });
+      expect(response.statusCode, JSON.stringify(extra)).toBe(422);
+      expect(response.json().error.code).toBe("INVALID_PAYLOAD");
+    }
+    expect({
+      applications: await count("admissions_applications"),
+      receipts: await count("admissions_command_results"),
+    }).toEqual(before);
+  } finally {
+    await app.close();
+    instant = saved;
+  }
+});
