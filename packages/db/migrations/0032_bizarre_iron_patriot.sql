@@ -1,3 +1,6 @@
+-- Each existing table changes in one statement, so a table copy happens at most once per table.
+ALTER TABLE `identity_memberships` MODIFY COLUMN `display_timezone` varchar(128) DEFAULT 'UTC', ADD `joined_at` datetime(3) DEFAULT (UTC_TIMESTAMP(3)) NOT NULL;--> statement-breakpoint
+ALTER TABLE `admissions_applications` ADD `referral_source` enum('truckersmp','discord','friend_or_member','youtube_or_twitch','other'), ADD `referral_other` varchar(200), ADD CONSTRAINT `admissions_referral_other_requires_other` CHECK (`admissions_applications`.`referral_other` IS NULL OR `admissions_applications`.`referral_source` <=> 'other'), ADD CONSTRAINT `admissions_referral_other_nonblank` CHECK (`admissions_applications`.`referral_other` IS NULL OR REGEXP_LIKE(`admissions_applications`.`referral_other`, '[^[:space:]]'));--> statement-breakpoint
 CREATE TABLE `admissions_truckers_checks` (
 	`application_id` binary(36) NOT NULL,
 	`generation` int unsigned NOT NULL DEFAULT 1,
@@ -12,6 +15,8 @@ CREATE TABLE `admissions_truckers_checks` (
 	`last_attempt_at` datetime(3),
 	`failure` enum('transport','timeout','rate_limited','unavailable','invalid_response'),
 	CONSTRAINT `admissions_truckers_checks_application_id` PRIMARY KEY(`application_id`),
+	INDEX `admissions_truckers_check_lease` (`lease_until`),
+	CONSTRAINT `admissions_truckers_check_application_fk` FOREIGN KEY (`application_id`) REFERENCES `admissions_applications`(`id`) ON DELETE cascade ON UPDATE no action,
 	CONSTRAINT `admissions_truckers_check_generation` CHECK(`admissions_truckers_checks`.`generation` > 0),
 	CONSTRAINT `admissions_truckers_check_steam` CHECK((`admissions_truckers_checks`.`state` = 'not_checked') = (`admissions_truckers_checks`.`steam_id` IS NULL)),
 	CONSTRAINT `admissions_truckers_check_failure` CHECK(`admissions_truckers_checks`.`state` <> 'failed' OR `admissions_truckers_checks`.`failure` IS NOT NULL),
@@ -19,24 +24,8 @@ CREATE TABLE `admissions_truckers_checks` (
 	CONSTRAINT `admissions_truckers_check_lease_pair` CHECK((`admissions_truckers_checks`.`lease_id` IS NULL) = (`admissions_truckers_checks`.`lease_until` IS NULL))
 );
 --> statement-breakpoint
-ALTER TABLE `identity_memberships` MODIFY COLUMN `display_timezone` varchar(128) DEFAULT 'UTC';--> statement-breakpoint
-ALTER TABLE `identity_memberships` ADD `joined_at` datetime(3) DEFAULT (UTC_TIMESTAMP(3)) NOT NULL;--> statement-breakpoint
-ALTER TABLE `admissions_applications` ADD `referral_source` enum('truckersmp','discord','friend_or_member','youtube_or_twitch','other');--> statement-breakpoint
-ALTER TABLE `admissions_applications` ADD `referral_other` varchar(200);--> statement-breakpoint
-ALTER TABLE `trip_facts` ADD `origin_depot_id` binary(36);--> statement-breakpoint
-ALTER TABLE `trip_facts` ADD `destination_depot_id` binary(36);--> statement-breakpoint
-ALTER TABLE `trip_facts` ADD `origin_company_code` varbinary(128);--> statement-breakpoint
-ALTER TABLE `trip_facts` ADD `destination_company_code` varbinary(128);--> statement-breakpoint
-ALTER TABLE `notification_recipients` ADD `review_queue` boolean DEFAULT true NOT NULL;--> statement-breakpoint
-ALTER TABLE `notification_recipients` ADD `new_applications` boolean DEFAULT true NOT NULL;--> statement-breakpoint
-ALTER TABLE `notification_recipients` ADD `trip_accepted` boolean DEFAULT true NOT NULL;--> statement-breakpoint
-ALTER TABLE `notification_recipients` ADD `new_event` boolean DEFAULT true NOT NULL;--> statement-breakpoint
-ALTER TABLE `admissions_truckers_checks` ADD CONSTRAINT `admissions_truckers_check_application_fk` FOREIGN KEY (`application_id`) REFERENCES `admissions_applications`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX `admissions_truckers_check_lease` ON `admissions_truckers_checks` (`lease_until`);--> statement-breakpoint
-ALTER TABLE `admissions_applications` ADD CONSTRAINT `admissions_referral_other_requires_other` CHECK (`admissions_applications`.`referral_other` IS NULL OR `admissions_applications`.`referral_source` <=> 'other');--> statement-breakpoint
-ALTER TABLE `admissions_applications` ADD CONSTRAINT `admissions_referral_other_nonblank` CHECK (`admissions_applications`.`referral_other` IS NULL OR REGEXP_LIKE(`admissions_applications`.`referral_other`, '[^[:space:]]'));--> statement-breakpoint
--- Both depot keys share one statement so trip_facts is copied once.
-ALTER TABLE `trip_facts` ADD CONSTRAINT `trip_fact_origin_depot_fk` FOREIGN KEY (`origin_depot_id`) REFERENCES `catalog_company_cities`(`id`) ON DELETE restrict ON UPDATE no action, ADD CONSTRAINT `trip_fact_destination_depot_fk` FOREIGN KEY (`destination_depot_id`) REFERENCES `catalog_company_cities`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `trip_facts` ADD `origin_depot_id` binary(36), ADD `destination_depot_id` binary(36), ADD `origin_company_code` varbinary(128), ADD `destination_company_code` varbinary(128), ADD CONSTRAINT `trip_fact_origin_depot_fk` FOREIGN KEY (`origin_depot_id`) REFERENCES `catalog_company_cities`(`id`) ON DELETE restrict ON UPDATE no action, ADD CONSTRAINT `trip_fact_destination_depot_fk` FOREIGN KEY (`destination_depot_id`) REFERENCES `catalog_company_cities`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `notification_recipients` ADD `review_queue` boolean DEFAULT true NOT NULL, ADD `new_applications` boolean DEFAULT true NOT NULL, ADD `trip_accepted` boolean DEFAULT true NOT NULL, ADD `new_event` boolean DEFAULT true NOT NULL;--> statement-breakpoint
 CREATE INDEX `trip_owner_accepted_reporting` ON `trips` (`owner_id`,`decision`,`alias_of`,`reporting_at`,`actual_distance_m`);
 --> statement-breakpoint
 -- Stage 4 backfill: drain writers throughout. Both updates are deterministic and idempotent.
