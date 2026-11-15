@@ -3171,7 +3171,7 @@ export interface components {
             games: ("ets2" | "ats")[];
             introduction?: string | null;
             nickname: string;
-            /** @description Free text, only with referralSource other; any other source returns 422. */
+            /** @description Free text, only with referralSource other. Without referralSource or with any other source the request returns 422. */
             referralOther?: string;
             /**
              * @description Optional answer to how the applicant found the company.

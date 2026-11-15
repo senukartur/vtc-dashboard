@@ -20,7 +20,7 @@ const fixture = (id: string) => {
 const valid = (name: string) =>
   createSchemaValidator().compile({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 
-test("the referral answer is optional, bounded and free text only follows a source", () => {
+test("the referral answer is optional and its free text is bounded", () => {
   const input = valid("ApplicationInput");
   const submitted = fixture("submitApplication:stage-4-referral-other").request ?? {};
   expect(input(submitted)).toBe(true);
@@ -42,7 +42,9 @@ test("the referral answer is optional, bounded and free text only follows a sour
     { referralOther: " \t " },
   ])
     expect(input({ ...submitted, ...mutation }), JSON.stringify(mutation)).toBe(false);
-  expect(input({ ...legacy, referralOther: "Text without a source" })).toBe(false);
+  // The web's zod reader cannot convert dependentRequired, so the source dependency is not in the
+  // schema; the service rejects free text without the other source with 422.
+  expect(input({ ...legacy, referralOther: "Text without a source" })).toBe(true);
   expect(input({ ...submitted, referralOther: "x".repeat(200) })).toBe(true);
 });
 

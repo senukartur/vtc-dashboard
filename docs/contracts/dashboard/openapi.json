@@ -14194,7 +14194,7 @@
             "minLength": 1,
             "maxLength": 200,
             "pattern": "\\S",
-            "description": "Free text, only with referralSource other; any other source returns 422."
+            "description": "Free text, only with referralSource other. Without referralSource or with any other source the request returns 422."
           }
         },
         "required": [
@@ -14203,12 +14203,7 @@
           "steamProfileUrl",
           "games"
         ],
-        "additionalProperties": false,
-        "dependentRequired": {
-          "referralOther": [
-            "referralSource"
-          ]
-        }
+        "additionalProperties": false
       },
       "Application": {
         "type": "object",
