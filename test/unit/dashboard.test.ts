@@ -401,23 +401,82 @@ describe("Dashboard & Driver Profiles Unit Tests", () => {
         { id: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a12" },
       ];
 
-      const p1 = pageFn(actor, [], { limit: 2 });
-      const res1 = p1.finish(rows, (r) => r.id);
+      const plain = { sort: undefined, windowed: false } as const;
+      const p1 = pageFn(actor, [], { limit: 2 }, plain);
+      const res1 = p1.finish(rows, (r) => ({ id: r.id, value: null }), null);
       expect(res1.items.length).toBe(2);
       expect(res1.nextCursor).toBeTruthy();
 
       // Second page with cursor
-      const p2 = pageFn(actor, [], { limit: 2, cursor: res1.nextCursor! });
-      expect(p2.after).toBe(rows[1]!.id);
+      const p2 = pageFn(actor, [], { limit: 2, cursor: res1.nextCursor! }, plain);
+      expect(p2.after).toEqual({ id: rows[1]!.id, value: null });
+      expect(p2.windowEndsAt).toBeNull();
 
+      const conflict = (run: () => unknown) => {
+        try {
+          run();
+        } catch (error) {
+          return (error as { statusCode?: number; publicCode?: string }).publicCode;
+        }
+        return "accepted";
+      };
       // Rejects forged cursor (tampered signature)
       const [body] = res1.nextCursor!.split(".");
       const forged = `${body}.tamperedmac12345`;
-      expect(() => pageFn(actor, [], { limit: 2, cursor: forged })).toThrow();
+      expect(conflict(() => pageFn(actor, [], { limit: 2, cursor: forged }, plain))).toBe(
+        "VERSION_CONFLICT",
+      );
 
-      // Rejects cursor signed for different actor
+      // Rejects cursor signed for different actor, scope or shape
       const otherActor: Actor = { ...actor, userId: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a99" };
-      expect(() => pageFn(otherActor, [], { limit: 2, cursor: res1.nextCursor! })).toThrow();
+      for (const run of [
+        () => pageFn(otherActor, [], { limit: 2, cursor: res1.nextCursor! }, plain),
+        () => pageFn(actor, ["other"], { limit: 2, cursor: res1.nextCursor! }, plain),
+        () =>
+          pageFn(actor, [], { limit: 2, cursor: res1.nextCursor! }, { ...plain, windowed: true }),
+        () =>
+          pageFn(actor, [], { limit: 2, cursor: res1.nextCursor! }, { ...plain, sort: "nickname" }),
+      ])
+        expect(conflict(run)).toBe("VERSION_CONFLICT");
+
+      // Windowed sorted cursors carry typed keyset values and the window end.
+      const windowEndsAt = "2026-11-16T12:00:00.000Z";
+      for (const [sort, value] of [
+        ["distance30d", "10.000000000000000001"],
+        ["trips30d", 3],
+        ["lastTrip", null],
+        ["lastTrip", "2026-11-01T08:00:00.000Z"],
+        ["nickname", "Tie Driver"],
+      ] as const) {
+        const shape = { sort, windowed: true };
+        const first = pageFn(actor, [sort], { limit: 1 }, shape).finish(
+          rows,
+          (r) => ({ id: r.id, value }),
+          windowEndsAt,
+        );
+        const next = pageFn(actor, [sort], { limit: 1, cursor: first.nextCursor! }, shape);
+        expect(next.after).toEqual({ id: rows[0]!.id, value });
+        expect(next.windowEndsAt).toBe(windowEndsAt);
+      }
+      const mistyped = pageFn(
+        actor,
+        ["trips30d"],
+        { limit: 1 },
+        { sort: "trips30d", windowed: true },
+      ).finish(rows, (r) => ({ id: r.id, value: "3" }), windowEndsAt).nextCursor!;
+      expect(
+        conflict(() =>
+          pageFn(
+            actor,
+            ["trips30d"],
+            { limit: 1, cursor: mistyped },
+            {
+              sort: "trips30d",
+              windowed: true,
+            },
+          ),
+        ),
+      ).toBe("VERSION_CONFLICT");
     });
   });
 });

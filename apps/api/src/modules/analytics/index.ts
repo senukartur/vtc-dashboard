@@ -7,3 +7,4 @@ export {
   type LeaderboardQuery,
 } from "./service.js";
 export { registerAnalyticsRoutes } from "./http.js";
+export { createMemberDirectoryActivity, type MemberDirectoryActivity } from "./member-activity.js";
