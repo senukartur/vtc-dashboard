@@ -12,7 +12,6 @@ import {
 import { ChartContainer } from "../../shared/ui/chart.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
-import { useQualificationQuery } from "../qualifications/queries.js";
 import { progressPercent } from "./model.js";
 import type { DTO } from "./transport.js";
 import {
@@ -27,7 +26,7 @@ import "./dashboard.css";
 
 type AnalyticsData = DTO["AnalyticsStage4Company"];
 type LeaderboardData = DTO["ListLeaderboardEntry"];
-type ProgressData = DTO["Progress"];
+type ProgressData = DTO["MyQualification"] | null;
 
 /** Decorative placeholder; the page status line or the block itself announces loading. */
 export function Skeleton({ className }: { className?: string }) {
@@ -455,19 +454,15 @@ export function LeaderboardWidget({
   );
 }
 
-type LevelsQuery = ReturnType<typeof useQualificationQuery<"EnvelopeListQualificationLevel">>;
-
 function QualificationGame({
   label,
   query,
   available,
-  levels,
   locale,
 }: {
   label: string;
   query: QueryView<ProgressData>;
   available: boolean;
-  levels: LevelsQuery;
   locale: Locale;
 }) {
   const { t } = useTranslation("dashboard");
@@ -475,75 +470,73 @@ function QualificationGame({
 
   let content: ReactNode;
   let badges: ReactNode = null;
-  if (!available || (progress && !progress.assignment)) {
+  if (!available || (!query.isPending && !query.isError && !progress?.level)) {
     // Members without own-trip submission have no driver qualification to show.
     content = <p className="dashboard-muted">{t("myQualification.noQualification")}</p>;
   } else if (!progress && query.isError) {
     content = <p className="dashboard-muted">{t("myQualification.progressUnavailable")}</p>;
-  } else if (!progress) {
+  } else if (!progress?.level) {
     content = <p className="dashboard-muted">{t("myQualification.progressLoading")}</p>;
   } else {
-    const level = levels.data?.data.data.items.find(
-      (item) => item.id === progress.assignment.levelId && item.game === progress.assignment.game,
-    );
+    const conditions = progress.nextLevel ? progress.conditions : null;
     badges = (
-      <>
-        <Badge size="xs">
-          {level?.name ??
-            t(
-              levels.isPending
-                ? "myQualification.levelLoading"
-                : "myQualification.levelUnavailable",
-            )}
-        </Badge>
-        {progress.eligibleForConfirmation && (
-          <Badge size="xs" className="badge-accepted">
-            {t("myQualification.eligible")}
-          </Badge>
-        )}
-      </>
+      <Badge size="xs">
+        <Link to={`/account/qualifications/${encodeURIComponent(progress.level.id)}`}>
+          {progress.level.name}
+        </Link>
+      </Badge>
     );
     const rows = [
       {
         key: "trips",
         label: t("myQualification.trips"),
-        value: `${formatDecimal(String(progress.acceptedTrips), locale)}${
-          progress.requiredTrips !== null
-            ? ` / ${formatDecimal(String(progress.requiredTrips), locale)}`
+        value: `${formatDecimal(String(progress.progress.trips), locale)}${
+          conditions?.requiredTrips != null
+            ? ` / ${formatDecimal(String(conditions.requiredTrips), locale)}`
             : ""
         }`,
         percent: progressPercent(
-          String(progress.acceptedTrips),
-          progress.requiredTrips === null ? null : String(progress.requiredTrips),
+          String(progress.progress.trips),
+          conditions?.requiredTrips != null ? String(conditions.requiredTrips) : null,
         ),
       },
       {
         key: "distance",
         label: t("myQualification.distance"),
-        value: `${formatQuantity(progress.actualDistanceM, "km", locale)}${
-          progress.requiredDistanceM !== null
-            ? ` / ${formatQuantity(progress.requiredDistanceM, "km", locale)}`
+        value: `${formatQuantity(progress.progress.distanceM, "km", locale)}${
+          conditions?.requiredDistanceM != null
+            ? ` / ${formatQuantity(conditions.requiredDistanceM, "km", locale)}`
             : ""
         }`,
-        percent: progressPercent(progress.actualDistanceM, progress.requiredDistanceM),
+        percent: progressPercent(
+          progress.progress.distanceM,
+          conditions?.requiredDistanceM ?? null,
+        ),
       },
     ];
     content = (
-      <dl className="dashboard-progress">
-        {rows.map((row) => (
-          <div key={row.key}>
-            <dt>{row.label}</dt>
-            <dd>
-              {row.percent !== null && (
-                <span className="dashboard-bar" aria-hidden="true">
-                  <span style={{ width: `${row.percent}%` }} />
-                </span>
-              )}
-              <span className="dashboard-progress-value">{row.value}</span>
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <>
+        {progress.nextLevel && (
+          <p className="dashboard-muted">
+            {t("myQualification.next", { name: progress.nextLevel.name })}
+          </p>
+        )}
+        <dl className="dashboard-progress">
+          {rows.map((row) => (
+            <div key={row.key}>
+              <dt>{row.label}</dt>
+              <dd>
+                {row.percent !== null && (
+                  <span className="dashboard-bar" aria-hidden="true">
+                    <span style={{ width: `${row.percent}%` }} />
+                  </span>
+                )}
+                <span className="dashboard-progress-value">{row.value}</span>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </>
     );
   }
 
@@ -570,37 +563,17 @@ export function MyQualificationWidget({
   const { t, i18n } = useTranslation("dashboard");
   const locale = (i18n.resolvedLanguage === "en" ? "en" : "ru") as Locale;
   const headingId = useId();
-  const ets2Levels = useQualificationQuery(
-    "/qualification-levels?game=ets2&limit=25",
-    "EnvelopeListQualificationLevel",
-  );
-  const atsLevels = useQualificationQuery(
-    "/qualification-levels?game=ats&limit=25",
-    "EnvelopeListQualificationLevel",
-  );
 
   return (
     <Card className="dashboard-qualification" aria-labelledby={headingId}>
       <div className="dashboard-card-head">
         <h2 id={headingId}>{t("myQualification.title")}</h2>
-        <Link to="/account/trips" className="dashboard-head-link">
-          {t("myQualification.tripsLink")}
+        <Link to="/account/qualifications" className="dashboard-head-link">
+          {t("myQualification.qualificationsLink")}
         </Link>
       </div>
-      <QualificationGame
-        label="ETS2"
-        query={ets2Progress}
-        available={available}
-        levels={ets2Levels}
-        locale={locale}
-      />
-      <QualificationGame
-        label="ATS"
-        query={atsProgress}
-        available={available}
-        levels={atsLevels}
-        locale={locale}
-      />
+      <QualificationGame label="ETS2" query={ets2Progress} available={available} locale={locale} />
+      <QualificationGame label="ATS" query={atsProgress} available={available} locale={locale} />
     </Card>
   );
 }

@@ -199,7 +199,7 @@ export function useMyQualificationProgress(
 ) {
   const session = useSession();
   const { i18n } = useTranslation();
-  const path = `/me/qualification-progress?game=${game}`;
+  const path = "/me/qualifications";
 
   return useQuery({
     queryKey: [
@@ -219,7 +219,8 @@ export function useMyQualificationProgress(
     staleTime: 30000,
     queryFn: async ({ signal }) => {
       try {
-        return (await dashboardRead(path, "EnvelopeProgress", signal)).data.data;
+        const list = (await dashboardRead(path, "EnvelopeMyQualificationList", signal)).data.data;
+        return list.items.find((item) => item.game === game && item.level) ?? null;
       } catch (error) {
         if (error instanceof AccountFailure && !signal.aborted) {
           if (error.kind === "unauthorized") await session.confirmSessionLoss(signal);

@@ -65,7 +65,7 @@ export const administrationTranslations = {
     qualifications: "Per-game qualifications",
     levelLabelLoading: "Loading qualification label…",
     levelLabelUnavailable: "Qualification label unavailable",
-    qualificationWorkspace: "Open qualification configuration and history",
+    qualificationWorkspace: "Open qualifications",
     ets2: "Euro Truck Simulator 2",
     ats: "American Truck Simulator",
     noGame: "Do not assign this game",
@@ -96,7 +96,7 @@ export const administrationTranslations = {
     ready: "Reporting settings are configured. Deployment and other launch checks are separate.",
     incomplete: "Reporting configuration is incomplete.",
     company_reporting_timezone: "Company reporting timezone",
-    qualification_configuration: "Qualification rules and promotion thresholds",
+    qualification_configuration: "Promotion conditions on every level but the top",
     sources: "Trip sources",
     sourceHelp:
       "Drivers use personal telemetry credentials. Planned company webhooks for Trucky and VTCBase will be available only to the Director and Deputy Directors once those adapters are supported.",
@@ -255,7 +255,6 @@ export const administrationTranslations = {
     settingsUi: {
       tabs: {
         general: "General",
-        qualifications: "Qualification levels",
         audit: "Audit log",
       },
       companyName: "Company name",
@@ -330,11 +329,12 @@ export const administrationTranslations = {
       notReadyTitle: "Reporting is not ready",
       timezoneOk: "Timezone: {{timezone}}",
       timezoneMissing: "Reporting timezone is not set",
-      qualificationsOk: "Qualification rules and promotion thresholds are in effect",
-      qualificationsMissing: "Qualification rules or promotion thresholds are not in effect",
+      qualificationsOk: "Every level but the top has a promotion condition",
+      qualificationsMissing:
+        "A game has no levels, or a level below the top has no promotion condition",
       unknownMissing: "Another reporting setup step is incomplete",
       readinessNote:
-        "This is reporting readiness (timezone plus effective qualification rules and thresholds), not readiness of the whole launch.",
+        "This is reporting readiness (timezone plus qualification levels with promotion conditions), not readiness of the whole launch.",
       reportingTitle: "Reporting",
       timezoneRowHelp:
         "One timezone for the company's daily and monthly totals. A member's personal timezone only changes how times are shown.",
@@ -435,7 +435,8 @@ export const administrationTranslations = {
       lastAccepted: "Last accepted trip: {{date}}",
       noTripsLong: "No accepted trips recorded",
       assignedOn: "since {{date}}",
-      qualificationsNote: "Qualifications change only in Qualifications, by confirming promotion.",
+      qualificationsNote:
+        "Qualifications change in Qualifications: automatically when the conditions are met, or by a manual level change.",
       rolesTitle: "Roles",
       membership: "Membership",
       membershipHelp:
@@ -582,7 +583,7 @@ export const administrationTranslations = {
     qualifications: "Квалификации по играм",
     levelLabelLoading: "Загрузка названия квалификации…",
     levelLabelUnavailable: "Название квалификации недоступно",
-    qualificationWorkspace: "Открыть настройки и историю квалификаций",
+    qualificationWorkspace: "Открыть квалификации",
     ets2: "Euro Truck Simulator 2",
     ats: "American Truck Simulator",
     noGame: "Не назначать в этой игре",
@@ -614,7 +615,7 @@ export const administrationTranslations = {
       "Настройки отчётности заполнены. Развёртывание и остальные проверки запуска выполняются отдельно.",
     incomplete: "Настройка отчётности не завершена.",
     company_reporting_timezone: "Часовой пояс отчётности компании",
-    qualification_configuration: "Правила квалификаций и пороги повышения",
+    qualification_configuration: "Условия повышения на всех уровнях, кроме высшего",
     sources: "Источники рейсов",
     sourceHelp:
       "Водители используют личные ключи телеметрии. Планируемая настройка корпоративных вебхуков Trucky и VTCBase будет доступна только директору и заместителям после появления этих адаптеров.",
@@ -774,7 +775,6 @@ export const administrationTranslations = {
     settingsUi: {
       tabs: {
         general: "Общие",
-        qualifications: "Уровни квалификации",
         audit: "Журнал",
       },
       companyName: "Название компании",
@@ -849,11 +849,11 @@ export const administrationTranslations = {
       notReadyTitle: "Отчётность не готова",
       timezoneOk: "Пояс: {{timezone}}",
       timezoneMissing: "Отчётный часовой пояс не задан",
-      qualificationsOk: "Правила квалификаций и пороги повышения действуют",
-      qualificationsMissing: "Правила квалификаций или пороги повышения не действуют",
+      qualificationsOk: "На всех уровнях, кроме высшего, заданы условия повышения",
+      qualificationsMissing: "В игре нет уровней или у уровня ниже высшего нет условия повышения",
       unknownMissing: "Другой шаг настройки отчётности не завершён",
       readinessNote:
-        "Это готовность отчётности (пояс плюс действующие правила и пороги квалификаций), а не готовность всего запуска.",
+        "Это готовность отчётности (пояс плюс уровни квалификаций с условиями повышения), а не готовность всего запуска.",
       reportingTitle: "Отчётность",
       timezoneRowHelp:
         "Один пояс для дневных и месячных итогов компании. Личный пояс участника меняет только отображение времени.",
@@ -955,7 +955,7 @@ export const administrationTranslations = {
       noTripsLong: "Принятые рейсы не записаны",
       assignedOn: "с {{date}}",
       qualificationsNote:
-        "Квалификации меняются только в разделе «Квалификации» — подтверждением повышения.",
+        "Квалификации меняются в разделе «Квалификации»: автоматически при выполнении условий или ручной сменой уровня.",
       rolesTitle: "Роли",
       membership: "Членство",
       membershipHelp:

@@ -512,56 +512,6 @@
   flex: 1 1 160px;
 }
 
-/* Qualification check: symbol plus visible state text for every rule. */
-.review-decision .review-checks {
-  display: grid;
-  gap: 6px;
-  padding: 0;
-  list-style: none;
-}
-.review-decision .review-checks li {
-  display: grid;
-  grid-template-columns: 1.25em minmax(0, 1fr);
-  gap: 6px;
-  align-items: start;
-}
-.review-decision .review-check-symbol {
-  font-weight: 700;
-  text-align: center;
-}
-.review-decision .review-checks [data-state="pass"] .review-check-symbol {
-  color: var(--accepted);
-}
-.review-decision .review-checks [data-state="fail"] .review-check-symbol {
-  color: var(--destructive);
-}
-.review-decision
-  .review-checks
-  :is([data-state="unknown"], [data-state="unavailable"])
-  .review-check-symbol {
-  color: var(--pending);
-}
-.review-decision .review-checks [data-state="bypassed"] .review-check-symbol {
-  color: var(--focus);
-}
-.review-decision .review-check-text {
-  display: grid;
-  min-width: 0;
-}
-.review-decision .review-check-title {
-  font-weight: 500;
-}
-.review-decision .review-check-state {
-  display: inline;
-  color: var(--muted);
-  font-size: var(--font-badge);
-  font-weight: 400;
-}
-.review-decision .review-check-detail {
-  color: var(--muted);
-  font-size: var(--font-small);
-}
-
 /* History timeline, newest first. */
 .review-decision .review-history {
   display: grid;

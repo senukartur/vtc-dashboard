@@ -40,7 +40,13 @@ export const decisions: readonly QueueDecision[] = [
   "rejected",
 ];
 /** Qualification limits a reviewer may waive with explicit confirmation (policy, VTC-059A). */
+/** The five level-limit failures; the older rule codes stay for decisions recorded before. */
 export const overLimitCodes: ReadonlySet<string> = new Set([
+  "qualification_cargo_mass",
+  "qualification_distance",
+  "qualification_trailer",
+  "qualification_adr",
+  "qualification_hard_mode",
   "rule_mass_exceeded",
   "rule_trailer_type_disallowed",
   "rule_adr_category_disallowed",
@@ -152,12 +158,13 @@ export function reviewType(trip: ReviewTrip): QueueType {
 
 /** Rule outcomes that record a pass; every other rule code needs an assessment. */
 const passCodes = new Set(["rule_passed"]);
-// Any rule code that is neither a pass nor an over-limit breach (unknown, invalid or incomplete
-// data, unknown rule types) and any unresolved qualification lookup needs an assessment.
+// Any qualification or rule code that is neither a pass nor an over-limit breach (a limit that
+// could not be checked, no level, an unknown qualification instant) needs an assessment.
 const checkCode = (code: string) =>
-  (code.startsWith("rule_") && !passCodes.has(code) && !overLimitCodes.has(code)) ||
-  code === "unknown_rule_type" ||
-  code.startsWith("qualification_");
+  ((code.startsWith("rule_") || code.startsWith("qualification_")) &&
+    !passCodes.has(code) &&
+    !overLimitCodes.has(code)) ||
+  code === "unknown_rule_type";
 
 /** Compact rules flag of a queue row from its stored review reasons. */
 export function ruleFlag(reasonCodes: readonly string[]): RuleFlag {
@@ -231,55 +238,6 @@ export function diffRows(
   });
 }
 
-export type CheckState = "pass" | "fail" | "unknown" | "bypassed" | "unavailable";
-export const checkSymbol: Record<CheckState, string> = {
-  pass: "✓",
-  fail: "✕",
-  unknown: "?",
-  bypassed: "◇",
-  unavailable: "?",
-};
-export type CheckRow = {
-  key: string;
-  state: CheckState;
-  symbol: string;
-  ruleType: string | null;
-  reasonCode: string | null;
-  observedMassKg: string | null;
-  limitMassKg: string | null;
-  entityIds: string[];
-};
-
-/** Rows of the historical qualification check; unresolved history is one unavailable row. */
-export function checkRows(check: DTO["QualificationCheck"]): CheckRow[] {
-  if (check.status === "unresolved")
-    return [
-      {
-        key: "unavailable",
-        state: "unavailable",
-        symbol: checkSymbol.unavailable,
-        ruleType: null,
-        reasonCode: check.reasonCode,
-        observedMassKg: null,
-        limitMassKg: null,
-        entityIds: [],
-      },
-    ];
-  return check.rules.map((rule, index) => {
-    const state: CheckState = rule.bypassedByEvent ? "bypassed" : rule.outcome;
-    return {
-      key: `${index}-${rule.ruleType}`,
-      state,
-      symbol: checkSymbol[state],
-      ruleType: rule.ruleType,
-      reasonCode: rule.reasonCode,
-      observedMassKg: rule.observedMassKg,
-      limitMassKg: rule.limitMassKg,
-      entityIds: rule.entityIds,
-    };
-  });
-}
-
 export type Blocker =
   | "self"
   | "blocked"
@@ -321,7 +279,7 @@ export function decisionState({
     self = review.blockedReasonCodes.includes(selfReviewCode),
     exceeded =
       mode === "over_limits"
-        ? review.qualificationCheck.rules.filter((rule) => rule.outcome === "fail")
+        ? review.qualificationCheck.rules.filter((rule) => rule.result === "fail")
         : [],
     needsConfirmation = choice === "accept" && mode === "over_limits";
   const blocker: Blocker = self

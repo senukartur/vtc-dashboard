@@ -1,18 +1,17 @@
 import i18next from "i18next";
 import { initReactI18next } from "react-i18next";
 import { accountTranslations } from "../features/account/translations.js";
+import { administrationTranslations } from "../features/admin/translations.js";
 import { admissionsTranslations } from "../features/admissions/translations.js";
 import { catalogTranslations } from "../features/catalogs/translations.js";
 import { dashboardTranslations } from "../features/dashboard/translations.js";
 import { driverTranslations } from "../features/drivers/translations.js";
+import { eventTranslations } from "../features/events/translations.js";
 import { foundationTranslations } from "../features/foundation/translations.js";
-import { promotionTranslations } from "../features/qualifications/promotion-translations.js";
+import { notificationTranslations } from "../features/notifications/translations.js";
 import { qualificationTranslations } from "../features/qualifications/translations.js";
 import { tripTranslations } from "../features/trips/translations.js";
-import { administrationTranslations } from "../features/admin/translations.js";
 import { core } from "../i18n/core/resources.js";
-import { eventTranslations } from "../features/events/translations.js";
-import { notificationTranslations } from "../features/notifications/translations.js";
 
 export const localeStorageKey = "vtc.locale";
 
@@ -66,7 +65,6 @@ await i18next.use(initReactI18next).init({
       catalogs: catalogTranslations.en,
       trips: tripTranslations.en,
       qualifications: qualificationTranslations.en,
-      promotions: promotionTranslations.en,
       dashboard: dashboardTranslations.en,
       drivers: driverTranslations.en,
     },
@@ -81,7 +79,6 @@ await i18next.use(initReactI18next).init({
       catalogs: catalogTranslations.ru,
       trips: tripTranslations.ru,
       qualifications: qualificationTranslations.ru,
-      promotions: promotionTranslations.ru,
       dashboard: dashboardTranslations.ru,
       drivers: driverTranslations.ru,
     },

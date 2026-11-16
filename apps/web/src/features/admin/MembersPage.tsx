@@ -1008,7 +1008,7 @@ function MemberDetail({
               <p>{t("notSet")}</p>
             )}
             <p className="muted">{t("membersUi.qualificationsNote")}</p>
-            <Link to={`/account/qualifications?member=${id}`}>{t("qualificationWorkspace")}</Link>
+            <Link to="/account/qualifications">{t("qualificationWorkspace")}</Link>
           </section>
           {panel.protected ? (
             <ProtectedPanel roles={data.profile.member.roles} steam={steam} />

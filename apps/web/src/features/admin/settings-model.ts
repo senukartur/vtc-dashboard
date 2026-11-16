@@ -103,7 +103,7 @@ export function sourceBadges(source: { implemented: boolean; runtimeEnabled: boo
   };
 }
 
-export const settingsTabs = ["general", "qualifications", "audit"] as const;
+export const settingsTabs = ["general", "audit"] as const;
 type SettingsTab = (typeof settingsTabs)[number];
 
 export function settingsTab(value: string | null): SettingsTab {

@@ -19,7 +19,6 @@ import { CatalogsPage } from "../features/catalogs/CatalogsPage.js";
 import { publicContent } from "../features/landing/content.js";
 import { LandingPage } from "../features/landing/LandingPage.js";
 import { NotificationsProvider } from "../features/notifications/controller.js";
-import { PromotionCommandProvider } from "../features/qualifications/PromotionCommandProvider.js";
 import { Button, Card } from "../shared/ui/primitives.js";
 import { AppLayout } from "./AppLayout.js";
 import { matchRouteMeta, paths, type RouteId } from "./navigation-model.js";
@@ -45,6 +44,16 @@ const TripsPage = lazy(() =>
 const QualificationsPage = lazy(() =>
   import("../features/qualifications/QualificationsPage.js").then((module) => ({
     default: module.QualificationsPage,
+  })),
+);
+const LevelPage = lazy(() =>
+  import("../features/qualifications/LevelPage.js").then((module) => ({
+    default: module.LevelPage,
+  })),
+);
+const LevelEditor = lazy(() =>
+  import("../features/qualifications/LevelEditor.js").then((module) => ({
+    default: module.LevelEditor,
   })),
 );
 const TripDetailPage = lazy(() =>
@@ -88,11 +97,6 @@ const ApplicationsPage = lazy(() =>
     default: module.ApplicationsPage,
   })),
 );
-const PromotionsPage = lazy(() =>
-  import("../features/qualifications/PromotionsPage.js").then((module) => ({
-    default: module.PromotionsPage,
-  })),
-);
 const MembersPage = lazy(() =>
   import("../features/admin/MembersPage.js").then((module) => ({ default: module.MembersPage })),
 );
@@ -131,11 +135,13 @@ const accountRoutes: Record<RouteId, ReactElement> = {
   drivers: <DriversPage />,
   driver: <DriverProfilePage />,
   qualifications: <QualificationsPage />,
+  newQualification: <LevelEditor mode="new" />,
+  qualification: <LevelPage />,
+  editQualification: <LevelEditor mode="edit" />,
   review: <ReviewQueuePage />,
   reconciliation: <ReconciliationPage />,
   reviewTrip: <TripDetailPage review />,
   applications: <ApplicationsPage />,
-  promotions: <PromotionsPage />,
   members: <MembersPage />,
   catalogs: <CatalogsPage />,
   settings: <SettingsPage />,
@@ -307,11 +313,9 @@ export function App({ handoff }: { handoff: LinkHandoff }) {
         <SessionProvider>
           <SignOutProvider>
             <SettingsLeadershipReceiptProvider>
-              <PromotionCommandProvider>
-                <NotificationsProvider>
-                  <Shell handoff={handoff} />
-                </NotificationsProvider>
-              </PromotionCommandProvider>
+              <NotificationsProvider>
+                <Shell handoff={handoff} />
+              </NotificationsProvider>
             </SettingsLeadershipReceiptProvider>
           </SignOutProvider>
         </SessionProvider>

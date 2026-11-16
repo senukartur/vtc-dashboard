@@ -29,6 +29,7 @@ import {
   type Level,
   membershipLine,
   ladderFor,
+  type MemberQualification,
   monthLabel,
   nextLevel,
   sourceKeys,
@@ -36,7 +37,7 @@ import {
 import type { DTO } from "./transport.js";
 
 type Analytics = DTO["Analytics"];
-type Progress = DTO["ProgressPublic"];
+type Qualifications = DTO["MyQualificationList"];
 type MemberProfile = DTO["MemberProfile"];
 
 const gameName: Record<Game, string> = { ets2: "ETS2", ats: "ATS" };
@@ -310,41 +311,34 @@ export function DriverKpis({
   );
 }
 
-function ProgressRows({
-  progress,
-  locale,
-  level,
-}: {
-  progress: Progress;
-  locale: Locale;
-  level: Level | undefined;
-}) {
+function ProgressRows({ item, locale }: { item: MemberQualification; locale: Locale }) {
   const { t } = useTranslation("drivers");
+  const { progress, conditions } = item;
+  const requiredTrips = conditions?.requiredTrips ?? null;
+  const requiredDistanceM = conditions?.requiredDistanceM ?? null;
   const rows = [
     {
       key: "trips",
       label: t("qualification.trips"),
       value:
-        progress.requiredTrips === null
-          ? formatDecimal(String(progress.acceptedTrips), locale)
-          : `${formatDecimal(String(progress.acceptedTrips), locale)} / ${formatDecimal(String(progress.requiredTrips), locale)}`,
+        requiredTrips === null
+          ? formatDecimal(String(progress.trips), locale)
+          : `${formatDecimal(String(progress.trips), locale)} / ${formatDecimal(String(requiredTrips), locale)}`,
       percent: progressPercent(
-        String(progress.acceptedTrips),
-        progress.requiredTrips === null ? null : String(progress.requiredTrips),
+        String(progress.trips),
+        requiredTrips === null ? null : String(requiredTrips),
       ),
     },
     {
       key: "distance",
       label: t("qualification.distance"),
       value:
-        progress.requiredDistanceM === null
-          ? formatQuantity(progress.actualDistanceM, "km", locale)
-          : `${formatDecimal(decimalShift(progress.actualDistanceM, 3), locale)} / ${formatQuantity(progress.requiredDistanceM, "km", locale)}`,
-      percent: progressPercent(progress.actualDistanceM, progress.requiredDistanceM),
+        requiredDistanceM === null
+          ? formatQuantity(progress.distanceM, "km", locale)
+          : `${formatDecimal(decimalShift(progress.distanceM, 3), locale)} / ${formatQuantity(requiredDistanceM, "km", locale)}`,
+      percent: progressPercent(progress.distanceM, requiredDistanceM),
     },
   ];
-  const unconfigured =
-    level?.id === progress.assignment.levelId && !level.terminal && !level.promotionConfigured;
   return (
     <>
       <dl className="driver-progress">
@@ -362,11 +356,8 @@ function ProgressRows({
           </div>
         ))}
       </dl>
-      {unconfigured && <p className="driver-muted">{t("qualification.notConfigured")}</p>}
-      {progress.eligibleForConfirmation && (
-        <p className="driver-eligible">
-          <span aria-hidden="true">✓</span> {t("qualification.eligible")}
-        </p>
+      {item.nextLevel && requiredTrips === null && requiredDistanceM === null && (
+        <p className="driver-muted">{t("qualification.notConfigured")}</p>
       )}
     </>
   );
@@ -375,14 +366,14 @@ function ProgressRows({
 export function QualificationCard({
   game,
   assignment,
-  progress,
+  qualifications,
   levels,
   locale,
   displayTimezone,
 }: {
   game: Game;
   assignment: Assignment | null;
-  progress: UseQueryResult<Progress>;
+  qualifications: UseQueryResult<Qualifications>;
   levels: LevelsState;
   locale: Locale;
   displayTimezone: string;
@@ -406,13 +397,16 @@ export function QualificationCard({
   const { name, resolved } = levelText(assignment, levels, t);
   const ladder = levels.levels ? ladderFor(levels.levels, game) : [];
   const next = resolved ? nextLevel(ladder, resolved.id) : null;
-  const failure = !progress.data && progress.isError ? failureView(progress.error) : null;
+  const item = qualifications.data?.items.find(
+    (entry) => entry.game === game && entry.level?.id === assignment.levelId,
+  );
+  const failure =
+    !qualifications.data && qualifications.isError ? failureView(qualifications.error) : null;
 
   let body: ReactNode;
-  if (progress.data)
-    body = <ProgressRows progress={progress.data} locale={locale} level={resolved} />;
-  else if (failure === "setup") body = <p className="driver-muted">{t("qualification.none")}</p>;
-  else if (failure) body = <p className="driver-muted">{t("qualification.progressUnavailable")}</p>;
+  if (item) body = <ProgressRows item={item} locale={locale} />;
+  else if (qualifications.data || failure)
+    body = <p className="driver-muted">{t("qualification.progressUnavailable")}</p>;
   else body = <p className="driver-muted">{t("qualification.progressLoading")}</p>;
 
   return (
@@ -421,7 +415,11 @@ export function QualificationCard({
         <h2 id={headingId}>
           <GameChip game={game} />
           <span className="visually-hidden"> · </span>
-          <span>{name}</span>
+          {resolved ? (
+            <Link to={`/account/qualifications/${encodeURIComponent(resolved.id)}`}>{name}</Link>
+          ) : (
+            <span>{name}</span>
+          )}
         </h2>
         {next && (
           <span className="driver-next">

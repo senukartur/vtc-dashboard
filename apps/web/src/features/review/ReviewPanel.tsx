@@ -66,18 +66,12 @@ function ResolutionForm({
     [error, setError] = useState(false),
     [saved, setSaved] = useState(false),
     [catalogField, setCatalogField] = useState("cargoId"),
-    requestPages = useCursorPages(`/trips/${tripId}/correction-requests`),
-    assignmentPages = useCursorPages(`/trips/${tripId}/qualification-assignments`);
+    requestPages = useCursorPages(`/trips/${tripId}/correction-requests`);
   const requests = useTripQuery(
-      `/trips/${tripId}/correction-requests?${queryString({ limit: 25, cursor: requestPages.cursor })}`,
-      "EnvelopeListManualCorrectionRequest",
-      open,
-    ),
-    assignments = useTripQuery(
-      `/trips/${tripId}/qualification-assignments?${queryString({ limit: 25, cursor: assignmentPages.cursor })}`,
-      "EnvelopeListAssignmentHistory",
-      open && !requests.isPending,
-    );
+    `/trips/${tripId}/correction-requests?${queryString({ limit: 25, cursor: requestPages.cursor })}`,
+    "EnvelopeListManualCorrectionRequest",
+    open,
+  );
   const body = {
     ...changes,
     reason: reason.trim(),
@@ -185,34 +179,6 @@ function ResolutionForm({
                   />
                 ))}
             </div>
-            <Label htmlFor="resolution-assignment">{t("assignment")}</Label>
-            <select
-              id="resolution-assignment"
-              className="input"
-              value={changes.qualificationAssignmentId ?? ""}
-              onChange={(e) => patch("qualificationAssignmentId", e.target.value)}
-            >
-              <option value="">—</option>
-              {changes.qualificationAssignmentId &&
-                !assignments.data?.data.data.items.some(
-                  (item) => item.id === changes.qualificationAssignmentId,
-                ) && (
-                  <option value={changes.qualificationAssignmentId}>
-                    {changes.qualificationAssignmentId}
-                  </option>
-                )}
-              {assignments.data?.data.data.items.map((a) => (
-                <option value={a.id} key={a.id}>
-                  {a.id} · {a.assignedAt} → {a.endedAt ?? "…"}
-                </option>
-              ))}
-            </select>
-            <State query={assignments} />
-            <Pager
-              pages={assignmentPages}
-              nextCursor={assignments.data?.data.data.nextCursor}
-              label={t("assignmentPages")}
-            />
             {trip.effectiveFacts?.provider === "ets2telemetry" && (
               <>
                 <p>{t("timeHelp")}</p>

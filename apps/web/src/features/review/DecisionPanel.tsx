@@ -19,8 +19,8 @@ import {
   DispatchDecisionBadge,
   EvidenceList,
   HoldReasons,
-  QualificationCheckList,
   ReviewHistory,
+  ReviewQualificationCheck,
   RevisionDiff,
   TripFacts,
 } from "./decision-parts.js";
@@ -165,9 +165,7 @@ export function DecisionPanel({
     evidence = review && (revision || review.trip.evidence.length > 0) && (
       <EvidenceList evidence={review.trip.evidence} />
     ),
-    check = review && (
-      <QualificationCheckList check={review.qualificationCheck} game={review.trip.summary.game} />
-    ),
+    check = review && <ReviewQualificationCheck check={review.qualificationCheck} />,
     log = review && <ReviewHistory items={history} timezone={timezone} staged={staged} />,
     form = review && (
       <DecisionForm key={tripId} tripId={tripId} review={review} etag={etag} staged={staged} />

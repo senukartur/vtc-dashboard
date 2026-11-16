@@ -8,6 +8,7 @@ import { Pager } from "../../shared/ui/pager.js";
 import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
 import { EventSelect, EvidenceItem } from "../manual-reports/fields.js";
 import { ReferenceFacts } from "../manual-reports/ReferenceFacts.js";
+import { QualificationCheckList } from "../qualifications/QualificationCheckList.js";
 import { DecisionPanel } from "../review/DecisionPanel.js";
 import { dispatchSearch } from "../review/dispatch-model.js";
 import { ReviewAccessState } from "../review/ReviewAccessState.js";
@@ -24,7 +25,6 @@ import {
   State,
   TripSummary,
 } from "./components.js";
-import { HistoricalRules } from "./HistoricalRules.js";
 import { useTripCommand, useTripQuery } from "./queries.js";
 import { TripDeliveryFacts, TripQualificationCheck, TripSources } from "./TripPageSections.js";
 import { validId } from "./transport.js";
@@ -93,6 +93,11 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
               <TripQualificationCheck check={view.qualificationCheck} />
               <EffectiveFacts facts={view.effectiveFacts} />
               <Codes values={view.reviewReasonCodes} />
+              {view.qualificationCheck && (
+                <Card>
+                  <QualificationCheckList check={view.qualificationCheck} />
+                </Card>
+              )}
               {view.manualRevision && (
                 <Card className="stack">
                   <ReferenceFacts revision={view.manualRevision} />
@@ -136,7 +141,6 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
                       }}
                     />
                     <Codes values={d.reasonCodes} />
-                    <HistoricalRules basis={d.basis} />
                   </article>
                 ))}
                 <p>{t("historyBound")}</p>
