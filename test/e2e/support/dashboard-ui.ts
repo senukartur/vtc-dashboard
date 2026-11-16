@@ -59,6 +59,14 @@ export function makeAnalyticsFixture(empty = false) {
       computedAt: "2026-10-26T12:00:00.000Z",
       projectionVersion: 2,
       projectionPending: false,
+      // Stage 4 aggregates the live API returns since VTC-143; the client must accept them.
+      period: "range" as const,
+      activeDrivers: 3,
+      activeMembers: 5,
+      byGame: [
+        { game: "ets2" as const, acceptedTrips: 30, actualDistanceM: "90000000" },
+        { game: "ats" as const, acceptedTrips: 12, actualDistanceM: "35430000" },
+      ],
     },
     meta,
   };
@@ -144,6 +152,10 @@ export function makeFilteredAnalyticsFixture(search: URLSearchParams, empty = fa
       toDateExclusive: search.get("toDateExclusive") ?? base.data.toDateExclusive,
       granularity,
       buckets,
+      // byGame lists only the filtered game, and its totals follow the buckets.
+      ...("byGame" in base.data && (game === "ets2" || game === "ats")
+        ? { byGame: [{ game, acceptedTrips, actualDistanceM }] }
+        : {}),
     },
     meta,
   };
