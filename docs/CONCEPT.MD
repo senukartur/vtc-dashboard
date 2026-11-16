@@ -6,9 +6,9 @@ A web dashboard for the Yukon Union virtual trucking company: a small community 
 
 A visitor learns about the company and public convoys and applies to join. An administrator approves the application and sends an invitation. The new member sets a password, links Steam and starts as a Trainee in each game.
 
-Drivers submit trips via the companion telemetry app or a manual report with a screenshot. The dashboard keeps source evidence, recognizes cities, cargo and trailers from game catalogs, checks qualification rules, and accepts, rejects or sends the trip to staff review. Only accepted trips count toward statistics and promotion.
+Drivers submit trips via the companion telemetry app or a manual report with a screenshot. The dashboard keeps source evidence, recognizes cities, cargo and trailers from game catalogs, checks the driver's level limits, and accepts, rejects or sends the trip to staff review. Only accepted trips count toward statistics and promotion.
 
-Members browse company and personal stats, driver profiles and trips, RSVP to convoys and get in-app updates. Admins review reports and applications, manage qualifications and members, and confirm promotions and event attendance.
+Members browse company and personal stats, driver profiles and trips, RSVP to convoys and get in-app updates. Admins review reports and applications, manage qualifications and members, and confirm event attendance.
 
 ## Roles
 
@@ -27,12 +27,12 @@ Roles are additive and separate from ETS2/ATS qualifications. Nobody may approve
 - **Telemetry**: a revocable personal token for durable desktop uploads of all retained trips, then new ones. Private details show job type, game mode (including HaulMP) and recorded Hard Mode result.
 - **Manual reports**: game, cities, cargo, mass, trailer, actual distance, reference start and completion, and a screenshot. Damage and depot companies are optional. A different reviewer checks the report. Edits create revisions. Screenshots stay at least a year after the latest decision. Over-limit acceptance needs explicit confirmation.
 - **Trip history** is searchable by stable number or localized labels. Replays, revisions and overlaps preserve one trip and its credit. Late telemetry changes to confirmed trips need review.
-- **Qualifications**: configurable per-game levels limit cargo mass, trailers and hazardous cargo. New members start at the first active level. The Director or a Deputy reviews candidates and history and confirms promotions from accepted trips and distance. Rules apply at actual start for telemetry and staff confirmation for manual reports.
+- **Qualifications**: one page per game with up to 25 levels. Each level limits cargo mass, distance, trailer types, ADR and Hard Mode, and sets trip and distance conditions. New members start at the first level; meeting the conditions promotes automatically. The Director or a Deputy edits the ladder and can change a member's level. The level at actual start (telemetry) or staff confirmation (manual reports) applies.
 - **Game catalogs**: per-game DLCs, regions, cities, companies, cargo and trailer types as plain lists edited by hand or via CSV/JSON import. Telemetry is matched by exact code. DLCs and companies have one canonical name; other names are RU/EN with a visible English fallback; a city may add its in-game name beside the translation; hidden rows stay readable but leave new selections. Companies also have city depots for manual reports and a staff-uploaded logo or placeholder.
 - **Analytics**: accepted trips and actual distance for company and driver in one reporting timezone, by range or all time, with leaderboard positions, top routes, cargo and trip sources. Recent trips: date filter, search and driver history links.
-- **Events**: staff draft and publish public or private convoys with platform, cities, depots, exact distance, DLCs and galleries with covers. Members see depot logos and RSVPs. Only authors and admins see decline reasons. One-hour reminders and nearest-event quick RSVP in the header and overview. Staff record actual attendance. Confirmed event trips may carry prescribed loads beyond qualification limits.
+- **Events**: staff draft and publish public or private convoys with platform, cities, depots, exact distance, DLCs and galleries with covers. Members see depot logos and RSVPs. Only authors and admins see decline reasons. One-hour reminders and nearest-event quick RSVP in the header and overview. Staff record actual attendance. Confirmed event trips are credited without the level limits.
 - **Notifications**: in-app history and updates while the site is open; per-kind toggles, own accepted trips, new events.
-- **Workspace attention**: counts by permission, promotion links.
+- **Workspace attention**: counts by permission.
 - **Administration**: members, roles, qualification levels, company settings, integrations and a filterable audit log. The serving Director transfers leadership with a ten-minute email code.
 
 ## Not in the MVP

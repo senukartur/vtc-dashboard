@@ -60,7 +60,7 @@ Stems resolve under [unit](../../test/unit/) / [contracts](../../test/contracts/
 | Drivers | `drivers` | — | — | `drivers` |
 | Events | `event-workspace`, `events-ui`, `events` | `events` | `events` | `events`, `events-layout`, `events-real` |
 | Notifications and messaging | `notifications-acceptance-diagnostics`, `notifications-acceptance-handshake`, `notifications-acceptance-sources`, `notifications-ui`, `notifications`, `messaging` | `notifications` | `notifications`, `messaging` | `notifications`, `notifications-real` |
-| Qualifications | `qualification-changes`, `qualification-read-fence`, `qualification-rules`, `qualification-ui`, `qualification-workspace`, `qualifications` | `qualifications` | `qualifications` | `qualifications`, `qualifications-editor`, `qualifications-layout`, `qualifications-real` |
+| Qualifications | `qualification-check`, `qualification-ui` | `qualifications` | `qualifications`, `qualification-simplification-upgrade` | `qualifications`, `qualifications-layout` |
 | Trip list | `trips`, `trip-ui`, `trip-availability`, `read-scheduler` | `trips-list` | `trips` | `trips-list` |
 | Manual reports | `manual-blobs`, `manual-decoder-lifecycle`, `manual-native-notices`, `manual-report-ui`, `manual-roots` | `manual-reports` | `manual-reports` | `manual-report-layout`, `trips` |
 | Review and canonical decisions | `review-ui`, `trip-decisions` | `trip-decisions` | `trip-decisions` | `review-layout`, `trips-corrections`, `trips-real` |

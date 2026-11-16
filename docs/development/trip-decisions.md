@@ -1,6 +1,6 @@
 # Canonical trip decisions and review
 
-VTC-029 implements the disabled-by-default acceptance coordinator over the owning [Trips](trips.md), [Manual Reports](manual-reports.md), [Qualifications](qualifications.md), [Reconciliation](reconciliation.md), [Events](events.md) and pure [rule engine](qualification-rules.md) facades. Approved policy remains in [CONCEPT.MD](../CONCEPT.MD); the [browser contract](../contracts/dashboard/openapi.json) preserves existing Decision operations and adds the named proposal-decision response union and optional immutable event-association proposal references described below. Frozen telemetry wire bytes are unchanged. UI, analytics consumers and notification delivery remain VTC-030/032/036.
+VTC-029 implements the disabled-by-default acceptance coordinator over the owning [Trips](trips.md), [Manual Reports](manual-reports.md), [Qualifications](qualifications.md), [Reconciliation](reconciliation.md), [Events](events.md) facades and the pure [qualification check](qualifications.md#trip-check). Approved policy remains in [CONCEPT.MD](../CONCEPT.MD); the [browser contract](../contracts/dashboard/openapi.json) preserves existing Decision operations and adds the named proposal-decision response union and optional immutable event-association proposal references described below. Frozen telemetry wire bytes are unchanged. UI, analytics consumers and notification delivery remain VTC-030/032/036.
 
 ## Classification and effective state
 
@@ -30,7 +30,7 @@ Resolution proposals support only the existing `ResolutionInput`. Catalog select
 
 The existing routes are implemented:
 
-- `GET /api/v1/trips/{tripId}/review`, `/proposals`, `/proposals/{proposalId}` and `/qualification-assignments`.
+- `GET /api/v1/trips/{tripId}/review`, `/proposals`, and `/proposals/{proposalId}`.
 - `POST /api/v1/trips/{tripId}/decisions`, `/resolution-proposals`, `/proposals/{proposalId}/decisions` and `/event-association`.
 
 Commands use Origin/CSRF, strict closed schemas, `If-Match: "vN"`, permanent actor/operation/key receipts and keyed normalized fingerprints. Exact replay still checks current authority; changed input conflicts. Proposal detail returns the current canonical ETag, while approval additionally checks the exact immutable proposal revision, base trip/fact and current supporting source/history/event versions. A changed supporting epoch requires fresh review. Correction-request IDs remain distinct from proposal IDs. Signed keyset cursors bind actor/session/access epoch and query scope, with the existing one-to-one-hundred page bounds.
@@ -41,7 +41,7 @@ Any independent adjudication advances a separate Trips marker. An obsolete merge
 
 ## Event participation and durable work
 
-Event association is stored separately from source evidence and validated through the Events facade. Only current confirmed actual attendance and a matching prescribed load can bypass the corresponding ordinary mass/trailer/ADR restrictions. RSVP does not authorize an exception; lifecycle/evidence/distance/history remain required. Changes to confirmed associations use proposals. Manual form event selections enter the same association seam after the immutable revision and references exist.
+Event association is stored separately from source evidence and validated through the Events facade. Only current confirmed actual attendance exempts a trip from the level limits (`event_exempt`); prescribed loads are not compared. RSVP does not authorize an exception; lifecycle/evidence/distance/history remain required. Changes to confirmed associations use proposals. Manual form event selections enter the same association seam after the immutable revision and references exist.
 
 API composition prepares qualification state whenever reconciliation or acceptance is enabled. Telemetry refreshes reconciliation before assessing the resulting canonical root. Manual assessment runs after its immutable revision, source pointer, evidence references and pending state persist. Correction requests and merge/reversal use narrow caller-transaction callbacks, without recursive public commands.
 

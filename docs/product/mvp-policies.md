@@ -45,7 +45,7 @@ Administrative roles add permissions to the user's member roles; game qualificat
 | View an accessible event's participant and decliner lists | Yes | Yes | Yes | Yes |
 | View an event's list of members who have not answered | No | No | Yes | Yes |
 | Read another member's event-decline reason | No | No | Yes | Yes |
-| Configure qualifications and confirm promotion | No | No | Yes | Yes |
+| Configure qualifications and change levels | No | No | Yes | Yes |
 | Set a member's membership directly to Trainee or Driver | No | No | Yes | Yes |
 | Administer users/roles, deactivate or reinstate ordinary members | No | No | Yes | Yes |
 | Replace a member's Steam link on request | No | No | Yes | Yes |
@@ -72,7 +72,7 @@ There must be exactly one director after the initial company bootstrap. Administ
 
 Do not delete or deactivate the serving director or remove their Director role without the director-only succession workflow below. A deputy cannot transfer leadership through direct role assignment or remove/deactivate the serving director. Do not allow multiple directors as an implementation shortcut.
 
-The deputy's permission parity includes applications/invitations, event management and participation confirmation, private decline reasons, manual/disputed report review, qualification configuration and promotions, user/role administration, Steam replacement, and company integrations. Leadership succession and protected changes to the serving director's account remain exclusive to that director. General constraints such as the prohibition on approving one's own manual report apply to both roles. In the workflows below, director administrative responsibilities also apply to the deputy except for those explicitly protected operations.
+The deputy's permission parity includes applications/invitations, event management and participation confirmation, private decline reasons, manual/disputed report review, qualification configuration and manual level changes, user/role administration, Steam replacement, and company integrations. Leadership succession and protected changes to the serving director's account remain exclusive to that director. General constraints such as the prohibition on approving one's own manual report apply to both roles. In the workflows below, director administrative responsibilities also apply to the deputy except for those explicitly protected operations.
 
 Membership application review and event management belong to the director and deputy in the MVP. Separate recruitment and event-organizer roles are deferred. Joining or responding to an event is a standard member capability, distinct from managing it.
 
@@ -118,34 +118,31 @@ Qualifications remain separate for ETS2 and ATS. Both ladders start with **Train
 
 ## Qualification configuration before launch
 
-- The initial supported qualification restrictions are maximum cargo mass, allowed trailer types, and hazardous-cargo category permissions (ADR), configured separately for each level and game.
-- Keep restriction types extensible as specified in the planning baseline. The initial set is not a hard-coded limit on future rule types.
-- The director configures actual qualification limits and accepted-trip/distance promotion thresholds before launch. No concrete numeric values have been supplied or approved during this clarification.
-- The highest level has freight restrictions and no promotion thresholds. A former highest level needs a new effective publication before drivers can advance from it.
-- Implementation may proceed with the agreed configuration model and clearly identified test fixtures; actual production values remain a director-owned launch prerequisite rather than invented defaults.
+- Each game has its own ladder of up to 25 levels on one qualifications page. Every member sees the ladder; the Director and Deputies add, edit, reorder and remove levels there.
+- A level has five limits, each optional: cargo mass (from/to), actual distance (from/to), trailer types (any or selected), ADR (forbidden, selected classes or any) and Hard Mode (required or not). An empty field means no limit. "Selected" trailers or ADR classes need at least one item. A trip must pass every set limit.
+- A level has two promotion conditions: credited trips and actual distance on the level. Every set condition must be met. Every level but the top needs at least one condition; the top level has none and a level without conditions never promotes.
+- The director configures actual limits and conditions before launch. No numeric defaults are invented; tests use clearly identified fixtures.
+- Upgrading from the earlier model keeps the levels, their order and the assignment history but not their rules, which staff configure again.
 
 ## Qualification timing and promotion
 
-- For trips with a known actual start time, evaluate the driver's qualification and rule versions effective at that start, independently of submission or processing time.
-- A qualification or rule change during such a trip does not change the versions used to assess it. A delayed report with a known start uses the historical versions applicable at that start.
-- If the trip start time is unknown, require manual review rather than automatically substituting receipt or completion time.
-- The system calculates promotion progress and signals when the defined requirements are met. The director or deputy confirms promotion; meeting a threshold alone does not automatically change a role or qualification.
-- Director/deputy confirmation applies both to the transition from trainee to driver and to subsequent qualification levels.
-- Each level has a separate promotion-progress period beginning when that level is assigned in the relevant game. For telemetry trips, count accepted trips started after that assignment; trips from earlier levels remain in historical statistics but are not reused for the next promotion.
-- For manual reports, use the qualification and rule versions effective at staff confirmation. Attribute progress to the game-specific qualification level assigned at that confirmation time. Driver-supplied reference dates remain private report facts.
-- When the director or deputy confirms a promotion from the first active level in either game, the user’s Trainee role becomes Driver if they currently hold Trainee. Other global roles and the other game's qualification stay as recorded. The director or deputy may also set Trainee or Driver directly without changing any qualification or progress period.
-- Reordering preserves current assignments and roles. Archiving moves all current assignees to the explicitly selected active level in the same game and starts new progress periods. The original assignments, rule versions and credited trips remain in history. The director or deputy reviews the affected driver count and explicitly confirms the archive. This audited archive is the narrow exception to the prohibition on automatic demotion: it may transfer drivers to a lower active level in that game. Trip corrections and revoked acceptance never demote drivers.
-- When an accepted trip is corrected or its acceptance is revoked, recalculate affected statistics and qualification progress. If the change invalidates the requirements for a previously confirmed promotion, notify the director and retain the assigned qualification until the director decides what to do. Never automatically demote a driver.
+- A trip is checked against the level the driver held at its attribution time: the actual start for telemetry and staff confirmation for manual reports. Driver-supplied reference dates remain private report facts.
+- If the attribution time is unknown, the trip goes to staff review rather than substituting receipt or completion time.
+- A pending trip is checked against that level's current limits. The decision stores the level name, limits and results, so later edits never change a decided trip.
+- Progress counts credited trips and their actual distance on the current level, from the moment the level was assigned in that game. Trips from earlier levels stay in statistics but do not count again.
+- Promotion is automatic: when a credited trip, or a level edit that lowers the conditions, makes the driver meet every set condition, the driver moves to the next level at once. The change is audited and the driver is notified.
+- Leaving the first level in either game, by promotion, manual change or removal transfer, changes a held Trainee role to Driver. Other global roles and the other game's level stay as recorded. The director or deputy may also set Trainee or Driver directly without changing any level.
+- The director or deputy may change a member's level manually with a comment. The change is audited.
+- Reordering keeps current assignments and roles. Removing a level moves its drivers to an explicitly selected level in the same game, which may be lower, after staff review the affected driver count. Removed levels stay in history.
+- A corrected or revoked trip recalculates statistics and progress but never demotes a driver.
 
 ## Qualification exceptions for company events
 
-The owner confirmed the current company policy: qualification restrictions do not prevent participants in a company-wide event from carrying the load prescribed by that event, regardless of their ordinary qualification level. This exception is part of the event policy, rather than a separate discretionary waiver that the director must grant to each participant. It is also distinct from the discretionary over-limit acceptance in [manual report review](#manual-report-review-and-resubmission): a trip covered by this exception is accepted normally, not marked as accepted over limits.
+The owner confirmed the current company policy: qualification limits do not apply to a trip for a company event that the driver actually attended. This exception is part of the event policy, not a discretionary waiver. It is also distinct from the discretionary over-limit acceptance in [manual report review](#manual-report-review-and-resubmission): such a trip is accepted normally, not marked as accepted over limits.
 
-The event's conditions determine the permitted load. For the MVP, a driver selects the event when submitting the report, and the director confirms actual participation. An RSVP alone does not establish participation. Automatic association of telemetry trips using event conditions may be added later; it is not an MVP prerequisite.
+For the MVP, a driver selects the event when submitting the report, and the director confirms actual participation. An RSVP alone does not establish participation. Automatic association of telemetry trips may be added later; it is not an MVP prerequisite.
 
-Accepted trips for a confirmed company-wide event count toward qualification progress, including when the prescribed load would be outside the driver's ordinary qualification limits. They contribute accepted-trip count and distance within the relevant level's progress period and count in company statistics as accepted canonical trips, without duplicate effects. Actual numeric thresholds are configured by the director before launch.
-
-For the agreed initial restriction types, the prescribed-load exception covers ordinary cargo-mass, trailer-type, and hazardous-cargo qualification limits. The previously agreed evidence and review workflow still applies.
+Accepted event trips count toward qualification progress and company statistics like any other accepted trip, without duplicate effects. The previously agreed evidence and review workflow still applies.
 
 ## Event responses, reminders, and privacy
 
@@ -257,13 +254,13 @@ The current manual form requires game, origin and destination cities, cargo, car
 10. An author requests a correction to an accepted report. An authorized staff member records the correction with its history; affected statistics are recalculated without creating another trip.
 11. A driver supplies reference start and completion for a manual report and provides the required evidence. Its age alone does not prevent submission. Once confirmed, it belongs to the reporting period containing its confirmation time, is checked against the qualification/rules at confirmation, and contributes to that game-specific level's progress.
 12. A rule or qualification changes after a trip starts but before it finishes or is submitted. The assessment uses the historical versions effective at the start.
-13. A driver meets the configured promotion requirements. The system shows eligibility, but the role/qualification changes only after director/deputy confirmation.
-14. A trainee selects a company-wide event on a report for its prescribed load, and the director confirms actual participation. Ordinary qualification restrictions do not prevent that load; once accepted, the trip also contributes to qualification progress. An RSVP without actual-participation confirmation does not authorize the exception.
-15. ETS2 and ATS each start with Trainee → Driver III → Driver II → Driver I and can be configured independently. A new member receives the current first level in each admitted game. Reordering changes the next promotion without moving any current driver, and archived levels remain in history.
-16. A director confirms promotion to Driver III in ETS2. Progress toward Driver II uses accepted telemetry trips started after the Driver III assignment and manual reports confirmed while that level is assigned; earlier credited trips remain in lifetime statistics. The same progression rules apply independently in ATS.
-17. A member with Trainee receives a confirmed promotion from the current first level in ETS2. Their global role becomes Driver, and their ATS qualification and other global roles stay as recorded.
+13. A driver meets every set promotion condition of the current level. The driver moves to the next level at once; the change is audited and the driver is notified.
+14. A trainee selects a company event on a report, and the director confirms actual participation. The level limits do not apply to that trip; once accepted, it also contributes to qualification progress. An RSVP without actual-participation confirmation does not authorize the exception.
+15. ETS2 and ATS each start with Trainee → Driver III → Driver II → Driver I and can be configured independently. A new member receives the current first level in each admitted game. Reordering changes the next promotion without moving any current driver. Removing a level moves its drivers to a selected level, and removed levels remain in history.
+16. A driver is promoted to Driver III in ETS2. Progress toward Driver II uses accepted telemetry trips started after the Driver III assignment and manual reports confirmed while that level is assigned; earlier credited trips remain in lifetime statistics. The same progression rules apply independently in ATS.
+17. A member with Trainee leaves the current first level in ETS2 by promotion, manual change or removal transfer. Their global role becomes Driver, and their ATS qualification and other global roles stay as recorded.
 18. A director configures the production limits and promotion thresholds independently for each level and game before launch; implementation fixtures are not presented as approved company limits.
-19. A corrected or revoked trip reduces the progress that justified an existing promotion. The system recalculates the affected totals and alerts the director, while retaining the assigned qualification pending the director's decision.
+19. A corrected or revoked trip reduces the progress that justified an existing promotion. The system recalculates the affected totals and keeps the assigned level; it never demotes automatically.
 20. Before an event starts, a member changes Participating to Declined and supplies a reason. After the start, response editing is closed and the director records actual attendance separately.
 21. One hour before an event, an in-app reminder targets members who selected Participating. The upcoming-event header remains visible to other VTC members who may access the event.
 22. A VTC member can view the event's signed-up participant list but cannot read another member's decline reason without the Director or Deputy Director role. An anonymous visitor to a public event page sees neither the participant list nor decline reasons.
@@ -287,7 +284,7 @@ The current manual form requires game, origin and destination cities, cargo, car
 40. The serving director transfers leadership to another active member after the required additional verification. Exactly one director remains, and the former director retains driver membership, qualifications, and trip history.
 41. The serving director selects a successor and receives a one-time code at their verified email. A code older than ten minutes, already used/replaced, or associated with another successor cannot authorize transfer.
 42. A deputy attempts to change the serving director's email/login credentials or bypass succession through role administration. The operation is denied; a director's own credential change requires confirmation through the current verified email.
-43. A director or deputy sets a member's membership from Trainee to Driver, or back to Trainee, without a promotion confirmation. The change is audited; ETS2/ATS qualifications, their progress periods and other assigned roles stay unchanged. Trainee, Driver, or Dispatcher roles alone cannot make this change.
+43. A director or deputy sets a member's membership from Trainee to Driver, or back to Trainee, without changing a level. The change is audited; ETS2/ATS levels, their progress periods and other assigned roles stay unchanged. Trainee, Driver, or Dispatcher roles alone cannot make this change.
 44. A director approves an application. No invitation email is sent until the director or deputy chooses Send to email; alternatively they copy the link and send it through Discord or Steam. Either way the same one-time use and seven-day expiry apply.
 45. After five incorrect entries, a leadership-transfer code cannot authorize transfer, even with the correct value. A new code requested within 60 seconds of the previous one, or a sixth code within 60 minutes, is refused.
 46. A dispatcher reviews another member's manual report whose cargo mass exceeds the driver's ordinary limit, and no event exception applies. The review shows every exceeded limit. The dispatcher accepts only after explicit confirmation, and the decision is recorded as accepted over limits with that dispatcher. The author cannot make this decision on their own report. A trip covered by the event exception in scenario 14 is accepted without the over-limit marker. A telemetry trip that breaks the same limit is rejected automatically and cannot be accepted over limits. If matching telemetry for an over-limit manual report arrives later and confirms the breach, the reconciliation review withdraws the over-limit acceptance and recalculates totals and progress; a manual report for a trip whose telemetry was rejected for a limit breach cannot be accepted over limits.
