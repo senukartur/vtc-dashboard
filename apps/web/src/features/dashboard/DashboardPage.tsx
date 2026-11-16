@@ -2,7 +2,7 @@ import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { useWorkspaceSummary } from "../../app/workspace-summary.js";
-import type { Locale } from "../../shared/formatting.js";
+import { accountTimeZone, type Locale } from "../../shared/formatting.js";
 import { Button, Card, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { useUpcomingEventCard } from "../events/event-list-queries.js";
@@ -61,7 +61,7 @@ function DashboardContent() {
   const { t, i18n } = useTranslation("dashboard");
   const locale = (i18n.resolvedLanguage === "en" ? "en" : "ru") as Locale;
   const session = useSession();
-  const displayTimezone = session.self?.preferences.displayTimezone ?? "UTC";
+  const displayTimezone = accountTimeZone(session.self?.preferences.displayTimezone);
   const capabilities = session.self?.capabilities ?? [];
   const titleRef = useRef<HTMLHeadingElement>(null);
 

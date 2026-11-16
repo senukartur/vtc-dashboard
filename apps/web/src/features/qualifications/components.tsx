@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { itemSchema } from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
-import { formatQuantity, formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Pager } from "../../shared/ui/pager.js";
 import { Button } from "../../shared/ui/primitives.js";
@@ -80,7 +80,7 @@ export function Recovery({
 export function Time({ value }: { value: string | null }) {
   const { i18n } = useTranslation(),
     session = useSession(),
-    zone = session.self?.preferences.displayTimezone ?? "UTC";
+    zone = accountTimeZone(session.self?.preferences.displayTimezone);
   return (
     <time dateTime={value ?? undefined}>
       {formatUtc(value, i18n.resolvedLanguage === "en" ? "en" : "ru", zone)} · {zone}

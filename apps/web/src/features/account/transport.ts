@@ -10,7 +10,8 @@ const meta = z.strictObject({ requestId: z.string().min(1).max(128) });
 const envelope = <T extends z.ZodType>(data: T) => z.strictObject({ data, meta });
 const preferences = z.strictObject({
   locale: z.enum(["ru", "en"]),
-  displayTimezone: z.string().min(1).max(128),
+  // Null means "as on the device".
+  displayTimezone: z.string().min(1).max(128).nullable(),
 });
 export const selfEnvelope = envelope(
   z.strictObject({

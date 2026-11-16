@@ -28,6 +28,7 @@ import { pageSize, selfReviewCode } from "./review-model.js";
 import "../trips/trips.css";
 import "../trips/trips-list.css";
 import "./review.css";
+import { accountTimeZone } from "../../shared/formatting.js";
 
 export function DispatchReviewPage({
   reconciliationAlias = false,
@@ -37,7 +38,7 @@ export function DispatchReviewPage({
   const { t, i18n } = useTranslation("trips");
   const session = useSession();
   const memberId = session.self?.member.id;
-  const timezone = session.self?.preferences.displayTimezone ?? "UTC";
+  const timezone = accountTimeZone(session.self?.preferences.displayTimezone);
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const location = useLocation();
   const navigate = useNavigate();
