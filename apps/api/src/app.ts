@@ -150,6 +150,7 @@ export async function createApp(options: AppOptions) {
         "CATALOG_IMPORT_TOKEN_INVALID",
         "CATALOG_IMPORT_INVALID",
         "CATALOG_SELECTION_HIDDEN",
+        "QUALIFICATION_CONDITIONS_REQUIRED",
       ].includes(suppliedCode)
         ? suppliedCode
         : (errorCodes[status] ?? "INTERNAL_ERROR");

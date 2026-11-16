@@ -5393,7 +5393,7 @@ export interface components {
             /** @enum {string} */
             status: "checked" | "event_exempt" | "no_level";
         };
-        /** @description Promotion conditions on the level. Every set condition must be met. A non-top level needs at least one (qualification_conditions_required); distance must be positive. */
+        /** @description Promotion conditions on the level. Every set condition must be met. A non-top level needs at least one (422 QUALIFICATION_CONDITIONS_REQUIRED); distance must be positive. */
         QualificationConditions: {
             requiredDistanceM: components["schemas"]["Decimal"] | null;
             requiredTrips: number | null;
