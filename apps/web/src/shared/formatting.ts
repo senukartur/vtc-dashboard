@@ -60,11 +60,19 @@ export function chartGeometry(value: string): number | null {
 }
 
 /**
- * Display time zone for a saved account preference. Null means "as on the device": the browser's
- * resolved zone. A missing or invalid zone falls back to UTC.
+ * The saved display time zone with only null ("as on the device") resolved to the browser's zone.
+ * A saved zone is returned as is, even when invalid, so callers can detect and report it.
+ */
+export function savedTimeZone(saved: string | null): string {
+  return saved ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+}
+
+/**
+ * Display time zone for formatting a saved account preference. Null means "as on the device": the
+ * browser's resolved zone. A missing or invalid zone falls back to UTC.
  */
 export function accountTimeZone(saved: string | null | undefined): string {
-  const zone = saved === null ? Intl.DateTimeFormat().resolvedOptions().timeZone : saved;
+  const zone = saved === undefined ? undefined : savedTimeZone(saved);
   if (!zone) return "UTC";
   try {
     new Intl.DateTimeFormat("en", { timeZone: zone });

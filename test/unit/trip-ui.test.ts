@@ -19,6 +19,7 @@ import {
   tripFilters,
   tripSources,
 } from "../../apps/web/src/features/trips/transport.ts";
+import { savedTimeZone } from "../../apps/web/src/shared/formatting.ts";
 import { queryString } from "../../apps/web/src/shared/paging.ts";
 
 const cases = JSON.parse(
@@ -158,6 +159,16 @@ test("half-open trip periods use the display calendar and both DST offsets", () 
     toExclusive: "2018-11-11T02:00:00.000Z",
   });
   expect(tripPeriodBounds("lastMonth", now, "Unknown/Zone")).toBeUndefined();
+  // The page passes the saved zone with only null resolved, so an unknown one stays unknown.
+  expect(tripPeriodBounds("lastMonth", now, savedTimeZone("Unknown/Zone"))).toBeUndefined();
+  expect(tripPeriodBounds("thisMonth", now, savedTimeZone("Europe/Warsaw"))).toEqual({
+    from: "2026-09-30T22:00:00.000Z",
+    toExclusive: "2026-10-31T23:00:00.000Z",
+  });
+  expect(tripPeriodBounds("thisMonth", now, savedTimeZone(null))).toEqual(
+    tripPeriodBounds("thisMonth", now, Intl.DateTimeFormat().resolvedOptions().timeZone),
+  );
+  expect(tripPeriodBounds("thisMonth", now, savedTimeZone(null))).toBeDefined();
 });
 
 test("list dates distinguish completion, staff confirmation and legacy reporting time", () => {

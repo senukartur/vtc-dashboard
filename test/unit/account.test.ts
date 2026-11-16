@@ -24,7 +24,7 @@ import {
   selfEnvelope,
 } from "../../apps/web/src/features/account/transport.ts";
 import { publicContent } from "../../apps/web/src/features/landing/content.ts";
-import { accountTimeZone } from "../../apps/web/src/shared/formatting.ts";
+import { accountTimeZone, savedTimeZone } from "../../apps/web/src/shared/formatting.ts";
 import {
   localeStorageKey,
   readStoredLocale,
@@ -443,6 +443,10 @@ test("a null display time zone parses in the Stage 4 envelopes and resolves to t
   expect(accountTimeZone(undefined)).toBe("UTC");
   expect(accountTimeZone("Mars/Base")).toBe("UTC");
   expect(accountTimeZone("Europe/Warsaw")).toBe("Europe/Warsaw");
+  // Only null is resolved for callers that must still see an invalid saved zone.
+  expect(savedTimeZone(null)).toBe(resolved || "UTC");
+  expect(savedTimeZone("Mars/Base")).toBe("Mars/Base");
+  expect(savedTimeZone("Europe/Warsaw")).toBe("Europe/Warsaw");
 });
 test("display timezone validation and suggestions keep the existing technical bounds", () => {
   for (const zone of ["UTC", "Europe/Warsaw"]) expect(timezoneValid(zone)).toBe(true);

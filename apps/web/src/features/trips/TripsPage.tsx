@@ -3,7 +3,12 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { isPlainSelfClick } from "../../app/Navigation.js";
 import { useSession } from "../../app/Session.js";
-import { accountTimeZone, formatDecimal, formatQuantity } from "../../shared/formatting.js";
+import {
+  accountTimeZone,
+  formatDecimal,
+  formatQuantity,
+  savedTimeZone,
+} from "../../shared/formatting.js";
 import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs.js";
@@ -27,10 +32,11 @@ export function TripsPage() {
   const wide = useWideLayout();
   const [params, setParams] = useSearchParams();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
+  // Period bounds need the raw saved zone, so an unknown one still falls back to All time.
   const savedTimezone = session.self
-    ? accountTimeZone(session.self.preferences.displayTimezone)
+    ? savedTimeZone(session.self.preferences.displayTimezone)
     : undefined;
-  const timezone = savedTimezone ?? "UTC";
+  const timezone = accountTimeZone(savedTimezone);
   const submit = !!session.self?.capabilities.includes("trips.submit_own");
   const viewDrafts = submit && params.get("tab") === "drafts";
   const drafts = useManualDrafts(submit);
