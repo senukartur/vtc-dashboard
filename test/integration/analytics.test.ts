@@ -748,7 +748,8 @@ test("Stage 4 all_time aggregates a known dataset from the month of the earliest
     buckets: expectedBuckets,
     computedAt: "2026-11-16T09:00:00.000Z",
     projectionVersion: 1,
-    projectionPending: false,
+    // The pending 2023 trip predates the earliest accepted trip and could still change all_time.
+    projectionPending: true,
     period: "all_time",
     activeDrivers: 4,
     activeMembers: 5,
@@ -757,6 +758,16 @@ test("Stage 4 all_time aggregates a known dataset from the month of the earliest
       { game: "ats", acceptedTrips: 1, actualDistanceM: "80000" },
     ],
   });
+  // A range only sees unfinalized trips inside it; the game filter also applies to all_time.
+  for (const [query, pending] of [
+    ["fromDate=2023-06-01&toDateExclusive=2023-07-01", true],
+    ["fromDate=2024-01-01&toDateExclusive=2025-01-01", false],
+    ["period=all_time&game=ats", false],
+    ["period=all_time&game=ets2", true],
+  ] as const)
+    expect((await data(`/api/v1/analytics/company?${query}`)).projectionPending, query).toBe(
+      pending,
+    );
   // The covered range exceeds 732 days, which an explicit range may not.
   expect(
     (await get("/api/v1/analytics/company?fromDate=2024-01-01&toDateExclusive=2026-12-01"))

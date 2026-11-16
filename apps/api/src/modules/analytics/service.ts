@@ -499,6 +499,8 @@ export function createAnalytics(
           .from(trips)
           .where(accepted);
 
+        // all_time also sees unfinalized trips older than the earliest accepted one: accepting
+        // them would change the totals and fromDate, so the probe has no lower bound there.
         const pendingConditions = [
           isNull(trips.aliasOf),
           or(
@@ -506,7 +508,7 @@ export function createAnalytics(
             eq(trips.correctionPending, true),
             eq(trips.decision, "pending_review"),
           ),
-          gte(trips.reportingAt, range.startIso),
+          ...(range.period === "all_time" ? [] : [gte(trips.reportingAt, range.startIso)]),
           lt(trips.reportingAt, range.endIso),
         ];
         if (q.game) {
