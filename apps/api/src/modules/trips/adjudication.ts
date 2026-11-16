@@ -156,6 +156,19 @@ export function createTripAdjudication(
           (await select(changes.destinationCityId, "city", base.destination)).id,
           "city",
         );
+      // A depot belongs to one city: a moved endpoint keeps only the raw company code.
+      for (const side of ["origin", "destination"] as const) {
+        const before = base[side],
+          after = evidence[side],
+          company = evidence.companies?.[side];
+        if (
+          company?.depotId &&
+          (after.status !== "known" ||
+            before.status !== "known" ||
+            after.value.entityId !== before.value.entityId)
+        )
+          company.depotId = null;
+      }
       if (changes.cargoId) {
         const cargo = await select(changes.cargoId, "cargo", base.cargo);
         evidence.cargo = reference(cargo.id, "cargo");

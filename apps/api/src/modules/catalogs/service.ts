@@ -1808,6 +1808,81 @@ export function createCatalogs(
         .for("share");
       return depot !== undefined;
     },
+    /**
+     * Source recognition of a depot in a trip city by company code or ID. Hidden rows are still
+     * recognized; an unknown or invalid code returns null. Pass exactly one of the two keys.
+     */
+    async depotInTransaction(
+      tx: TxContext,
+      input: { game: Game; cityId: string; companyCode?: string; companyId?: string },
+    ): Promise<{ id: string; companyCode: string } | null> {
+      if ((input.companyCode === undefined) === (input.companyId === undefined))
+        throw new Error("CATALOG_DEPOT_KEY_INVALID");
+      if (input.companyCode !== undefined && !validCode(input.companyCode)) return null;
+      const [row] = await c(tx)
+        .select({ id: catalogCompanyCities.id, code: catalogCompanies.code })
+        .from(catalogCompanyCities)
+        .innerJoin(catalogCompanies, eq(catalogCompanyCities.companyId, catalogCompanies.id))
+        .where(
+          and(
+            eq(catalogCompanyCities.game, input.game),
+            eq(catalogCompanies.game, input.game),
+            eq(catalogCompanyCities.cityId, applicationId(input.cityId)),
+            input.companyCode !== undefined
+              ? eq(catalogCompanies.code, Buffer.from(input.companyCode))
+              : eq(catalogCompanies.id, applicationId(input.companyId as string)),
+          ),
+        )
+        .limit(1);
+      return row ? { id: row.id, companyCode: row.code.toString() } : null;
+    },
+    /** Current display facts of depots; only logo metadata, never the image bytes. */
+    async depotRefsInTransaction(tx: TxContext, depotIds: readonly string[]) {
+      const ids = [...new Set(depotIds.map(applicationId))];
+      if (ids.length > 100) throw new Error("CATALOG_DEPOT_BATCH_BOUND_EXCEEDED");
+      const result = new Map<
+        string,
+        {
+          depotId: string;
+          cityId: string;
+          companyId: string;
+          name: string;
+          code: string;
+          hidden: boolean;
+          logo: S["CatalogLogo"] | null;
+        }
+      >();
+      if (!ids.length) return result;
+      const rows = await c(tx)
+        .select({
+          id: catalogCompanyCities.id,
+          cityId: catalogCompanyCities.cityId,
+          companyId: catalogCompanies.id,
+          name: catalogCompanies.nameEn,
+          code: catalogCompanies.code,
+          depotHidden: catalogCompanyCities.hidden,
+          companyHidden: catalogCompanies.hidden,
+          cityHidden: catalogCities.hidden,
+          logoSha: catalogCompanyLogos.sha256,
+          logoBytes: catalogCompanyLogos.byteLength,
+        })
+        .from(catalogCompanyCities)
+        .innerJoin(catalogCompanies, eq(catalogCompanyCities.companyId, catalogCompanies.id))
+        .innerJoin(catalogCities, eq(catalogCompanyCities.cityId, catalogCities.id))
+        .leftJoin(catalogCompanyLogos, companyLogoLink)
+        .where(inArray(catalogCompanyCities.id, ids));
+      for (const row of rows)
+        result.set(row.id, {
+          depotId: row.id,
+          cityId: row.cityId,
+          companyId: row.companyId,
+          name: row.name,
+          code: row.code.toString(),
+          hidden: row.depotHidden || row.companyHidden || row.cityHidden,
+          logo: logoOf(row.logoSha, row.logoBytes),
+        });
+      return result;
+    },
     async cargoAdrInTransaction(tx: TxContext, cargoId: string) {
       return (await selectionsInTransaction(tx, [{ kind: "cargo", id: cargoId }])).get(cargoId)
         ?.adrClass;

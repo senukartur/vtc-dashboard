@@ -866,7 +866,13 @@ export function createTripDecisions(
     return {
       view: "private",
       summary: await ports.trips.privateSummaryInTransaction(tx, row.id, actor, projection),
-      effectiveFacts: await ports.trips.effectiveFactsInTransaction(tx, row.id),
+      ...(await ports.trips.privateFactsInTransaction(
+        tx,
+        row.id,
+        projection?.manualRevision ?? null,
+      )),
+      // Rule checks return with the qualifications redesign (VTC-157).
+      qualificationCheck: null,
       manualRevision: projection?.manualRevision ?? null,
       evidence: projection?.evidence ?? [],
       decisions: await Promise.all(decisions.map((d) => decisionDto(tx, d, people))),
