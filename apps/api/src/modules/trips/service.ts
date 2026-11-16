@@ -956,13 +956,24 @@ export function createTrips(
     });
     const sources: S["TripStage4Source"][] = [];
     if (telemetry) {
+      // The selection picks the message; the entry shows that message's own source fact,
+      // never the values of a derived correction based on it.
       const [message] = await c(tx)
-        .select({ receivedAt: sourceMessages.receivedAt })
+        .select({ receivedAt: sourceMessages.receivedAt, factId: tripFacts.id })
         .from(sourceMessages)
+        .innerJoin(tripFacts, eq(tripFacts.messageId, sourceMessages.id))
         .where(eq(sourceMessages.id, telemetry.sourceRecordId))
         .for("share");
       if (!message) throw new Error("SOURCE_MESSAGE_MISSING");
-      sources.push(entry(telemetry, message.receivedAt));
+      let own = telemetry;
+      if (message.factId !== telemetry.factRevisionId) {
+        const saved = (await factsRepository.read(tx, [message.factId], true)).get(message.factId);
+        if (!saved) throw new Error("SOURCE_FACT_MISSING");
+        if (!(await groups.contains(tx, row.id, saved.tripId, true)))
+          throw new Error("TRIP_SOURCE_SCOPE_INVALID");
+        own = saved.evidence;
+      }
+      sources.push(entry(own, message.receivedAt));
     }
     if (manual && manualRevision) sources.push(entry(manual, manualRevision.submittedAt));
     if (!current) return { effectiveFacts: null, sources };

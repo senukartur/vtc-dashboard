@@ -5373,12 +5373,16 @@ test("a derived current fact keeps its telemetry source effective and drops a de
   const a = await resolveDistance(r.tripId, "200000");
   const view = await privateRead(owner, r.tripId);
   expectAuthorSafe(view);
-  expect(view.effectiveFacts?.factRevisionId).toBe(a.result.data.basis.factRevisionId);
+  expect(view.effectiveFacts).toMatchObject({
+    factRevisionId: a.result.data.basis.factRevisionId,
+    actualDistanceM: "200000",
+  });
+  // The source entry shows what telemetry reported, not the staff correction.
   expect(view.sources).toEqual([
     {
       kind: "ets2telemetry",
       receivedAt: r.firstReceivedAt,
-      actualDistanceM: "200000",
+      actualDistanceM: "123400",
       state: "delivered",
       effective: true,
     },
@@ -5396,7 +5400,12 @@ test("a derived current fact keeps its telemetry source effective and drops a de
     state: "unresolved",
     code: "fixture_vtc141_epsilon",
   });
-  expect(after.sources?.[0]).toMatchObject({ kind: "ets2telemetry", effective: true });
+  expect(after.effectiveFacts?.actualDistanceM).toBe("210000");
+  expect(after.sources?.[0]).toMatchObject({
+    kind: "ets2telemetry",
+    actualDistanceM: "123400",
+    effective: true,
+  });
 });
 
 test("HTTP author trip read serializes sources and a null qualification check", async () => {
