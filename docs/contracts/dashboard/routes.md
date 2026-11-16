@@ -104,26 +104,15 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `POST /api/v1/reconciliations` | `reconcileTrips` | `trips.review` | VTC-026 |
 | `GET /api/v1/reconciliations/{reconciliationId}` | `getReconciliation` | `trips.review` | VTC-026 |
 | `POST /api/v1/reconciliations/{reconciliationId}/reversals` | `reverseReconciliation` | `trips.review` | VTC-026 |
-| `GET /api/v1/qualification-levels` | `listQualificationLevels` | `company.read` | VTC-028 |
-| `GET /api/v1/admin/qualification-levels/archived` | `listArchivedQualificationLevels` | `qualifications.manage` | VTC-113 |
-| `GET /api/v1/admin/qualification-ladders/{game}` | `getQualificationLadder` | `qualifications.manage` | VTC-113 |
-| `POST /api/v1/admin/qualification-ladders/{game}/levels` | `addQualificationLadderLevel` | `qualifications.manage` | VTC-113 |
-| `PATCH /api/v1/admin/qualification-ladders/{game}/order` | `reorderQualificationLadder` | `qualifications.manage` | VTC-113 |
-| `POST /api/v1/admin/qualification-ladders/{game}/levels/{levelId}/archive` | `archiveQualificationLadderLevel` | `qualifications.manage` | VTC-113 |
-| `GET /api/v1/admin/qualification-members` | `listQualificationMembers` | `qualifications.manage` | VTC-031 |
-| `POST /api/v1/admin/qualification-rule-previews` | `previewQualificationRules` | `qualifications.manage` | VTC-031 |
-| `GET /api/v1/qualification-levels/{levelId}/rule-versions` | `listQualificationRuleVersions` | `company.read` | VTC-028 |
-| `GET /api/v1/qualification-levels/{levelId}/rule-versions/{ruleVersionId}` | `getQualificationRuleVersion` | `company.read` | VTC-028 |
-| `GET /api/v1/members/{memberId}/qualification-progress` | `getQualificationProgress` | `company.read` | VTC-028 |
-| `GET /api/v1/me/qualification-progress` | `getMyQualificationProgress` | `trips.submit_own` | VTC-028 |
-| `GET /api/v1/admin/members/{memberId}/qualification-progress` | `getAdminQualificationProgress` | `qualifications.manage` | VTC-028 |
-| `GET /api/v1/me/qualification-assignments` | `listMyQualificationAssignments` | `session` | VTC-028 |
-| `GET /api/v1/trips/{tripId}/qualification-assignments` | `listTripQualificationAssignments` | `trips.review` | VTC-029 |
-| `GET /api/v1/admin/members/{memberId}/qualification-assignments` | `listMemberQualificationAssignments` | `qualifications.manage` | VTC-028 |
-| `PATCH /api/v1/admin/qualification-levels/{levelId}` | `renameQualificationLevel` | `qualifications.manage` | VTC-028 |
-| `POST /api/v1/admin/qualification-levels/{levelId}/rule-versions` | `publishQualificationRules` | `qualifications.manage` | VTC-028 |
-| `POST /api/v1/admin/members/{memberId}/qualification-assignments` | `assignQualification` | `qualifications.manage` | VTC-028 |
-| `POST /api/v1/admin/members/{memberId}/promotions` | `confirmPromotion` | `qualifications.manage` | VTC-028 |
+| `GET /api/v1/qualification-levels` | `listQualificationLevels` | `company.read` | VTC-157 |
+| `GET /api/v1/qualification-levels/{levelId}` | `getQualificationLevel` | `company.read` | VTC-157 |
+| `GET /api/v1/me/qualifications` | `listMyQualifications` | `company.read` | VTC-157 |
+| `GET /api/v1/members/{memberId}/qualifications` | `listMemberQualifications` | `company.read` | VTC-157 |
+| `POST /api/v1/admin/qualification-levels` | `createQualificationLevel` | `qualifications.manage` | VTC-157 |
+| `PUT /api/v1/admin/qualification-levels/{levelId}` | `updateQualificationLevel` | `qualifications.manage` | VTC-157 |
+| `PUT /api/v1/admin/qualification-levels/{levelId}/position` | `moveQualificationLevel` | `qualifications.manage` | VTC-157 |
+| `POST /api/v1/admin/qualification-levels/{levelId}/removal` | `removeQualificationLevel` | `qualifications.manage` | VTC-157 |
+| `PUT /api/v1/admin/members/{memberId}/qualifications/{game}` | `changeMemberQualification` | `qualifications.manage` | VTC-157 |
 | `GET /api/v1/events` | `listEvents` | `company.read` | VTC-034 |
 | `GET /api/v1/events/{eventId}` | `getEvent` | `company.read` | VTC-034 |
 | `GET /api/v1/events/{eventId}/my-response` | `getEventResponse` | `events.respond` | VTC-034 |
@@ -152,8 +141,6 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/admin/source-connections/{connectionId}` | `getSourceConnection` | `connections.manage` | VTC-038 |
 | `PATCH /api/v1/admin/source-connections/{connectionId}` | `updateSourceConnection` | `connections.manage` | VTC-038 |
 | `GET /api/v1/admin/audit` | `listAudit` | `members.manage` | VTC-038 |
-| `GET /api/v1/admin/members/{memberId}/qualification-action-history` | `listQualificationActionHistory` | `qualifications.manage` | VTC-031 |
-| `GET /api/v1/admin/qualification-levels/{levelId}/rule-versions` | `listQualificationRuleHistory` | `qualifications.manage` | VTC-031 |
 | `GET /api/v1/mail-deliveries/{deliveryId}` | `getMailDelivery` | `session` (owner or applications.manage) | VTC-014 |
 | `POST /api/v1/mail-deliveries/{deliveryId}/resends` | `resendMailDelivery` | `session` (owner or applications.manage) | VTC-014 |
 | `GET /api/v1/admin/source-capabilities` | `getSourceCapabilities` | `connections.manage` | VTC-038 |
@@ -198,10 +185,6 @@ OpenAPI stages the following operations and shared-path extensions. A shared pat
 | `GET /api/v1/reconciliation-candidates?view=stage3` | `listReconciliationCandidates` | `trips.review` | VTC-133 |
 | `POST /api/v1/reconciliation-candidates/{candidateId}/dismissals` | `dismissReconciliationCandidate` | `trips.review` | VTC-133 |
 | `POST /api/v1/reconciliation-candidates/{candidateId}/dismissal-reversals` | `undoReconciliationCandidateDismissal` | `trips.review` | VTC-133 |
-| `GET /api/v1/admin/promotion-candidates?game=ets2&status=eligible&search=nickname` | `listPromotionCandidates` | `qualifications.manage` | VTC-134 |
-| `GET /api/v1/admin/promotion-history` | `listPromotionHistory` | `qualifications.manage` | VTC-134 |
-| `GET /api/v1/admin/members/{memberId}/qualification-action-history?view=stage3` | `listQualificationActionHistory` | `qualifications.manage` | VTC-134 |
-| `GET /api/v1/admin/qualification-members?view=stage3` | `listQualificationMembers` | `qualifications.manage` | VTC-134 |
 | `GET /api/v1/me/workspace-summary?view=stage3` | `getMyWorkspaceSummary` | `company.read` with source-specific capabilities | VTC-134 |
 | `GET /api/v1/admin/audit?view=stage3` | `listAudit` | `members.manage` | VTC-135 |
 

@@ -714,7 +714,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/members/{memberId}/promotions": {
+    "/api/v1/admin/members/{memberId}/qualifications/{game}": {
         parameters: {
             query?: never;
             header?: never;
@@ -722,60 +722,11 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
-        /** confirmPromotion */
-        post: operations["confirmPromotion"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/members/{memberId}/qualification-action-history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Read staff-only recorded qualification action attribution and effective intervals */
-        get: operations["listQualificationActionHistory"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/members/{memberId}/qualification-assignments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** listMemberQualificationAssignments */
-        get: operations["listMemberQualificationAssignments"];
-        put?: never;
-        /** assignQualification */
-        post: operations["assignQualification"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/members/{memberId}/qualification-progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** getAdminQualificationProgress */
-        get: operations["getAdminQualificationProgress"];
-        put?: never;
+        /**
+         * Change a member's level manually
+         * @description Moves an active member to any active level of the game, up or down, with a required reason. Progress on the new level starts from zero.
+         */
+        put: operations["changeMemberQualification"];
         post?: never;
         delete?: never;
         options?: never;
@@ -868,112 +819,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/promotion-candidates": {
+    "/api/v1/admin/qualification-levels": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
+        get?: never;
+        put?: never;
         /**
-         * List company promotion candidates
-         * @description Return active members in the selected game with current assignments and authoritative accepted trip totals for those assignments. Eligibility follows the same rule, current/next levels and totals as confirmation. Historical eligibility onset can be unknown; ineligible rows have eligibleSince null. Order by eligibleSince descending with null last, then member ID ascending. Filter by status and optional nickname substring before total and paging. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.
+         * Add a level at a position
+         * @description Inserts the level at the position (1..active count + 1) and shifts later levels down, then promotes drivers who already meet their level's conditions. 409 when the game already has 25 active levels.
          */
-        get: operations["listPromotionCandidates"];
-        put?: never;
-        post?: never;
+        post: operations["createQualificationLevel"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/promotion-history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List company qualification actions
-         * @description Read company-wide promotions and assignments newest first by the recorded promotion confirmation or assignment effective time, then action ID and kind. Include each promotion once with its linked proof and include ordinary assignments independently. Expose the recorded actor and domain reason where available, without inferring an assignment recording time. Filter by game and member before the total and cursor. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.
-         */
-        get: operations["listPromotionHistory"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/qualification-ladders/{game}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** getQualificationLadder */
-        get: operations["getQualificationLadder"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/qualification-ladders/{game}/levels": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** addQualificationLadderLevel */
-        post: operations["addQualificationLadderLevel"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/qualification-ladders/{game}/levels/{levelId}/archive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** archiveQualificationLadderLevel */
-        post: operations["archiveQualificationLadderLevel"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/qualification-ladders/{game}/order": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** reorderQualificationLadder */
-        patch: operations["reorderQualificationLadder"];
         trace?: never;
     };
     "/api/v1/admin/qualification-levels/{levelId}": {
@@ -984,49 +847,31 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** renameQualificationLevel */
-        patch: operations["renameQualificationLevel"];
-        trace?: never;
-    };
-    "/api/v1/admin/qualification-levels/{levelId}/rule-versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Read staff-only immutable rule history with recorded publisher */
-        get: operations["listQualificationRuleHistory"];
-        put?: never;
         /**
-         * publishQualificationRules
-         * @description Publishes an immutable qualification rule version. The reason is optional and must be nonblank when supplied. Both promotion threshold keys are required and accept null to disable the corresponding minimum. Authorization and effective-time guards apply.
+         * Edit a level's name, limits and conditions
+         * @description Limits apply to trips decided from now on; decided trips keep their stored check. Drivers who already meet lowered conditions are promoted in the same transaction. 409 VERSION_CONFLICT on a stale expectedVersion.
          */
-        post: operations["publishQualificationRules"];
+        put: operations["updateQualificationLevel"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/qualification-levels/archived": {
+    "/api/v1/admin/qualification-levels/{levelId}/position": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
+        get?: never;
         /**
-         * listArchivedQualificationLevels
-         * @description Archived choices for a historical qualification assignment in one game.
+         * Move a level to another position
+         * @description Re-numbers the game's ladder and promotes drivers who meet their conditions.
          */
-        get: operations["listArchivedQualificationLevels"];
-        put?: never;
+        put: operations["moveQualificationLevel"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1034,24 +879,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/qualification-members": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List named qualification targets, including former members */
-        get: operations["listQualificationMembers"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/qualification-rule-previews": {
+    "/api/v1/admin/qualification-levels/{levelId}/removal": {
         parameters: {
             query?: never;
             header?: never;
@@ -1060,8 +888,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Evaluate hypothetical facts against a draft without publishing */
-        post: operations["previewQualificationRules"];
+        /**
+         * Remove a level and transfer its drivers
+         * @description Soft-deletes the level, moves its current drivers to the active transfer level of the same game and closes the position gap. The last active level cannot be removed.
+         */
+        post: operations["removeQualificationLevel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1997,32 +1828,18 @@ export interface paths {
         patch: operations["updatePreferences"];
         trace?: never;
     };
-    "/api/v1/me/qualification-assignments": {
+    "/api/v1/me/qualifications": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** listMyQualificationAssignments */
-        get: operations["listMyQualificationAssignments"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/me/qualification-progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** getMyQualificationProgress */
-        get: operations["getMyQualificationProgress"];
+        /**
+         * List the current member's qualifications
+         * @description One item per game in which the member has a current level.
+         */
+        get: operations["listMyQualifications"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2262,15 +2079,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/members/{memberId}/qualification-progress": {
+    "/api/v1/members/{memberId}/qualifications": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** getQualificationProgress */
-        get: operations["getQualificationProgress"];
+        /**
+         * List a member's qualifications
+         * @description One item per game in which the member has a current level.
+         */
+        get: operations["listMemberQualifications"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2479,7 +2299,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** listQualificationLevels */
+        /**
+         * List the active levels of one game's ladder
+         * @description Active levels ordered by position with limits, conditions, next level and current driver count, plus the viewer's own qualification in the game.
+         */
         get: operations["listQualificationLevels"];
         put?: never;
         post?: never;
@@ -2489,32 +2312,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/qualification-levels/{levelId}/rule-versions": {
+    "/api/v1/qualification-levels/{levelId}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** listQualificationRuleVersions */
-        get: operations["listQualificationRuleVersions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/qualification-levels/{levelId}/rule-versions/{ruleVersionId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** getQualificationRuleVersion */
-        get: operations["getQualificationRuleVersion"];
+        /**
+         * Get one active level
+         * @description Drivers currently on the level with their credited progress; change history only for qualifications.manage. A removed level is 404.
+         */
+        get: operations["getQualificationLevel"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2855,23 +2664,6 @@ export interface paths {
         put?: never;
         /** decideTripProposal */
         post: operations["decideTripProposal"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/trips/{tripId}/qualification-assignments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** listTripQualificationAssignments */
-        get: operations["listTripQualificationAssignments"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3235,22 +3027,10 @@ export interface components {
             periodId: string;
         };
         AssignmentInput: {
-            /**
-             * Format: date-time
-             * @description Supported historical interval start, required only for historical_resolution.
-             */
-            assignedAt?: string;
-            /**
-             * Format: date-time
-             * @description Supported exclusive historical interval end, required only for historical_resolution.
-             */
-            endedAt?: string;
+            game: components["schemas"]["Game"];
+            levelId: components["schemas"]["Id"];
             /** @enum {string} */
-            game: "ets2" | "ats";
-            /** Format: uuid */
-            levelId: string;
-            /** @enum {string} */
-            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction";
+            purpose: "initial" | "reinstatement";
             reason: string;
         };
         Attendance: {
@@ -4034,10 +3814,6 @@ export interface components {
             data: components["schemas"]["Application"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeAssignment: {
-            data: components["schemas"]["Assignment"];
-            meta: components["schemas"]["Meta"];
-        };
         EnvelopeCatalogDepot: {
             data: components["schemas"]["CatalogDepot"];
             meta: components["schemas"]["Meta"];
@@ -4142,10 +3918,6 @@ export interface components {
             data: components["schemas"]["ListApplication"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeListAssignmentHistory: {
-            data: components["schemas"]["ListAssignmentHistory"];
-            meta: components["schemas"]["Meta"];
-        };
         EnvelopeListAttendance: {
             data: components["schemas"]["ListAttendance"];
             meta: components["schemas"]["Meta"];
@@ -4196,26 +3968,6 @@ export interface components {
         };
         EnvelopeListParticipant: {
             data: components["schemas"]["ListParticipant"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeListQualificationActionHistory: {
-            data: components["schemas"]["ListQualificationActionHistory"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeListQualificationArchivedLevel: {
-            data: components["schemas"]["ListQualificationArchivedLevel"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeListQualificationLevel: {
-            data: components["schemas"]["ListQualificationLevel"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeListQualificationRuleHistory: {
-            data: components["schemas"]["ListQualificationRuleHistory"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeListQualificationRuleVersion: {
-            data: components["schemas"]["ListQualificationRuleVersion"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeListReconciliation: {
@@ -4270,6 +4022,10 @@ export interface components {
             data: components["schemas"]["MemberProfile"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeMyQualificationList: {
+            data: components["schemas"]["MyQualificationList"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeNotificationFeed: {
             data: components["schemas"]["NotificationFeed"];
             meta: components["schemas"]["Meta"];
@@ -4294,32 +4050,24 @@ export interface components {
             data: components["schemas"]["Preferences"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeProgress: {
-            data: components["schemas"]["Progress"];
+        EnvelopeQualificationLevelCommandResult: {
+            data: components["schemas"]["QualificationLevelCommandResult"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeProgressPublic: {
-            data: components["schemas"]["ProgressPublic"];
+        EnvelopeQualificationLevelDetail: {
+            data: components["schemas"]["QualificationLevelDetail"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeQualificationLadder: {
-            data: components["schemas"]["QualificationLadder"];
+        EnvelopeQualificationLevelList: {
+            data: components["schemas"]["QualificationLevelList"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeQualificationLadderRevision: {
-            data: components["schemas"]["QualificationLadderRevision"];
+        EnvelopeQualificationLevelRemovalResult: {
+            data: components["schemas"]["QualificationLevelRemovalResult"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeQualificationLevel: {
-            data: components["schemas"]["QualificationLevel"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeQualificationPreview: {
-            data: components["schemas"]["QualificationPreview"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeQualificationRuleVersion: {
-            data: components["schemas"]["QualificationRuleVersion"];
+        EnvelopeQualificationManualChangeResult: {
+            data: components["schemas"]["QualificationManualChangeResult"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeReconciliation: {
@@ -4403,7 +4151,6 @@ export interface components {
             levelId: string | null;
             qualificationAssignmentId: string | null;
             reportingAt: string | null;
-            ruleVersionId: string | null;
         };
         EventAssociationInput: {
             /** Format: uuid */
@@ -4942,10 +4689,6 @@ export interface components {
             challengeId: string;
             code: string;
         };
-        LevelInput: {
-            name: string;
-            reason?: string;
-        };
         LifetimeTripTotals: {
             acceptedTrips: number;
             actualDistanceM: components["schemas"]["Decimal"];
@@ -4957,10 +4700,6 @@ export interface components {
         };
         ListApplication: {
             items: components["schemas"]["Application"][];
-            nextCursor: string | null;
-        };
-        ListAssignmentHistory: {
-            items: components["schemas"]["AssignmentHistory"][];
             nextCursor: string | null;
         };
         ListAttendance: {
@@ -5031,26 +4770,6 @@ export interface components {
         };
         ListParticipant: {
             items: components["schemas"]["Participant"][];
-            nextCursor: string | null;
-        };
-        ListQualificationActionHistory: {
-            items: components["schemas"]["QualificationActionHistory"][];
-            nextCursor: string | null;
-        };
-        ListQualificationArchivedLevel: {
-            items: components["schemas"]["QualificationArchivedLevel"][];
-            nextCursor: string | null;
-        };
-        ListQualificationLevel: {
-            items: components["schemas"]["QualificationLevel"][];
-            nextCursor: string | null;
-        };
-        ListQualificationRuleHistory: {
-            items: components["schemas"]["QualificationRuleHistory"][];
-            nextCursor: string | null;
-        };
-        ListQualificationRuleVersion: {
-            items: components["schemas"]["QualificationRuleVersion"][];
             nextCursor: string | null;
         };
         ListReconciliation: {
@@ -5510,6 +5229,22 @@ export interface components {
         Meta: {
             requestId: string;
         };
+        /** @description A member's current level in one game. Progress counts credited trips and their actual distance on the current level; a member without a current level has a null level and zero progress. */
+        MyQualification: {
+            conditions: components["schemas"]["QualificationConditions"] | null;
+            game: components["schemas"]["Game"];
+            level: {
+                id: components["schemas"]["Id"];
+                name: string;
+                position: number;
+            } | null;
+            nextLevel: components["schemas"]["QualificationLevelRef"] | null;
+            progress: components["schemas"]["QualificationProgress"];
+            since: components["schemas"]["Timestamp"] | null;
+        };
+        MyQualificationList: {
+            items: components["schemas"]["MyQualification"][];
+        };
         Notification: {
             category: string;
             display: {
@@ -5560,7 +5295,7 @@ export interface components {
          * @description Known notification categories; messageKey is notifications.<category>. Notification.category stays a free string so clients ignore unknown values.
          * @enum {string}
          */
-        NotificationStage4Category: "trip.started" | "trip.finished" | "trip.cancelled" | "trip.rejected" | "trip.review_required" | "trip.correction_requested" | "event.start_changed" | "event.route_changed" | "event.cancelled" | "event.reminder" | "qualification.assigned" | "qualification.promoted" | "promotion.eligible" | "promotion.review_required" | "application.submitted" | "application.decided" | "member.access_changed" | "trip.accepted" | "event.published";
+        NotificationStage4Category: "trip.started" | "trip.finished" | "trip.cancelled" | "trip.rejected" | "trip.review_required" | "trip.correction_requested" | "event.start_changed" | "event.route_changed" | "event.cancelled" | "event.reminder" | "qualification.assigned" | "qualification.promoted" | "application.submitted" | "application.decided" | "member.access_changed" | "trip.accepted" | "event.published";
         OptionalEvent: components["schemas"]["EventPublic"] | null;
         OwnTripStatusSummary: {
             activeTrips: number;
@@ -5629,43 +5364,6 @@ export interface components {
             data: components["schemas"]["PreferencesStage4"];
             meta: components["schemas"]["Meta"];
         };
-        Progress: {
-            acceptedTrips: number;
-            actualDistanceM: string;
-            assignment: components["schemas"]["Assignment"];
-            /** Format: date-time */
-            computedAt: string;
-            eligibleForConfirmation: boolean;
-            /** @constant */
-            projectionPending: false;
-            projectionVersion: number;
-            requiredDistanceM: string | null;
-            requiredTrips: number | null;
-            reviewReasonCodes: "promotion_requirements_no_longer_met"[];
-            reviewRequired: boolean;
-        };
-        ProgressPublic: {
-            acceptedTrips: number;
-            actualDistanceM: string;
-            assignment: components["schemas"]["Assignment"];
-            /** Format: date-time */
-            computedAt: string;
-            eligibleForConfirmation: boolean;
-            /** @constant */
-            projectionPending: false;
-            projectionVersion: number;
-            requiredDistanceM: string | null;
-            requiredTrips: number | null;
-        };
-        PromotionInput: {
-            /** Format: uuid */
-            assignmentId: string;
-            /** @enum {string} */
-            game: "ets2" | "ats";
-            reason: string;
-            /** Format: uuid */
-            targetLevelId: string;
-        };
         ProposalDecisionInput: {
             /** @enum {string} */
             decision: "approve" | "reject";
@@ -5684,300 +5382,197 @@ export interface components {
             /** Format: uuid */
             reviewerId: string;
         };
-        QualificationActionActor: {
-            /** Format: uuid */
-            id: string;
-            nickname: string | null;
-        };
-        QualificationActionHistory: {
-            actor: components["schemas"]["QualificationActionActor"] | null;
-            /** Format: date-time */
-            assignedAt: string;
-            endedAt: string | null;
-            /** @enum {string} */
-            game: "ets2" | "ats";
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            levelId: string;
-            levelName: string;
-            /** Format: uuid */
-            periodId: string;
-            promotion: {
-                /** Format: date-time */
-                confirmedAt: string;
-                /** Format: uuid */
-                id: string;
-            } | null;
-            /** @enum {string} */
-            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion" | "ladder_archive_transfer";
-        };
-        QualificationArchivedLevel: {
-            game: components["schemas"]["Game"];
-            id: components["schemas"]["Id"];
-            name: string;
-        };
-        /** @description Historical qualification rules evaluated for the reviewed fact. Unresolved history has a reason code and no rules. */
+        /** @description The driver's level limits checked against the trip. decision reads the snapshot stored with the company decision; current checks a pending trip against the level at its attribution time. checked always lists the five rules; event_exempt (company event trip) and no_level list none. */
         QualificationCheck: {
+            /** @enum {string} */
+            basis: "decision" | "current";
+            level: components["schemas"]["QualificationLevelRef"] | null;
+            outcome: ("pass" | "fail" | "unknown") | null;
             reasonCode: string | null;
             rules: components["schemas"]["QualificationRuleCheck"][];
             /** @enum {string} */
-            status: "resolved" | "unresolved";
+            status: "checked" | "event_exempt" | "no_level";
         };
-        QualificationFreightRuleSummary: {
-            allowedAdrCategoryCount: number | null;
-            allowedTrailerTypeCount: number | null;
-            maxMassKg: string | null;
-        };
-        QualificationLadder: {
-            /** Format: date-time */
-            asOf: string;
-            game: components["schemas"]["Game"];
-            ladderEditsEnabled: boolean;
-            levels: components["schemas"]["QualificationLadderLevel"][];
-            revision: number;
-        };
-        QualificationLadderAddInput: {
-            name: string;
-            position: number;
-            reason?: string;
-        };
-        QualificationLadderArchiveInput: {
-            observedDriverCount: number;
-            reason?: string;
-            targetLevelId: components["schemas"]["Id"];
-        };
-        QualificationLadderLevel: {
-            configured: boolean;
-            currentDriverCount: number;
-            effectiveRule: components["schemas"]["QualificationRuleVersion"] | null;
-            freightRuleSummary: components["schemas"]["QualificationFreightRuleSummary"] | null;
-            /** @enum {string} */
-            game: "ets2" | "ats";
-            /** Format: uuid */
-            id: string;
-            name: string;
-            position: number;
-            promotionConfigured: boolean;
-            requiredDistanceM: string | null;
+        /** @description Promotion conditions on the level. Every set condition must be met. A non-top level needs at least one (qualification_conditions_required); distance must be positive. */
+        QualificationConditions: {
+            requiredDistanceM: components["schemas"]["Decimal"] | null;
             requiredTrips: number | null;
-            ruleVersionId: string | null;
-            terminal: boolean;
+        };
+        /** @description promotedCount is the number of drivers promoted by the re-check in the same transaction. */
+        QualificationLevelCommandResult: {
+            level: components["schemas"]["QualificationLevelDetail"];
+            promotedCount: number;
+        };
+        QualificationLevelCreateInput: {
+            conditions: components["schemas"]["QualificationConditions"];
+            game: components["schemas"]["Game"];
+            limits: components["schemas"]["QualificationLimitsInput"];
+            name: string;
+            position: number;
+        };
+        QualificationLevelDetail: {
+            canManage: boolean;
+            conditions: components["schemas"]["QualificationConditions"];
+            driverCount: number;
+            drivers: components["schemas"]["QualificationLevelDriver"][];
+            game: components["schemas"]["Game"];
+            history: components["schemas"]["QualificationLevelHistoryEntry"][] | null;
+            id: components["schemas"]["Id"];
+            levelCount: number;
+            limits: components["schemas"]["QualificationLimits"];
+            mine: components["schemas"]["MyQualification"] | null;
+            name: string;
+            nextLevel: components["schemas"]["QualificationLevelRef"] | null;
+            position: number;
             version: number;
         };
-        QualificationLadderOrderInput: {
-            levelIds: components["schemas"]["Id"][];
-            reason?: string;
+        QualificationLevelDriver: {
+            credited: components["schemas"]["QualificationProgress"];
+            displayName: string;
+            memberId: components["schemas"]["Id"];
+            since: components["schemas"]["Timestamp"];
         };
-        QualificationLadderRevision: {
-            game: components["schemas"]["Game"];
-            revision: number;
-        };
-        QualificationLevel: {
-            configured: boolean;
-            freightRuleSummary: components["schemas"]["QualificationFreightRuleSummary"] | null;
+        /** @description One level change from the audit log, newest first. legacy marks entries of the earlier ladder model. */
+        QualificationLevelHistoryEntry: {
+            actor: {
+                displayName: string;
+                id: components["schemas"]["Id"];
+            } | null;
+            at: components["schemas"]["Timestamp"];
+            changes: ("name" | "limits" | "conditions" | "position")[];
             /** @enum {string} */
-            game: "ets2" | "ats";
-            /** Format: uuid */
-            id: string;
-            name: string;
+            operation: "created" | "edited" | "moved" | "removed" | "legacy";
+            position: number | null;
+            transferLevel: components["schemas"]["QualificationLevelRef"] | null;
+        };
+        QualificationLevelList: {
+            canManage: boolean;
+            game: components["schemas"]["Game"];
+            levels: components["schemas"]["QualificationLevelSummary"][];
+            mine: components["schemas"]["MyQualification"] | null;
+        };
+        QualificationLevelMoveInput: {
+            expectedVersion: number;
             position: number;
-            promotionConfigured: boolean;
-            requiredDistanceM: string | null;
-            requiredTrips: number | null;
-            ruleVersionId: string | null;
-            terminal: boolean;
+        };
+        QualificationLevelRef: {
+            id: components["schemas"]["Id"];
+            name: string;
+        };
+        QualificationLevelRemovalInput: {
+            expectedVersion: number;
+            transferLevelId: components["schemas"]["Id"];
+        };
+        QualificationLevelRemovalResult: {
+            promotedCount: number;
+            transferLevel: components["schemas"]["QualificationLevelDetail"];
+        };
+        QualificationLevelSummary: {
+            conditions: components["schemas"]["QualificationConditions"];
+            driverCount: number;
+            game: components["schemas"]["Game"];
+            id: components["schemas"]["Id"];
+            limits: components["schemas"]["QualificationLimits"];
+            name: string;
+            nextLevel: components["schemas"]["QualificationLevelRef"] | null;
+            position: number;
             version: number;
         };
-        QualificationPreview: {
-            /** @enum {string} */
-            outcome: "pass" | "fail" | "unknown";
-            ruleResults: {
-                /** @enum {string} */
-                outcome: "pass" | "fail" | "unknown";
-                /** @enum {string} */
-                reasonCode: "rule_passed" | "rule_mass_exceeded" | "rule_mass_unknown" | "rule_mass_invalid" | "rule_trailer_type_disallowed" | "rule_trailer_type_unknown" | "rule_trailers_incomplete" | "rule_adr_category_disallowed" | "rule_adr_category_unknown";
-                /** @enum {string} */
-                ruleType: "max_mass" | "allowed_trailer_types" | "allowed_adr_categories";
-            }[];
+        QualificationLevelUpdateInput: {
+            conditions: components["schemas"]["QualificationConditions"];
+            expectedVersion: number;
+            limits: components["schemas"]["QualificationLimitsInput"];
+            name: string;
         };
-        QualificationPreviewInput: {
-            /** @enum {string} */
-            game: "ets2" | "ats";
-            rules: components["schemas"]["Rule"][];
-            sample: {
-                adr: {
-                    adrClass: ("1" | "2" | "3" | "4" | "6" | "8") | null;
-                    /** @enum {string} */
-                    status: "known" | "non_hazardous" | "unknown";
-                };
-                cargoMassKg: string | null;
-                trailersComplete: boolean;
-                trailerTypeIds: (string | null)[];
+        /** @description Trip limits of a level. Null bounds and the any modes are unset limits. Mass is kilograms and distance is the trip's actual distance in metres; bounds are inclusive. */
+        QualificationLimits: {
+            adr: {
+                classes: ("1" | "2" | "3" | "4" | "6" | "8")[];
+                /** @enum {string} */
+                mode: "forbidden" | "selected" | "any";
+            };
+            distanceMaxM: components["schemas"]["Decimal"] | null;
+            distanceMinM: components["schemas"]["Decimal"] | null;
+            hardModeRequired: boolean;
+            massMaxKg: components["schemas"]["Decimal"] | null;
+            massMinKg: components["schemas"]["Decimal"] | null;
+            trailers: {
+                /** @enum {string} */
+                mode: "any" | "selected";
+                types: components["schemas"]["CatalogLabel"][];
             };
         };
-        /** @description One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 trailer catalog IDs or ADR classes that broke the rule. Unknown values are null, never zero. */
+        /** @description The server rejects min above max, a selected mode without items, unknown trailer types and the classes or types of a mode that does not use them. */
+        QualificationLimitsInput: {
+            adr: {
+                classes: ("1" | "2" | "3" | "4" | "6" | "8")[];
+                /** @enum {string} */
+                mode: "forbidden" | "selected" | "any";
+            };
+            distanceMaxM: components["schemas"]["Decimal"] | null;
+            distanceMinM: components["schemas"]["Decimal"] | null;
+            hardModeRequired: boolean;
+            massMaxKg: components["schemas"]["Decimal"] | null;
+            massMinKg: components["schemas"]["Decimal"] | null;
+            trailers: {
+                /** @enum {string} */
+                mode: "any" | "selected";
+                typeIds: components["schemas"]["Id"][];
+            };
+        };
+        QualificationManualChangeInput: {
+            levelId: components["schemas"]["Id"];
+            reason: string;
+        };
+        QualificationManualChangeResult: {
+            qualification: components["schemas"]["MyQualification"];
+        };
+        QualificationProgress: {
+            distanceM: components["schemas"]["Decimal"];
+            trips: number;
+        };
+        /** @description One of the five level limits applied to the trip with its configured value. An unset limit passes with null bounds or the any mode. Unknown observed values are null, never zero. */
         QualificationRuleCheck: {
-            bypassedByEvent: boolean;
-            entityIds: (string | ("1" | "2" | "3" | "4" | "6" | "8"))[];
-            limitMassKg: components["schemas"]["Decimal"] | null;
-            observedMassKg: components["schemas"]["Decimal"] | null;
+            maxKg: components["schemas"]["Decimal"] | null;
+            minKg: components["schemas"]["Decimal"] | null;
+            observedKg: components["schemas"]["Decimal"] | null;
             /** @enum {string} */
-            outcome: "pass" | "fail" | "unknown";
-            reasonCode: string;
-            ruleType: string;
-        };
-        QualificationRuleHistory: {
-            /** Format: date-time */
-            effectiveAt: string;
-            /** @enum {string} */
-            game: "ets2" | "ats";
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            levelId: string;
-            /** Format: date-time */
-            publishedAt: string;
-            publisher: components["schemas"]["QualificationActionActor"] | null;
-            requiredDistanceM: string | null;
-            requiredTrips: number | null;
-            rules: components["schemas"]["Rule"][];
-        };
-        /** @description Optional publication reason. A null requiredTrips or requiredDistanceM means there is no minimum for that measure. Both keys are required. Use the separate optional preview action for a sample. */
-        QualificationRulePublicationInput: {
-            /**
-             * Format: date-time
-             * @description Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected.
-             */
-            effectiveAt?: string;
-            reason?: string;
-            requiredDistanceM: string | null;
-            requiredTrips: number | null;
-            rules: components["schemas"]["Rule"][];
-        };
-        QualificationRuleVersion: {
-            /** Format: date-time */
-            effectiveAt: string;
-            /** @enum {string} */
-            game: "ets2" | "ats";
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            levelId: string;
-            /** Format: date-time */
-            publishedAt: string;
-            requiredDistanceM: string | null;
-            requiredTrips: number | null;
-            rules: components["schemas"]["Rule"][];
-        };
-        QualificationStage3ActionHistory: {
-            actor: components["schemas"]["QualificationActionActor"] | null;
-            /** Format: date-time */
-            assignedAt: string;
-            assignmentReason: string | null;
-            endedAt: string | null;
-            /** @enum {string} */
-            game: "ets2" | "ats";
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            levelId: string;
-            /** Format: uuid */
-            periodId: string;
-            promotion: {
-                actor: components["schemas"]["QualificationActionActor"] | null;
-                confirmedAt: components["schemas"]["Timestamp"];
-                id: components["schemas"]["Id"];
-                reason: string | null;
-            } | null;
-            /** @enum {string} */
-            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion" | "ladder_archive_transfer";
-        };
-        QualificationStage3ActionHistoryList: {
-            items: components["schemas"]["QualificationStage3ActionHistory"][];
-            nextCursor: string | null;
-        };
-        QualificationStage3ActionHistoryListEnvelope: {
-            data: components["schemas"]["QualificationStage3ActionHistoryList"];
-            meta: components["schemas"]["Meta"];
-        };
-        QualificationStage3AssignmentHistory: {
-            actor: components["schemas"]["QualificationActionActor"] | null;
-            assignedAt: components["schemas"]["Timestamp"];
-            assignmentId: components["schemas"]["Id"];
-            endedAt: components["schemas"]["Timestamp"] | null;
-            game: components["schemas"]["Game"];
-            id: components["schemas"]["Id"];
+            result: "pass" | "fail" | "unknown";
             /** @constant */
-            kind: "assignment";
-            level: components["schemas"]["QualificationStage3LevelSummary"];
-            member: components["schemas"]["MemberSummary"];
+            rule: "cargo_mass";
+        } | {
+            maxM: components["schemas"]["Decimal"] | null;
+            minM: components["schemas"]["Decimal"] | null;
+            observedM: components["schemas"]["Decimal"] | null;
             /** @enum {string} */
-            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "ladder_archive_transfer";
-            reason: string | null;
-        };
-        QualificationStage3CompanyAction: components["schemas"]["QualificationStage3PromotionHistory"] | components["schemas"]["QualificationStage3AssignmentHistory"];
-        QualificationStage3LevelSummary: {
-            id: components["schemas"]["Id"];
-            name: string;
-        };
-        QualificationStage3MemberSearchList: {
-            items: components["schemas"]["MemberSummary"][];
-            nextCursor: string | null;
-        };
-        QualificationStage3MemberSearchListEnvelope: {
-            data: components["schemas"]["QualificationStage3MemberSearchList"];
-            meta: components["schemas"]["Meta"];
-        };
-        QualificationStage3PromotionCandidate: {
-            acceptedTrips: number;
-            actualDistanceM: string;
-            assignmentId: components["schemas"]["Id"];
-            currentLevel: components["schemas"]["QualificationStage3LevelSummary"];
-            eligible: boolean;
-            eligibleSince: components["schemas"]["Timestamp"] | null;
-            game: components["schemas"]["Game"];
-            member: components["schemas"]["MemberSummary"];
-            nextLevel: components["schemas"]["QualificationStage3LevelSummary"] | null;
-            requiredDistanceM: string | null;
-            requiredTrips: number | null;
-            version: number;
-        };
-        QualificationStage3PromotionCandidateList: {
-            items: components["schemas"]["QualificationStage3PromotionCandidate"][];
-            nextCursor: string | null;
-            total: number;
-        };
-        QualificationStage3PromotionCandidateListEnvelope: {
-            data: components["schemas"]["QualificationStage3PromotionCandidateList"];
-            meta: components["schemas"]["Meta"];
-        };
-        QualificationStage3PromotionHistory: {
-            acceptedTrips: number;
-            actor: components["schemas"]["QualificationActionActor"] | null;
-            actualDistanceM: string;
-            confirmedAt: components["schemas"]["Timestamp"];
-            game: components["schemas"]["Game"];
-            id: components["schemas"]["Id"];
+            result: "pass" | "fail" | "unknown";
             /** @constant */
-            kind: "promotion";
-            member: components["schemas"]["MemberSummary"];
-            reason: string | null;
-            requiredDistanceM: string | null;
-            requiredTrips: number | null;
-            sourceAssignmentId: components["schemas"]["Id"];
-            sourceLevel: components["schemas"]["QualificationStage3LevelSummary"];
-            targetAssignmentId: components["schemas"]["Id"];
-            targetLevel: components["schemas"]["QualificationStage3LevelSummary"];
-        };
-        QualificationStage3PromotionHistoryList: {
-            items: components["schemas"]["QualificationStage3CompanyAction"][];
-            nextCursor: string | null;
-            total: number;
-        };
-        QualificationStage3PromotionHistoryListEnvelope: {
-            data: components["schemas"]["QualificationStage3PromotionHistoryList"];
-            meta: components["schemas"]["Meta"];
+            rule: "distance";
+        } | {
+            allowed: components["schemas"]["CatalogLabel"][];
+            /** @enum {string} */
+            mode: "any" | "selected";
+            observed: components["schemas"]["CatalogLabel"][];
+            /** @enum {string} */
+            result: "pass" | "fail" | "unknown";
+            /** @constant */
+            rule: "trailer_types";
+        } | {
+            allowedClasses: ("1" | "2" | "3" | "4" | "6" | "8")[];
+            /** @enum {string} */
+            mode: "forbidden" | "selected" | "any";
+            observed: ("1" | "2" | "3" | "4" | "6" | "8" | "none") | null;
+            /** @enum {string} */
+            result: "pass" | "fail" | "unknown";
+            /** @constant */
+            rule: "adr";
+        } | {
+            observed: ("qualified" | "not-qualified" | "unknown") | null;
+            required: boolean;
+            /** @enum {string} */
+            result: "pass" | "fail" | "unknown";
+            /** @constant */
+            rule: "hard_mode";
         };
         ReadAllInput: {
             throughCursor: string;
@@ -6098,30 +5693,6 @@ export interface components {
             reason: string;
             /** @constant */
             response: "declined";
-        };
-        Rule: {
-            maxKg: string;
-            /** @constant */
-            type: "max_mass";
-        } | {
-            entityIds: string[];
-            /** @constant */
-            type: "allowed_trailer_types";
-        } | {
-            classes: ("1" | "2" | "3" | "4" | "6" | "8")[];
-            /** @constant */
-            type: "allowed_adr_categories";
-        };
-        RulesInput: {
-            /**
-             * Format: date-time
-             * @description Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected.
-             */
-            effectiveAt?: string;
-            reason: string;
-            requiredDistanceM: string | null;
-            requiredTrips: number | null;
-            rules: components["schemas"]["Rule"][];
         };
         SafeErrorDetail: {
             code: string;
@@ -6250,7 +5821,7 @@ export interface components {
             evidence: components["schemas"]["Evidence"][];
             manualRevision: components["schemas"]["ManualRevisionRead"] | null;
             pendingProposalId: string | null;
-            qualificationCheck?: components["schemas"]["TripStage4QualificationCheck"] | null;
+            qualificationCheck?: components["schemas"]["QualificationCheck"] | null;
             reviewReasonCodes: string[];
             /** @description At most one telemetry source (the selected telemetry fact revision) followed by at most one manual source (the current revision); each can be absent. */
             sources?: components["schemas"]["TripStage4Source"][];
@@ -6550,42 +6121,6 @@ export interface components {
             /** @constant */
             state: "unresolved";
         };
-        /** @description Author-safe qualification check of the effective fact. Unresolved history has a reason code and no rules. Acceptance, decision authority and blocked reasons are reviewer-only. */
-        TripStage4QualificationCheck: {
-            reasonCode: string | null;
-            rules: components["schemas"]["TripStage4RuleCheck"][];
-            /** @enum {string} */
-            status: "resolved" | "unresolved";
-        };
-        /** @description One historical rule applied to the effective fact with its configured value. Unknown observed values are null, never zero. */
-        TripStage4RuleCheck: {
-            bypassedByEvent: boolean;
-            limitMassKg: components["schemas"]["Decimal"];
-            observedMassKg: components["schemas"]["Decimal"] | null;
-            /** @enum {string} */
-            outcome: "pass" | "fail" | "unknown";
-            /** @constant */
-            ruleType: "max_mass";
-        } | {
-            /** @description Full number of configured trailer types. */
-            allowedTrailerTypeCount: number;
-            /** @description Configured trailer types in the viewer locale, truncated at 100. */
-            allowedTrailerTypes: components["schemas"]["CatalogLabel"][];
-            bypassedByEvent: boolean;
-            offendingTrailerTypes: components["schemas"]["CatalogLabel"][];
-            /** @enum {string} */
-            outcome: "pass" | "fail" | "unknown";
-            /** @constant */
-            ruleType: "allowed_trailer_types";
-        } | {
-            allowedAdrClasses: ("1" | "2" | "3" | "4" | "6" | "8")[];
-            bypassedByEvent: boolean;
-            observedAdrClass: ("1" | "2" | "3" | "4" | "6" | "8") | null;
-            /** @enum {string} */
-            outcome: "pass" | "fail" | "unknown";
-            /** @constant */
-            ruleType: "allowed_adr_categories";
-        };
         /** @description One author-safe source of the trip. Reconciliation candidates, dismissals, confidence and reasons are reviewer-only and never appear here. */
         TripStage4Source: {
             actualDistanceM: components["schemas"]["Decimal"] | null;
@@ -6667,11 +6202,6 @@ export interface components {
             };
             /** @description Requires applications.manage and enabled Admissions reads. Count submitted applications. */
             newApplicationsCount?: number;
-            /** @description Requires qualifications.manage and enabled qualification progress reads. Use the authorized per-game promotion-candidate population. */
-            promotionsReady?: {
-                ats: number;
-                ets2: number;
-            };
             /** @description Requires trips.review and enabled review sources. Exclude the viewer's own trips. */
             reviewQueue?: components["schemas"]["TripStage3ReviewSummary"];
             /** @description Requires trips.read_own_private and enabled Trips and Manual Reports reads, including effective rejection data. Include each owned canonical trip once when effectively rejected with an author-resubmittable current manual revision owned by the viewer. Use the latest applicable authoritative staff rejection of that revision in its canonical group. Exclude aliases as rows and ignore historical alias decisions without current effect, telemetry-only and proposal-only rejections, and pending or accepted revisions. A resubmitted pending revision leaves the list until rejected. Sort by applicable decidedAt DESC, then canonical trip ID DESC. Return the author-visible reason or null when no displayable text is available. */
@@ -8173,144 +7703,29 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    confirmPromotion: {
+    changeMemberQualification: {
         parameters: {
             query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
+            header?: never;
             path: {
-                memberId: string;
+                game: components["schemas"]["Game"];
+                memberId: components["schemas"]["Id"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PromotionInput"];
+                "application/json": components["schemas"]["QualificationManualChangeInput"];
             };
         };
         responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeAssignment"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    listQualificationActionHistory: {
-        parameters: {
-            query: {
-                cursor?: components["parameters"]["Cursor"];
-                game: "ets2" | "ats";
-                limit?: components["parameters"]["Limit"];
-            };
-            header?: never;
-            path: {
-                memberId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Recorded purpose and actor, exact promotion proof relation; no private rationale or invented recorded timestamp. */
+            /** @description Committed result. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeListQualificationActionHistory"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    listMemberQualificationAssignments: {
-        parameters: {
-            query: {
-                cursor?: components["parameters"]["Cursor"];
-                game: "ets2" | "ats";
-                limit?: components["parameters"]["Limit"];
-            };
-            header?: never;
-            path: {
-                memberId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeListAssignmentHistory"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    assignQualification: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                memberId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AssignmentInput"];
-            };
-        };
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            201: {
-                headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeAssignment"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    getAdminQualificationProgress: {
-        parameters: {
-            query: {
-                game: "ets2" | "ats";
-            };
-            header?: never;
-            path: {
-                memberId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeProgress"];
+                    "application/json": components["schemas"]["EnvelopeQualificationManualChangeResult"];
                 };
             };
             default: components["responses"]["Error"];
@@ -8462,346 +7877,107 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    listPromotionCandidates: {
-        parameters: {
-            query: {
-                cursor?: components["parameters"]["Cursor"];
-                game: components["schemas"]["Game"];
-                limit?: components["parameters"]["Limit"];
-                /** @description Case-insensitive literal nickname substring. Surrounding whitespace is ignored. */
-                search?: string;
-                /** @description Defaults to eligible. */
-                status?: "eligible" | "all";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List company promotion candidates */
-            200: {
-                headers: {
-                    /** @description Private response; never cache. */
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["QualificationStage3PromotionCandidateListEnvelope"];
-                };
-            };
-            default: components["responses"]["PrivateNoStoreError"];
-        };
-    };
-    listPromotionHistory: {
-        parameters: {
-            query?: {
-                cursor?: components["parameters"]["Cursor"];
-                game?: components["schemas"]["Game"];
-                limit?: components["parameters"]["Limit"];
-                memberId?: components["schemas"]["Id"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List company qualification actions */
-            200: {
-                headers: {
-                    /** @description Private response; never cache. */
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["QualificationStage3PromotionHistoryListEnvelope"];
-                };
-            };
-            default: components["responses"]["PrivateNoStoreError"];
-        };
-    };
-    getQualificationLadder: {
+    createQualificationLevel: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                game: components["schemas"]["Game"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current bounded qualification ladder for the selected game. */
-            200: {
-                headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeQualificationLadder"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    addQualificationLadderLevel: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                game: components["schemas"]["Game"];
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QualificationLadderAddInput"];
+                "application/json": components["schemas"]["QualificationLevelCreateInput"];
             };
         };
         responses: {
-            /** @description Committed ladder revision. */
+            /** @description Committed result. */
             201: {
                 headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeQualificationLadderRevision"];
+                    "application/json": components["schemas"]["EnvelopeQualificationLevelCommandResult"];
                 };
             };
             default: components["responses"]["Error"];
         };
     };
-    archiveQualificationLadderLevel: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                game: components["schemas"]["Game"];
-                levelId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["QualificationLadderArchiveInput"];
-            };
-        };
-        responses: {
-            /** @description Committed ladder revision. */
-            200: {
-                headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeQualificationLadderRevision"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    reorderQualificationLadder: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                game: components["schemas"]["Game"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["QualificationLadderOrderInput"];
-            };
-        };
-        responses: {
-            /** @description Committed ladder revision. */
-            200: {
-                headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeQualificationLadderRevision"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    renameQualificationLevel: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                levelId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LevelInput"];
-            };
-        };
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeQualificationLevel"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    listQualificationRuleHistory: {
-        parameters: {
-            query?: {
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
-            };
-            header?: never;
-            path: {
-                levelId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Immutable versions and recorded publisher with current safe nickname. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeListQualificationRuleHistory"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    publishQualificationRules: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                levelId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["QualificationRulePublicationInput"];
-            };
-        };
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            201: {
-                headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeQualificationLevel"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    listArchivedQualificationLevels: {
-        parameters: {
-            query: {
-                cursor?: components["parameters"]["Cursor"];
-                game: components["schemas"]["Game"];
-                limit?: components["parameters"]["Limit"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Bounded archived level choices for the selected game. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeListQualificationArchivedLevel"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    listQualificationMembers: {
-        parameters: {
-            query?: {
-                cursor?: string;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Bounded member summaries ordered by exact ascending ID. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeListMemberSummary"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    previewQualificationRules: {
+    updateQualificationLevel: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                levelId: components["schemas"]["Id"];
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QualificationPreviewInput"];
+                "application/json": components["schemas"]["QualificationLevelUpdateInput"];
             };
         };
         responses: {
-            /** @description Hypothetical qualification outcome only; no company acceptance or event authority. */
+            /** @description Committed result. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeQualificationPreview"];
+                    "application/json": components["schemas"]["EnvelopeQualificationLevelCommandResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    moveQualificationLevel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                levelId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualificationLevelMoveInput"];
+            };
+        };
+        responses: {
+            /** @description Committed result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeQualificationLevelCommandResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    removeQualificationLevel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                levelId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualificationLevelRemovalInput"];
+            };
+        };
+        responses: {
+            /** @description Committed result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeQualificationLevelRemovalResult"];
                 };
             };
             default: components["responses"]["Error"];
@@ -10501,49 +9677,22 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    listMyQualificationAssignments: {
+    listMyQualifications: {
         parameters: {
-            query: {
-                cursor?: components["parameters"]["Cursor"];
-                game: "ets2" | "ats";
-                limit?: components["parameters"]["Limit"];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Committed result; see semantic preconditions. */
+            /** @description Current state. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeListAssignmentHistory"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    getMyQualificationProgress: {
-        parameters: {
-            query: {
-                game: "ets2" | "ats";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeProgress"];
+                    "application/json": components["schemas"]["EnvelopeMyQualificationList"];
                 };
             };
             default: components["responses"]["Error"];
@@ -10901,26 +10050,24 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    getQualificationProgress: {
+    listMemberQualifications: {
         parameters: {
-            query: {
-                game: "ets2" | "ats";
-            };
+            query?: never;
             header?: never;
             path: {
-                memberId: string;
+                memberId: components["schemas"]["Id"];
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Committed result; see semantic preconditions. */
+            /** @description Current state. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeProgressPublic"];
+                    "application/json": components["schemas"]["EnvelopeMyQualificationList"];
                 };
             };
             default: components["responses"]["Error"];
@@ -11211,9 +10358,7 @@ export interface operations {
     listQualificationLevels: {
         parameters: {
             query: {
-                cursor?: components["parameters"]["Cursor"];
-                game: "ets2" | "ats";
-                limit?: components["parameters"]["Limit"];
+                game: components["schemas"]["Game"];
             };
             header?: never;
             path?: never;
@@ -11221,63 +10366,36 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Committed result; see semantic preconditions. */
+            /** @description Current state. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeListQualificationLevel"];
+                    "application/json": components["schemas"]["EnvelopeQualificationLevelList"];
                 };
             };
             default: components["responses"]["Error"];
         };
     };
-    listQualificationRuleVersions: {
-        parameters: {
-            query?: {
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
-            };
-            header?: never;
-            path: {
-                levelId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeListQualificationRuleVersion"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    getQualificationRuleVersion: {
+    getQualificationLevel: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                levelId: string;
-                ruleVersionId: string;
+                levelId: components["schemas"]["Id"];
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Committed result; see semantic preconditions. */
+            /** @description Current state. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeQualificationRuleVersion"];
+                    "application/json": components["schemas"]["EnvelopeQualificationLevelDetail"];
                 };
             };
             default: components["responses"]["Error"];
@@ -11919,32 +11037,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeTripProposalDecision"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    listTripQualificationAssignments: {
-        parameters: {
-            query?: {
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
-            };
-            header?: never;
-            path: {
-                tripId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeListAssignmentHistory"];
                 };
             };
             default: components["responses"]["Error"];

@@ -6101,902 +6101,6 @@
         }
       }
     },
-    "/api/v1/qualification-levels": {
-      "get": {
-        "operationId": "listQualificationLevels",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "listQualificationLevels",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "company.read",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListQualificationLevel"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "game",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "ets2",
-                "ats"
-              ]
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/qualification-levels/archived": {
-      "get": {
-        "operationId": "listArchivedQualificationLevels",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "listArchivedQualificationLevels",
-        "description": "Archived choices for a historical qualification assignment in one game.",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-113",
-        "x-capability": "qualifications.manage",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Bounded archived level choices for the selected game.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListQualificationArchivedLevel"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "game",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Game"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/qualification-levels/{levelId}/rule-versions": {
-      "get": {
-        "operationId": "listQualificationRuleVersions",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "listQualificationRuleVersions",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "company.read",
-        "x-guards": [
-          "immutable_published_rules_only"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListQualificationRuleVersion"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "levelId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          }
-        ]
-      }
-    },
-    "/api/v1/qualification-levels/{levelId}/rule-versions/{ruleVersionId}": {
-      "get": {
-        "operationId": "getQualificationRuleVersion",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "getQualificationRuleVersion",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "company.read",
-        "x-guards": [
-          "immutable_published_rules_only",
-          "rule_version_belongs_to_level"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeQualificationRuleVersion"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "levelId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "name": "ruleVersionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/members/{memberId}/qualification-progress": {
-      "get": {
-        "operationId": "getQualificationProgress",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "getQualificationProgress",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "company.read",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeProgressPublic"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "memberId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "name": "game",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "ets2",
-                "ats"
-              ]
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/me/qualification-progress": {
-      "get": {
-        "operationId": "getMyQualificationProgress",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "getMyQualificationProgress",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "trips.submit_own",
-        "x-guards": [
-          "owner_private_projection"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeProgress"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "game",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "ets2",
-                "ats"
-              ]
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/members/{memberId}/qualification-progress": {
-      "get": {
-        "operationId": "getAdminQualificationProgress",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "getAdminQualificationProgress",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "qualifications.manage",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeProgress"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "memberId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "name": "game",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "ets2",
-                "ats"
-              ]
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/me/qualification-assignments": {
-      "get": {
-        "operationId": "listMyQualificationAssignments",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "listMyQualificationAssignments",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "session",
-        "x-guards": [
-          "owner_only",
-          "historical_intervals_no_invented_assignments"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListAssignmentHistory"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "game",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "ets2",
-                "ats"
-              ]
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/trips/{tripId}/qualification-assignments": {
-      "get": {
-        "operationId": "listTripQualificationAssignments",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "listTripQualificationAssignments",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-029",
-        "x-capability": "trips.review",
-        "x-guards": [
-          "review_subject_owner_only",
-          "historical_intervals_no_invented_assignments"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListAssignmentHistory"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "tripId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/members/{memberId}/qualification-assignments": {
-      "get": {
-        "operationId": "listMemberQualificationAssignments",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "listMemberQualificationAssignments",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "historical_intervals_no_invented_assignments"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListAssignmentHistory"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "memberId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "game",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "ets2",
-                "ats"
-              ]
-            }
-          }
-        ]
-      },
-      "post": {
-        "operationId": "assignQualification",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "assignQualification",
-        "security": [
-          {
-            "sessionCookie": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "audited_assignment_period",
-          "ordinary_promotion_uses_confirmation"
-        ],
-        "responses": {
-          "201": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeAssignment"
-                }
-              }
-            },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "memberId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AssignmentInput"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/admin/qualification-levels/{levelId}": {
-      "patch": {
-        "operationId": "renameQualificationLevel",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "renameQualificationLevel",
-        "security": [
-          {
-            "sessionCookie": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "qualifications.manage",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeQualificationLevel"
-                }
-              }
-            },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "levelId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LevelInput"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/admin/qualification-levels/{levelId}/rule-versions": {
-      "post": {
-        "operationId": "publishQualificationRules",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "publishQualificationRules",
-        "security": [
-          {
-            "sessionCookie": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "immutable_effective_versions",
-          "no_invented_launch_limits"
-        ],
-        "responses": {
-          "201": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeQualificationLevel"
-                }
-              }
-            },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "levelId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QualificationRulePublicationInput"
-              }
-            }
-          }
-        },
-        "description": "Publishes an immutable qualification rule version. The reason is optional and must be nonblank when supplied. Both promotion threshold keys are required and accept null to disable the corresponding minimum. Authorization and effective-time guards apply."
-      },
-      "get": {
-        "operationId": "listQualificationRuleHistory",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "Read staff-only immutable rule history with recorded publisher",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-031",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "current_authority",
-          "session_access_level_game_state_cursor",
-          "no_private_rationale",
-          "bounded_actor_enrichment"
-        ],
-        "responses": {
-          "200": {
-            "description": "Immutable versions and recorded publisher with current safe nickname.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListQualificationRuleHistory"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "levelId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/members/{memberId}/promotions": {
-      "post": {
-        "operationId": "confirmPromotion",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "confirmPromotion",
-        "security": [
-          {
-            "sessionCookie": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-028",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "current_authoritative_progress",
-          "per_game_period",
-          "global_driver_role_once",
-          "no_auto_demotion"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeAssignment"
-                }
-              }
-            },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "memberId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PromotionInput"
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/events": {
       "get": {
         "operationId": "listEvents",
@@ -11032,328 +10136,6 @@
         ]
       }
     },
-    "/api/v1/admin/qualification-members": {
-      "get": {
-        "tags": [
-          "qualifications"
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-031",
-        "x-capability": "qualifications.manage",
-        "operationId": "listQualificationMembers",
-        "summary": "List named qualification targets, including former members",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 25
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Bounded member summaries ordered by exact ascending ID.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListMemberSummary"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-guards": [
-          "current_authority",
-          "session_bound_cursor",
-          "no_private_identity_fields"
-        ],
-        "x-stage-3-operation": {
-          "x-owner-card": "VTC-134",
-          "x-capability": "qualifications.manage",
-          "x-guards": [
-            "current_authority",
-            "no_private_identity_fields"
-          ],
-          "description": "Trim the optional search term and match a case-insensitive nickname substring inside the authorized qualification target population. Include eligible former members as in the current lookup. Keep exact ascending ID order. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
-          "parameters": [
-            {
-              "name": "limit",
-              "in": "query",
-              "schema": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 100,
-                "default": 25
-              }
-            },
-            {
-              "name": "cursor",
-              "in": "query",
-              "schema": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              }
-            },
-            {
-              "name": "view",
-              "in": "query",
-              "required": true,
-              "schema": {
-                "type": "string",
-                "const": "stage3"
-              },
-              "description": "Explicit Stage 3 wire selection when activated."
-            },
-            {
-              "name": "search",
-              "in": "query",
-              "required": false,
-              "schema": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128,
-                "pattern": "\\S"
-              }
-            }
-          ],
-          "responses": {
-            "200": {
-              "description": "Trim the optional search term and match a case-insensitive nickname substring inside the authorized qualification target population. Include eligible former members as in the current lookup. Keep exact ascending ID order. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
-              "headers": {
-                "Cache-Control": {
-                  "schema": {
-                    "const": "no-store"
-                  },
-                  "description": "Private response; never cache."
-                }
-              },
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/QualificationStage3MemberSearchListEnvelope"
-                  }
-                }
-              }
-            },
-            "default": {
-              "$ref": "#/components/responses/PrivateNoStoreError"
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/admin/qualification-rule-previews": {
-      "post": {
-        "tags": [
-          "qualifications"
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-031",
-        "x-capability": "qualifications.manage",
-        "operationId": "previewQualificationRules",
-        "summary": "Evaluate hypothetical facts against a draft without publishing",
-        "security": [
-          {
-            "sessionCookie": [],
-            "csrfHeader": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QualificationPreviewInput"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Hypothetical qualification outcome only; no company acceptance or event authority.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeQualificationPreview"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-guards": [
-          "current_authority",
-          "same_origin_csrf",
-          "no_domain_mutation",
-          "bounded_hypothetical_facts"
-        ]
-      }
-    },
-    "/api/v1/admin/members/{memberId}/qualification-action-history": {
-      "get": {
-        "operationId": "listQualificationActionHistory",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "Read staff-only recorded qualification action attribution and effective intervals",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-031",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "current_authority",
-          "session_access_member_game_state_cursor",
-          "no_private_rationale",
-          "bounded_actor_enrichment"
-        ],
-        "responses": {
-          "200": {
-            "description": "Recorded purpose and actor, exact promotion proof relation; no private rationale or invented recorded timestamp.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListQualificationActionHistory"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "memberId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "game",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "ets2",
-                "ats"
-              ]
-            }
-          }
-        ],
-        "x-stage-3-operation": {
-          "x-owner-card": "VTC-134",
-          "x-capability": "qualifications.manage",
-          "x-guards": [
-            "current_authority",
-            "private_domain_reasons",
-            "exact_promotion_proof_relation"
-          ],
-          "description": "Read authorized assignment history, with its recorded actor and reason, and the recorded actor and reason of the exact linked promotion proof. Preserve historical nulls and effective interval boundaries. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
-          "parameters": [
-            {
-              "name": "memberId",
-              "in": "path",
-              "required": true,
-              "schema": {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              }
-            },
-            {
-              "$ref": "#/components/parameters/Limit"
-            },
-            {
-              "$ref": "#/components/parameters/Cursor"
-            },
-            {
-              "name": "game",
-              "in": "query",
-              "required": true,
-              "schema": {
-                "type": "string",
-                "enum": [
-                  "ets2",
-                  "ats"
-                ]
-              }
-            },
-            {
-              "name": "view",
-              "in": "query",
-              "required": true,
-              "schema": {
-                "type": "string",
-                "const": "stage3"
-              },
-              "description": "Explicit Stage 3 wire selection when activated."
-            }
-          ],
-          "responses": {
-            "200": {
-              "description": "Read authorized assignment history, with its recorded actor and reason, and the recorded actor and reason of the exact linked promotion proof. Preserve historical nulls and effective interval boundaries. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
-              "headers": {
-                "Cache-Control": {
-                  "schema": {
-                    "const": "no-store"
-                  },
-                  "description": "Private response; never cache."
-                }
-              },
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/QualificationStage3ActionHistoryListEnvelope"
-                  }
-                }
-              }
-            },
-            "default": {
-              "$ref": "#/components/responses/PrivateNoStoreError"
-            }
-          }
-        }
-      }
-    },
     "/api/v1/admin/source-capabilities": {
       "get": {
         "operationId": "getSourceCapabilities",
@@ -12963,429 +11745,6 @@
         }
       }
     },
-    "/api/v1/admin/promotion-candidates": {
-      "get": {
-        "operationId": "listPromotionCandidates",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "List company promotion candidates",
-        "description": "Return active members in the selected game with current assignments and authoritative accepted trip totals for those assignments. Eligibility follows the same rule, current/next levels and totals as confirmation. Historical eligibility onset can be unknown; ineligible rows have eligibleSince null. Order by eligibleSince descending with null last, then member ID ascending. Filter by status and optional nickname substring before total and paging. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-134",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "current_authority",
-          "active_members_only",
-          "game_scoped_qualification_state"
-        ],
-        "x-contract-stage": "VTC-139 Step 1",
-        "responses": {
-          "200": {
-            "description": "List company promotion candidates",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "const": "no-store"
-                },
-                "description": "Private response; never cache."
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QualificationStage3PromotionCandidateListEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/PrivateNoStoreError"
-          }
-        },
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "game",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Game"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "eligible",
-                "all"
-              ]
-            },
-            "description": "Defaults to eligible."
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "pattern": "\\S"
-            },
-            "description": "Case-insensitive literal nickname substring. Surrounding whitespace is ignored."
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/promotion-history": {
-      "get": {
-        "operationId": "listPromotionHistory",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "List company qualification actions",
-        "description": "Read company-wide promotions and assignments newest first by the recorded promotion confirmation or assignment effective time, then action ID and kind. Include each promotion once with its linked proof and include ordinary assignments independently. Expose the recorded actor and domain reason where available, without inferring an assignment recording time. Filter by game and member before the total and cursor. Signed cursors bind the actor, session, access epoch and normalized filters; mismatches return 409 VERSION_CONFLICT.",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-134",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "current_authority",
-          "private_domain_reasons"
-        ],
-        "x-contract-stage": "VTC-139 Step 1",
-        "responses": {
-          "200": {
-            "description": "List company qualification actions",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "const": "no-store"
-                },
-                "description": "Private response; never cache."
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QualificationStage3PromotionHistoryListEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/PrivateNoStoreError"
-          }
-        },
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "game",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/Game"
-            }
-          },
-          {
-            "name": "memberId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/Id"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/qualification-ladders/{game}": {
-      "get": {
-        "operationId": "getQualificationLadder",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "getQualificationLadder",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-113",
-        "x-capability": "qualifications.manage",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Current bounded qualification ladder for the selected game.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeQualificationLadder"
-                }
-              }
-            },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "game",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Game"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/qualification-ladders/{game}/levels": {
-      "post": {
-        "operationId": "addQualificationLadderLevel",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "addQualificationLadderLevel",
-        "security": [
-          {
-            "sessionCookie": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-113",
-        "x-capability": "qualifications.manage",
-        "x-guards": [],
-        "responses": {
-          "201": {
-            "description": "Committed ladder revision.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeQualificationLadderRevision"
-                }
-              }
-            },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "game",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Game"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QualificationLadderAddInput"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/admin/qualification-ladders/{game}/order": {
-      "patch": {
-        "operationId": "reorderQualificationLadder",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "reorderQualificationLadder",
-        "security": [
-          {
-            "sessionCookie": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-113",
-        "x-capability": "qualifications.manage",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Committed ladder revision.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeQualificationLadderRevision"
-                }
-              }
-            },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "game",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Game"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QualificationLadderOrderInput"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/admin/qualification-ladders/{game}/levels/{levelId}/archive": {
-      "post": {
-        "operationId": "archiveQualificationLadderLevel",
-        "tags": [
-          "qualifications"
-        ],
-        "summary": "archiveQualificationLadderLevel",
-        "security": [
-          {
-            "sessionCookie": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-module": "qualifications",
-        "x-owner-card": "VTC-113",
-        "x-capability": "qualifications.manage",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Committed ladder revision.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeQualificationLadderRevision"
-                }
-              }
-            },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "game",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Game"
-            }
-          },
-          {
-            "name": "levelId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QualificationLadderArchiveInput"
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/admin/invitations": {
       "get": {
         "operationId": "listInvitations",
@@ -13642,6 +12001,472 @@
             "$ref": "#/components/parameters/IdempotencyKey"
           }
         ]
+      }
+    },
+    "/api/v1/qualification-levels": {
+      "get": {
+        "operationId": "listQualificationLevels",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "List the active levels of one game's ladder",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-157",
+        "x-capability": "company.read",
+        "x-guards": [
+          "current_active_membership"
+        ],
+        "description": "Active levels ordered by position with limits, conditions, next level and current driver count, plus the viewer's own qualification in the game.",
+        "responses": {
+          "200": {
+            "description": "Current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeQualificationLevelList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "game",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Game"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/qualification-levels/{levelId}": {
+      "get": {
+        "operationId": "getQualificationLevel",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "Get one active level",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-157",
+        "x-capability": "company.read",
+        "x-guards": [
+          "current_active_membership"
+        ],
+        "description": "Drivers currently on the level with their credited progress; change history only for qualifications.manage. A removed level is 404.",
+        "responses": {
+          "200": {
+            "description": "Current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeQualificationLevelDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "levelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/me/qualifications": {
+      "get": {
+        "operationId": "listMyQualifications",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "List the current member's qualifications",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-157",
+        "x-capability": "company.read",
+        "x-guards": [
+          "current_active_membership"
+        ],
+        "description": "One item per game in which the member has a current level.",
+        "responses": {
+          "200": {
+            "description": "Current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeMyQualificationList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/members/{memberId}/qualifications": {
+      "get": {
+        "operationId": "listMemberQualifications",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "List a member's qualifications",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-157",
+        "x-capability": "company.read",
+        "x-guards": [
+          "current_active_membership"
+        ],
+        "description": "One item per game in which the member has a current level.",
+        "responses": {
+          "200": {
+            "description": "Current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeMyQualificationList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/qualification-levels": {
+      "post": {
+        "operationId": "createQualificationLevel",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "Add a level at a position",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-157",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "current_active_membership",
+          "company_lock"
+        ],
+        "description": "Inserts the level at the position (1..active count + 1) and shifts later levels down, then promotes drivers who already meet their level's conditions. 409 when the game already has 25 active levels.",
+        "responses": {
+          "201": {
+            "description": "Committed result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeQualificationLevelCommandResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualificationLevelCreateInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/qualification-levels/{levelId}": {
+      "put": {
+        "operationId": "updateQualificationLevel",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "Edit a level's name, limits and conditions",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-157",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "current_active_membership",
+          "company_lock",
+          "level_version"
+        ],
+        "description": "Limits apply to trips decided from now on; decided trips keep their stored check. Drivers who already meet lowered conditions are promoted in the same transaction. 409 VERSION_CONFLICT on a stale expectedVersion.",
+        "responses": {
+          "200": {
+            "description": "Committed result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeQualificationLevelCommandResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "levelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualificationLevelUpdateInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/qualification-levels/{levelId}/position": {
+      "put": {
+        "operationId": "moveQualificationLevel",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "Move a level to another position",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-157",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "current_active_membership",
+          "company_lock",
+          "level_version"
+        ],
+        "description": "Re-numbers the game's ladder and promotes drivers who meet their conditions.",
+        "responses": {
+          "200": {
+            "description": "Committed result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeQualificationLevelCommandResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "levelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualificationLevelMoveInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/qualification-levels/{levelId}/removal": {
+      "post": {
+        "operationId": "removeQualificationLevel",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "Remove a level and transfer its drivers",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-157",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "current_active_membership",
+          "company_lock",
+          "level_version"
+        ],
+        "description": "Soft-deletes the level, moves its current drivers to the active transfer level of the same game and closes the position gap. The last active level cannot be removed.",
+        "responses": {
+          "200": {
+            "description": "Committed result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeQualificationLevelRemovalResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "levelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualificationLevelRemovalInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/members/{memberId}/qualifications/{game}": {
+      "put": {
+        "operationId": "changeMemberQualification",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "Change a member's level manually",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-157",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "current_active_membership",
+          "company_lock",
+          "active_target_member"
+        ],
+        "description": "Moves an active member to any active level of the game, up or down, with a required reason. Progress on the new level starts from zero.",
+        "responses": {
+          "200": {
+            "description": "Committed result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeQualificationManualChangeResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          },
+          {
+            "name": "game",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Game"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualificationManualChangeInput"
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -15708,18 +14533,6 @@
               }
             ]
           },
-          "ruleVersionId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "eventId": {
             "anyOf": [
               {
@@ -15782,7 +14595,6 @@
           "factRevisionId",
           "qualificationAssignmentId",
           "levelId",
-          "ruleVersionId",
           "eventId",
           "attendanceRevisionId",
           "attributionAt",
@@ -15961,7 +14773,7 @@
           "qualificationCheck": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/TripStage4QualificationCheck"
+                "$ref": "#/components/schemas/QualificationCheck"
               },
               {
                 "type": "null"
@@ -16764,329 +15576,6 @@
         ],
         "additionalProperties": false
       },
-      "Rule": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "const": "max_mass"
-              },
-              "maxKg": {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              }
-            },
-            "required": [
-              "type",
-              "maxKg"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "const": "allowed_trailer_types"
-              },
-              "entityIds": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-                },
-                "maxItems": 1000,
-                "uniqueItems": true
-              }
-            },
-            "required": [
-              "type",
-              "entityIds"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "const": "allowed_adr_categories"
-              },
-              "classes": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "1",
-                    "2",
-                    "3",
-                    "4",
-                    "6",
-                    "8"
-                  ]
-                },
-                "maxItems": 6,
-                "uniqueItems": true
-              }
-            },
-            "required": [
-              "type",
-              "classes"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "QualificationLevel": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "ruleVersionId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "configured": {
-            "type": "boolean"
-          },
-          "requiredTrips": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredDistanceM": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "position": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 25
-          },
-          "terminal": {
-            "type": "boolean"
-          },
-          "promotionConfigured": {
-            "type": "boolean"
-          },
-          "freightRuleSummary": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/QualificationFreightRuleSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "version",
-          "game",
-          "name",
-          "ruleVersionId",
-          "configured",
-          "requiredTrips",
-          "requiredDistanceM",
-          "position",
-          "terminal",
-          "promotionConfigured",
-          "freightRuleSummary"
-        ],
-        "additionalProperties": false
-      },
-      "LevelInput": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048,
-            "pattern": "\\S"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "additionalProperties": false
-      },
-      "RulesInput": {
-        "type": "object",
-        "properties": {
-          "rules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Rule"
-            },
-            "maxItems": 32
-          },
-          "requiredTrips": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 2147483647
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredDistanceM": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048
-          },
-          "effectiveAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
-            "description": "Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected."
-          }
-        },
-        "required": [
-          "rules",
-          "requiredTrips",
-          "requiredDistanceM",
-          "reason"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationRuleVersion": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "levelId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "publishedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          },
-          "rules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Rule"
-            }
-          },
-          "requiredTrips": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 2147483647
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredDistanceM": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "effectiveAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          }
-        },
-        "required": [
-          "id",
-          "levelId",
-          "game",
-          "publishedAt",
-          "rules",
-          "requiredTrips",
-          "requiredDistanceM",
-          "effectiveAt"
-        ],
-        "additionalProperties": false
-      },
       "Assignment": {
         "type": "object",
         "properties": {
@@ -17190,16 +15679,10 @@
         "type": "object",
         "properties": {
           "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
+            "$ref": "#/components/schemas/Game"
           },
           "levelId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            "$ref": "#/components/schemas/Id"
           },
           "reason": {
             "type": "string",
@@ -17210,22 +15693,8 @@
             "type": "string",
             "enum": [
               "initial",
-              "reinstatement",
-              "historical_resolution",
-              "administrative_correction"
+              "reinstatement"
             ]
-          },
-          "assignedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
-            "description": "Supported historical interval start, required only for historical_resolution."
-          },
-          "endedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
-            "description": "Supported exclusive historical interval end, required only for historical_resolution."
           }
         },
         "required": [
@@ -17233,196 +15702,6 @@
           "levelId",
           "reason",
           "purpose"
-        ],
-        "additionalProperties": false
-      },
-      "Progress": {
-        "type": "object",
-        "properties": {
-          "assignment": {
-            "$ref": "#/components/schemas/Assignment"
-          },
-          "acceptedTrips": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "actualDistanceM": {
-            "type": "string",
-            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-            "maxLength": 64
-          },
-          "requiredTrips": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredDistanceM": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "eligibleForConfirmation": {
-            "type": "boolean"
-          },
-          "reviewRequired": {
-            "type": "boolean"
-          },
-          "computedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          },
-          "projectionVersion": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "projectionPending": {
-            "const": false,
-            "type": "boolean"
-          },
-          "reviewReasonCodes": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "promotion_requirements_no_longer_met"
-              ]
-            }
-          }
-        },
-        "required": [
-          "assignment",
-          "acceptedTrips",
-          "actualDistanceM",
-          "requiredTrips",
-          "requiredDistanceM",
-          "eligibleForConfirmation",
-          "reviewRequired",
-          "computedAt",
-          "projectionVersion",
-          "projectionPending",
-          "reviewReasonCodes"
-        ],
-        "additionalProperties": false
-      },
-      "ProgressPublic": {
-        "type": "object",
-        "properties": {
-          "assignment": {
-            "$ref": "#/components/schemas/Assignment"
-          },
-          "acceptedTrips": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "actualDistanceM": {
-            "type": "string",
-            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-            "maxLength": 64
-          },
-          "requiredTrips": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredDistanceM": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "eligibleForConfirmation": {
-            "type": "boolean"
-          },
-          "computedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          },
-          "projectionVersion": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "projectionPending": {
-            "const": false,
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "assignment",
-          "acceptedTrips",
-          "actualDistanceM",
-          "requiredTrips",
-          "requiredDistanceM",
-          "eligibleForConfirmation",
-          "computedAt",
-          "projectionVersion",
-          "projectionPending"
-        ],
-        "additionalProperties": false
-      },
-      "PromotionInput": {
-        "type": "object",
-        "properties": {
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "assignmentId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "targetLevelId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048
-          }
-        },
-        "required": [
-          "game",
-          "assignmentId",
-          "targetLevelId",
-          "reason"
         ],
         "additionalProperties": false
       },
@@ -19590,285 +17869,6 @@
         ],
         "additionalProperties": false
       },
-      "ListQualificationLevel": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QualificationLevel"
-            }
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListQualificationLevel": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListQualificationLevel"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationArchivedLevel": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/Id"
-          },
-          "game": {
-            "$ref": "#/components/schemas/Game"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          }
-        },
-        "required": [
-          "id",
-          "game",
-          "name"
-        ],
-        "additionalProperties": false
-      },
-      "ListQualificationArchivedLevel": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "maxItems": 100,
-            "items": {
-              "$ref": "#/components/schemas/QualificationArchivedLevel"
-            }
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListQualificationArchivedLevel": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListQualificationArchivedLevel"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "ListQualificationRuleVersion": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QualificationRuleVersion"
-            }
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListQualificationRuleVersion": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListQualificationRuleVersion"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeQualificationRuleVersion": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/QualificationRuleVersion"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeProgressPublic": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ProgressPublic"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeProgress": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/Progress"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "ListAssignmentHistory": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AssignmentHistory"
-            }
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListAssignmentHistory": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListAssignmentHistory"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeQualificationLevel": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/QualificationLevel"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeAssignment": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/Assignment"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
       "EnvelopeEventMember": {
         "type": "object",
         "properties": {
@@ -21824,498 +19824,6 @@
         ],
         "additionalProperties": false
       },
-      "QualificationPreviewInput": {
-        "type": "object",
-        "properties": {
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "rules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Rule"
-            },
-            "maxItems": 32
-          },
-          "sample": {
-            "type": "object",
-            "properties": {
-              "cargoMassKg": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                    "maxLength": 64
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "trailerTypeIds": {
-                "type": "array",
-                "maxItems": 1,
-                "items": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "format": "uuid",
-                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "trailersComplete": {
-                "type": "boolean"
-              },
-              "adr": {
-                "type": "object",
-                "properties": {
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "known",
-                      "non_hazardous",
-                      "unknown"
-                    ]
-                  },
-                  "adrClass": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "1",
-                          "2",
-                          "3",
-                          "4",
-                          "6",
-                          "8"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "status",
-                  "adrClass"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "cargoMassKg",
-              "trailerTypeIds",
-              "trailersComplete",
-              "adr"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "required": [
-          "game",
-          "rules",
-          "sample"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationPreview": {
-        "type": "object",
-        "properties": {
-          "outcome": {
-            "type": "string",
-            "enum": [
-              "pass",
-              "fail",
-              "unknown"
-            ]
-          },
-          "ruleResults": {
-            "type": "array",
-            "maxItems": 3,
-            "items": {
-              "type": "object",
-              "properties": {
-                "ruleType": {
-                  "type": "string",
-                  "enum": [
-                    "max_mass",
-                    "allowed_trailer_types",
-                    "allowed_adr_categories"
-                  ]
-                },
-                "outcome": {
-                  "type": "string",
-                  "enum": [
-                    "pass",
-                    "fail",
-                    "unknown"
-                  ]
-                },
-                "reasonCode": {
-                  "type": "string",
-                  "enum": [
-                    "rule_passed",
-                    "rule_mass_exceeded",
-                    "rule_mass_unknown",
-                    "rule_mass_invalid",
-                    "rule_trailer_type_disallowed",
-                    "rule_trailer_type_unknown",
-                    "rule_trailers_incomplete",
-                    "rule_adr_category_disallowed",
-                    "rule_adr_category_unknown"
-                  ]
-                }
-              },
-              "required": [
-                "ruleType",
-                "outcome",
-                "reasonCode"
-              ],
-              "additionalProperties": false
-            }
-          }
-        },
-        "required": [
-          "outcome",
-          "ruleResults"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeQualificationPreview": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/QualificationPreview"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationActionActor": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "nickname": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "nickname"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationActionHistory": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "levelId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "assignedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          },
-          "periodId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "endedAt": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time",
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "purpose": {
-            "type": "string",
-            "enum": [
-              "initial",
-              "reinstatement",
-              "historical_resolution",
-              "administrative_correction",
-              "promotion",
-              "ladder_archive_transfer"
-            ]
-          },
-          "actor": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/QualificationActionActor"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "promotion": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "format": "uuid",
-                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-                  },
-                  "confirmedAt": {
-                    "type": "string",
-                    "format": "date-time",
-                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-                  }
-                },
-                "required": [
-                  "id",
-                  "confirmedAt"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "levelName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          }
-        },
-        "required": [
-          "id",
-          "levelId",
-          "game",
-          "assignedAt",
-          "periodId",
-          "endedAt",
-          "purpose",
-          "actor",
-          "promotion",
-          "levelName"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationRuleHistory": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "levelId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "publishedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          },
-          "rules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Rule"
-            }
-          },
-          "requiredTrips": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 2147483647
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredDistanceM": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "effectiveAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          },
-          "publisher": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/QualificationActionActor"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "levelId",
-          "game",
-          "publishedAt",
-          "rules",
-          "requiredTrips",
-          "requiredDistanceM",
-          "effectiveAt",
-          "publisher"
-        ],
-        "additionalProperties": false
-      },
-      "ListQualificationActionHistory": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QualificationActionHistory"
-            },
-            "maxItems": 100
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListQualificationActionHistory": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListQualificationActionHistory"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "ListQualificationRuleHistory": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QualificationRuleHistory"
-            },
-            "maxItems": 100
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListQualificationRuleHistory": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListQualificationRuleHistory"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
       "SourceCapability": {
         "type": "object",
         "properties": {
@@ -22505,125 +20013,6 @@
           "meta"
         ],
         "additionalProperties": false
-      },
-      "QualificationRuleCheck": {
-        "type": "object",
-        "properties": {
-          "ruleType": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "outcome": {
-            "type": "string",
-            "enum": [
-              "pass",
-              "fail",
-              "unknown"
-            ]
-          },
-          "reasonCode": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "bypassedByEvent": {
-            "type": "boolean"
-          },
-          "observedMassKg": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Decimal"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "limitMassKg": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Decimal"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "entityIds": {
-            "type": "array",
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "1",
-                    "2",
-                    "3",
-                    "4",
-                    "6",
-                    "8"
-                  ]
-                }
-              ]
-            },
-            "maxItems": 10
-          }
-        },
-        "required": [
-          "ruleType",
-          "outcome",
-          "reasonCode",
-          "bypassedByEvent",
-          "observedMassKg",
-          "limitMassKg",
-          "entityIds"
-        ],
-        "additionalProperties": false,
-        "description": "One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 trailer catalog IDs or ADR classes that broke the rule. Unknown values are null, never zero."
-      },
-      "QualificationCheck": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string",
-            "enum": [
-              "resolved",
-              "unresolved"
-            ]
-          },
-          "reasonCode": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QualificationRuleCheck"
-            },
-            "maxItems": 32
-          }
-        },
-        "required": [
-          "status",
-          "reasonCode",
-          "rules"
-        ],
-        "additionalProperties": false,
-        "description": "Historical qualification rules evaluated for the reviewed fact. Unresolved history has a reason code and no rules."
       },
       "ReviewAcceptance": {
         "type": "object",
@@ -24929,61 +22318,6 @@
           "expectedTripVersion"
         ],
         "additionalProperties": false
-      },
-      "QualificationRulePublicationInput": {
-        "type": "object",
-        "properties": {
-          "rules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Rule"
-            },
-            "maxItems": 32
-          },
-          "requiredTrips": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 2147483647
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredDistanceM": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048,
-            "pattern": "\\S"
-          },
-          "effectiveAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
-            "description": "Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected."
-          }
-        },
-        "required": [
-          "rules",
-          "requiredTrips",
-          "requiredDistanceM"
-        ],
-        "additionalProperties": false,
-        "description": "Optional publication reason. A null requiredTrips or requiredDistanceM means there is no minimum for that measure. Both keys are required. Use the separate optional preview action for a sample."
       },
       "EventStage2Input": {
         "type": "object",
@@ -28485,557 +25819,6 @@
         ],
         "additionalProperties": false
       },
-      "QualificationStage3LevelSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/Id"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          }
-        },
-        "required": [
-          "id",
-          "name"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3PromotionCandidate": {
-        "type": "object",
-        "properties": {
-          "member": {
-            "$ref": "#/components/schemas/MemberSummary"
-          },
-          "game": {
-            "$ref": "#/components/schemas/Game"
-          },
-          "assignmentId": {
-            "$ref": "#/components/schemas/Id"
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 4294967295
-          },
-          "currentLevel": {
-            "$ref": "#/components/schemas/QualificationStage3LevelSummary"
-          },
-          "nextLevel": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/QualificationStage3LevelSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "acceptedTrips": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "actualDistanceM": {
-            "type": "string",
-            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-            "maxLength": 64
-          },
-          "requiredTrips": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredDistanceM": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "eligible": {
-            "type": "boolean"
-          },
-          "eligibleSince": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Timestamp"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "member",
-          "game",
-          "assignmentId",
-          "version",
-          "currentLevel",
-          "nextLevel",
-          "acceptedTrips",
-          "actualDistanceM",
-          "requiredTrips",
-          "requiredDistanceM",
-          "eligible",
-          "eligibleSince"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3PromotionCandidateList": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QualificationStage3PromotionCandidate"
-            },
-            "maxItems": 100
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor",
-          "total"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3PromotionCandidateListEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/QualificationStage3PromotionCandidateList"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3ActionHistory": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "levelId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "assignedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          },
-          "periodId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "endedAt": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time",
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "purpose": {
-            "type": "string",
-            "enum": [
-              "initial",
-              "reinstatement",
-              "historical_resolution",
-              "administrative_correction",
-              "promotion",
-              "ladder_archive_transfer"
-            ]
-          },
-          "actor": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/QualificationActionActor"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "assignmentReason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048,
-                "pattern": "\\S"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "promotion": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "$ref": "#/components/schemas/Id"
-                  },
-                  "confirmedAt": {
-                    "$ref": "#/components/schemas/Timestamp"
-                  },
-                  "actor": {
-                    "anyOf": [
-                      {
-                        "$ref": "#/components/schemas/QualificationActionActor"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "reason": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 2048,
-                        "pattern": "\\S"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "id",
-                  "confirmedAt",
-                  "actor",
-                  "reason"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "levelId",
-          "game",
-          "assignedAt",
-          "periodId",
-          "endedAt",
-          "purpose",
-          "actor",
-          "assignmentReason",
-          "promotion"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3ActionHistoryList": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QualificationStage3ActionHistory"
-            },
-            "maxItems": 100
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3ActionHistoryListEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/QualificationStage3ActionHistoryList"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3PromotionHistory": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "const": "promotion"
-          },
-          "id": {
-            "$ref": "#/components/schemas/Id"
-          },
-          "member": {
-            "$ref": "#/components/schemas/MemberSummary"
-          },
-          "game": {
-            "$ref": "#/components/schemas/Game"
-          },
-          "sourceAssignmentId": {
-            "$ref": "#/components/schemas/Id"
-          },
-          "targetAssignmentId": {
-            "$ref": "#/components/schemas/Id"
-          },
-          "sourceLevel": {
-            "$ref": "#/components/schemas/QualificationStage3LevelSummary"
-          },
-          "targetLevel": {
-            "$ref": "#/components/schemas/QualificationStage3LevelSummary"
-          },
-          "confirmedAt": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
-          "actor": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/QualificationActionActor"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048,
-                "pattern": "\\S"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "acceptedTrips": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "actualDistanceM": {
-            "type": "string",
-            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-            "maxLength": 64
-          },
-          "requiredTrips": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredDistanceM": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "kind",
-          "id",
-          "member",
-          "game",
-          "sourceAssignmentId",
-          "targetAssignmentId",
-          "sourceLevel",
-          "targetLevel",
-          "confirmedAt",
-          "actor",
-          "reason",
-          "acceptedTrips",
-          "actualDistanceM",
-          "requiredTrips",
-          "requiredDistanceM"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3PromotionHistoryList": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QualificationStage3CompanyAction"
-            },
-            "maxItems": 100
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor",
-          "total"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3PromotionHistoryListEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/QualificationStage3PromotionHistoryList"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3MemberSearchList": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MemberSummary"
-            },
-            "maxItems": 100
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3MemberSearchListEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/QualificationStage3MemberSearchList"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
       "WorkspaceStage3Summary": {
         "type": "object",
         "properties": {
@@ -29202,27 +25985,6 @@
             "minimum": 0,
             "maximum": 9007199254740991,
             "description": "Requires applications.manage and enabled Admissions reads. Count submitted applications."
-          },
-          "promotionsReady": {
-            "type": "object",
-            "properties": {
-              "ets2": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              "ats": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              }
-            },
-            "required": [
-              "ets2",
-              "ats"
-            ],
-            "additionalProperties": false,
-            "description": "Requires qualifications.manage and enabled qualification progress reads. Use the authorized per-game promotion-candidate population."
           }
         },
         "required": [
@@ -31152,427 +27914,6 @@
         ],
         "additionalProperties": false
       },
-      "QualificationStage3AssignmentHistory": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "const": "assignment"
-          },
-          "id": {
-            "$ref": "#/components/schemas/Id"
-          },
-          "member": {
-            "$ref": "#/components/schemas/MemberSummary"
-          },
-          "game": {
-            "$ref": "#/components/schemas/Game"
-          },
-          "assignmentId": {
-            "$ref": "#/components/schemas/Id"
-          },
-          "level": {
-            "$ref": "#/components/schemas/QualificationStage3LevelSummary"
-          },
-          "assignedAt": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
-          "endedAt": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Timestamp"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "purpose": {
-            "type": "string",
-            "enum": [
-              "initial",
-              "reinstatement",
-              "historical_resolution",
-              "administrative_correction",
-              "ladder_archive_transfer"
-            ]
-          },
-          "actor": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/QualificationActionActor"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048,
-                "pattern": "\\S"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "kind",
-          "id",
-          "member",
-          "game",
-          "assignmentId",
-          "level",
-          "assignedAt",
-          "endedAt",
-          "purpose",
-          "actor",
-          "reason"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationStage3CompanyAction": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/QualificationStage3PromotionHistory"
-          },
-          {
-            "$ref": "#/components/schemas/QualificationStage3AssignmentHistory"
-          }
-        ]
-      },
-      "QualificationLadderLevel": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "ruleVersionId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "configured": {
-            "type": "boolean"
-          },
-          "requiredTrips": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredDistanceM": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "position": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 25
-          },
-          "terminal": {
-            "type": "boolean"
-          },
-          "promotionConfigured": {
-            "type": "boolean"
-          },
-          "currentDriverCount": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "effectiveRule": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/QualificationRuleVersion"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "freightRuleSummary": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/QualificationFreightRuleSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "version",
-          "game",
-          "name",
-          "ruleVersionId",
-          "configured",
-          "requiredTrips",
-          "requiredDistanceM",
-          "position",
-          "terminal",
-          "promotionConfigured",
-          "currentDriverCount",
-          "effectiveRule",
-          "freightRuleSummary"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationLadder": {
-        "type": "object",
-        "properties": {
-          "game": {
-            "$ref": "#/components/schemas/Game"
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
-          "asOf": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          },
-          "ladderEditsEnabled": {
-            "type": "boolean"
-          },
-          "levels": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QualificationLadderLevel"
-            },
-            "minItems": 1,
-            "maxItems": 25
-          }
-        },
-        "required": [
-          "game",
-          "revision",
-          "asOf",
-          "ladderEditsEnabled",
-          "levels"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationLadderRevision": {
-        "type": "object",
-        "properties": {
-          "game": {
-            "$ref": "#/components/schemas/Game"
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          }
-        },
-        "required": [
-          "game",
-          "revision"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeQualificationLadder": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/QualificationLadder"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeQualificationLadderRevision": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/QualificationLadderRevision"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationLadderAddInput": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "position": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 25
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048,
-            "pattern": "\\S"
-          }
-        },
-        "required": [
-          "name",
-          "position"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationLadderOrderInput": {
-        "type": "object",
-        "properties": {
-          "levelIds": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Id"
-            },
-            "uniqueItems": true,
-            "minItems": 1,
-            "maxItems": 25
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048,
-            "pattern": "\\S"
-          }
-        },
-        "required": [
-          "levelIds"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationLadderArchiveInput": {
-        "type": "object",
-        "properties": {
-          "targetLevelId": {
-            "$ref": "#/components/schemas/Id"
-          },
-          "observedDriverCount": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048,
-            "pattern": "\\S"
-          }
-        },
-        "required": [
-          "targetLevelId",
-          "observedDriverCount"
-        ],
-        "additionalProperties": false
-      },
-      "QualificationFreightRuleSummary": {
-        "type": "object",
-        "properties": {
-          "maxMassKg": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "allowedTrailerTypeCount": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 1000
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "allowedAdrCategoryCount": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "maxMassKg",
-          "allowedTrailerTypeCount",
-          "allowedAdrCategoryCount"
-        ],
-        "additionalProperties": false
-      },
       "AnalyticsStage4Totals": {
         "type": "object",
         "properties": {
@@ -31926,199 +28267,6 @@
         "additionalProperties": false,
         "description": "One author-safe source of the trip. Reconciliation candidates, dismissals, confidence and reasons are reviewer-only and never appear here."
       },
-      "TripStage4RuleCheck": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "ruleType": {
-                "const": "max_mass"
-              },
-              "outcome": {
-                "type": "string",
-                "enum": [
-                  "pass",
-                  "fail",
-                  "unknown"
-                ]
-              },
-              "bypassedByEvent": {
-                "type": "boolean"
-              },
-              "limitMassKg": {
-                "$ref": "#/components/schemas/Decimal"
-              },
-              "observedMassKg": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/Decimal"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "ruleType",
-              "outcome",
-              "bypassedByEvent",
-              "limitMassKg",
-              "observedMassKg"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "ruleType": {
-                "const": "allowed_trailer_types"
-              },
-              "outcome": {
-                "type": "string",
-                "enum": [
-                  "pass",
-                  "fail",
-                  "unknown"
-                ]
-              },
-              "bypassedByEvent": {
-                "type": "boolean"
-              },
-              "allowedTrailerTypes": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/CatalogLabel"
-                },
-                "maxItems": 100,
-                "description": "Configured trailer types in the viewer locale, truncated at 100."
-              },
-              "allowedTrailerTypeCount": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 1000,
-                "description": "Full number of configured trailer types."
-              },
-              "offendingTrailerTypes": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/CatalogLabel"
-                },
-                "maxItems": 10
-              }
-            },
-            "required": [
-              "ruleType",
-              "outcome",
-              "bypassedByEvent",
-              "allowedTrailerTypes",
-              "allowedTrailerTypeCount",
-              "offendingTrailerTypes"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "ruleType": {
-                "const": "allowed_adr_categories"
-              },
-              "outcome": {
-                "type": "string",
-                "enum": [
-                  "pass",
-                  "fail",
-                  "unknown"
-                ]
-              },
-              "bypassedByEvent": {
-                "type": "boolean"
-              },
-              "allowedAdrClasses": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "1",
-                    "2",
-                    "3",
-                    "4",
-                    "6",
-                    "8"
-                  ]
-                },
-                "maxItems": 6,
-                "uniqueItems": true
-              },
-              "observedAdrClass": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "1",
-                      "2",
-                      "3",
-                      "4",
-                      "6",
-                      "8"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "ruleType",
-              "outcome",
-              "bypassedByEvent",
-              "allowedAdrClasses",
-              "observedAdrClass"
-            ],
-            "additionalProperties": false
-          }
-        ],
-        "description": "One historical rule applied to the effective fact with its configured value. Unknown observed values are null, never zero."
-      },
-      "TripStage4QualificationCheck": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string",
-            "enum": [
-              "resolved",
-              "unresolved"
-            ]
-          },
-          "reasonCode": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TripStage4RuleCheck"
-            },
-            "maxItems": 32
-          }
-        },
-        "required": [
-          "status",
-          "reasonCode",
-          "rules"
-        ],
-        "additionalProperties": false,
-        "description": "Author-safe qualification check of the effective fact. Unresolved history has a reason code and no rules. Acceptance, decision authority and blocked reasons are reviewer-only."
-      },
       "TripStage4CompanyRef": {
         "oneOf": [
           {
@@ -32328,8 +28476,6 @@
           "event.reminder",
           "qualification.assigned",
           "qualification.promoted",
-          "promotion.eligible",
-          "promotion.review_required",
           "application.submitted",
           "application.decided",
           "member.access_changed",
@@ -33111,6 +29257,1325 @@
           "meta"
         ],
         "additionalProperties": false
+      },
+      "QualificationLevelRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationLimits": {
+        "type": "object",
+        "properties": {
+          "massMinKg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "massMaxKg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distanceMinM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distanceMaxM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trailers": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "any",
+                  "selected"
+                ]
+              },
+              "types": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CatalogLabel"
+                },
+                "maxItems": 100
+              }
+            },
+            "required": [
+              "mode",
+              "types"
+            ],
+            "additionalProperties": false
+          },
+          "adr": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "forbidden",
+                  "selected",
+                  "any"
+                ]
+              },
+              "classes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "6",
+                    "8"
+                  ]
+                },
+                "maxItems": 6,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "mode",
+              "classes"
+            ],
+            "additionalProperties": false
+          },
+          "hardModeRequired": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "massMinKg",
+          "massMaxKg",
+          "distanceMinM",
+          "distanceMaxM",
+          "trailers",
+          "adr",
+          "hardModeRequired"
+        ],
+        "additionalProperties": false,
+        "description": "Trip limits of a level. Null bounds and the any modes are unset limits. Mass is kilograms and distance is the trip's actual distance in metres; bounds are inclusive."
+      },
+      "QualificationLimitsInput": {
+        "type": "object",
+        "properties": {
+          "massMinKg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "massMaxKg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distanceMinM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distanceMaxM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trailers": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "any",
+                  "selected"
+                ]
+              },
+              "typeIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Id"
+                },
+                "maxItems": 100,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "mode",
+              "typeIds"
+            ],
+            "additionalProperties": false
+          },
+          "adr": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "forbidden",
+                  "selected",
+                  "any"
+                ]
+              },
+              "classes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "6",
+                    "8"
+                  ]
+                },
+                "maxItems": 6,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "mode",
+              "classes"
+            ],
+            "additionalProperties": false
+          },
+          "hardModeRequired": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "massMinKg",
+          "massMaxKg",
+          "distanceMinM",
+          "distanceMaxM",
+          "trailers",
+          "adr",
+          "hardModeRequired"
+        ],
+        "additionalProperties": false,
+        "description": "The server rejects min above max, a selected mode without items, unknown trailer types and the classes or types of a mode that does not use them."
+      },
+      "QualificationConditions": {
+        "type": "object",
+        "properties": {
+          "requiredTrips": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredDistanceM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "requiredTrips",
+          "requiredDistanceM"
+        ],
+        "additionalProperties": false,
+        "description": "Promotion conditions on the level. Every set condition must be met. A non-top level needs at least one (qualification_conditions_required); distance must be positive."
+      },
+      "QualificationProgress": {
+        "type": "object",
+        "properties": {
+          "trips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "distanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          }
+        },
+        "required": [
+          "trips",
+          "distanceM"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationLevelSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "limits": {
+            "$ref": "#/components/schemas/QualificationLimits"
+          },
+          "conditions": {
+            "$ref": "#/components/schemas/QualificationConditions"
+          },
+          "nextLevel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationLevelRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "driverCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "game",
+          "name",
+          "position",
+          "version",
+          "limits",
+          "conditions",
+          "nextLevel",
+          "driverCount"
+        ],
+        "additionalProperties": false
+      },
+      "MyQualification": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/Id"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "position": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "position"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "since": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "progress": {
+            "$ref": "#/components/schemas/QualificationProgress"
+          },
+          "conditions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationConditions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nextLevel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationLevelRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "level",
+          "since",
+          "progress",
+          "conditions",
+          "nextLevel"
+        ],
+        "additionalProperties": false,
+        "description": "A member's current level in one game. Progress counts credited trips and their actual distance on the current level; a member without a current level has a null level and zero progress."
+      },
+      "QualificationLevelDriver": {
+        "type": "object",
+        "properties": {
+          "memberId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "since": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "credited": {
+            "$ref": "#/components/schemas/QualificationProgress"
+          }
+        },
+        "required": [
+          "memberId",
+          "displayName",
+          "since",
+          "credited"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationLevelHistoryEntry": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/Id"
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "id",
+                  "displayName"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "created",
+              "edited",
+              "moved",
+              "removed",
+              "legacy"
+            ]
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "name",
+                "limits",
+                "conditions",
+                "position"
+              ]
+            },
+            "maxItems": 4,
+            "uniqueItems": true
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 25
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transferLevel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationLevelRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "at",
+          "actor",
+          "operation",
+          "changes",
+          "position",
+          "transferLevel"
+        ],
+        "additionalProperties": false,
+        "description": "One level change from the audit log, newest first. legacy marks entries of the earlier ladder model."
+      },
+      "QualificationLevelDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "limits": {
+            "$ref": "#/components/schemas/QualificationLimits"
+          },
+          "conditions": {
+            "$ref": "#/components/schemas/QualificationConditions"
+          },
+          "nextLevel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationLevelRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "driverCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "levelCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          },
+          "canManage": {
+            "type": "boolean"
+          },
+          "mine": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MyQualification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "drivers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QualificationLevelDriver"
+            },
+            "maxItems": 1000
+          },
+          "history": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/QualificationLevelHistoryEntry"
+                },
+                "maxItems": 50,
+                "description": "Present only for qualifications.manage; null otherwise."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "game",
+          "name",
+          "position",
+          "version",
+          "limits",
+          "conditions",
+          "nextLevel",
+          "driverCount",
+          "levelCount",
+          "canManage",
+          "mine",
+          "drivers",
+          "history"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationLevelList": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "canManage": {
+            "type": "boolean"
+          },
+          "levels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QualificationLevelSummary"
+            },
+            "maxItems": 25
+          },
+          "mine": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MyQualification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "canManage",
+          "levels",
+          "mine"
+        ],
+        "additionalProperties": false
+      },
+      "MyQualificationList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MyQualification"
+            },
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationLevelCreateInput": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "\\S"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/QualificationLimitsInput"
+          },
+          "conditions": {
+            "$ref": "#/components/schemas/QualificationConditions"
+          }
+        },
+        "required": [
+          "game",
+          "position",
+          "name",
+          "limits",
+          "conditions"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationLevelUpdateInput": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "\\S"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/QualificationLimitsInput"
+          },
+          "conditions": {
+            "$ref": "#/components/schemas/QualificationConditions"
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "name",
+          "limits",
+          "conditions"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationLevelMoveInput": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "position"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationLevelRemovalInput": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "transferLevelId": {
+            "$ref": "#/components/schemas/Id"
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "transferLevelId"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationManualChangeInput": {
+        "type": "object",
+        "properties": {
+          "levelId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "levelId",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationLevelCommandResult": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/QualificationLevelDetail"
+          },
+          "promotedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "level",
+          "promotedCount"
+        ],
+        "additionalProperties": false,
+        "description": "promotedCount is the number of drivers promoted by the re-check in the same transaction."
+      },
+      "QualificationLevelRemovalResult": {
+        "type": "object",
+        "properties": {
+          "transferLevel": {
+            "$ref": "#/components/schemas/QualificationLevelDetail"
+          },
+          "promotedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "transferLevel",
+          "promotedCount"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationManualChangeResult": {
+        "type": "object",
+        "properties": {
+          "qualification": {
+            "$ref": "#/components/schemas/MyQualification"
+          }
+        },
+        "required": [
+          "qualification"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeQualificationLevelList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualificationLevelList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeQualificationLevelDetail": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualificationLevelDetail"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeMyQualificationList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MyQualificationList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeQualificationLevelCommandResult": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualificationLevelCommandResult"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeQualificationLevelRemovalResult": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualificationLevelRemovalResult"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeQualificationManualChangeResult": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualificationManualChangeResult"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationRuleCheck": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "rule": {
+                "const": "cargo_mass"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              "minKg": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Decimal"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "maxKg": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Decimal"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "observedKg": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Decimal"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "rule",
+              "result",
+              "minKg",
+              "maxKg",
+              "observedKg"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "rule": {
+                "const": "distance"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              "minM": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Decimal"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "maxM": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Decimal"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "observedM": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Decimal"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "rule",
+              "result",
+              "minM",
+              "maxM",
+              "observedM"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "rule": {
+                "const": "trailer_types"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "any",
+                  "selected"
+                ]
+              },
+              "allowed": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CatalogLabel"
+                },
+                "maxItems": 100
+              },
+              "observed": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CatalogLabel"
+                },
+                "maxItems": 10
+              }
+            },
+            "required": [
+              "rule",
+              "result",
+              "mode",
+              "allowed",
+              "observed"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "rule": {
+                "const": "adr"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "forbidden",
+                  "selected",
+                  "any"
+                ]
+              },
+              "allowedClasses": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "6",
+                    "8"
+                  ]
+                },
+                "maxItems": 6,
+                "uniqueItems": true
+              },
+              "observed": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "1",
+                      "2",
+                      "3",
+                      "4",
+                      "6",
+                      "8",
+                      "none"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "rule",
+              "result",
+              "mode",
+              "allowedClasses",
+              "observed"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "rule": {
+                "const": "hard_mode"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "observed": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "qualified",
+                      "not-qualified",
+                      "unknown"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "rule",
+              "result",
+              "required",
+              "observed"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "One of the five level limits applied to the trip with its configured value. An unset limit passes with null bounds or the any mode. Unknown observed values are null, never zero."
+      },
+      "QualificationCheck": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "checked",
+              "event_exempt",
+              "no_level"
+            ]
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "decision",
+              "current"
+            ]
+          },
+          "level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationLevelRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasonCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QualificationRuleCheck"
+            },
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "status",
+          "basis",
+          "level",
+          "outcome",
+          "reasonCode",
+          "rules"
+        ],
+        "additionalProperties": false,
+        "description": "The driver's level limits checked against the trip. decision reads the snapshot stored with the company decision; current checks a pending trip against the level at its attribution time. checked always lists the five rules; event_exempt (company event trip) and no_level list none."
       }
     },
     "parameters": {
