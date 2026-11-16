@@ -7,6 +7,7 @@ import {
 import { membershipLine } from "../../apps/web/src/features/drivers/model.ts";
 import {
   accessHref,
+  activeOnlyParams,
   activityView,
   countsPath,
   type DirectoryEntry,
@@ -71,17 +72,25 @@ describe("directory URL state", () => {
     expect(Array.from(url(`search=${encodeURIComponent(long)}`).search ?? "")).toHaveLength(128);
   });
 
-  it("opens Invited only with applications.manage and never keeps level filters off In company", () => {
+  it("opens Invited only with applications.manage and keeps role and level filters on In company only", () => {
     expect(url("tab=invited").tab).toBe("active");
     expect(url("tab=invited", true).tab).toBe("invited");
     expect(url("tab=former").tab).toBe("former");
-    expect(url(`tab=former&ets2Level=${ets2}&atsLevel=${ats}`)).toMatchObject({
+    // Deactivation clears access roles, so Left ignores a role filter like the level filters.
+    expect(url(`tab=former&role=driver&ets2Level=${ets2}&atsLevel=${ats}`)).toMatchObject({
+      role: null,
       ets2Level: null,
       atsLevel: null,
     });
-    expect(url(`tab=invited&ets2Level=${ets2}`, true).ets2Level).toBeNull();
-    // Without the capability the tab falls back to In company, where levels apply.
-    expect(url(`tab=invited&ets2Level=${ets2}`).ets2Level).toBe(ets2);
+    expect(url(`tab=invited&role=driver&ets2Level=${ets2}`, true)).toMatchObject({
+      role: null,
+      ets2Level: null,
+    });
+    // Without the capability the tab falls back to In company, where role and levels apply.
+    expect(url(`tab=invited&role=driver&ets2Level=${ets2}`)).toMatchObject({
+      role: "driver",
+      ets2Level: ets2,
+    });
   });
 
   it("counts only narrowing filters as active", () => {
@@ -161,10 +170,18 @@ describe("directory requests", () => {
     ).toBe(
       `/members?limit=25&status=active&search=Echo+Runner&role=driver&ets2Level=${ets2}&atsLevel=${ats}&sort=lastTrip&order=asc&cursor=signed+cursor`,
     );
-    // Former sends no level parameters even when the URL still had them.
-    expect(path(`tab=former&role=driver&ets2Level=${ets2}`)).toBe(
-      "/members?limit=25&status=former&role=driver&sort=lastTrip&order=desc",
+    // Former never sends role or level parameters, even when the URL still had them.
+    expect(path(`tab=former&search=Echo&role=driver&ets2Level=${ets2}`)).toBe(
+      "/members?limit=25&status=former&search=Echo&sort=lastTrip&order=desc",
     );
+    expect(
+      directoryPath(
+        { ...url("tab=former"), role: "driver", ets2Level: ets2 },
+        effectiveSort("former", url(""), false),
+        null,
+      ),
+    ).toBe("/members?limit=25&status=former&sort=lastTrip&order=desc");
+    expect(activeOnlyParams).toEqual(["role", "ets2Level", "atsLevel"]);
     expect(countsPath).toBe("/members?limit=1&sort=nickname");
   });
 

@@ -149,23 +149,25 @@ export function DirectoryToolbar({
           onChange={(event) => onSearch(event.target.value.trimStart())}
         />
       </div>
-      <div className="drivers-filter drivers-filter-role">
-        <Label htmlFor={`${ids}-role`} className="visually-hidden">
-          {t("directory.role")}
-        </Label>
-        <Select
-          id={`${ids}-role`}
-          value={role ?? ""}
-          onChange={(event) => onChange("role", event.target.value)}
-        >
-          <option value="">{t("directory.anyRole")}</option>
-          {directoryRoles.map((item) => (
-            <option key={item} value={item}>
-              {t(`roles.${item}`)}
-            </option>
-          ))}
-        </Select>
-      </div>
+      {tab === "active" && (
+        <div className="drivers-filter drivers-filter-role">
+          <Label htmlFor={`${ids}-role`} className="visually-hidden">
+            {t("directory.role")}
+          </Label>
+          <Select
+            id={`${ids}-role`}
+            value={role ?? ""}
+            onChange={(event) => onChange("role", event.target.value)}
+          >
+            <option value="">{t("directory.anyRole")}</option>
+            {directoryRoles.map((item) => (
+              <option key={item} value={item}>
+                {t(`roles.${item}`)}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
       {tab === "active" && (levels.ets2.shown || ets2Level) && (
         <LevelSelect
           id={`${ids}-ets2`}

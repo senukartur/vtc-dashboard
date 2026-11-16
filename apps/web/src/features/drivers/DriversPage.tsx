@@ -19,6 +19,7 @@ import {
   useDirectorySearch,
 } from "./directory-components.js";
 import {
+  activeOnlyParams,
   countsPath,
   DIRECTORY_PAGE_SIZE,
   type DirectorySort,
@@ -56,10 +57,12 @@ export function DriversPage() {
 
 /**
  * Whether the 30-day activity can be sorted: "unknown" tries the activity default, "fallback"
- * follows a 422 on that implicit default (requeried once by nickname), "off" a page without
- * `windowEndsAt` (Trips is not configured).
+ * follows a 422 on that implicit default (requeried once by nickname), "retry" asks for the
+ * default again after the fallback page proved Trips on (that 422 came from a stale filter; a
+ * second one shows the invalid-filters state instead of falling back again), "off" a page
+ * without `windowEndsAt` (Trips is not configured).
  */
-type Activity = "unknown" | "fallback" | "off";
+type Activity = "unknown" | "fallback" | "retry" | "off";
 
 function DriversDirectory() {
   const { t, i18n } = useTranslation("drivers");
@@ -73,7 +76,8 @@ function DriversDirectory() {
   const url = parseDirectoryUrl(params, canInvite);
   const listTab = url.tab === "invited" ? null : url.tab;
   const [activity, setActivity] = useState<Activity>("unknown");
-  const sort = effectiveSort(url.tab, url, activity !== "unknown");
+  const activityUnavailable = activity === "fallback" || activity === "off";
+  const sort = effectiveSort(url.tab, url, activityUnavailable);
 
   const pages = useCursorPages(directoryFilterKey(url, sort));
   const query = useDirectoryList(directoryPath(url, sort, pages.cursor), !!listTab, true);
@@ -100,8 +104,14 @@ function DriversDirectory() {
   if (failure === "invalid" && sort.implicit && sort.sort !== "nickname" && activity === "unknown")
     setActivity("fallback");
   const list = query.isError ? undefined : query.data;
-  if (list && !query.isPlaceholderData && !list.windowEndsAt && activity !== "off")
-    setActivity("off");
+  // The next real page settles a fallback or retry: with the window Trips is on, without it off.
+  if (list && !query.isPlaceholderData) {
+    if (!list.windowEndsAt) {
+      if (activity !== "off") setActivity("off");
+    } else if (activity === "fallback") setActivity("retry");
+    else if (activity === "retry" && sort.implicit && sort.sort !== "nickname")
+      setActivity("unknown");
+  }
   const activitySortable = activity !== "off" && !(list && !list.windowEndsAt);
 
   // Counters stay while another tab loads; they belong to this viewer and session only.
@@ -132,15 +142,12 @@ function DriversDirectory() {
     const tab = value as DirectoryTab;
     update((next) => {
       set(next, "tab", tab === "active" ? null : tab);
-      if (tab !== "active") {
-        next.delete("ets2Level");
-        next.delete("atsLevel");
-      }
+      if (tab !== "active") for (const name of activeOnlyParams) next.delete(name);
       if (tab !== "invited") next.delete("state");
     });
   }
   function changeSort(next: { key: DirectorySort; direction: SortOrder }) {
-    const implicit = effectiveSort(url.tab, { sort: null, order: null }, activity !== "unknown");
+    const implicit = effectiveSort(url.tab, { sort: null, order: null }, activityUnavailable);
     const value = sortParams({ sort: next.key, order: next.direction }, implicit);
     update((search) => {
       set(search, "sort", value.sort);
@@ -151,7 +158,7 @@ function DriversDirectory() {
     setDraft("");
     searchRef.current?.focus();
     // A fallback inferred from a 422 may have come from a stale filter: try the default again.
-    if (activity === "fallback") setActivity("unknown");
+    if (activity === "fallback" || activity === "retry") setActivity("unknown");
     update((next) => {
       for (const name of ["search", "role", "ets2Level", "atsLevel", "sort", "order"])
         next.delete(name);

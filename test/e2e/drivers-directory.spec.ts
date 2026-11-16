@@ -176,12 +176,17 @@ test.describe("Drivers directory", () => {
       // Back to the default drops the sort from the URL.
       await distance.click();
       await expect(page).toHaveURL("/account/drivers");
-      await page.getByRole("button", { name: "Trips, 30 days" }).click();
+      const trips = page.getByRole("button", { name: "Trips, 30 days" });
+      await trips.click();
       await expect(page).toHaveURL("/account/drivers?sort=trips30d");
       await loaded(page);
       await expect(nicknames(page).first()).toHaveText("AlphaHauler");
-      await page.getByRole("button", { name: "Last trip" }).click();
+      await expect(trips).toBeFocused();
+      const lastTrip = page.getByRole("button", { name: "Last trip" });
+      await lastTrip.click();
       await expect(page).toHaveURL("/account/drivers?sort=lastTrip");
+      await loaded(page);
+      await expect(lastTrip).toBeFocused();
       await page.getByRole("button", { name: "Driver", exact: true }).click();
       await expect(page).toHaveURL("/account/drivers?sort=nickname");
       await loaded(page);
@@ -246,8 +251,11 @@ test.describe("Drivers directory", () => {
         "AlphaHauler",
       ]);
       await expect(ets2).toBeFocused();
-      await select(page, "ATS level").selectOption({ label: "Highway Driver III" });
+      const atsSelect = select(page, "ATS level");
+      await atsSelect.focus();
+      await atsSelect.selectOption({ label: "Highway Driver III" });
       await expect(nicknames(page)).toHaveText(["AlphaHauler"]);
+      await expect(atsSelect).toBeFocused();
       expect(memberReads(state).at(-1)).toBe(
         `/members?limit=25&status=active&search=hauler&ets2Level=${driverII}&atsLevel=${levelId("ats", "driver_iii")}&sort=distance30d&order=desc`,
       );
@@ -329,6 +337,79 @@ test.describe("Drivers directory", () => {
   );
 
   test(
+    "returns to the distance default when a valid level replaces a stale one",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDirectoryRoutes(page);
+      const stale = "41000000-0000-4000-8000-0000000009ff";
+      await open(page, `?ets2Level=${stale}`);
+      await expect(page.getByRole("alert")).toContainText("not available now");
+      expect(memberReads(state)).toHaveLength(2);
+      // Picking a level instead of Reset: the nickname page proves Trips on, so the activity
+      // default is requested once more and stays the default.
+      const ets2 = select(page, "ETS2 level");
+      await ets2.focus();
+      await ets2.selectOption({ label: "Driver II" });
+      const driverII = levelId("ets2", "driver_ii");
+      await expect(page).toHaveURL(`/account/drivers?ets2Level=${driverII}`);
+      await expect
+        .poll(() => memberReads(state).at(-1))
+        .toBe(`/members?limit=25&status=active&ets2Level=${driverII}&sort=distance30d&order=desc`);
+      await loaded(page);
+      await expect(
+        table(page).getByRole("columnheader", { name: "Distance, 30 days" }),
+      ).toHaveAttribute("aria-sort", "descending");
+      await expect(table(page).getByRole("columnheader", { name: "Driver" })).not.toHaveAttribute(
+        "aria-sort",
+        "ascending",
+      );
+      await expect(nicknames(page).first()).toHaveText(
+        "Romeo Long Distance Hauler of the Northern Routes",
+      );
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(ets2).toBeFocused();
+      // One nickname page settled the fallback, then exactly one activity request followed.
+      expect(memberReads(state).slice(2)).toEqual([
+        `/members?limit=25&status=active&ets2Level=${driverII}&sort=nickname&order=asc`,
+        `/members?limit=25&status=active&ets2Level=${driverII}&sort=distance30d&order=desc`,
+      ]);
+      // Clicking Driver now writes the nickname sort: it is no longer the default.
+      await page.getByRole("button", { name: "Driver", exact: true }).click();
+      await expect(page).toHaveURL(`/account/drivers?ets2Level=${driverII}&sort=nickname`);
+      expect(state.unexpected).toEqual([]);
+    },
+  );
+
+  test(
+    "clears inactive directory pages and refreshes the session after a 403",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDirectoryRoutes(page, { pageCap: 2 });
+      await open(page);
+      await loaded(page);
+      await tab(page, /^Left: 4$/).click();
+      await loaded(page);
+      const sessions = () => state.requests.filter((url) => url.pathname === "/api/v1/me").length;
+      const before = sessions();
+      // The refused read is the next Left page, so the In company key itself stays unchanged.
+      state.failures.members = 403;
+      await pager(page).getByRole("button", { name: "Next page" }).click();
+      await expect(page.getByRole("alert")).toBeVisible();
+      expect(memberReads(state).at(-1)).toMatch(/^\/members\?limit=25&status=former&.*&cursor=/);
+      await expect.poll(sessions).toBeGreaterThan(before);
+      delete state.failures.members;
+      // The In company page was cached and inactive: the 403 removed it, so it is read again.
+      const reads = memberReads(state).length;
+      await tab(page, /^In company: 18$/).click();
+      await expect.poll(() => memberReads(state).slice(reads)).toEqual([activeDefault]);
+      await expect(nicknames(page).first()).toHaveText(
+        "Romeo Long Distance Hauler of the Northern Routes",
+      );
+      expect(state.unexpected).toEqual([]);
+    },
+  );
+
+  test(
     "falls back to nickname once without Trips and marks activity unavailable",
     browserCase(["@functional"]),
     async ({ page }) => {
@@ -385,7 +466,7 @@ test.describe("Drivers directory", () => {
     async ({ page }) => {
       const state = await mockDirectoryRoutes(page, { pageCap: 10 });
       const driverII = levelId("ets2", "driver_ii");
-      await open(page, `?search=er&ets2Level=${driverII}`);
+      await open(page, `?search=er&role=driver&ets2Level=${driverII}`);
       await loaded(page);
       const active = tab(page, /^In company: 18$/);
       await active.focus();
@@ -410,7 +491,9 @@ test.describe("Drivers directory", () => {
         ["420 km", "1", "2 Nov 2026"],
         { useInnerText: true },
       );
+      // Deactivation clears access roles, so Left has no role filter and never sends one.
       await expect(select(page, "ETS2 level")).toHaveCount(0);
+      await expect(select(page, "Role")).toHaveCount(0);
       await expect(search(page)).toHaveValue("er");
       await expect(page.locator(".drivers-counts")).toHaveText(
         "18 in the company · 15 drove in the last 30 days",
@@ -425,9 +508,12 @@ test.describe("Drivers directory", () => {
         "GammaRetired",
         "TangoEarlier",
       ]);
-      await page.goto("/account/drivers?tab=former");
+      await page.goto("/account/drivers?tab=former&role=driver");
       await loaded(page);
       expect(memberReads(state).at(-1)).toBe(formerDefault);
+      expect(
+        memberReads(state).filter((path) => path.includes("status=former") && /role=/.test(path)),
+      ).toEqual([]);
     },
   );
 
@@ -653,5 +739,35 @@ test(
       await capture(page, info, `drivers-directory-${locale}`);
       if (locale === "ru") await switchLanguage(page, "en");
     }
+  },
+);
+
+test(
+  "changes the phone Sort select from page 2 with the cursor reset and focus kept",
+  browserCase(["@layout", "@viewport-mobile"]),
+  async ({ page }) => {
+    const state = await mockDirectoryRoutes(page, { pageCap: 10 });
+    await open(page);
+    await loaded(page);
+    await pager(page).getByRole("button", { name: "Next page" }).click();
+    await expect(pager(page).getByText("Page 2")).toBeVisible();
+    await loaded(page);
+    expect(memberReads(state).at(-1)).toMatch(/&cursor=fixture-directory/);
+
+    const sort = page.getByRole("combobox", { name: "Sort", exact: true });
+    await expect(sort).toHaveValue("distance30d:desc");
+    const before = memberReads(state).length;
+    await sort.focus();
+    await sort.selectOption("trips30d:desc");
+    await expect(page).toHaveURL("/account/drivers?sort=trips30d");
+    await loaded(page);
+    await expect(pager(page).getByText("Page 1")).toBeVisible();
+    await expect(nicknames(page).first()).toHaveText("AlphaHauler");
+    expect(since(state, before)).toEqual([
+      "/members?limit=25&status=active&sort=trips30d&order=desc",
+    ]);
+    await expect(sort).toHaveValue("trips30d:desc");
+    await expect(sort).toBeFocused();
+    expect(state.unexpected).toEqual([]);
   },
 );

@@ -27,6 +27,8 @@ export const directorySorts: readonly DirectorySort[] = [
   "trips30d",
   "lastTrip",
 ];
+/** URL parameters only the In company tab keeps; leaving it drops them. */
+export const activeOnlyParams = ["role", "ets2Level", "atsLevel"] as const;
 export const activitySorts: readonly DirectorySort[] = ["distance30d", "trips30d", "lastTrip"];
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -34,8 +36,11 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export type DirectoryUrl = {
   tab: DirectoryTab;
   search: string | null;
+  /**
+   * Role and level filters apply only to the In company tab: deactivation clears access roles, so
+   * a role filter on Left could only ever match nobody.
+   */
   role: DirectoryRole | null;
-  /** Level filters apply only to the In company tab. */
   ets2Level: string | null;
   atsLevel: string | null;
   /** Explicit sort from the URL; null keeps the tab default. */
@@ -52,9 +57,10 @@ export function parseDirectoryUrl(params: URLSearchParams, canInvite: boolean): 
   const role = params.get("role");
   const sort = params.get("sort");
   const order = params.get("order");
+  const active = tab === "active";
   const level = (name: string) => {
     const id = params.get(name);
-    return tab === "active" && id && uuid.test(id) ? id.toLowerCase() : null;
+    return active && id && uuid.test(id) ? id.toLowerCase() : null;
   };
   const explicitSort = directorySorts.includes(sort as DirectorySort)
     ? (sort as DirectorySort)
@@ -62,7 +68,7 @@ export function parseDirectoryUrl(params: URLSearchParams, canInvite: boolean): 
   return {
     tab,
     search: normalizeSearch(params.get("search") ?? ""),
-    role: directoryRoles.includes(role as DirectoryRole) ? (role as DirectoryRole) : null,
+    role: active && directoryRoles.includes(role as DirectoryRole) ? (role as DirectoryRole) : null,
     ets2Level: level("ets2Level"),
     atsLevel: level("atsLevel"),
     sort: explicitSort,
@@ -115,7 +121,7 @@ export function directoryParams(url: DirectoryUrl, sort: EffectiveSort) {
     limit: DIRECTORY_PAGE_SIZE,
     status: url.tab === "former" ? "former" : "active",
     search: url.search,
-    role: url.role,
+    role: active ? url.role : null,
     ets2Level: active ? url.ets2Level : null,
     atsLevel: active ? url.atsLevel : null,
     sort: sort.sort,
