@@ -147,3 +147,111 @@
 .trip-page .trip-editor-body {
   display: contents;
 }
+
+/* Stage 4 author blocks: delivery facts, sources and the rule-by-rule check (VTC-146). */
+.trip-delivery {
+  margin-block: 16px;
+}
+.trip-muted,
+.trip-company-code {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+/* The 128px logo plate and a long company name wrap instead of widening a phone screen. */
+.trip-company {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+.trip-company-name {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.trip-sources,
+.trip-checks {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trip-sources li {
+  display: grid;
+  gap: 10px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.trip-sources li:first-child {
+  padding-top: 0;
+}
+.trip-sources li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.trip-source-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.trip-source-effective {
+  white-space: nowrap;
+}
+.trip-source-facts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.trip-checks {
+  gap: 10px;
+}
+.trip-checks li {
+  display: grid;
+  grid-template-columns: 1.25em minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.trip-rule-symbol {
+  font-weight: 700;
+  text-align: center;
+}
+.trip-checks [data-state="pass"] .trip-rule-symbol {
+  color: var(--accepted);
+}
+.trip-checks [data-state="fail"] .trip-rule-symbol {
+  color: var(--destructive);
+}
+.trip-checks :is([data-state="unknown"], [data-state="unavailable"]) .trip-rule-symbol {
+  color: var(--pending);
+}
+.trip-checks [data-state="bypassed"] .trip-rule-symbol {
+  color: var(--focus);
+}
+.trip-rule-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.trip-rule-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  font-weight: 500;
+}
+.trip-rule-state {
+  color: var(--secondary);
+  font-size: var(--font-small);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.trip-rule-detail {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+@media (max-width: 760px) {
+  .trip-source-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
