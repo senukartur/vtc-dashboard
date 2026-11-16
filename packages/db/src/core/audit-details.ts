@@ -191,6 +191,22 @@ type CatalogKind = ReturnType<typeof catalogKind>;
 type CatalogGame = ReturnType<typeof game>;
 type EventContext = { title: string | null };
 type CatalogContext = { kind: CatalogKind; games: CatalogGame[] };
+const levelChange = oneOf("name", "limits", "conditions", "position");
+export const qualificationLevelOperations = [
+  "qualification.level_created",
+  "qualification.level_edited",
+  "qualification.level_moved",
+  "qualification.level_removed",
+] as const;
+// Level history (VTC-157). The context stays private to the Qualifications reader; the
+// administration log shows these rows without details.
+export type QualificationLevelContext = {
+  game: CatalogGame;
+  name: string;
+  position: number | null;
+  changes: ReturnType<typeof levelChange>[];
+  transferLevelId: string | null;
+};
 
 export type AuditContextRecord =
   | { operation: "configuration.changed"; subjectKind: "event"; details: EventContext }
@@ -198,6 +214,11 @@ export type AuditContextRecord =
       operation: "catalog.changed" | "catalog.imported" | "catalog.published";
       subjectKind: "catalog";
       details: CatalogContext;
+    }
+  | {
+      operation: (typeof qualificationLevelOperations)[number];
+      subjectKind: "qualification_level";
+      details: QualificationLevelContext;
     };
 export type AuditContext = AuditContextRecord["details"];
 
@@ -227,6 +248,41 @@ function catalogContext(value: unknown, allowMixedGames: boolean): CatalogContex
   return { kind: catalogKind(kind), games: validated.length === 2 ? ["ets2", "ats"] : validated };
 }
 
+function qualificationLevelContext(value: unknown): QualificationLevelContext {
+  const input = auditObject(
+    value,
+    ["game", "name", "position", "changes", "transferLevelId"],
+    invalidDetails,
+  );
+  const { name, position, changes } = input;
+  if (typeof name !== "string" || !name.trim() || name.length > 128) return invalidDetails();
+  if (
+    position !== null &&
+    (typeof position !== "number" || !Number.isInteger(position) || position < 1 || position > 25)
+  )
+    return invalidDetails();
+  if (
+    !Array.isArray(changes) ||
+    types.isProxy(changes) ||
+    changes.length > 4 ||
+    Reflect.ownKeys(changes).length !== changes.length + 1
+  )
+    return invalidDetails();
+  const validated = Array.from({ length: changes.length }, (_, i) => {
+    const descriptor = Object.getOwnPropertyDescriptor(changes, i);
+    if (!descriptor?.enumerable || !("value" in descriptor)) return invalidDetails();
+    return levelChange(descriptor.value);
+  });
+  if (new Set(validated).size !== validated.length) return invalidDetails();
+  return {
+    game: game(input.game),
+    name,
+    position,
+    changes: validated,
+    transferLevelId: nullable(id)(input.transferLevelId),
+  };
+}
+
 export function safeAuditContext(
   operation: (typeof auditOperations)[number],
   subject: (typeof auditSubjects)[number],
@@ -240,5 +296,10 @@ export function safeAuditContext(
       operation === "catalog.published")
   )
     return catalogContext(raw, operation === "catalog.imported");
+  if (
+    subject === "qualification_level" &&
+    (qualificationLevelOperations as readonly string[]).includes(operation)
+  )
+    return qualificationLevelContext(raw);
   return undefined;
 }

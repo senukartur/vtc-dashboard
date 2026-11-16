@@ -28,6 +28,10 @@ export const auditOperations = [
   "qualification.promoted",
   "qualification.level_changed",
   "qualification.rules_published",
+  "qualification.level_created",
+  "qualification.level_edited",
+  "qualification.level_moved",
+  "qualification.level_removed",
 ] as const;
 export const auditReasons = [
   "operator_request",

@@ -193,6 +193,35 @@ export function createAudit(unitOfWork: UnitOfWork) {
         ...readableDetails(action, objectType, details),
       }));
     },
+    // Newest entries of one subject. The owning module authorizes the reader on this transaction.
+    async subjectHistory(
+      tx: TxContext,
+      input: { subjectKind: AuditCodes["subjectKind"]; subjectId: string; limit: number },
+    ) {
+      if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)
+        throw new Error("AUDIT_QUERY_BOUND_EXCEEDED");
+      const rows = await unitOfWork
+        .client(tx)
+        .select({
+          ...auditListFields,
+          actorKind: auditEntries.actorKind,
+          objectType: auditEntries.subjectKind,
+          details: auditEntries.details,
+        })
+        .from(auditEntries)
+        .where(
+          and(
+            eq(auditEntries.subjectKind, input.subjectKind),
+            eq(auditEntries.subjectId, applicationId(input.subjectId)),
+          ),
+        )
+        .orderBy(desc(auditEntries.occurredAt), desc(auditEntries.id))
+        .limit(input.limit);
+      return rows.map(({ action, objectType, details, ...row }) => ({
+        ...row,
+        ...readableDetails(action, objectType, details),
+      }));
+    },
     async append(tx: TxContext, input: AuditInput): Promise<string> {
       const client = unitOfWork.client(tx);
       const safe = safeInput(input);
