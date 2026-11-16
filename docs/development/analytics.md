@@ -10,7 +10,7 @@ VTC-032 implements the read-only analytics APIs for company-level and member-lev
    - Trips with `decision = 'pending_review'` are excluded from accepted totals, but cause the summary flag `projectionPending: true` to indicate unfinalized driving activity in the requested period.
 
 2. **Distance precision**:
-   - Driven distance is aggregated from `trips.actualDistanceM` using exact tenth-meter scaled arithmetic (`BigInt`).
+   - Company totals, buckets and `byGame` use `SUM(TRUNCATE(actual_distance_m, 1))` per bucket and game in exact MySQL decimals, folded with exact tenth-metre `BigInt` arithmetic (`addDistances`). This equals the per-trip tenth truncation, so `byGame` and the buckets sum exactly to the totals. Leaderboard distances are exact SQL sums.
    - Planned route length is never mixed or substituted for actual driven distance.
    - Summaries and leaderboard rankings use string representations preserving exact values without IEEE 754 floating-point drift.
 
@@ -30,17 +30,29 @@ VTC-032 implements the read-only analytics APIs for company-level and member-lev
 The anonymous [public company statistics](#public-company-statistics-vtc-052) route is the only exception. All other analytics endpoints require the `company.read` permission (satisfied by active members with roles `driver`, `dispatcher`, `deputy_director`, or `director`).
 
 - `GET /api/v1/analytics/company`:
-  - Query parameters: `fromDate`, `toDateExclusive`, optional `game` (`ets2` | `ats`), optional `granularity` (`day` | `month`).
-  - Returns envelope with `data` containing `acceptedTrips`, `actualDistanceM`, `projectionPending`, `reportingTimezone`, and contiguous `buckets`.
+  - Query parameters: optional `period` (`range` default | `all_time`), `fromDate` and `toDateExclusive` (required for `range`, forbidden for `all_time`), optional `game` (`ets2` | `ats`), optional `granularity` (`day` | `month`).
+  - Returns envelope with `data` containing `acceptedTrips`, `actualDistanceM`, `projectionPending`, `reportingTimezone`, contiguous `buckets`, the covered `fromDate`/`toDateExclusive`, `period`, `activeDrivers`, `activeMembers` and `byGame` (see [periods and active counts](#periods-and-active-counts-vtc-143)).
 
 - `GET /api/v1/members/:memberId/analytics`:
   - Query parameters: `fromDate`, `toDateExclusive`, optional `game` (`ets2` | `ats`), optional `granularity` (`day` | `month`).
   - Returns member analytics envelope matching `Analytics` schema for the specified member.
 
 - `GET /api/v1/analytics/leaderboard`:
-  - Query parameters: `fromDate`, `toDateExclusive`, optional `game`, optional pagination `limit` (1-100, default 50) and signed `cursor`.
-  - Returns ranked member items (`member: { id }`, `acceptedTrips`, `actualDistanceM`) ordered by distance descending, with deterministic tie-breaking by member ID ascending.
+  - Query parameters: the same `period`, `fromDate`, `toDateExclusive` and `game` rules as company analytics, optional pagination `limit` (1-100, default 50) and signed `cursor`. `granularity` is accepted and ignored for both periods.
+  - Returns ranked member items (`member`, `acceptedTrips`, `actualDistanceM`, `position`) ordered by distance descending (members whose trips carry no distance rank with zero), accepted trips descending, then member ID ascending, plus `rankedMembers`, `viewer` and the covered `period`/`fromDate`/`toDateExclusive`.
   - Keyset pagination uses HMAC-SHA256 cursors bound to the requester's identity session, access epoch, and filter scope to prevent cross-user replay and tampering.
+
+## Periods and active counts (VTC-143)
+
+- **Validation** (422 before the analytics transaction starts): `period=all_time` with `fromDate` or `toDateExclusive`; company `period=all_time` with `granularity=day`; `range` (explicit or default) without both dates; an unknown `period`; and the existing range rules (calendar dates, `fromDate < toDateExclusive`, at most 732 days). The member route keeps required dates and rejects `period`.
+- **Covered range**: `range` covers the requested dates. `all_time` uses month granularity and covers, in the reporting timezone, the first day of the month of the earliest accepted unique trip matching `game` (an ordered `LIMIT 1` read, not `MIN()`) up to the first day after the current month, without the 732-day limit. Without such a trip, or with only future trips, it starts at the current month, so an empty company returns one zero bucket. The request clock is read once and gives both the current month and `computedAt`.
+- **Buckets**: bucket starts are computed in JavaScript as the local midnight of each bucket date (DST-aware through `Intl`, no MySQL time zone tables). One grouped statement maps `reporting_at` to its bucket with `INTERVAL()` over those epoch-millisecond starts and groups by bucket and game; no trip rows are loaded.
+- **activeDrivers**: distinct trip owners with at least one accepted unique trip in the covered range and `game`, from the same predicate as the totals. It includes former members with such trips, so it equals the leaderboard `rankedMembers` for the same period and game and can exceed `activeMembers`.
+- **activeMembers**: memberships with status `active`, any role, read in the same transaction; the `game` filter does not apply.
+- **byGame**: `ets2` then `ats`, including zeros, or only the filtered game.
+- **Leaderboard**: `position` is the 1-based ordinal under the order above. `rankedMembers` counts every ranked member of the period. `viewer` is the requester's own `{ position, acceptedTrips, actualDistanceM }`, also when it is not on the page, or `null` when the requester has no accepted trip in the period. Member summaries are read only for the returned page.
+- **Cursor**: it binds `game`, `period`, the covered `fromDate`/`toDateExclusive` and the timezone. An `all_time` cursor fails with 409 `VERSION_CONFLICT` once the month rolls over or the earliest accepted trip changes the start month, and a cursor never crosses periods. The next page starts at the first row strictly after the cursor's (distance, trips, member ID), so a member whose totals changed or who left the ranking between pages does not restart the list.
+- **Cost**: per request one ordered earliest-trip read (`all_time` only), one grouped aggregate, one distinct-owner count, the unchanged pending probe and the active member count. The earliest read, the aggregate and the count can use `trip_analytics_reporting` (`decision, reporting_at, game, owner_id`); `all_time` reads every accepted trip up to the current month, and the leaderboard groups the same rows by owner. No index or migration was added. `test/integration/analytics.test.ts` checks the plans and logs them as `stage4_explain`.
 
 ## Public company statistics (VTC-052)
 
