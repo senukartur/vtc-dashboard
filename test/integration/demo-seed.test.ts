@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createUnitOfWork, runMigrations, type UnitOfWork } from "@vtc/db";
 import { catalogDlcs, catalogTrailers } from "@vtc/db/catalogs-schema";
 import { company, eq } from "@vtc/db/identity-schema";
-import { and, qualificationAssignments, qualificationStates } from "@vtc/db/qualifications-schema";
+import { and, qualificationAssignments } from "@vtc/db/qualifications-schema";
 import { sql, tripContributions, trips } from "@vtc/db/trips-schema";
 import type { Connection } from "mysql2/promise";
 import { expect, test, afterAll as vitestAfterAll, beforeAll as vitestBeforeAll } from "vitest";
@@ -105,7 +105,7 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
   const tripService = createTrips(unit, { cursorKey }, { identity, catalogs });
   const qualifications = createQualifications(
     unit,
-    { cursorKey },
+    {},
     { identity, trips: tripService },
     () => now,
   );
@@ -141,11 +141,13 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
     expect(directory.statusCode).toBe(200);
     expect(directory.json().data.items).toHaveLength(8);
     expect(directory.body).not.toContain("@example.invalid");
-    for (const game of ["ets2", "ats"]) {
-      const progress = await get(`/api/v1/me/qualification-progress?game=${game}`);
-      expect(progress.statusCode).toBe(200);
-      expect(progress.json().data.acceptedTrips).toBeGreaterThan(0);
-    }
+    const mine = await get("/api/v1/me/qualifications");
+    expect(mine.statusCode).toBe(200);
+    const items: { game: string; level: unknown; progress: { trips: number } }[] =
+      mine.json().data.items;
+    expect(items.map((item) => item.game).sort()).toEqual(["ats", "ets2"]);
+    expect(items.every((item) => item.level !== null)).toBe(true);
+    expect(items.some((item) => item.progress.trips > 0)).toBe(true);
     const upcoming = await get("/api/v1/me/upcoming-event");
     expect(upcoming.statusCode).toBe(200);
     expect(upcoming.json().data.title).toContain("Demo");
@@ -282,29 +284,26 @@ test("stage profile validates in production, adopts a bootstrapped company and a
 
     const { userId: directorId } = await start();
     // As in real attribution, no credit from an assignment newer than the fixture trips (ets2)
-    // or from the empty state that opening the qualifications page creates first (ats).
+    // or from a level period that has already ended (ats).
     await unit.run(async (tx) => {
       const c = unit.client(tx),
-        assignmentId = randomUUID();
-      await c.insert(qualificationAssignments).values({
-        id: assignmentId,
-        userId: directorId,
-        game: "ets2",
-        levelId: structuralLevels.ets2[0],
-        assignedAt: new Date().toISOString(),
-        endedAt: null,
-        purpose: "initial",
-        actorId: null,
-        reason: "Fictional assignment newer than the fixture trips",
-      });
+        at = Date.now();
       await c
-        .insert(qualificationStates)
-        .values({ userId: directorId, game: "ets2", assignmentId, version: 1 })
-        .onDuplicateKeyUpdate({ set: { assignmentId } });
-      await c
-        .insert(qualificationStates)
-        .values({ userId: directorId, game: "ats", assignmentId: null, version: 1 })
-        .onDuplicateKeyUpdate({ set: { assignmentId: null } });
+        .delete(qualificationAssignments)
+        .where(eq(qualificationAssignments.userId, directorId));
+      await c.insert(qualificationAssignments).values(
+        (["ets2", "ats"] as const).map((game) => ({
+          id: randomUUID(),
+          userId: directorId,
+          game,
+          levelId: structuralLevels[game][0],
+          assignedAt: new Date(at).toISOString(),
+          endedAt: game === "ats" ? new Date(at + 1000).toISOString() : null,
+          kind: "admission" as const,
+          actorId: null,
+          comment: null,
+        })),
+      );
     });
     const expected = demoDataset(new Date());
     expect(

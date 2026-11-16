@@ -174,12 +174,7 @@ beforeAll(async () => {
     },
     now,
   );
-  qualifications = createQualifications(
-    unit,
-    { cursorKey: key() },
-    { identity, trips: tripsService, catalogs },
-    now,
-  );
+  qualifications = createQualifications(unit, {}, { identity, trips: tripsService, catalogs }, now);
   manual = createManualReports(
     unit,
     { key: key(), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
@@ -216,22 +211,32 @@ beforeAll(async () => {
     { identity, trips: tripsService, qualifications, manual, events },
     now,
   );
-  const level = (await qualifications.levels(director, "ets2")).items.find(
-    (v) => v.id === structuralLevels.ets2[0],
-  );
-  if (!level) throw Error("SYNTHETIC_LEVEL_MISSING");
-  await qualifications.publish(director, level.id, newId(), level.version, {
-    rules: [{ type: "max_mass", maxKg: "20000" }],
-    requiredTrips: 1,
-    requiredDistanceM: "100",
-    reason: "Fictional launch fixture",
-  });
+  // A mass limit to break, and conditions far enough away that nobody is promoted by accident.
+  await configureFirstLevel({ massMaxKg: "20000" });
   instant = Date.parse("2026-10-21T12:00:00.000Z");
 }, SCHEMA_SETUP_TIMEOUT_MS);
 afterAll(async () => {
   await unit?.close();
   await control?.end();
 }, SCHEMA_SETUP_TIMEOUT_MS);
+const openLimits: S["QualificationLimitsInput"] = {
+  massMinKg: null,
+  massMaxKg: null,
+  distanceMinM: null,
+  distanceMaxM: null,
+  trailers: { mode: "any", typeIds: [] },
+  adr: { mode: "any", classes: [] },
+  hardModeRequired: false,
+};
+async function configureFirstLevel(limits: Partial<S["QualificationLimitsInput"]>) {
+  const level = await qualifications.detail(director, structuralLevels.ets2[0]);
+  return qualifications.update(director, level.id, {
+    expectedVersion: level.version,
+    name: level.name,
+    limits: { ...openLimits, ...limits },
+    conditions: { requiredTrips: 1000, requiredDistanceM: "100" },
+  });
+}
 function payload(kind: "completed" | "started" | "closed-partial" = "completed") {
   const p = telemetryFixture(kind) as unknown as Telemetry;
   p.eventId = newId();
@@ -1037,7 +1042,7 @@ test("denied reviewer GET leaves trip, qualification, review work and safe effec
       [r.tripId],
     );
     const [qualification] = await control.execute<RowDataPacket[]>(
-      "SELECT * FROM qualification_states WHERE user_id=? ORDER BY game",
+      "SELECT * FROM qualification_assignments WHERE user_id=? ORDER BY game, assigned_at",
       [owner.userId],
     );
     const [effects] = await control.query<RowDataPacket[]>(
@@ -1402,7 +1407,7 @@ test("leadership attendance links only current same-game canonical trip associat
   }
 });
 
-test("current attendance prescribed-load exception rejects RSVP/mismatch, fences obsolete support and freezes cancelled credit", async () => {
+test("only current confirmed attendance exempts an event trip from the level limits, fences obsolete support and freezes cancelled credit", async () => {
   const who = await member(),
     time = instant;
   try {
@@ -1495,6 +1500,7 @@ test("current attendance prescribed-load exception rejects RSVP/mismatch, fences
     expect(publicRead?.id).toBe(r.tripId);
     expect(publicRead).not.toHaveProperty("event");
     expect(publicRead).not.toHaveProperty("gameMode");
+    // A load other than the prescribed one is still a company event trip (VTC-157).
     const mismatch = payload();
     if (mismatch.snapshot.job.cargoMass.available) mismatch.snapshot.job.cargoMass.value = 22000;
     const other = await receive(mismatch, who),
@@ -1506,7 +1512,7 @@ test("current attendance prescribed-load exception rejects RSVP/mismatch, fences
         { eventId },
       ),
       detail = await service.getProposal(dispatcher, other.tripId, proposal.data.id);
-    const rejected = await decideProposal(
+    const otherLoad = await decideProposal(
       dispatcher,
       other.tripId,
       detail.data.id,
@@ -1515,11 +1521,11 @@ test("current attendance prescribed-load exception rejects RSVP/mismatch, fences
       {
         decision: "approve",
         reviewedRevisionId: detail.data.revisionId,
-        reason: "Fictional mismatched event load",
+        reason: "Fictional other event load",
       },
     );
-    expect(rejected.data.outcome).toBe("rejected");
-    expect((await credit(other.tripId))?.credited).toBe(false);
+    expect(otherLoad.data.outcome).toBe("accepted");
+    expect((await credit(other.tripId))?.credited).toBe(true);
     const before = await credit(r.tripId);
     const renamed = "Fictional updated convoy title";
     await events.update(director, eventId, newId(), 1, {
@@ -1975,7 +1981,7 @@ function composedModules(admissions?: AdmissionsConfig, stage3 = false) {
     { cursorKey: key() },
     undefined,
     { key: key(), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
-    { cursorKey: key() },
+    {},
     { cursorKey: key() },
     { key: key() },
     { key: key() },
@@ -2087,8 +2093,10 @@ test("current production merge and immediate reverse preserve coherent final ver
         expect(contribution?.credited ?? false).toBe(false);
       }
     }
-    const progress = await composed.qualifications.progress(director, who.userId, "ets2", "admin");
-    expect(progress.data.acceptedTrips).toBe(scenario === "accepted" ? 2 : 0);
+    const progress = (
+      await composed.qualifications.memberQualifications(director, who.userId)
+    ).items.find((item) => item.game === "ets2")?.progress;
+    expect(progress?.trips).toBe(scenario === "accepted" ? 2 : 0);
     if (scenario === "accepted") {
       const mergedAgain = await merge(),
         review = await decisions.review(dispatcher, leftId);
@@ -3179,20 +3187,19 @@ test("scenario 46: a different reviewer accepts an over-mass manual report only 
   const review = await service.review(dispatcher, id);
   expect(review.data.canDecide).toBe(true);
   expect(review.data.acceptance).toEqual({ mode: "over_limits", blockedReasonCodes: [] });
-  expect(review.data.qualificationCheck).toEqual({
-    status: "resolved",
+  expect(review.data.qualificationCheck).toMatchObject({
+    status: "checked",
+    basis: "current",
+    level: { id: structuralLevels.ets2[0] },
+    outcome: "fail",
     reasonCode: null,
-    rules: [
-      {
-        ruleType: "max_mass",
-        outcome: "fail",
-        reasonCode: "rule_mass_exceeded",
-        bypassedByEvent: false,
-        observedMassKg: "21000",
-        limitMassKg: "20000",
-        entityIds: [],
-      },
-    ],
+  });
+  expect(review.data.qualificationCheck.rules[0]).toEqual({
+    rule: "cargo_mass",
+    result: "fail",
+    minKg: null,
+    maxKg: "20000",
+    observedKg: "21000",
   });
   const before = await state(id);
   for (const flag of [undefined, false])
@@ -3220,7 +3227,7 @@ test("scenario 46: a different reviewer accepts an over-mass manual report only 
       formerMember: false,
       roles: ["dispatcher"],
     },
-    reasonCodes: ["rule_mass_exceeded", "accepted_over_limits"],
+    reasonCodes: ["qualification_cargo_mass", "accepted_over_limits"],
     reason: "Fictional over-limit review",
     reviewedRevisionId: r.currentRevision.id,
   });
@@ -3258,9 +3265,10 @@ test("HTTP over-limit review, decision, replay and history serialize the strict 
     const review = read.json().data as S["Review"];
     expect(review.acceptance).toEqual({ mode: "over_limits", blockedReasonCodes: [] });
     expect(review.qualificationCheck.rules[0]).toMatchObject({
-      outcome: "fail",
-      observedMassKg: "21000",
-      limitMassKg: "20000",
+      rule: "cargo_mass",
+      result: "fail",
+      observedKg: "21000",
+      maxKg: "20000",
     });
     const commandKey = newId(),
       body = {
@@ -3306,7 +3314,7 @@ test("HTTP over-limit review, decision, replay and history serialize the strict 
         nickname: "Fictional Decision Director",
         formerMember: false,
       },
-      reasonCodes: ["rule_mass_exceeded", "accepted_over_limits"],
+      reasonCodes: ["qualification_cargo_mass", "accepted_over_limits"],
     });
     const replay = await post({ ...body, confirmOverLimits: true });
     expect(replay.statusCode).toBe(200);
@@ -3524,52 +3532,43 @@ test("missing facts beside a proven breach make over-limit acceptance unavailabl
     await expect(overLimitDecide(r.tripId, flag)).rejects.toMatchObject({ statusCode: 409 });
   expect(await credit(r.tripId)).toBeUndefined();
 });
-test("restrictive historical rules list every exceeded limit and block overrides for unknown rules and partial event exceptions", async () => {
-  const time = instant,
-    levelId = structuralLevels.ets2[0];
-  const publish = async (rules: S["Rule"][], reason: string) => {
-    const level = (await qualifications.levels(director, "ets2")).items.find(
-      (v) => v.id === levelId,
-    );
-    if (!level) throw Error("SYNTHETIC_LEVEL_MISSING");
-    await qualifications.publish(director, levelId, newId(), level.version, {
-      rules,
-      requiredTrips: 1,
-      requiredDistanceM: "100",
-      reason,
-    });
-  };
-  // A far-future window keeps this rule version out of every other test's historical lookup.
+test("restrictive level limits list every exceeded limit, block overrides for unknown rules and exempt event trips", async () => {
+  const time = instant;
+  // A far-future window keeps these trips out of every other test's lookups.
   instant = Date.parse("2029-06-01T12:00:00.000Z");
   try {
-    await publish(
-      [
-        { type: "max_mass", maxKg: "20000" },
-        { type: "allowed_trailer_types", entityIds: [ids.get("fixture_flatbed") as string] },
-        { type: "allowed_adr_categories", classes: ["2"] },
-      ],
-      "Fictional restrictive rule window",
-    );
+    await configureFirstLevel({
+      massMaxKg: "20000",
+      trailers: { mode: "selected", typeIds: [ids.get("fixture_flatbed") as string] },
+      adr: { mode: "selected", classes: ["2"] },
+    });
     const who = await member();
     const all = await report(who, manual, { cargoMassKg: "21000", cargo: "fixture_hazard" }),
       review = await service.review(dispatcher, all.tripId);
     expect(review.data.acceptance).toEqual({ mode: "over_limits", blockedReasonCodes: [] });
-    expect(
-      review.data.qualificationCheck.rules.map((r) => [
-        r.ruleType,
-        r.outcome,
-        r.reasonCode,
-        r.entityIds,
-      ]),
-    ).toEqual([
-      ["max_mass", "fail", "rule_mass_exceeded", []],
-      ["allowed_trailer_types", "fail", "rule_trailer_type_disallowed", [ids.get("fixture_box")]],
-      ["allowed_adr_categories", "fail", "rule_adr_category_disallowed", ["3"]],
+    expect(review.data.qualificationCheck).toMatchObject({
+      status: "checked",
+      basis: "current",
+      level: { id: structuralLevels.ets2[0] },
+      outcome: "fail",
+    });
+    const rules = review.data.qualificationCheck.rules;
+    expect(rules.map((r) => [r.rule, r.result])).toEqual([
+      ["cargo_mass", "fail"],
+      ["distance", "pass"],
+      ["trailer_types", "fail"],
+      ["adr", "fail"],
+      ["hard_mode", "pass"],
     ]);
+    const trailers = rules.find((r) => r.rule === "trailer_types");
+    expect(trailers?.rule === "trailer_types" && trailers.observed.map((x) => x.entityId)).toEqual([
+      ids.get("fixture_box"),
+    ]);
+    expect(rules.find((r) => r.rule === "adr")).toMatchObject({ observed: "3" });
     expect((await overLimitDecide(all.tripId, true)).data.reasonCodes).toEqual([
-      "rule_adr_category_disallowed",
-      "rule_mass_exceeded",
-      "rule_trailer_type_disallowed",
+      "qualification_adr",
+      "qualification_cargo_mass",
+      "qualification_trailer",
       "accepted_over_limits",
     ]);
     // A listed non-hazardous cargo passes the ADR rule beside the mass breach.
@@ -3595,12 +3594,12 @@ test("restrictive historical rules list every exceeded limit and block overrides
     });
     expect((await service.review(dispatcher, unknown.tripId)).data.acceptance).toEqual({
       mode: "unavailable",
-      blockedReasonCodes: ["cargo_unknown", "rule_adr_category_unknown"],
+      blockedReasonCodes: ["cargo_unknown", "qualification_unknown"],
     });
     await expect(overLimitDecide(unknown.tripId, true)).rejects.toMatchObject({ statusCode: 409 });
     const eventInput: S["EventInput"] = {
       title: "Fictional over-limit event",
-      description: "Fictional prescribed heavy load",
+      description: "Fictional heavy convoy",
       game: "ets2",
       server: "Synthetic",
       organizer: "Fictional company",
@@ -3613,7 +3612,7 @@ test("restrictive historical rules list every exceeded limit and block overrides
       originCityId: null,
       destinationCityId: null,
       prescribedCargoId: null,
-      prescribedMassKg: "21000",
+      prescribedMassKg: null,
       prescribedTrailerTypeId: null,
     };
     const eventId = (await events.create(director, newId(), eventInput)).data.event.id;
@@ -3622,55 +3621,29 @@ test("restrictive historical rules list every exceeded limit and block overrides
     await events.setAttendance(director, eventId, newId(), 1, {
       members: [{ memberId: who.userId, attendance: "attended", note: null }],
     });
-    // The report names the attended event, so assessment pins the association before review.
-    const full = await report(who, manual, {
+    // A confirmed company event trip is credited without the level limits, whatever it breaks.
+    const exempt = await report(who, manual, {
       cargoMassKg: "21000",
-      cargo: "fixture_gas",
-      trailerType: "fixture_flatbed",
+      cargo: "fixture_hazard",
       eventId,
     });
-    expect((await state(full.tripId))?.decision).toBe("pending_review");
-    const fullReview = await service.review(dispatcher, full.tripId);
-    expect(fullReview.data.acceptance).toEqual({ mode: "ordinary", blockedReasonCodes: [] });
-    expect(fullReview.data.qualificationCheck.rules[0]).toEqual({
-      ruleType: "max_mass",
-      outcome: "pass",
-      reasonCode: "event_prescribed_load_bypass",
-      bypassedByEvent: true,
-      observedMassKg: "21000",
-      limitMassKg: "20000",
-      entityIds: [],
+    expect((await state(exempt.tripId))?.decision).toBe("pending_review");
+    const exemptReview = await service.review(dispatcher, exempt.tripId);
+    expect(exemptReview.data.acceptance).toEqual({ mode: "ordinary", blockedReasonCodes: [] });
+    expect(exemptReview.data.qualificationCheck).toMatchObject({
+      status: "event_exempt",
+      outcome: null,
+      rules: [],
     });
-    await expect(overLimitDecide(full.tripId, true)).rejects.toMatchObject({ statusCode: 409 });
-    const ordinary = await overLimitDecide(full.tripId, undefined);
+    await expect(overLimitDecide(exempt.tripId, true)).rejects.toMatchObject({ statusCode: 409 });
+    const ordinary = await overLimitDecide(exempt.tripId, undefined);
     expect(ordinary.data).toMatchObject({ outcome: "accepted", acceptedOverLimits: false });
     expect(ordinary.data.reasonCodes).not.toContain("accepted_over_limits");
     expect(ordinary.data.basis.eventId).toBe(eventId);
-    expect((await audits(full.tripId)).map((a) => a.operation)).toEqual(["report.reviewed"]);
-    // Mass is bypassed by the event but the trailer limit still fails: no override (decision 1).
-    const partial = await report(who, manual, {
-      cargoMassKg: "21000",
-      cargo: "fixture_gas",
-      eventId,
-    });
-    const partialReview = await service.review(dispatcher, partial.tripId);
-    expect(partialReview.data.acceptance).toEqual({
-      mode: "unavailable",
-      blockedReasonCodes: ["event_exception_applied"],
-    });
-    expect(partialReview.data.qualificationCheck.rules.map((r) => r.bypassedByEvent)).toEqual([
-      true,
-      false,
-      false,
-    ]);
-    for (const flag of [true, undefined])
-      await expect(overLimitDecide(partial.tripId, flag)).rejects.toMatchObject({
-        statusCode: 409,
-      });
-    expect(await credit(partial.tripId)).toBeUndefined();
+    expect((await audits(exempt.tripId)).map((a) => a.operation)).toEqual(["report.reviewed"]);
+    expect((await credit(exempt.tripId))?.credited).toBe(true);
   } finally {
-    instant = Date.parse("2029-06-01T15:00:00.000Z");
-    await publish([{ type: "max_mass", maxKg: "20000" }], "Fictional restored launch rules");
+    await configureFirstLevel({ massMaxKg: "20000" });
     instant = time;
   }
 });
@@ -3766,17 +3739,6 @@ test("concurrent over-limit decisions, member directory reads and reviewer histo
   }
 });
 
-const publishFor = async (rules: S["Rule"][], reason: string) => {
-  const levelId = structuralLevels.ets2[0];
-  const level = (await qualifications.levels(director, "ets2")).items.find((v) => v.id === levelId);
-  if (!level) throw Error("SYNTHETIC_LEVEL_MISSING");
-  await qualifications.publish(director, levelId, newId(), level.version, {
-    rules,
-    requiredTrips: 1,
-    requiredDistanceM: "100",
-    reason,
-  });
-};
 const coupled = (first: string, second: string) => {
   const p = payload();
   p.snapshot.trailers.items = [
@@ -3797,38 +3759,34 @@ const coupled = (first: string, second: string) => {
 };
 const trailerRule = async (tripId: string) => {
   const check = (await service.review(dispatcher, tripId)).data.qualificationCheck;
-  return check.rules.find((r) => r.ruleType === "allowed_trailer_types");
+  return check.rules.find((r) => r.rule === "trailer_types");
 };
 
 test("a coupling and a manual report are checked by the first body type only", async () => {
+  const time = instant;
   instant = Date.parse("2029-08-01T12:00:00.000Z");
   try {
-    await publishFor(
-      [{ type: "allowed_trailer_types", entityIds: [ids.get("fixture_flatbed") as string] }],
-      "Fictional coupling rule",
-    );
-    // Trips must start after the rule publication to fall under it.
+    await configureFirstLevel({
+      massMaxKg: "20000",
+      trailers: { mode: "selected", typeIds: [ids.get("fixture_flatbed") as string] },
+    });
     instant += 3600000;
     const who = await member();
+    const observed = (rule: Awaited<ReturnType<typeof trailerRule>>) =>
+      rule?.rule === "trailer_types" ? rule.observed.map((x) => x.entityId) : null;
     const disallowed = await receive(coupled("fixture_box", "fixture_flatbed"), who);
-    expect(await trailerRule(disallowed.tripId)).toMatchObject({
-      outcome: "fail",
-      reasonCode: "rule_trailer_type_disallowed",
-      entityIds: [ids.get("fixture_box")],
-    });
+    const denied = await trailerRule(disallowed.tripId);
+    expect(denied).toMatchObject({ result: "fail" });
+    expect(observed(denied)).toEqual([ids.get("fixture_box")]);
     const allowed = await receive(coupled("fixture_flatbed", "fixture_box"), who);
-    expect(await trailerRule(allowed.tripId)).toMatchObject({
-      outcome: "pass",
-    });
+    expect(await trailerRule(allowed.tripId)).toMatchObject({ result: "pass" });
     const manualAllowed = await report(who, manual, { trailerType: "fixture_flatbed" });
-    expect(await trailerRule(manualAllowed.tripId)).toMatchObject({ outcome: "pass" });
+    expect(await trailerRule(manualAllowed.tripId)).toMatchObject({ result: "pass" });
     const manualDenied = await report(who, manual, { trailerType: "fixture_box" });
-    expect(await trailerRule(manualDenied.tripId)).toMatchObject({
-      outcome: "fail",
-      reasonCode: "rule_trailer_type_disallowed",
-    });
+    expect(await trailerRule(manualDenied.tripId)).toMatchObject({ result: "fail" });
   } finally {
-    instant = Date.parse("2026-10-21T12:00:00.000Z");
+    await configureFirstLevel({ massMaxKg: "20000" });
+    instant = time;
   }
 });
 
@@ -3860,7 +3818,7 @@ test("editing a cargo ADR class leaves the stored snapshot and decision unchange
     expect(await readAdr()).toBe("2");
     expect(await state(r.tripId)).toEqual(before);
     const review = await service.review(dispatcher, r.tripId);
-    expect(review.data.qualificationCheck.status).toBe("resolved");
+    expect(review.data.qualificationCheck).toMatchObject({ status: "checked", basis: "decision" });
   } finally {
     await unit.run((tx) =>
       unit
@@ -4599,12 +4557,12 @@ test("Disabled queue tracks exact transitions and paged repair restores proven h
         })),
       ),
   );
-  await control.execute("DELETE FROM qualification_states WHERE user_id=? AND game='ats'", [
+  await control.execute("DELETE FROM qualification_assignments WHERE user_id=? AND game='ats'", [
     author.userId,
   ]);
   const states = async () => {
     const [rows] = await control.execute<RowDataPacket[]>(
-      "SELECT game,version FROM qualification_states WHERE user_id=? ORDER BY game",
+      "SELECT game,CAST(id AS CHAR) id,ended_at FROM qualification_assignments WHERE user_id=? ORDER BY game,assigned_at",
       [author.userId],
     );
     return rows;
@@ -5096,7 +5054,23 @@ const authorKeys = [
 ];
 function expectAuthorSafe(view: S["TripPrivate"]) {
   expect(Object.keys(view).sort()).toEqual(authorKeys);
-  expect(view.qualificationCheck).toBeNull();
+  // The author sees the same five-rule check as staff, without acceptance or decision authority.
+  expect(Object.keys(view.qualificationCheck ?? {}).sort()).toEqual([
+    "basis",
+    "level",
+    "outcome",
+    "reasonCode",
+    "rules",
+    "status",
+  ]);
+  if (view.qualificationCheck?.status === "checked")
+    expect(view.qualificationCheck.rules.map((rule) => rule.rule)).toEqual([
+      "cargo_mass",
+      "distance",
+      "trailer_types",
+      "adr",
+      "hard_mode",
+    ]);
   for (const source of view.sources ?? [])
     expect(Object.keys(source).sort()).toEqual([
       "actualDistanceM",
@@ -5408,7 +5382,7 @@ test("a derived current fact keeps its telemetry source effective and drops a de
   });
 });
 
-test("HTTP author trip read serializes sources and a null qualification check", async () => {
+test("HTTP author trip read serializes sources and the qualification check", async () => {
   const r = await receive(located(null, null, 0.5)),
     login = await identity.login(`${owner.userId}@example.invalid`, password),
     cookie = login.cookies.map((c) => c.split(";", 1)[0]).join("; "),

@@ -580,7 +580,8 @@ test("search, role and level filters apply before paging and combine with AND", 
       game: "ets2",
       name: "Fictional archived level",
       version: 1,
-      activePosition: null,
+      position: null,
+      deletedAt: "2026-01-01T00:00:00.000Z",
     }),
   );
   for (const query of [
@@ -735,7 +736,7 @@ test("joined_at is the registration instant and moves to the latest return only"
   });
   expect(await profile(userId)).toBe(iso(W + 300000));
   const [[initial]] = await control.query<RowDataPacket[]>(
-    "SELECT CAST(assigned_at AS CHAR) at FROM qualification_assignments WHERE user_id=? AND purpose='initial'",
+    "SELECT CAST(assigned_at AS CHAR) at FROM qualification_assignments WHERE user_id=? AND kind='admission'",
     [userId],
   );
   expect(initial?.at).toBe(sqlTime(W + 100000));
@@ -788,7 +789,11 @@ test("joined_at is the registration instant and moves to the latest return only"
   const [before] = await control.query<RowDataPacket[]>(
     "SELECT CAST(user_id AS CHAR) id, CAST(joined_at AS CHAR) joined FROM identity_memberships ORDER BY user_id",
   );
-  await control.query(await readFile(join(migrationFolder, "0033_joined_at_catch_up.sql"), "utf8"));
+  // 0035 renamed the assignment purpose to kind; the derivation is otherwise unchanged.
+  const catchUp = await readFile(join(migrationFolder, "0033_joined_at_catch_up.sql"), "utf8");
+  await control.query(
+    catchUp.replace("a.`purpose` = 'reinstatement'", "a.`kind` = 'reinstatement'"),
+  );
   const [after] = await control.query<RowDataPacket[]>(
     "SELECT CAST(user_id AS CHAR) id, CAST(joined_at AS CHAR) joined FROM identity_memberships ORDER BY user_id",
   );

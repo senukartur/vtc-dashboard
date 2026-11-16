@@ -364,6 +364,8 @@ test("create, edit, move and remove keep a dense ladder and record history", asy
     "Driver II",
     "Driver I",
   ]);
+  // Distinct instants keep the newest-first history order deterministic.
+  tick();
   const edited = await service.update(director, created.level.id, {
     expectedVersion: created.level.version,
     name: "Fictional Heavy II",
@@ -371,6 +373,7 @@ test("create, edit, move and remove keep a dense ladder and record history", asy
     conditions: { requiredTrips: 2, requiredDistanceM: null },
   });
   expect(edited.level.version).toBe(created.level.version + 1);
+  tick();
   const moved = await service.move(director, created.level.id, {
     expectedVersion: edited.level.version,
     position: 4,

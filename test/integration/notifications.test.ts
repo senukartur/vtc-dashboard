@@ -138,7 +138,7 @@ beforeAll(async () => {
   observer = (await member()).actor;
   dispatcher = (await member(["dispatcher"])).actor;
   trips = createTrips(unit, { cursorKey: key() }, { identity }, now);
-  qualifications = createQualifications(unit, { cursorKey: key() }, { identity, trips }, now);
+  qualifications = createQualifications(unit, {}, { identity, trips }, now);
   events = createEvents(
     unit,
     { cursorKey: key() },
@@ -1111,8 +1111,7 @@ test("wrapping primary-ID recovery finds every closed family amid mixed history 
     let kind = "qualification",
       aggregateId = id,
       data: Record<string, unknown> = { userId: owner.userId, assignmentId: newId() };
-    if (type === "qualification.rules_changed") data = { userId: null, assignmentId: null };
-    else if (type.startsWith("application.")) {
+    if (type.startsWith("application.") || type.startsWith("invitation.")) {
       kind = "application";
       data = { applicationId: id };
     } else if (type === "member.access_changed") {
@@ -1166,7 +1165,7 @@ test("wrapping primary-ID recovery finds every closed family amid mixed history 
     recordedAt: iso(),
   });
   const events = notificationEventTypes.map((type) => envelope(type)),
-    irrelevant = Array.from({ length: 3000 }, () => envelope("qualification.rules_changed"));
+    irrelevant = Array.from({ length: 3000 }, () => envelope("invitation.reissued"));
   const rows = [...events, ...irrelevant].map(raw);
   for (let n = 0; n < rows.length; n += 250)
     await unit.run((tx) =>
@@ -1402,161 +1401,78 @@ test("deactivation and return invalidate old sessions, poll/read-through proofs 
   );
   await expect(service.poll(person.actor)).rejects.toMatchObject({ statusCode: 401 });
 });
-test("qualification assignments, eligibility and confirmed promotion notify owner and qualification staff only", async () => {
+test("level changes and promotions notify the owner and qualification staff only", async () => {
   const person = await member(),
-    levelId = structuralLevels.ets2[0],
-    level = (await qualifications.levels(director, "ets2")).items.find((v) => v.id === levelId);
-  if (!level) throw Error("SYNTHETIC_LEVEL_MISSING");
-  await qualifications.publish(director, levelId, newId(), level.version, {
-    rules: [{ type: "max_mass", maxKg: "20000" }],
-    requiredTrips: 0,
-    requiredDistanceM: "0",
-    reason: "Fictional zero-progress notification fixture",
+    open = async () => {
+      const [rows] = await control.query<RowDataPacket[]>(
+        "SELECT CAST(id AS CHAR) id FROM qualification_assignments WHERE user_id=? AND game='ets2' AND ended_at IS NULL",
+        [Buffer.from(person.actor.userId)],
+      );
+      const id = rows[0]?.id;
+      if (typeof id !== "string") throw Error("SYNTHETIC_ASSIGNMENT_MISSING");
+      return id;
+    };
+  const admission = await open();
+  await qualifications.changeMember(director, person.actor.userId, "ets2", {
+    levelId: structuralLevels.ets2[1],
+    reason: "Fictional level change",
   });
-  const current = await qualifications.progress(person.actor, person.actor.userId, "ets2", "owner");
-  await qualifications.assign(director, person.actor.userId, newId(), current.version, {
-    game: "ets2",
-    levelId,
-    purpose: "administrative_correction",
-    reason: "Fictional assignment fixture",
-  });
-  const assigned = await qualifications.progress(
-    person.actor,
-    person.actor.userId,
-    "ets2",
-    "owner",
-  );
   await drain();
-  expect(
-    (await service.poll(person.actor)).items.some((r) => r.category === "qualification.assigned"),
-  ).toBe(true);
+  const changed = await open();
+  const assigned = (await service.poll(person.actor)).items.filter(
+    (r) => r.category === "qualification.assigned",
+  );
+  expect(assigned.map((r) => r.target?.id)).toEqual([changed]);
   expect(
     (await service.poll(dispatcher)).items.some((r) => r.category === "qualification.assigned"),
   ).toBe(false);
-  const eventId = newId();
-  await unit.run((tx) =>
-    createOutbox(unit, { notifications: true }).append(tx, {
-      eventId,
-      type: "qualification.progress_changed",
-      schemaVersion: 1,
-      aggregate: { kind: "qualification", id: assigned.data.assignment.id, version: 1 },
-      occurredAt: iso(),
-      correlationId: eventId,
-      causationId: null,
-      data: { userId: person.actor.userId, assignmentId: assigned.data.assignment.id },
-    }),
-  );
-  await drain();
-  expect(
-    (await service.poll(person.actor)).items.filter((r) => r.category === "promotion.eligible"),
-  ).toHaveLength(1);
-  expect(
-    (await service.poll(director)).items.some((r) => r.category === "promotion.eligible"),
-  ).toBe(true);
-  expect(
-    (await service.poll(observer)).items.some((r) => r.category === "promotion.eligible"),
-  ).toBe(false);
-  await qualifications.promote(director, person.actor.userId, newId(), assigned.version, {
-    game: "ets2",
-    assignmentId: assigned.data.assignment.id,
-    targetLevelId: structuralLevels.ets2[1],
-    reason: "Fictional confirmed promotion",
-  });
-  await drain();
-  const promoted = await qualifications.progress(
-    person.actor,
-    person.actor.userId,
-    "ets2",
-    "owner",
-  );
-  const feed = await service.poll(person.actor);
-  expect(feed.items.filter((r) => r.category === "qualification.promoted")).toHaveLength(1);
-  expect(
-    feed.items.filter(
-      (r) =>
-        r.category === "qualification.assigned" && r.target?.id === promoted.data.assignment.id,
-    ),
-  ).toHaveLength(0);
-  const [proofs] = await control.query<RowDataPacket[]>(
-    "SELECT id FROM qualification_promotions WHERE source_assignment_id=?",
-    [Buffer.from(assigned.data.assignment.id)],
-  );
-  const proofId = proofs[0]?.id;
-  if (!Buffer.isBuffer(proofId)) throw Error("SYNTHETIC_PROMOTION_PROOF_MISSING");
-  const proof = proofId.toString();
-  await control.execute(
-    "INSERT INTO qualification_promotion_reviews (promotion_id,review_required,version,checked_revision,checked_at) VALUES (?,1,1,1,UTC_TIMESTAMP(3))",
-    [Buffer.from(proof)],
-  );
-  const alert: DomainEvent = {
+  const promoted = (assignmentId: string): DomainEvent => ({
     eventId: newId(),
-    type: "promotion.review_required",
+    type: "qualification.promoted",
     schemaVersion: 1,
-    aggregate: { kind: "qualification", id: proof, version: 1 },
+    aggregate: { kind: "qualification", id: assignmentId, version: 1 },
     occurredAt: iso(),
     correlationId: newId(),
     causationId: null,
-    data: { userId: person.actor.userId, assignmentId: assigned.data.assignment.id },
-  };
+    data: { userId: person.actor.userId, assignmentId },
+  });
+  // A promotion from a period that already ended is not worth a notice.
   await unit.run((tx) =>
-    createOutbox(unit, { notifications: true }).append(tx, {
-      ...alert,
-      eventId: newId(),
-      data: { userId: person.actor.userId, assignmentId: promoted.data.assignment.id },
-    }),
+    createOutbox(unit, { notifications: true }).append(tx, promoted(admission)),
   );
   await drain();
   expect(
-    (await service.poll(person.actor)).items.filter(
-      (r) => r.category === "promotion.review_required",
-    ),
-  ).toHaveLength(0);
-  await unit.run((tx) => createOutbox(unit, { notifications: true }).append(tx, alert));
-  await drain();
-  expect(
-    (await service.poll(person.actor)).items.filter(
-      (r) => r.category === "promotion.review_required",
-    ),
-  ).toHaveLength(1);
-  expect(
-    (await service.poll(director)).items.some((r) => r.category === "promotion.review_required"),
-  ).toBe(true);
-  expect(
-    (await service.poll(observer)).items.some((r) => r.category === "promotion.review_required"),
+    (await service.poll(person.actor)).items.some((r) => r.category === "qualification.promoted"),
   ).toBe(false);
-  await control.execute(
-    "UPDATE qualification_promotion_reviews SET review_required=0,version=2 WHERE promotion_id=?",
-    [Buffer.from(proof)],
-  );
-  await unit.run((tx) =>
-    createOutbox(unit, { notifications: true }).append(tx, { ...alert, eventId: newId() }),
-  );
+  await unit.run((tx) => createOutbox(unit, { notifications: true }).append(tx, promoted(changed)));
   await drain();
   expect(
-    (await service.poll(person.actor)).items.filter(
-      (r) => r.category === "promotion.review_required",
-    ),
+    (await service.poll(person.actor)).items.filter((r) => r.category === "qualification.promoted"),
   ).toHaveLength(1);
+  expect(
+    (await service.poll(director)).items.some((r) => r.category === "qualification.promoted"),
+  ).toBe(true);
+  for (const other of [observer, dispatcher])
+    expect(
+      (await service.poll(other)).items.some((r) => r.category === "qualification.promoted"),
+    ).toBe(false);
 });
 
 test("notification qualification reads fail visibly without creating missing business state", async () => {
-  const person = await member(),
-    current = await qualifications.progress(person.actor, person.actor.userId, "ets2", "owner");
-  await control.execute("DELETE FROM qualification_states WHERE user_id=? AND game='ets2'", [
-    Buffer.from(person.actor.userId),
-  ]);
+  const missing = newId();
   await expect(
     unit.run(async (tx) => {
       await identity.notificationContextInTransaction(tx);
-      return qualifications.notificationAssignmentInTransaction(tx, current.data.assignment.id);
+      return qualifications.notificationAssignmentInTransaction(tx, missing);
     }),
-  ).rejects.toThrow("NOTIFICATION_QUALIFICATION_STATE_MISSING");
-  const [states] = await control.query<RowDataPacket[]>(
-    "SELECT COUNT(*) n FROM qualification_states WHERE user_id=? AND game='ets2'",
-    [Buffer.from(person.actor.userId)],
+  ).rejects.toThrow("NOTIFICATION_ASSIGNMENT_MISSING");
+  const [rows] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM qualification_assignments WHERE id=?",
+    [Buffer.from(missing)],
   );
-  expect(Number(states[0]?.n)).toBe(0);
+  expect(Number(rows[0]?.n)).toBe(0);
 });
+
 test("disabled event mutations filter obsolete unread generations immediately before maintenance", async () => {
   const { id, input } = await participating();
   await service.maintenance();

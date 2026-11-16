@@ -11,7 +11,6 @@ import {
   stagedReview,
 } from "../../apps/web/src/features/review/dispatch-model.ts";
 import {
-  checkRows,
   decisionBody,
   decisionState,
   diffRows,
@@ -46,10 +45,11 @@ const overLimits = () => example<DTO["Review"]>("getTripReview:over-limits");
 const ordinary = () => {
   const review = overLimits();
   review.acceptance = { mode: "ordinary", blockedReasonCodes: [] };
+  review.qualificationCheck.outcome = "pass";
+  review.qualificationCheck.reasonCode = null;
   review.qualificationCheck.rules = review.qualificationCheck.rules.map((rule) => ({
     ...rule,
-    outcome: "pass",
-    reasonCode: "rule_passed",
+    result: "pass",
   }));
   return review;
 };
@@ -259,9 +259,14 @@ describe("queue rows", () => {
     expect(reviewType(review.trip)).toBe("late_telemetry");
   });
   test("rules flag, own rows and queue time", () => {
+    expect(ruleFlag(["qualification_unknown", "qualification_trailer"])).toBe("exceeded");
+    for (const code of ["qualification_cargo_mass", "qualification_hard_mode"])
+      expect(ruleFlag([code])).toBe("exceeded");
+    expect(ruleFlag(["qualification_unknown"])).toBe("check");
+    expect(ruleFlag(["qualification_level_unknown"])).toBe("check");
+    // Stored reasons of decisions made before VTC-157 keep their flags.
     expect(ruleFlag(["rule_mass_unknown", "rule_trailer_type_disallowed"])).toBe("exceeded");
     expect(ruleFlag(["rule_adr_category_unknown"])).toBe("check");
-    expect(ruleFlag(["qualification_history_unknown"])).toBe("check");
     // Invalid or incomplete rule data needs an assessment; only a recorded pass is "OK".
     expect(ruleFlag(["rule_mass_invalid"])).toBe("check");
     expect(ruleFlag(["rule_trailers_incomplete"])).toBe("check");
@@ -357,33 +362,6 @@ describe("revision diff", () => {
   });
 });
 
-test("qualification check rows: four states with text symbols and the unresolved row", () => {
-  const check: DTO["QualificationCheck"] = {
-    status: "resolved",
-    reasonCode: null,
-    rules: (["pass", "fail", "unknown", "pass"] as const).map((outcome, index) => ({
-      ruleType: "max_mass",
-      outcome,
-      reasonCode: "rule_passed",
-      bypassedByEvent: index === 3,
-      observedMassKg: null,
-      limitMassKg: null,
-      entityIds: [],
-    })),
-  };
-  const rows = checkRows(check);
-  expect(rows.map((row) => [row.state, row.symbol])).toEqual([
-    ["pass", "✓"],
-    ["fail", "✕"],
-    ["unknown", "?"],
-    ["bypassed", "◇"],
-  ]);
-  expect(rows.some((row) => row.symbol === "◆")).toBe(false);
-  expect(
-    checkRows({ status: "unresolved", reasonCode: "qualification_history_unknown", rules: [] }),
-  ).toMatchObject([{ state: "unavailable", reasonCode: "qualification_history_unknown" }]);
-});
-
 describe("decision state", () => {
   const state = (
     review: DTO["Review"],
@@ -433,7 +411,7 @@ describe("decision state", () => {
       needsConfirmation: true,
       blocker: "confirm",
     });
-    expect(state(over, "accept").exceeded.map((rule) => rule.ruleType)).toEqual(["max_mass"]);
+    expect(state(over, "accept").exceeded.map((rule) => rule.rule)).toEqual(["cargo_mass"]);
     expect(state(over, "accept", "Synthetic", true).canSubmit).toBe(true);
     expect(state(over, "reject")).toMatchObject({ canSubmit: true, needsConfirmation: false });
   });

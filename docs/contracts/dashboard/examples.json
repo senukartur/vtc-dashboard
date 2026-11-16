@@ -1288,7 +1288,7 @@
               "review": {
                 "hold": true,
                 "reasonCodes": [
-                  "rule_mass_exceeded"
+                  "qualification_cargo_mass"
                 ],
                 "createdAt": "2026-10-17T12:00:00.000Z",
                 "manualRevision": {
@@ -1573,7 +1573,7 @@
             "basis": "current",
             "level": null,
             "outcome": null,
-            "reasonCode": "qualification_history_unknown",
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           },
           "acceptance": {
@@ -1645,7 +1645,7 @@
             "decisions": [],
             "pendingProposalId": null,
             "reviewReasonCodes": [
-              "rule_mass_exceeded"
+              "qualification_cargo_mass"
             ]
           },
           "factRevisionId": "41000000-0000-4000-8000-000000000001",
@@ -1668,7 +1668,7 @@
               "name": "Fictional Trainee"
             },
             "outcome": "fail",
-            "reasonCode": "qualification_cargo_mass",
+            "reasonCode": null,
             "rules": [
               {
                 "rule": "cargo_mass",
@@ -1930,7 +1930,7 @@
           "id": "41000000-0000-4000-8000-000000000001",
           "outcome": "accepted",
           "reasonCodes": [
-            "rule_mass_exceeded",
+            "qualification_cargo_mass",
             "accepted_over_limits"
           ],
           "reason": "synthetic-example",
@@ -6212,7 +6212,7 @@
               "review": {
                 "hold": true,
                 "reasonCodes": [
-                  "rule_mass_exceeded"
+                  "qualification_cargo_mass"
                 ],
                 "createdAt": "2026-10-17T12:00:00.000Z",
                 "manualRevision": {
@@ -7012,13 +7012,13 @@
             "basis": "current",
             "level": null,
             "outcome": null,
-            "reasonCode": "qualification_history_unknown",
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           },
           "acceptance": {
             "mode": "unavailable",
             "blockedReasonCodes": [
-              "qualification_history_unknown"
+              "qualification_level_unknown"
             ]
           },
           "canDecide": false,
@@ -9068,13 +9068,13 @@
             "basis": "current",
             "level": null,
             "outcome": null,
-            "reasonCode": "qualification_history_unknown",
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           },
           "acceptance": {
             "mode": "unavailable",
             "blockedReasonCodes": [
-              "qualification_history_unknown"
+              "qualification_level_unknown"
             ]
           },
           "canDecide": false,
@@ -9188,13 +9188,13 @@
             "basis": "current",
             "level": null,
             "outcome": null,
-            "reasonCode": "qualification_history_unknown",
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           },
           "acceptance": {
             "mode": "unavailable",
             "blockedReasonCodes": [
-              "qualification_history_unknown"
+              "qualification_level_unknown"
             ]
           },
           "canDecide": false,
@@ -9365,14 +9365,14 @@
             "basis": "current",
             "level": null,
             "outcome": null,
-            "reasonCode": "qualification_history_unknown",
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           },
           "acceptance": {
             "mode": "unavailable",
             "blockedReasonCodes": [
               "cargo_unknown",
-              "qualification_history_unknown"
+              "qualification_level_unknown"
             ]
           },
           "canDecide": false,
@@ -10400,7 +10400,7 @@
               "name": "Fictional Trainee"
             },
             "outcome": "fail",
-            "reasonCode": "qualification_trailer",
+            "reasonCode": null,
             "rules": [
               {
                 "rule": "cargo_mass",

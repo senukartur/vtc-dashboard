@@ -9,8 +9,8 @@ import {
   type Identity,
   identityError,
 } from "../../apps/api/src/modules/identity/service.ts";
-import { pagination } from "../../apps/api/src/modules/qualifications/pagination.ts";
 import { registerWorkspaceSummaryRoutes } from "../../apps/api/src/modules/workspace-summary/http.ts";
+import { pagination } from "../../apps/api/src/platform/http/cursor-pagination.ts";
 import type { Administration } from "../../apps/api/src/use-cases/administration.ts";
 import { createWorkspaceSummary } from "../../apps/api/src/use-cases/workspace-summary.ts";
 import { frozenAttempt } from "../../apps/web/src/features/admin/attempt.ts";
@@ -295,9 +295,8 @@ test.each([
   },
 );
 
-test("Stage 3 workspace scopes ready counts independently of the dispatch selector", async () => {
+test("Stage 3 workspace reads the dispatch selector only when it is wired", async () => {
   const { actor, identity, now, tx } = workspaceFixture(["director"]);
-  const ready = vi.fn(async () => ({ ets2: 0, ats: 0 }));
   const legacyQueue = vi.fn(async () => ({ count: 4, oldestCreatedAt: null }));
   const reviewQueue = {
     computedAt: snapshot,
@@ -322,56 +321,33 @@ test("Stage 3 workspace scopes ready counts independently of the dispatch select
     newApplicationsCount: 2,
   };
 
-  const withoutDispatch = createWorkspaceSummary(
-    identity,
-    { ...sources, qualifications: { workspacePromotionsReadyInTransaction: ready } },
-    now,
-  );
   const withDispatch = createWorkspaceSummary(
     identity,
-    {
-      ...sources,
-      qualifications: { workspacePromotionsReadyInTransaction: ready },
-      dispatch: { summaryInTransaction: dispatch },
-    },
+    { ...sources, dispatch: { summaryInTransaction: dispatch } },
     now,
   );
   expect(await withDispatch.read(actor)).toEqual(legacy);
   expect(dispatch).not.toHaveBeenCalled();
-  expect(ready).not.toHaveBeenCalled();
 
-  expect(await withoutDispatch.readStage3(actor)).toEqual({
-    ...staged,
-    promotionsReady: { ets2: 0, ats: 0 },
-  });
-  expect(ready).toHaveBeenCalledExactlyOnceWith(tx, snapshot);
+  expect(await createWorkspaceSummary(identity, sources, now).readStage3(actor)).toEqual(staged);
   expect(legacyQueue).toHaveBeenCalledTimes(2);
 
-  ready.mockResolvedValueOnce({ ets2: 2, ats: 5 });
   expect(await withDispatch.readStage3(actor)).toEqual({
     computedAt: snapshot,
     newApplicationsCount: 2,
     reviewQueue,
-    promotionsReady: { ets2: 2, ats: 5 },
   });
-  expect(ready).toHaveBeenLastCalledWith(tx, snapshot);
   expect(dispatch).toHaveBeenCalledExactlyOnceWith(tx, actor.userId, snapshot);
   expect(legacyQueue).toHaveBeenCalledTimes(2);
-  expect(await createWorkspaceSummary(identity, sources, now).readStage3(actor)).toEqual(staged);
-  expect(ready).toHaveBeenCalledTimes(2);
 
   const unauthorized = workspaceFixture(["dispatcher"]);
   expect(
     await createWorkspaceSummary(
       unauthorized.identity,
-      {
-        qualifications: { workspacePromotionsReadyInTransaction: ready },
-        dispatch: { summaryInTransaction: dispatch },
-      },
+      { dispatch: { summaryInTransaction: dispatch } },
       now,
     ).readStage3(unauthorized.actor),
   ).toEqual({ computedAt: snapshot, reviewQueue });
-  expect(ready).toHaveBeenCalledTimes(2);
 });
 
 test("workspace route applies current session authority and no-store to success and failures", async () => {

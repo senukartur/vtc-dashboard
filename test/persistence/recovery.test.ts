@@ -79,6 +79,11 @@ async function reconciliationPhase<T>(
   }
 }
 
+// 0035 renamed the assignment purpose to kind, so replays of older data steps on the latest
+// schema read the new column; the derivations are otherwise unchanged.
+const currentAssignmentColumns = (sql: string) =>
+  sql.replaceAll("a.`purpose` = 'reinstatement'", "a.`kind` = 'reinstatement'");
+
 async function recoveryTest(
   name: string,
   command: () => Promise<void>,
@@ -1189,7 +1194,7 @@ await recoveryTest(
       assert.deepEqual([Number(gone[0]?.outbox), Number(gone[0]?.job)], [0, 0]);
 
       const [retained] = await connection.query<RowDataPacket[]>(
-        "SELECT (SELECT COUNT(*) FROM identity_memberships WHERE user_id=?) member_row,(SELECT COUNT(*) FROM telemetry_tokens WHERE id=?) token,(SELECT COUNT(*) FROM manual_evidence WHERE id=?) evidence,(SELECT COUNT(*) FROM events WHERE id=?) event,(SELECT COUNT(*) FROM outbox_events WHERE id=?) outbox,(SELECT COUNT(*) FROM durable_jobs WHERE id=?) job,(SELECT COUNT(*) FROM audit_entries WHERE id=?) audit,(SELECT COUNT(*) FROM qualification_levels WHERE game='ets2' AND code='trainee') level",
+        "SELECT (SELECT COUNT(*) FROM identity_memberships WHERE user_id=?) member_row,(SELECT COUNT(*) FROM telemetry_tokens WHERE id=?) token,(SELECT COUNT(*) FROM manual_evidence WHERE id=?) evidence,(SELECT COUNT(*) FROM events WHERE id=?) event,(SELECT COUNT(*) FROM outbox_events WHERE id=?) outbox,(SELECT COUNT(*) FROM durable_jobs WHERE id=?) job,(SELECT COUNT(*) FROM audit_entries WHERE id=?) audit,(SELECT COUNT(*) FROM qualification_levels WHERE game='ets2' AND position=1) level",
         [id(1), id(3), id(42), id(50), id(62), id(64), id(70)],
       );
       assert.deepEqual(Object.values(retained[0] ?? {}).map(Number), [1, 1, 1, 1, 1, 1, 1, 1]);
@@ -2837,7 +2842,7 @@ await recoveryTest(
       const marker = sql.indexOf("-- Stage 4 backfill: drain writers throughout.");
       assert.ok(marker > 0);
       for (const statement of sql.slice(marker).split("--> statement-breakpoint"))
-        await connection.query(statement);
+        await connection.query(currentAssignmentColumns(statement));
       assert.deepEqual(await joined(), expectedJoined);
       assert.deepEqual(await toggles(), expectedToggles);
 
@@ -3099,7 +3104,7 @@ await recoveryTest(
           .filter(Boolean).length,
         1,
       );
-      await connection.query(sql);
+      await connection.query(currentAssignmentColumns(sql));
       assert.deepEqual(await joinedAt(), expected);
       // It repeats the exact 0032 derivation.
       const stage4 = await readFile(join(migrationFolder, "0032_bizarre_iron_patriot.sql"), "utf8");

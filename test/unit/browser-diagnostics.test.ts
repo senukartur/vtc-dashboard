@@ -257,9 +257,9 @@ test("failure locations keep the first existing test file and line and read noth
       ...valid,
       file: "qualifications",
       ...promotionPhase,
-      failureAt: "test/e2e/support/qualifications.ts:97",
+      failureAt: "test/e2e/support/review-ui.ts:97",
     }),
-  ).toMatchObject({ ...promotionPhase, failureAt: "test/e2e/support/qualifications.ts:97" });
+  ).toMatchObject({ ...promotionPhase, failureAt: "test/e2e/support/review-ui.ts:97" });
 });
 const promotionPhase = {
   scenario: qualificationPhaseScenario,

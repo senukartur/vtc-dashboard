@@ -138,7 +138,7 @@ test("over-limit acceptance input, decision marker, review details and queue fil
     outcome: "accepted",
     acceptedOverLimits: true,
     reviewer: { id: marked.data.reviewerId, roles: ["dispatcher"] },
-    reasonCodes: ["rule_mass_exceeded", "accepted_over_limits"],
+    reasonCodes: ["qualification_cargo_mass", "accepted_over_limits"],
   });
   for (const field of ["reviewer", "acceptedOverLimits"]) {
     const { [field]: _omitted, ...rest } = marked.data;
@@ -163,11 +163,11 @@ test("over-limit acceptance input, decision marker, review details and queue fil
       qualificationCheck: { ...detail.data.qualificationCheck, rules: [{ ...rule, ...patch }] },
     },
   });
-  expect(review(withRule({ observedMassKg: null, limitMassKg: null }))).toBe(true);
-  expect(review(withRule({ observedMassKg: 21000 }))).toBe(false);
-  expect(review(withRule({ observedMassKg: "-1" }))).toBe(false);
-  expect(review(withRule({ entityIds: Array.from({ length: 11 }, () => newId()) }))).toBe(false);
-  expect(review(withRule({ outcome: "waived" }))).toBe(false);
+  expect(review(withRule({ observedKg: null, maxKg: null }))).toBe(true);
+  expect(review(withRule({ observedKg: 21000 }))).toBe(false);
+  expect(review(withRule({ observedKg: "-1" }))).toBe(false);
+  expect(review(withRule({ entityIds: [newId()] }))).toBe(false);
+  expect(review(withRule({ result: "waived" }))).toBe(false);
   expect(
     review({
       ...detail,
@@ -275,14 +275,17 @@ test("Stage 3 review compares independently present manual and telemetry sources
       } = response.data;
       expect(evaluation.factRevisionId).toBe(factRevisionId);
       expect(effectiveFacts.factRevisionId).toBe(factRevisionId);
-      expect(qualificationCheck.reasonCode).toBe("qualification_history_unknown");
+      expect(qualificationCheck).toMatchObject({
+        status: "no_level",
+        reasonCode: "qualification_level_unknown",
+      });
       if (kind === "mixed") {
         expect(effectiveFacts.provider).toBe("manual");
         expect(evaluation.attributionBasis).toBe("manual_confirmation");
         expect(evaluation.reportingAt).toBe(evaluation.attributionAt);
         expect(acceptance).toEqual({
           mode: "unavailable",
-          blockedReasonCodes: ["cargo_unknown", "qualification_history_unknown"],
+          blockedReasonCodes: ["cargo_unknown", "qualification_level_unknown"],
         });
         expect(normalizedFacts.factRevisionId).not.toBe(
           response.data.effectiveFacts.factRevisionId,
@@ -302,7 +305,7 @@ test("Stage 3 review compares independently present manual and telemetry sources
         expect(evaluation.reportingAt).toBe(summary.reportingAt);
         expect(acceptance).toEqual({
           mode: "unavailable",
-          blockedReasonCodes: ["qualification_history_unknown"],
+          blockedReasonCodes: ["qualification_level_unknown"],
         });
       }
       const normalized = validate.compile({
@@ -339,7 +342,7 @@ test("Stage 3 review compares independently present manual and telemetry sources
 type Row = Record<string, unknown>;
 type StageTrip = Row & {
   sources: Row[];
-  qualificationCheck: Row & { rules: [Row, Row & { allowedTrailerTypes: Row[] }, Row] };
+  qualificationCheck: Row & { rules: [Row, Row, Row & { allowed: Row[] }, Row, Row] };
   effectiveFacts: Row & { originCompany: Row };
 };
 test("the author's Stage 4 trip view adds safe sources, rule values, damage and companies only", async () => {
@@ -372,7 +375,7 @@ test("the author's Stage 4 trip view adds safe sources, rule values, damage and 
   expect(trip({ ...telemetry, event: { id: newId(), title: "Fictional Convoy" } })).toBe(false);
 
   const [telemetrySource, manualSource] = sources;
-  const [mass, trailers, adr] = qualificationCheck.rules;
+  const [mass, , trailers, adr] = qualificationCheck.rules;
   const mutations: [string, Row][] = [
     ["three sources", { ...telemetry, sources: [...sources, manualSource] }],
     [
@@ -393,7 +396,7 @@ test("the author's Stage 4 trip view adds safe sources, rule values, damage and 
         ...telemetry,
         qualificationCheck: {
           ...qualificationCheck,
-          rules: [{ ...mass, allowedTrailerTypes: trailers.allowedTrailerTypes }],
+          rules: [{ ...mass, allowed: trailers.allowed }],
         },
       },
     ],
@@ -403,7 +406,7 @@ test("the author's Stage 4 trip view adds safe sources, rule values, damage and 
         ...telemetry,
         qualificationCheck: {
           ...qualificationCheck,
-          rules: [{ ...trailers, ruleType: "allowed_adr_categories" }],
+          rules: [{ ...trailers, rule: "adr" }],
         },
       },
     ],
@@ -416,10 +419,7 @@ test("the author's Stage 4 trip view adds safe sources, rule values, damage and 
           rules: [
             {
               ...trailers,
-              allowedTrailerTypes: Array.from(
-                { length: 101 },
-                () => trailers.allowedTrailerTypes[0],
-              ),
+              allowed: Array.from({ length: 101 }, () => trailers.allowed[0]),
             },
           ],
         },
@@ -429,14 +429,14 @@ test("the author's Stage 4 trip view adds safe sources, rule values, damage and 
       "unknown adr class",
       {
         ...telemetry,
-        qualificationCheck: { ...qualificationCheck, rules: [{ ...adr, observedAdrClass: "5" }] },
+        qualificationCheck: { ...qualificationCheck, rules: [{ ...adr, observed: "5" }] },
       },
     ],
     [
       "unknown rule type",
       {
         ...telemetry,
-        qualificationCheck: { ...qualificationCheck, rules: [{ ...mass, ruleType: "max_length" }] },
+        qualificationCheck: { ...qualificationCheck, rules: [{ ...mass, rule: "max_length" }] },
       },
     ],
     [

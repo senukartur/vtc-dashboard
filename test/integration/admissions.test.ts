@@ -16,7 +16,7 @@ import {
 } from "@vtc/db/admissions-schema";
 import { account, membership } from "@vtc/db/identity-schema";
 import { mailDeliveries } from "@vtc/db/messaging-schema";
-import { initialQualifications } from "@vtc/db/qualifications-schema";
+import { qualificationAssignments } from "@vtc/db/qualifications-schema";
 import { getTableName } from "drizzle-orm";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
@@ -51,7 +51,10 @@ import {
   invalidateAdmissionsMail,
   type Messaging,
 } from "../../apps/api/src/modules/messaging/service.ts";
-import { createQualificationInitialization } from "../../apps/api/src/modules/qualifications/initialization.ts";
+import {
+  createQualificationInitialization,
+  structuralLevels,
+} from "../../apps/api/src/modules/qualifications/initialization.ts";
 import {
   admissionsEvents,
   identityAccessEvents,
@@ -230,7 +233,7 @@ async function count(table: string, where = "", values: string[] = []) {
       "identity_memberships",
       "identity_roles",
       "identity_sessions",
-      "qualification_initial_assignments",
+      "qualification_assignments",
       "admissions_decisions",
       "admissions_invitations",
       "admissions_applications",
@@ -714,11 +717,19 @@ test("concurrent redemption is atomic and normal native sign-in reads its creden
     unit
       .client(tx)
       .select()
-      .from(initialQualifications)
-      .where(eq(initialQualifications.userId, a.id)),
+      .from(qualificationAssignments)
+      .where(eq(qualificationAssignments.userId, a.id)),
   );
   expect(q.map((r) => r.game).sort()).toEqual(["ats", "ets2"]);
-  expect(q.every((r) => r.level === "trainee" && r.assignedAt === time().toISOString())).toBe(true);
+  expect(
+    q.every(
+      (r) =>
+        r.kind === "admission" &&
+        r.levelId === structuralLevels[r.game][0] &&
+        r.endedAt === null &&
+        r.assignedAt === time().toISOString(),
+    ),
+  ).toBe(true);
   expect(await count("identity_accounts", "WHERE user_id=?", [a.id])).toBe(1);
   expect(await count("identity_memberships", "WHERE user_id=?", [a.id])).toBe(1);
   expect(await count("identity_sessions", "WHERE user_id=?", [a.id])).toBe(0);
@@ -748,8 +759,8 @@ test.each([["ets2"], ["ats"]] as ("ets2" | "ats")[][])(
       unit
         .client(tx)
         .select()
-        .from(initialQualifications)
-        .where(eq(initialQualifications.userId, r.id)),
+        .from(qualificationAssignments)
+        .where(eq(qualificationAssignments.userId, r.id)),
     );
     expect(q.map((row) => row.game)).toEqual([game]);
   },
@@ -805,7 +816,7 @@ test.each([
   "identity_accounts",
   "identity_memberships",
   "identity_roles",
-  "qualification_initial_assignments",
+  "qualification_assignments",
   "audit_entries",
   "outbox_events",
 ] as const)(
