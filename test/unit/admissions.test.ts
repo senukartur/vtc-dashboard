@@ -11,6 +11,10 @@ import {
   createAdmissions,
 } from "../../apps/api/src/modules/admissions/service.ts";
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
+import {
+  checkDto,
+  steamIdFromProfileUrl,
+} from "../../apps/api/src/modules/admissions/truckers-checks.ts";
 
 const config = { key: randomBytes(32).toString("base64url"), origin: "http://127.0.0.1:4173" };
 const input = () => ({
@@ -183,4 +187,198 @@ test("safe admissions events reject private extensions and unsupported event kin
     admissionsEvent({ ...e, data: { applicationId: id, email: "fictional@example.invalid" } }),
   ).toThrow();
   expect(() => admissionsEvent({ ...e, type: "unknown" })).toThrow();
+});
+test("each referral source is accepted alone; unknown or null sources and misplaced free text fail", () => {
+  for (const referralSource of [
+    "truckersmp",
+    "discord",
+    "friend_or_member",
+    "youtube_or_twitch",
+    "other",
+  ] as const)
+    expect(validateApplication({ ...input(), referralSource }).referralSource).toBe(referralSource);
+  expect(
+    validateApplication({
+      ...input(),
+      referralSource: "other",
+      referralOther: "A fictional convoy poster",
+    }).referralOther,
+  ).toBe("A fictional convoy poster");
+  for (const patch of [
+    { referralSource: "newsletter" },
+    { referralSource: null },
+    { referralSource: undefined },
+    { referralOther: "Text without a source" },
+    { referralSource: "discord", referralOther: "Text with another source" },
+    { referralSource: "other", referralOther: null },
+    { referralSource: "other", referralOther: "" },
+  ])
+    expect(
+      () => validateApplication({ ...input(), ...patch } as never),
+      JSON.stringify(patch),
+    ).toThrow(expect.objectContaining({ statusCode: 422 }));
+});
+test("referral free text counts code points and rejects what the MySQL nonblank CHECK would reject", () => {
+  const other = (referralOther: string) => ({
+    ...input(),
+    referralSource: "other" as const,
+    referralOther,
+  });
+  for (const accepted of [
+    "x".repeat(200),
+    "\u{1F69A}".repeat(200),
+    " Fictional\tconvoy\r\nposter ",
+    "\u180E",
+    "\u200B",
+    "\u00AD",
+  ])
+    expect(validateApplication(other(accepted)).referralOther).toBe(accepted);
+  for (const rejected of [
+    "x".repeat(201),
+    "\u{1F69A}".repeat(201),
+    "\uD800",
+    "Fictional \uDC00 text",
+    "\u0085",
+    "Fictional\u0085text",
+    "\u001C",
+    "\u001F",
+    "\u007F",
+    "\u0000",
+    " \t\r\n",
+    "\u3000",
+    "\uFEFF",
+    "\u00A0\u2028\u2029\u202F\u205F\u1680\u2000\u200A",
+  ])
+    expect(() => validateApplication(other(rejected)), JSON.stringify(rejected)).toThrow(
+      expect.objectContaining({ statusCode: 422 }),
+    );
+});
+test("legacy submissions keep their validated shape, so earlier idempotency fingerprints are unchanged", () => {
+  expect(Object.keys(validateApplication(input())).sort()).toEqual([
+    "discord",
+    "email",
+    "games",
+    "introduction",
+    "nickname",
+    "steamProfileUrl",
+  ]);
+  expect(
+    Object.keys(validateApplication({ ...input(), referralSource: "discord" })).sort(),
+  ).toEqual([
+    "discord",
+    "email",
+    "games",
+    "introduction",
+    "nickname",
+    "referralSource",
+    "steamProfileUrl",
+  ]);
+});
+test("only canonical /profiles/ links yield a SteamID64 for the TruckersMP check", () => {
+  expect(steamIdFromProfileUrl("https://steamcommunity.com/profiles/76561190000000001")).toBe(
+    "76561190000000001",
+  );
+  expect(steamIdFromProfileUrl("https://steamcommunity.com/profiles/76561190000000001/")).toBe(
+    "76561190000000001",
+  );
+  for (const url of [
+    "https://steamcommunity.com/id/fictional",
+    "https://steamcommunity.com/id/76561190000000001",
+    "https://steamcommunity.com/profiles/06561190000000001",
+    "https://steamcommunity.com/profiles/7656119000000000",
+  ])
+    expect(steamIdFromProfileUrl(url), url).toBeNull();
+});
+test("the check projection derives not_checked, hides transient failures and fails overdue checks", () => {
+  const now = new Date("2026-11-12T09:00:00.000Z");
+  const profilesUrl = "https://steamcommunity.com/profiles/76561190000000001";
+  const empty = {
+    found: null,
+    playerId: null,
+    displayName: null,
+    profileUrl: null,
+    bans: null,
+    vtc: null,
+    checkedAt: null,
+    lastAttemptAt: null,
+    failure: null,
+  };
+  expect(checkDto(null, "https://steamcommunity.com/id/fictional", now)).toEqual({
+    state: "not_checked",
+    notCheckedReason: "steam_vanity_url",
+    ...empty,
+  });
+  expect(checkDto(undefined, profilesUrl, now)).toEqual({
+    state: "not_checked",
+    notCheckedReason: "not_requested",
+    ...empty,
+  });
+  const base = {
+    applicationId: newId(),
+    generation: 1,
+    steamId: "76561190000000001",
+    requestedAt: new Date("2026-11-12T08:59:00.000Z"),
+    found: null,
+    profile: null,
+    checkedAt: null,
+    lastAttemptAt: new Date("2026-11-12T08:59:30.000Z"),
+  };
+  const checking = {
+    ...base,
+    state: "checking" as const,
+    leaseId: newId(),
+    leaseUntil: new Date(now.getTime() + 1),
+    failure: "rate_limited" as const,
+  };
+  expect(checkDto(checking, profilesUrl, now)).toEqual({
+    state: "checking",
+    notCheckedReason: null,
+    ...empty,
+    lastAttemptAt: "2026-11-12T08:59:30.000Z",
+  });
+  expect(checkDto({ ...checking, leaseUntil: now }, profilesUrl, now)).toMatchObject({
+    state: "failed",
+    failure: "rate_limited",
+  });
+  expect(checkDto({ ...checking, leaseUntil: now, failure: null }, profilesUrl, now)).toMatchObject(
+    { state: "failed", failure: "unavailable" },
+  );
+  const completed = {
+    ...base,
+    state: "completed" as const,
+    leaseId: null,
+    leaseUntil: null,
+    failure: null,
+    found: true,
+    checkedAt: now,
+    profile: {
+      playerId: "900000000000001",
+      displayName: "Fictional Applicant TMP",
+      vtc: { inVtc: true, id: "900000000001", name: "Fictional Other VTC", tag: "FOV" },
+      bans: { any: false, count: 0 },
+    },
+  };
+  expect(checkDto(completed, profilesUrl, now)).toEqual({
+    state: "completed",
+    notCheckedReason: null,
+    found: true,
+    playerId: "900000000000001",
+    displayName: "Fictional Applicant TMP",
+    profileUrl: "https://truckersmp.com/user/900000000000001",
+    bans: { any: false, count: 0 },
+    vtc: { inVtc: true, id: "900000000001", name: "Fictional Other VTC", tag: "FOV" },
+    checkedAt: "2026-11-12T09:00:00.000Z",
+    lastAttemptAt: "2026-11-12T08:59:30.000Z",
+    failure: null,
+  });
+  expect(checkDto({ ...completed, found: false, profile: null }, profilesUrl, now)).toMatchObject({
+    state: "completed",
+    found: false,
+    playerId: null,
+    bans: null,
+    vtc: null,
+  });
+  expect(
+    checkDto({ ...completed, state: "failed", failure: "invalid_response" }, profilesUrl, now),
+  ).toMatchObject({ state: "failed", found: true, failure: "invalid_response" });
 });

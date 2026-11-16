@@ -32,6 +32,13 @@ import {
   rejectionReason,
   validateApplication,
 } from "./security.js";
+import {
+  createTruckersChecks,
+  readTruckersCheck,
+  steamIdFromProfileUrl,
+  type TruckersCheck,
+  type TruckersPort,
+} from "./truckers-checks.js";
 
 type App = typeof applications.$inferSelect;
 type Invite = typeof invitations.$inferSelect;
@@ -79,6 +86,8 @@ export interface AdmissionsPorts {
     status(tx: TxContext, id: string): Promise<string>;
   };
   invalidateMail(tx: TxContext, generationId: string): Promise<void>;
+  // Stage 4 (VTC-144): applicant TruckersMP lookup; absent when external identities are off.
+  truckers?: TruckersPort;
 }
 export async function cleanupAdmissions(
   unit: UnitOfWork,
@@ -124,7 +133,8 @@ export function createAdmissions(
 ) {
   const crypto = admissionsSecurity(config),
     audit = createAudit(unit),
-    client = (tx: TxContext) => unit.client(tx);
+    client = (tx: TxContext) => unit.client(tx),
+    checks = ports.truckers ? createTruckersChecks(unit, ports.truckers, now) : undefined;
   const run = async <T>(command: (tx: TxContext) => Promise<T>): Promise<T> => {
     try {
       return await retryTransaction(unit, command);
@@ -282,6 +292,9 @@ export function createAdmissions(
         games: row.games,
         discord: row.discord,
         introduction: row.introduction,
+        // Old applications and applicants who skipped the question have no referral keys.
+        ...(row.referralSource !== null ? { referralSource: row.referralSource } : {}),
+        ...(row.referralOther !== null ? { referralOther: row.referralOther } : {}),
       },
       decisionReason: decision?.reason ?? null,
       invitationId: row.invitationId,
@@ -466,11 +479,13 @@ export function createAdmissions(
             discord: input.discord,
             introduction: input.introduction,
             invitationId: null,
-            // Stage 4 referral columns stay unset until VTC-144 accepts the fields.
-            referralSource: null,
-            referralOther: null,
+            referralSource: input.referralSource ?? null,
+            referralOther: input.referralOther ?? null,
           };
           await client(tx).insert(applications).values(row);
+          // The check row and its first job commit with the application, or not at all.
+          const steamId = steamIdFromProfileUrl(row.steamProfileUrl);
+          if (steamId && checks) await checks.start(tx, row.id, steamId, row.steamProfileUrl);
           await record(tx, company.id, undefined, row, {
             operation: "application.submitted",
             subjectKind: "application",
@@ -627,7 +642,35 @@ export function createAdmissions(
     async detail(actor: Actor, id: string) {
       return run(async (tx) => {
         await authority(tx, actor);
-        return appDto(tx, await application(tx, id));
+        const row = await application(tx, id);
+        return {
+          ...(await appDto(tx, row)),
+          truckersmpCheck: await readTruckersCheck(unit, tx, row.id, row.steamProfileUrl, now()),
+        };
+      });
+    },
+    async recheckTruckers(actor: Actor, id: string, key: string): Promise<TruckersCheck> {
+      return run(async (tx) => {
+        await authority(tx, actor);
+        const result = await once(
+          tx,
+          `${actor.userId}:truckersmp-check:${id}`,
+          key,
+          {},
+          async () => {
+            const app = await application(tx, id);
+            const steamId = steamIdFromProfileUrl(app.steamProfileUrl);
+            // Vanity links cannot be checked; the adapter decision needs no provider call.
+            if (!steamId) throw identityError(409);
+            if (!checks) throw identityError(503);
+            return {
+              id: app.id,
+              version: app.version,
+              response: await checks.start(tx, app.id, steamId, app.steamProfileUrl),
+            };
+          },
+        );
+        return result.response as TruckersCheck;
       });
     },
     async decide(
@@ -922,6 +965,7 @@ export function createAdmissions(
       return !!app && !!row && active(row, app);
     },
     purge,
+    ...(checks ? { truckersHandler: checks.handler } : {}),
   };
 }
 export type Admissions = ReturnType<typeof createAdmissions>;
