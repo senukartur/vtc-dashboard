@@ -267,6 +267,13 @@
   width: auto;
   max-width: 340px;
 }
+.account-settings .settings-timezone-unknown {
+  flex-basis: 100%;
+  color: var(--pending);
+  font-size: var(--font-small);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
 .account-settings .settings-timezone-now {
   flex-basis: 100%;
   color: var(--muted);

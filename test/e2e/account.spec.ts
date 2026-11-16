@@ -1846,13 +1846,20 @@ test(
       "Notifications are unavailable. Please try again.",
     );
     await expect(accepted).toBeChecked();
+    // Toggling the same switch again resends the same attempt, like Retry does.
+    state.notifications.statuses.push(503);
+    await accepted.click();
+    await expect.poll(() => state.notifications.commands.length).toBe(2);
+    await expect(accepted).toBeChecked();
     await card.getByRole("button", { name: "Retry saving", exact: true }).click();
     await expect(saved).toBeVisible();
     await expect(accepted).not.toBeChecked();
-    const [failed, retried] = state.notifications.commands;
-    expect(retried?.key).toBe(failed?.key);
-    expect(retried?.body).toEqual(failed?.body);
-    expect(retried?.ifMatch).toBe(failed?.ifMatch);
+    const [failed, toggled, retried] = state.notifications.commands;
+    for (const repeat of [toggled, retried]) {
+      expect(repeat?.key).toBe(failed?.key);
+      expect(repeat?.body).toEqual(failed?.body);
+      expect(repeat?.ifMatch).toBe(failed?.ifMatch);
+    }
     // 422: the available types changed; every switch waits for a reload.
     state.notifications.statuses.push(422);
     await event.click();
@@ -1864,7 +1871,7 @@ test(
     await expect(card.getByRole("button", { name: "Retry saving" })).toHaveCount(0);
     await capture(page, info, "en-notifications-keys-changed");
     await event.press("Space");
-    expect(state.notifications.commands).toHaveLength(3);
+    expect(state.notifications.commands).toHaveLength(4);
     const reads = state.notifications.reads;
     await card.getByRole("button", { name: "Reload preferences", exact: true }).click();
     await expect(accepted).not.toHaveAttribute("aria-disabled", /.*/);
@@ -1945,8 +1952,12 @@ test.describe("display time zone as on the device", () => {
       await page.reload();
       await language(page, "en");
       await expect(timezone).toHaveValue("Mars/Base");
-      await expect(timezone.locator("option:checked")).toHaveText(
-        "Mars/Base — unknown to this browser; times are shown in UTC",
+      // The closed select keeps a short label; the full explanation is visible below it.
+      await expect(timezone.locator("option:checked")).toHaveText("Mars/Base (unknown here)");
+      const unknownHint = "This zone is unknown to this browser; times are shown in UTC.";
+      await expect(page.getByText(unknownHint, { exact: true })).toBeVisible();
+      await expect(timezone).toHaveAccessibleDescription(
+        `All dates in the dashboard use this zone. Company reporting periods stay the same. ${unknownHint}`,
       );
       await expect(page.getByText("Now 12:00 · UTC", { exact: true })).toBeVisible();
       await save.click();
@@ -1955,8 +1966,25 @@ test.describe("display time zone as on the device", () => {
       await expect(timezone).toBeFocused();
       expect(state.preferences).toHaveLength(2);
       await capture(page, info, "en-preferences-unknown-zone");
+      await language(page, "ru");
+      const timezoneRu = page.getByLabel("Часовой пояс отображения", { exact: true });
+      await expect(timezoneRu.locator("option:checked")).toHaveText("Mars/Base (неизвестен здесь)");
+      await expect(
+        page.getByText("Этот пояс неизвестен браузеру; время показано в UTC.", { exact: true }),
+      ).toBeVisible();
+      await capture(page, info, "ru-preferences-unknown-zone");
+      await language(page, "en");
       await sectionNav(page).getByRole("link", { name: "Connections", exact: true }).click();
       await expect(page.getByText(/Created: 17 Oct 2026, 12:00/)).toBeVisible();
+      // Saving another zone drops the unknown entry at once, without remounting the form.
+      await sectionNav(page).getByRole("link", { name: "Preferences", exact: true }).click();
+      await timezone.selectOption("UTC");
+      await expect(page.getByText(unknownHint, { exact: true })).toHaveCount(0);
+      await save.click();
+      await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
+      await expect(timezone.locator('option[value="Mars/Base"]')).toHaveCount(0);
+      await expect(save).toBeFocused();
+      expect(state.preferences.at(-1)?.body).toEqual({ locale: "en", displayTimezone: "UTC" });
     },
   );
 });

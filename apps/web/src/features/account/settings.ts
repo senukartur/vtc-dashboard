@@ -64,24 +64,50 @@ export interface TimezoneChoice {
   kind: "device" | "unknown" | "zone";
 }
 
+const byValue = (a: TimezoneChoice, b: TimezoneChoice) =>
+  a.value < b.value ? -1 : a.value > b.value ? 1 : 0;
+
 /**
- * Display timezone options: "as on the device" first, then a saved zone this browser does not
- * know (kept selectable so the form shows the truth), then the runtime's zones plus UTC and the
- * saved value, unique and sorted by ID.
+ * The runtime's zones plus UTC with their offsets, sorted by ID. Building them takes several
+ * hundred formatters, so callers cache the result and pass it to `timezoneChoices`.
  */
-export function timezoneChoices(saved: string | null, at: number | Date = Date.now()) {
+export function runtimeZones(at: number | Date = Date.now()): TimezoneChoice[] {
+  const supported =
+    typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
+  return [...new Set([...supported, "UTC"])]
+    .map(
+      (zone): TimezoneChoice => ({ value: zone, zone, offset: utcOffset(zone, at), kind: "zone" }),
+    )
+    .sort(byValue);
+}
+
+/**
+ * Display timezone options for the currently saved value: "as on the device" first, then a saved
+ * zone this browser does not know (kept selectable so the form shows the truth), then the cached
+ * runtime zones with a valid saved alias merged in, unique and sorted by ID.
+ */
+export function timezoneChoices(
+  saved: string | null,
+  at: number | Date = Date.now(),
+  zones: readonly TimezoneChoice[] = runtimeZones(at),
+): TimezoneChoice[] {
   const device = accountTimeZone(null);
   const choices: TimezoneChoice[] = [
     { value: "", zone: device, offset: utcOffset(device, at), kind: "device" },
   ];
-  const extra: string[] = [];
+  let listed: TimezoneChoice[] = [...zones];
   if (saved !== null) {
-    if (timezoneValid(saved)) extra.push(saved);
-    else choices.push({ value: saved, zone: saved, offset: null, kind: "unknown" });
+    if (!timezoneValid(saved))
+      choices.push({ value: saved, zone: saved, offset: null, kind: "unknown" });
+    else if (!zones.some((choice) => choice.value === saved)) {
+      const alias: TimezoneChoice = {
+        value: saved,
+        zone: saved,
+        offset: utcOffset(saved, at),
+        kind: "zone",
+      };
+      listed = [...listed, alias].sort(byValue);
+    }
   }
-  const supported =
-    typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
-  for (const zone of [...new Set([...supported, "UTC", ...extra])].sort())
-    choices.push({ value: zone, zone, offset: utcOffset(zone, at), kind: "zone" });
-  return choices;
+  return [...choices, ...listed];
 }

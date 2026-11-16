@@ -9,7 +9,7 @@ import { useMinuteNow } from "../notifications/components.js";
 import { OptionalNotifications } from "../notifications/controller.js";
 import { NotificationPreferencesCard } from "../notifications/preferences.js";
 import { SettingsRow } from "./SettingsRow.js";
-import { type TimezoneChoice, timezoneChoices, timezoneValid } from "./settings.js";
+import { runtimeZones, type TimezoneChoice, timezoneChoices, timezoneValid } from "./settings.js";
 import type { DTO } from "./transport.js";
 import { useCommand } from "./useCommand.js";
 
@@ -65,9 +65,12 @@ function TimezoneForm({
   const [value, setValue] = useState(initial ?? "");
   const [invalid, setInvalid] = useState(false);
   const select = useRef<HTMLSelectElement>(null);
-  // Several hundred offset formatters: built once per mount; a conflict refresh remounts.
-  const [choices] = useState(() => timezoneChoices(initial));
   const now = useMinuteNow();
+  // Several hundred offset formatters: built once per mount. The device and saved entries follow
+  // the current saved value, so a saved replacement drops an unknown legacy zone without a remount.
+  const [zones] = useState(() => runtimeZones());
+  const choices = timezoneChoices(initial, now, zones);
+  const unknown = choices.some((choice) => choice.kind === "unknown" && choice.value === value);
   const id = "preferences-timezone";
   // The preview follows the selection before it is saved; an unknown zone shows UTC honestly.
   const zone = accountTimeZone(value === "" ? null : value);
@@ -106,7 +109,7 @@ function TimezoneForm({
         ref={select}
         id={id}
         aria-labelledby={`${id}-title`}
-        aria-describedby={`${id}-hint${invalid ? ` ${id}-error` : ""}`}
+        aria-describedby={`${id}-hint${unknown ? ` ${id}-unknown` : ""}${invalid ? ` ${id}-error` : ""}`}
         aria-invalid={invalid}
         value={value}
         onChange={(event) => {
@@ -124,6 +127,11 @@ function TimezoneForm({
       <Button type="submit" size="xs" aria-disabled={busy || undefined}>
         {t("saveShort")}
       </Button>
+      {unknown && (
+        <p id={`${id}-unknown`} className="settings-timezone-unknown">
+          {t("timezoneUnknownHint")}
+        </p>
+      )}
       <p className="settings-timezone-now">
         {t("timezoneNow", { time: clock, zone: zoneName(zone) })}
       </p>

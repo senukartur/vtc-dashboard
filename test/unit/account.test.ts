@@ -10,6 +10,7 @@ import { clearPrivateQueries, createAppQueryClient } from "../../apps/web/src/ap
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import {
   legacyAccountSection,
+  runtimeZones,
   timezoneChoices,
   timezoneValid,
   utcOffset,
@@ -382,6 +383,7 @@ test("account settings copy covers every section and row in RU/EN and drops the 
       "languageTimeCard",
       "timezoneDevice",
       "timezoneUnknown",
+      "timezoneUnknownHint",
       "timezoneNow",
       "saveShort",
       "steamHint",
@@ -504,6 +506,25 @@ test("timezone choices put the device first, flag an unknown saved zone and keep
   });
   expect(unknown.filter((c) => c.value === "Mars/Base")).toHaveLength(1);
   expect(timezoneChoices(null, at).some((c) => c.kind === "unknown")).toBe(false);
+});
+test("cached runtime zones keep their list while the saved entries follow the current value", () => {
+  const at = Date.parse("2026-01-15T12:00:00.000Z");
+  const zones = runtimeZones(at);
+  const snapshot = structuredClone(zones);
+  expect(zones.every((choice) => choice.kind === "zone")).toBe(true);
+  expect(zones.map((choice) => choice.value)).toContain("UTC");
+  // An unknown legacy zone disappears once another value is saved, from the same cached list.
+  const before = timezoneChoices("Mars/Base", at, zones);
+  const after = timezoneChoices("UTC", at, zones);
+  expect(before[1]?.kind).toBe("unknown");
+  expect(after.some((choice) => choice.kind === "unknown")).toBe(false);
+  expect(after.slice(1)).toEqual(zones);
+  // A valid alias is merged in sorted position without changing the cached list.
+  const alias = timezoneChoices("US/Eastern", at, zones).slice(1);
+  expect(alias.filter((choice) => choice.value === "US/Eastern")).toHaveLength(1);
+  expect(alias.map((choice) => choice.value)).toEqual(alias.map((choice) => choice.value).sort());
+  expect(zones).toEqual(snapshot);
+  expect(timezoneChoices(null, at, zones)).toEqual(timezoneChoices(null, at));
 });
 test("language preference persistence in client storage and initial resolution", () => {
   const store = new Map<string, string>();
