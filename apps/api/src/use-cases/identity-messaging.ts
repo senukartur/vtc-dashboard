@@ -1,6 +1,7 @@
 import type { UnitOfWork } from "@vtc/db";
 import type { AdmissionsConfig } from "../modules/admissions/security.js";
 import { type Admissions, createAdmissions } from "../modules/admissions/service.js";
+import { truckersCheckKind } from "../modules/admissions/truckers-checks.js";
 import { type AnalyticsConfig, createAnalytics } from "../modules/analytics/index.js";
 import type { CatalogConfig } from "../modules/catalogs/config.js";
 import { createCatalogs } from "../modules/catalogs/service.js";
@@ -12,6 +13,7 @@ import {
   createExternalIdentities,
   steamProjection,
 } from "../modules/external-identities/service.js";
+import { truckersApplicantProvider } from "../modules/external-identities/providers.js";
 import type { IdentityConfig } from "../modules/identity/engine.js";
 import { createIdentity, type Identity } from "../modules/identity/service.js";
 import {
@@ -146,6 +148,7 @@ export function composeIdentity(
       qualifications: qualificationsLifecycle,
       events: admissionsEvents(unit, outbox),
       invalidateMail: (tx, id) => invalidateAdmissionsMail(unit, tx, id),
+      ...(externalEnabled ? { truckers: truckersApplicantProvider() } : {}),
       ...(messaging
         ? {
             mail: {
@@ -350,6 +353,7 @@ export function composeIdentity(
         ...(tripDecisions ? [tripDecisions.handler] : []),
         ...(notifications ? [notifications.handler, notifications.reminderHandler] : []),
         ...(eventMedia?.handlers ?? []),
+        ...(admissions?.truckersHandler ? [admissions.truckersHandler] : []),
       ],
       notifications ? [notifications.subscription] : [],
       undefined,
@@ -360,6 +364,7 @@ export function composeIdentity(
         ...(!tripDecisions ? ["trips.reevaluate"] : []),
         ...(!notifications ? ["notifications.deliver", "notifications.remind"] : []),
         ...(!eventMedia ? mediaJobKinds : []),
+        ...(!admissions?.truckersHandler ? [truckersCheckKind] : []),
         ...(!manualReports?.config.storage
           ? ["manual.evidence-delete", "manual.generation-delete"]
           : []),

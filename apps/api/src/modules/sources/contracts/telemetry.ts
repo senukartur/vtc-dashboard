@@ -4,6 +4,7 @@ import addFormats from "ajv-formats";
 import { canonicalJson, decimal, sourceKey } from "./canonical.js";
 import type {
   AdrClass,
+  CompanyFact,
   Fact,
   Game,
   NormalizedTripEvidence,
@@ -19,6 +20,13 @@ import schema from "./telemetry-v1.schema.json" with { type: "json" };
 type Available<T> = { available: true; value: T } | { available: false; reason: string };
 type AccountingStatus = "complete" | "partial" | "unknown";
 type Time = { utcMs: number | null; basis: ReportedTime["basis"]; eventSeq: string | null };
+// companyName is display text of the source; it is validated but never stored as a fact.
+type Place = {
+  cityId: Available<string>;
+  cityName: Available<string>;
+  companyId: Available<string>;
+  companyName: Available<string>;
+};
 export interface Telemetry {
   contract: { major: 1; minor: 0 | 1 | 2 };
   producer: unknown;
@@ -55,8 +63,8 @@ export interface Telemetry {
       gameBuild: Available<string>;
     };
     job: {
-      origin: { cityId: Available<string>; cityName: Available<string> };
-      destination: { cityId: Available<string>; cityName: Available<string> };
+      origin: Place;
+      destination: Place;
       cargoId: Available<string>;
       cargoName: Available<string>;
       cargoMass: Available<number>;
@@ -297,6 +305,24 @@ export const telemetryAdapter: TripSourceAdapter = {
       "snapshot.job.destination.cityId",
       "city",
     );
+    // A raw company code names a depot only in the trip's recognized city of the same game.
+    async function company(place: Place, city: Fact<TripEntity>): Promise<CompanyFact> {
+      const code =
+        place.companyId.available && place.companyId.value !== "" ? place.companyId.value : null;
+      if (code === null) return { depotId: null, code: null };
+      if (city.status !== "known" || !context.catalogs?.depotInTransaction)
+        return { depotId: null, code };
+      const depot = await context.catalogs.depotInTransaction(context.tx, {
+        game: p.source.game,
+        cityId: city.value.entityId,
+        companyCode: code,
+      });
+      return { depotId: depot?.id ?? null, code };
+    }
+    const companies = {
+      origin: await company(s.job.origin, origin),
+      destination: await company(s.job.destination, destination),
+    };
     const cargo = await resolve(s.job.cargoId, "snapshot.job.cargoId", "cargo");
     // A coupling counts as its first trailer's body type; every slot stays in provenance.
     const first = s.trailers.items.find((t) => t.index === 0);
@@ -413,6 +439,7 @@ export const telemetryAdapter: TripSourceAdapter = {
       adrCategory,
       ruleContextComplete,
       reasonCodes: [...reasons].sort(),
+      companies,
     };
     return result;
   },

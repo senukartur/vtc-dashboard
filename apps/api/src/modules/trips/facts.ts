@@ -100,6 +100,8 @@ export function createFactRepository(unit: UnitOfWork) {
       const entity = (value: Fact<TripEntity>) =>
         value.status === "known" ? value.value.entityId : null;
       const quantity = (value: Fact<string>) => (value.status === "known" ? value.value : null);
+      const code = (value: string | null | undefined) =>
+        value == null ? null : Buffer.from(value, "utf8");
       await c(tx)
         .insert(tripFacts)
         .values({
@@ -121,6 +123,10 @@ export function createFactRepository(unit: UnitOfWork) {
           endVerified: f.end.verifiedActual,
           originCityId: entity(f.origin),
           destinationCityId: entity(f.destination),
+          originDepotId: f.companies?.origin.depotId ?? null,
+          destinationDepotId: f.companies?.destination.depotId ?? null,
+          originCompanyCode: code(f.companies?.origin.code),
+          destinationCompanyCode: code(f.companies?.destination.code),
           cargoId: entity(f.cargo),
           adrClass: f.adrCategory.status === "known" ? f.adrCategory.value : null,
           cargoMassKg: quantity(f.cargoMassKg),
@@ -358,6 +364,17 @@ export function createFactRepository(unit: UnitOfWork) {
           wholeTripDistanceSupported: stored.wholeTripDistanceSupported,
           ruleContextComplete: stored.ruleContextComplete,
           reasonCodes: stored.reasons,
+          // Facts stored before VTC-141 have no company columns and read back as unknown.
+          companies: {
+            origin: {
+              depotId: stored.originDepotId,
+              code: stored.originCompanyCode?.toString("utf8") ?? null,
+            },
+            destination: {
+              depotId: stored.destinationDepotId,
+              code: stored.destinationCompanyCode?.toString("utf8") ?? null,
+            },
+          },
           money: metadata.money,
           provenance: metadata.provenance,
           ...(metadata.recordedTelemetry && { recordedTelemetry: metadata.recordedTelemetry }),
@@ -367,6 +384,14 @@ export function createFactRepository(unit: UnitOfWork) {
       return result;
     },
   };
+}
+
+/** Cargo damage percentage of a telemetry fact; null when unknown or outside 0..1. */
+export function damagePercent(evidence: NormalizedTripEvidence): number | null {
+  const damage = evidence.cargoDamageFraction;
+  if (evidence.provider !== "ets2telemetry" || damage.status !== "known") return null;
+  const fraction = Number(damage.value);
+  return fraction >= 0 && fraction <= 1 ? fraction * 100 : null;
 }
 
 /** Explicit normalized private projection; no raw payload, diagnostic text or money. */

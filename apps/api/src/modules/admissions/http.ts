@@ -51,7 +51,8 @@ export async function registerAdmissionsRoutes(
     if (
       (route.endsWith("/copy-link") ||
         route.endsWith("/reissue") ||
-        route.endsWith("/email-deliveries")) &&
+        route.endsWith("/email-deliveries") ||
+        route.endsWith("/truckersmp-checks")) &&
       request.body !== undefined
     )
       throw identityError(422);
@@ -230,6 +231,25 @@ export async function registerAdmissionsRoutes(
       );
       reply.header("ETag", `"v${data.version}"`);
       return envelope(data, request);
+    },
+  );
+  app.post<{ Params: { applicationId: string } }>(
+    "/api/v1/admin/applications/:applicationId/truckersmp-checks",
+    {
+      schema: {
+        params: params("applicationId"),
+        response: { 202: ref("ApplicationStage4TruckersmpCheckEnvelope") },
+      },
+    },
+    async (request, reply) => {
+      const current = await actor(request);
+      csrf.check(request, current);
+      const data = await admissions.recheckTruckers(
+        current,
+        request.params.applicationId,
+        key(request),
+      );
+      return reply.code(202).header("Cache-Control", "no-store").send(envelope(data, request));
     },
   );
   app.get<{ Params: { invitationId: string } }>(

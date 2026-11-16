@@ -364,7 +364,7 @@
             "ApplicationInput.referralSource",
             "ApplicationInput.referralOther"
           ],
-          "description": "Accepts optional referralSource and referralOther. Until VTC-144 activates them the route rejects them with 422 INVALID_PAYLOAD."
+          "description": "Accepts optional referralSource and referralOther."
         }
       }
     },

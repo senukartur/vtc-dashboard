@@ -6,6 +6,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { applicationId } from "@vtc/db";
+import { referralSources } from "@vtc/db/admissions-schema";
 import { identityError } from "../identity/service.js";
 import { mailbox } from "../messaging/content.js";
 
@@ -20,6 +21,8 @@ export interface ApplicationInput {
   games: ("ets2" | "ats")[];
   discord?: string | null;
   introduction?: string | null;
+  referralSource?: (typeof referralSources)[number];
+  referralOther?: string;
 }
 const canonical = (input: unknown): string =>
   JSON.stringify(input, (_key, value: unknown) =>
@@ -129,16 +132,36 @@ function bounded(value: unknown, max: number): value is string {
     Buffer.from(value).toString("utf8") === value
   );
 }
+// Free referral text is rejected, never normalized, unless the MySQL CHECK
+// `REGEXP_LIKE(referral_other, '[^[:space:]]')` accepts it too. ICU [:space:] is Unicode
+// White_Space; JS \s omits U+0085 and adds U+FEFF. Rejecting every C0/C1 control except
+// tab/LF/CR (U+0085 included) and requiring a character outside White_Space and U+FEFF makes
+// API acceptance a subset of the database's. Ajv maxLength and varchar(200) count code points.
+function referralText(value: unknown): value is string {
+  if (typeof value !== "string" || Buffer.from(value).toString("utf8") !== value) return false;
+  const chars = [...value];
+  return (
+    chars.length >= 1 &&
+    chars.length <= 200 &&
+    !chars.some((char) => /\p{Cc}/u.test(char) && !"\t\n\r".includes(char)) &&
+    chars.some((char) => /[^\p{White_Space}\uFEFF]/u.test(char))
+  );
+}
+const applicationKeys = [
+  "nickname",
+  "email",
+  "steamProfileUrl",
+  "games",
+  "discord",
+  "introduction",
+  "referralSource",
+  "referralOther",
+];
 export function validateApplication(input: ApplicationInput) {
   try {
     if (
       !input ||
-      Object.keys(input).some(
-        (key) =>
-          !["nickname", "email", "steamProfileUrl", "games", "discord", "introduction"].includes(
-            key,
-          ),
-      ) ||
+      Object.keys(input).some((key) => !applicationKeys.includes(key)) ||
       !bounded(input.nickname, 128) ||
       !Array.isArray(input.games) ||
       !input.games.length ||
@@ -167,6 +190,12 @@ export function validateApplication(input: ApplicationInput) {
     if (
       (input.discord != null && !bounded(input.discord, 256)) ||
       (input.introduction != null && !bounded(input.introduction, 4000))
+    )
+      throw new Error();
+    if (
+      ("referralSource" in input && !referralSources.includes(input.referralSource as never)) ||
+      ("referralOther" in input &&
+        (input.referralSource !== "other" || !referralText(input.referralOther)))
     )
       throw new Error();
     return {
