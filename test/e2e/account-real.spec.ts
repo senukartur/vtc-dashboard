@@ -279,7 +279,7 @@ test(
         .getByRole("navigation", { name: "Account sections", exact: true })
         .getByRole("link", { name: "Preferences", exact: true })
         .click();
-      await page.getByLabel("Display timezone", { exact: true }).fill("Europe/Warsaw");
+      await page.getByLabel("Display timezone", { exact: true }).selectOption("Europe/Warsaw");
       await page.getByRole("button", { name: "Save", exact: true }).click();
       await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
       await page
@@ -288,9 +288,16 @@ test(
         .click();
       await expect(page.locator("html")).toHaveAttribute("lang", "ru");
       await page.reload();
-      await expect(page.getByLabel("Часовой пояс отображения", { exact: true })).toHaveValue(
-        "Europe/Warsaw",
-      );
+      const timezone = page.getByLabel("Часовой пояс отображения", { exact: true });
+      await expect(timezone).toHaveValue("Europe/Warsaw");
+      // "As on the device" saves null and survives a reload as the selected first option.
+      await timezone.selectOption("");
+      await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+      await expect(page.getByText("Часовой пояс сохранён", { exact: true })).toBeVisible();
+      const device = await (await context.request.get("/api/v1/me")).json();
+      expect(device.data.preferences.displayTimezone).toBeNull();
+      await page.reload();
+      await expect(timezone).toHaveValue("");
       phase = "LOGOUT";
       await signOutFromMenu(page);
       await expect(

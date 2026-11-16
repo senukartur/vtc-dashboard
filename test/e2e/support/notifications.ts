@@ -5,6 +5,7 @@ import {
   notificationFixture,
   notificationId,
   notificationPreferences,
+  notificationPreferencesFor,
 } from "../../../apps/web/src/features/notifications/fixtures.ts";
 import type { DTO, Notification } from "../../../apps/web/src/features/notifications/model.ts";
 export const notificationEnvelope = (data: unknown) => ({
@@ -41,8 +42,11 @@ export async function mockNotifications(page: Page, locale: "en" | "ru" = "en") 
       key: string | undefined;
       etag: string | undefined;
     }[],
+    /** Saved switch values; a read returns the keys the current capabilities receive. */
     prefs: structuredClone(notificationPreferences),
     version: 1,
+    displayTimezone: "Europe/Warsaw" as string | null,
+    selfVersion: 1,
     status: 200,
     prefStatus: 200,
     commandStatus: 200,
@@ -53,6 +57,14 @@ export async function mockNotifications(page: Page, locale: "en" | "ru" = "en") 
     historyGate: null as Promise<void> | null,
     historyNextStatus: 200,
     commandGate: null as Promise<void> | null,
+  };
+  const readPreferences = (): DTO["NotificationPreferences"] => {
+    const keys = Object.keys(
+      notificationPreferencesFor(state.capabilities),
+    ) as (keyof DTO["NotificationPreferences"])[];
+    return Object.fromEntries(
+      keys.map((key) => [key, state.prefs[key] ?? true]),
+    ) as DTO["NotificationPreferences"];
   };
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request(),
@@ -71,8 +83,22 @@ export async function mockNotifications(page: Page, locale: "en" | "ru" = "en") 
       const self = accountFixture(locale).data;
       self.capabilities = state.capabilities;
       self.identityEpoch = state.epoch;
-      self.preferences.displayTimezone = "Europe/Warsaw";
-      return reply(self, state.session ? 200 : 401);
+      self.preferences.displayTimezone = state.displayTimezone;
+      return state.session
+        ? route.fulfill({
+            json: notificationEnvelope(self),
+            headers: { ETag: `"s${state.selfVersion}"` },
+          })
+        : reply(null, 401);
+    }
+    if (path === "/me/preferences" && request.method() === "PATCH") {
+      const body = request.postDataJSON() as DTO["PreferencesStage4"];
+      state.displayTimezone = body.displayTimezone;
+      state.selfVersion++;
+      return route.fulfill({
+        json: notificationEnvelope(body),
+        headers: { ETag: `"s${state.selfVersion}"` },
+      });
     }
     if (path === "/auth/csrf") return reply({ token: "NONFUNCTIONAL_FIXTURE" });
     if (path === "/auth/logout") {
@@ -108,7 +134,7 @@ export async function mockNotifications(page: Page, locale: "en" | "ru" = "en") 
       return reply(data, state.status);
     }
     if (path === "/me/notification-preferences" && request.method() === "GET")
-      return reply(state.prefs, state.prefStatus);
+      return reply(readPreferences(), state.prefStatus);
     if (request.method() === "POST" || request.method() === "PUT") {
       const body = request.postData() ? request.postDataJSON() : undefined;
       state.commands.push({
@@ -121,9 +147,14 @@ export async function mockNotifications(page: Page, locale: "en" | "ru" = "en") 
       if (state.commandGate) await state.commandGate;
       if (state.commandStatus !== 200) return reply(null, state.commandStatus);
       if (path === "/me/notification-preferences") {
-        state.prefs = body as DTO["NotificationPreferences"];
+        // The server checks the exact key set first, then the revision.
+        const keys = Object.keys(readPreferences()).sort();
+        if (JSON.stringify(Object.keys(body ?? {}).sort()) !== JSON.stringify(keys))
+          return reply(null, 422);
+        if (request.headers()["if-match"] !== `"v${state.version}"`) return reply(null, 412);
+        state.prefs = { ...state.prefs, ...(body as DTO["NotificationPreferences"]) };
         state.version++;
-        return reply(state.prefs);
+        return reply(readPreferences());
       }
       for (const item of state.items)
         if (path.endsWith(`/${item.id}/read`) || path === "/notifications/read-all")
