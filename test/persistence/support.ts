@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 107 tables including the ledger and 33 migrations.
+// Fresh full-schema preparation now covers 107 tables including the ledger and 34 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -285,7 +285,8 @@ async function publishedPrefixFolder(
     | 29
     | 30
     | 31
-    | 32,
+    | 32
+    | 33,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -345,6 +346,8 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_QUALIFICATION_LADDER_PREFIX_REQUIRED");
   if (count === 32 && entries[31]?.tag !== "0031_odd_stellaris")
     throw new Error("PUBLISHED_STAGE_4_PREFIX_REQUIRED");
+  if (count === 33 && entries[32]?.tag !== "0032_bizarre_iron_patriot")
+    throw new Error("PUBLISHED_NOTIFICATION_TOGGLE_RECOPY_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -488,6 +491,11 @@ export async function qualificationLadderPriorFolder(): Promise<string> {
 
 export async function stage4PriorFolder(): Promise<string> {
   return publishedPrefixFolder(32);
+}
+
+/** Every published migration through 0032, before the VTC-142 toggle re-copy. */
+export async function notificationToggleRecopyPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(33);
 }
 
 /**
