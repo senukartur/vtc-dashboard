@@ -7,6 +7,7 @@ import { Button, Card, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { useUpcomingEventCard } from "../events/event-list-queries.js";
 import { RecentTripsWidget, UpcomingEventWidget } from "./blocks.js";
+import { TripBreakdowns } from "./breakdowns.js";
 import {
   ActualDistanceChart,
   KpiStrip,
@@ -16,15 +17,17 @@ import {
   ReviewerQueueWidget,
 } from "./components.js";
 import {
-  computePeriodDates,
+  effectiveGranularity,
   type GameFilter,
+  type OverviewPeriod,
+  overviewPeriods,
   PERIOD_FALLBACK_TIMEZONE,
-  type PeriodFilter,
-  periods,
+  periodQuery,
   periodTimeZone,
 } from "./model.js";
 import {
   useCompanyAnalytics,
+  useCompanyBreakdown,
   useDriverLeaderboard,
   useMyQualificationProgress,
   useRecentCompanyTrips,
@@ -32,7 +35,7 @@ import {
   useUpcomingEvent,
 } from "./queries.js";
 import { Stage2UpcomingEventWidget } from "./Stage2UpcomingEventWidget.js";
-import { untilAnchored } from "./view-model.js";
+import { placeView, untilAnchored } from "./view-model.js";
 import { WorkspaceActions } from "./WorkspaceActions.js";
 import "./dashboard.css";
 
@@ -67,8 +70,9 @@ function DashboardContent() {
 
   const periodId = useId();
   const [game, setGame] = useState<GameFilter>("all");
-  const [period, setPeriod] = useState<PeriodFilter>("thisMonth");
+  const [period, setPeriod] = useState<OverviewPeriod>("thisMonth");
   const [granularity, setGranularity] = useState<"day" | "month">("day");
+  const allTime = period === "allTime";
 
   // Overview reads wait for the reporting timezone, so the first period request already has its
   // dates and, on a cold load, analytics and the leaderboard enter the read queue first. A failed
@@ -79,29 +83,19 @@ function DashboardContent() {
     timezoneQuery.isError && !timezoneQuery.isFetching,
   );
   const anchored = reportingTimezone !== undefined;
-  const dates = computePeriodDates(
-    period,
-    new Date(),
-    reportingTimezone ?? PERIOD_FALLBACK_TIMEZONE,
-  );
+  // All time sends no dates, but its reads still wait for the zone, like every overview read.
+  const query = periodQuery(period, new Date(), reportingTimezone ?? PERIOD_FALLBACK_TIMEZONE);
   const effectiveGame = game === "all" ? undefined : game;
 
   const analyticsQuery = useCompanyAnalytics({
-    fromDate: dates.fromDate,
-    toDateExclusive: dates.toDateExclusive,
+    query,
     game: effectiveGame,
-    granularity,
+    granularity: effectiveGranularity(period, granularity),
     enabled: anchored,
   });
 
-  // Contract maximum: the widget shows the top ten, the KPI counts every returned driver.
-  const leaderboardQuery = useDriverLeaderboard({
-    fromDate: dates.fromDate,
-    toDateExclusive: dates.toDateExclusive,
-    game: effectiveGame,
-    limit: 100,
-    enabled: anchored,
-  });
+  // The top ten; the viewer's place comes with the page, active drivers from analytics.
+  const leaderboardQuery = useDriverLeaderboard({ query, game: effectiveGame, enabled: anchored });
 
   // Enabled in the same render as the period reads and after them in hook order. The shell chip
   // keeps its own enabled observer of the nearest event.
@@ -114,11 +108,17 @@ function DashboardContent() {
   const workspaceSummary = useWorkspaceSummary();
   // Follows the game filter only: the trips list has no date filter for the period.
   const recentTripsQuery = useRecentCompanyTrips(effectiveGame, { enabled: anchored });
+  // Last in hook order, so on a cold load the breakdowns enter the read queue after the blocks.
+  const breakdownParams = { query, game: effectiveGame, enabled: anchored };
+  const routeQuery = useCompanyBreakdown("route", breakdownParams);
+  const cargoQuery = useCompanyBreakdown("cargo", breakdownParams);
+  const sourceQuery = useCompanyBreakdown("source", breakdownParams);
 
   /**
    * Retry rereads a pending, failed or zone-less stats read first (reusing a read in flight). A new
-   * zone changes the period keys and those queries fetch on their own; refetching the current ones
-   * would repeat the old dates. Refetch ignores `enabled`, so it never runs on a pending zone.
+   * zone changes the dated period keys and those queries fetch on their own; refetching the current
+   * ones would repeat the old dates. All time has no dates, so its keys stay and are refetched.
+   * Refetch ignores `enabled`, so it never runs on a pending zone.
    */
   const retryPeriodData = async () => {
     if (
@@ -129,10 +129,10 @@ function DashboardContent() {
       const result = await timezoneQuery.refetch({ cancelRefetch: false });
       // The page may have gone (navigation, revoked access): no private reads for it.
       if (!titleRef.current) return;
-      if (periodTimeZone(result.data, result.isError) !== reportingTimezone) return;
+      if (!allTime && periodTimeZone(result.data, result.isError) !== reportingTimezone) return;
     }
-    void analyticsQuery.refetch({ cancelRefetch: false });
-    void leaderboardQuery.refetch({ cancelRefetch: false });
+    for (const read of [analyticsQuery, leaderboardQuery, routeQuery, cargoQuery, sourceQuery])
+      void read.refetch({ cancelRefetch: false });
   };
 
   const canReview = capabilities.includes("trips.review");
@@ -144,6 +144,9 @@ function DashboardContent() {
   const pending = analyticsPending || leaderboardPending;
   // A failed background refresh keeps the last data; the alert is only for having none.
   const analyticsFailed = anchored && analyticsQuery.isError && !analytics;
+
+  const self = session.self?.member;
+  const place = placeView(leaderboard, anchored && leaderboardQuery.isError && !leaderboard);
 
   // Zero only counts as an empty company when both sources actually answered.
   const isCompanyEmpty =
@@ -188,11 +191,11 @@ function DashboardContent() {
               id={periodId}
               value={period}
               onChange={(event) => {
-                const next = periods.find((item) => item === event.target.value);
+                const next = overviewPeriods.find((item) => item === event.target.value);
                 if (next) setPeriod(next);
               }}
             >
-              {periods.map((item) => (
+              {overviewPeriods.map((item) => (
                 <option key={item} value={item}>
                   {t(`filters.${item}`)}
                 </option>
@@ -214,9 +217,8 @@ function DashboardContent() {
           <KpiStrip
             analytics={analytics}
             analyticsPending={analyticsPending}
-            leaderboard={leaderboard}
+            place={place}
             leaderboardPending={leaderboardPending}
-            leaderboardFailed={anchored && leaderboardQuery.isError && !leaderboard}
             locale={locale}
           />
         </>
@@ -246,13 +248,18 @@ function DashboardContent() {
               displayTimezone={displayTimezone}
               granularity={granularity}
               onGranularityChange={setGranularity}
+              showGranularity={!allTime}
             />
             <MyQualificationWidget
               ets2Progress={untilAnchored(ets2ProgressQuery, anchored)}
               atsProgress={untilAnchored(atsProgressQuery, anchored)}
               available={capabilities.includes("trips.submit_own")}
             />
-            <LeaderboardWidget query={untilAnchored(leaderboardQuery, anchored)} locale={locale} />
+            <LeaderboardWidget
+              query={untilAnchored(leaderboardQuery, anchored)}
+              locale={locale}
+              self={self ? { id: self.id, nickname: self.nickname } : undefined}
+            />
           </>
         )}
         <div className="dashboard-side">
@@ -279,6 +286,14 @@ function DashboardContent() {
             </>
           )}
         </div>
+        {!analyticsFailed && (
+          <TripBreakdowns
+            route={untilAnchored(routeQuery, anchored)}
+            cargo={untilAnchored(cargoQuery, anchored)}
+            source={untilAnchored(sourceQuery, anchored)}
+            locale={locale}
+          />
+        )}
         {!analyticsFailed && (
           <RecentTripsWidget
             query={untilAnchored(recentTripsQuery, anchored)}

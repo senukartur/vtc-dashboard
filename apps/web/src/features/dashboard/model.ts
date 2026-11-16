@@ -64,6 +64,31 @@ export function computePeriodDates(
 }
 
 /**
+ * Overview period choices: the shared calendar periods plus "All time" (VTC-148). Only the
+ * overview offers all time; the trip list keeps using `periods`.
+ */
+export type OverviewPeriod = PeriodFilter | "allTime";
+export const overviewPeriods: readonly OverviewPeriod[] = [...periods, "allTime"];
+
+/** Period parameters of the overview reads: all time sends no dates, the others send both. */
+export type PeriodQuery =
+  | { period: "all_time" }
+  | { period?: undefined; fromDate: string; toDateExclusive: string };
+
+export function periodQuery(period: OverviewPeriod, now: Date, timeZone: string): PeriodQuery {
+  if (period === "allTime") return { period: "all_time" };
+  return computePeriodDates(period, now, timeZone);
+}
+
+/** All time is reported in whole months (the API rejects daily buckets for it). */
+export function effectiveGranularity(
+  period: OverviewPeriod,
+  granularity: "day" | "month",
+): "day" | "month" {
+  return period === "allTime" ? "month" : granularity;
+}
+
+/**
  * Zone for the period anchors, read from the public company stats. Undefined while that read is
  * pending; UTC when it failed without data or the company has no reporting timezone. Retained
  * data wins over a later failed refresh.

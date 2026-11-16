@@ -1,11 +1,13 @@
 // Pure view model for the overview's recent company trips and nearest convoy blocks (VTC-055),
 // plus the pending query view for any page that waits for the reporting timezone (the overview
 // and, since VTC-078, the driver profile). It only decides what the blocks show; requests, keys,
-// ETags and command state stay in the hooks and components.
+// ETags and command state stay in the hooks and components. Since VTC-148 it also builds the
+// statistics request paths and the place, leaderboard and breakdown views.
 import { formatQuantity, formatUtc, type Locale } from "../../shared/formatting.js";
 import { AccountFailure } from "../account/transport.js";
 import type { EventPhase, ResponseValue } from "../events/view-model.js";
 import { promotionReadyCount } from "../qualifications/promotion-summary.js";
+import type { PeriodQuery } from "./model.js";
 import { dashboardTranslations } from "./translations.js";
 import type { DTO } from "./transport.js";
 
@@ -236,4 +238,255 @@ export function visibleActionSections(
       ? [{ key, count }]
       : [];
   });
+}
+
+// Overview statistics (VTC-148): request paths, the viewer's place, Stage 4 KPI values,
+// leaderboard rows and the trip breakdowns. Components format and render the results.
+
+type Game = "ets2" | "ats";
+
+function periodParams(query: PeriodQuery): Record<string, string> {
+  return query.period === "all_time"
+    ? { period: "all_time" }
+    : { fromDate: query.fromDate, toDateExclusive: query.toDateExclusive };
+}
+
+/** Company analytics. All time sends no dates and always month buckets (day is rejected). */
+export function analyticsPath(
+  query: PeriodQuery,
+  options: { game?: Game | undefined; granularity: "day" | "month" },
+) {
+  const granularity = query.period === "all_time" ? "month" : options.granularity;
+  return `/analytics/company?${new URLSearchParams({
+    ...periodParams(query),
+    granularity,
+    ...(options.game ? { game: options.game } : {}),
+  })}`;
+}
+
+/** The overview shows the top ten; the viewer's own row comes with the page when ranked. */
+export const LEADERBOARD_LIMIT = 10;
+
+export function leaderboardPath(query: PeriodQuery, game?: Game) {
+  return `/analytics/leaderboard?${new URLSearchParams({
+    ...periodParams(query),
+    limit: String(LEADERBOARD_LIMIT),
+    ...(game ? { game } : {}),
+  })}`;
+}
+
+export type BreakdownDimension = "route" | "cargo" | "source";
+/** Top routes and cargo shown per card; the source split always has its two parts. */
+export const BREAKDOWN_LIMIT = 5;
+
+/** Labels in the interface language; `limit` only for route and cargo (source rejects it). */
+export function breakdownPath(
+  dimension: BreakdownDimension,
+  query: PeriodQuery,
+  options: { game?: Game | undefined; locale: Locale },
+) {
+  return `/analytics/company/breakdown?${new URLSearchParams({
+    dimension,
+    ...periodParams(query),
+    ...(options.game ? { game: options.game } : {}),
+    locale: options.locale,
+    ...(dimension === "source" ? {} : { limit: String(BREAKDOWN_LIMIT) }),
+  })}`;
+}
+
+type Leaderboard = DTO["ListLeaderboardEntry"];
+
+export type PlaceView =
+  | { kind: "loading" }
+  | { kind: "unavailable" }
+  | { kind: "notRanked" }
+  | {
+      kind: "ranked";
+      position: number;
+      /** Undefined when the response does not say how many members are ranked. */
+      ranked: number | undefined;
+      acceptedTrips: number;
+      actualDistanceM: string;
+    };
+
+/**
+ * The viewer's place from the leaderboard read. An absent viewer (no Stage 4 data) or a failure
+ * without data is unavailable; null means the viewer has no accepted trip in the period.
+ */
+export function placeView(leaderboard: Leaderboard | undefined, failed: boolean): PlaceView {
+  if (!leaderboard) return failed ? { kind: "unavailable" } : { kind: "loading" };
+  const { viewer } = leaderboard;
+  if (viewer === undefined) return { kind: "unavailable" };
+  if (viewer === null) return { kind: "notRanked" };
+  return {
+    kind: "ranked",
+    position: viewer.position,
+    ranked: leaderboard.rankedMembers,
+    acceptedTrips: viewer.acceptedTrips,
+    actualDistanceM: viewer.actualDistanceM,
+  };
+}
+
+type CompanyAnalytics = DTO["AnalyticsStage4Company"];
+
+/**
+ * Active drivers come from analytics only. They include former members with accepted trips, so
+ * active members are a separate sub-line, never a denominator. Null means unavailable.
+ */
+export function activeDriversView(analytics: CompanyAnalytics) {
+  return {
+    drivers: analytics.activeDrivers ?? null,
+    members: analytics.activeMembers ?? null,
+  };
+}
+
+/** Per-game totals for the KPI sub-lines, only when the response splits both games. */
+export function gameSplit(analytics: CompanyAnalytics) {
+  const ets2 = analytics.byGame?.find((item) => item.game === "ets2");
+  const ats = analytics.byGame?.find((item) => item.game === "ats");
+  return ets2 && ats ? { ets2, ats } : null;
+}
+
+export type LeaderboardRow = {
+  entry: Leaderboard["items"][number];
+  rank: number;
+  self: boolean;
+};
+
+/**
+ * Shown leaderboard rows with their rank (server position, else the list order) and the viewer's
+ * own row marked. A ranked viewer outside the shown rows is returned separately for an extra row.
+ */
+export function leaderboardRows(leaderboard: Leaderboard, selfId: string | undefined) {
+  const rows: LeaderboardRow[] = leaderboard.items
+    .slice(0, LEADERBOARD_LIMIT)
+    .map((entry, index) => ({
+      entry,
+      rank: entry.position ?? index + 1,
+      self: selfId !== undefined && entry.member.id === selfId,
+    }));
+  const viewer = leaderboard.viewer ?? null;
+  const offPage = viewer && !rows.some((row) => row.self) ? viewer : null;
+  return { rows, offPage };
+}
+
+type RouteBreakdown = DTO["AnalyticsStage4RouteBreakdown"];
+type CargoBreakdown = DTO["AnalyticsStage4CargoBreakdown"];
+type SourceBreakdown = DTO["AnalyticsStage4SourceBreakdown"];
+export type BreakdownData = {
+  route: RouteBreakdown;
+  cargo: CargoBreakdown;
+  source: SourceBreakdown;
+};
+
+export type BreakdownRow = {
+  key: string;
+  game: Game;
+  /** Origin and destination for a route, the cargo alone otherwise; the role is a stable key. */
+  labels: { role: "origin" | "destination" | "cargo"; label: DTO["CatalogLabel"] }[];
+  /** True when any label is an English fallback for the requested locale. */
+  fallback: boolean;
+  acceptedTrips: number;
+  /** Decorative bar width (0–100) relative to the largest shown item. */
+  barPercent: number;
+};
+
+export type BreakdownView = {
+  rows: BreakdownRow[];
+  /** Game chips only when the breakdown covers both games. */
+  chips: boolean;
+  /** Trips outside the shown items, or null when there are none. */
+  remainder: number | null;
+  /** Trips whose city or cargo was not recognized, or null when there are none. */
+  undetermined: number | null;
+};
+
+/** Empty only for a computed zero total; a failure is never empty. */
+export function breakdownEmpty(data: { totals: { acceptedTrips: number } }) {
+  return data.totals.acceptedTrips === 0;
+}
+
+export function breakdownRows(data: RouteBreakdown | CargoBreakdown): BreakdownView {
+  const items: { key: string; game: Game; labels: BreakdownRow["labels"]; trips: number }[] =
+    data.dimension === "route"
+      ? data.items.map((item) => ({
+          key: `${item.game}:${item.origin.entityId}:${item.destination.entityId}`,
+          game: item.game,
+          labels: [
+            { role: "origin", label: item.origin },
+            { role: "destination", label: item.destination },
+          ],
+          trips: item.acceptedTrips,
+        }))
+      : data.items.map((item) => ({
+          key: `${item.game}:${item.cargo.entityId}`,
+          game: item.game,
+          labels: [{ role: "cargo", label: item.cargo }],
+          trips: item.acceptedTrips,
+        }));
+  const largest = Math.max(0, ...items.map((item) => item.trips));
+  return {
+    rows: items.map((item) => ({
+      key: item.key,
+      game: item.game,
+      labels: item.labels,
+      fallback: item.labels.some(({ label }) => label.englishFallback),
+      acceptedTrips: item.trips,
+      barPercent: largest > 0 ? (item.trips / largest) * 100 : 0,
+    })),
+    chips: data.game === null,
+    remainder: data.remainder.acceptedTrips > 0 ? data.remainder.acceptedTrips : null,
+    undetermined: data.undetermined.acceptedTrips > 0 ? data.undetermined.acceptedTrips : null,
+  };
+}
+
+export type SourcePart = {
+  source: "ets2telemetry" | "manual" | "undetermined";
+  acceptedTrips: number;
+  /** Whole percent of the total, rounded per part (the parts may not add up to exactly 100). */
+  percent: number;
+};
+
+/**
+ * The source split in its fixed order (telemetry, manual), plus undetermined trips only when
+ * there are some. A zero total has no shares: the card shows its empty state instead.
+ */
+export function sourceShares(data: SourceBreakdown): SourcePart[] {
+  const total = data.totals.acceptedTrips;
+  if (total === 0) return [];
+  const share = (trips: number) => Math.round((trips * 100) / total);
+  const parts: SourcePart[] = (["ets2telemetry", "manual"] as const).map((source) => {
+    const trips = data.items.find((item) => item.source === source)?.acceptedTrips ?? 0;
+    return { source, acceptedTrips: trips, percent: share(trips) };
+  });
+  if (data.undetermined.acceptedTrips > 0)
+    parts.push({
+      source: "undetermined",
+      acceptedTrips: data.undetermined.acceptedTrips,
+      percent: share(data.undetermined.acceptedTrips),
+    });
+  return parts;
+}
+
+const numberTag = { ru: "ru-RU", en: "en-GB" } as const;
+export type TripsKey = "tripsOne" | "tripsFew" | "tripsMany" | "tripsOther";
+
+/**
+ * Translation key for a trip count. Plain keys chosen by the CLDR plural rules keep the RU and EN
+ * key sets identical; i18next plural suffixes would differ by language.
+ */
+export function tripsKey(count: number, locale: Locale): TripsKey {
+  const category = new Intl.PluralRules(numberTag[locale]).select(count);
+  if (category === "one") return "tripsOne";
+  if (category === "few") return "tripsFew";
+  if (category === "many") return "tripsMany";
+  return "tripsOther";
+}
+
+/** A whole percent in the interface language ("76%", "76 %"). */
+export function formatPercent(percent: number, locale: Locale) {
+  return new Intl.NumberFormat(numberTag[locale], {
+    style: "percent",
+    maximumFractionDigits: 0,
+  }).format(percent / 100);
 }
