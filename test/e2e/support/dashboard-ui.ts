@@ -2,8 +2,18 @@ import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 import {
+  analyticsWithoutStage4,
+  type BreakdownDimension,
   type FixtureLocale,
+  type LeaderboardViewer,
+  leaderboardWithoutStage4,
+  makeAllTimeAnalyticsFixture,
+  makeAnalyticsFixture,
+  makeBreakdownFixture,
   makeCompanyStatsFixture,
+  makeFilteredAnalyticsFixture,
+  makeLeaderboardFixture,
+  makeMemberAnalyticsFixture,
   makeOptionalEventFixture,
   makeRecentTripsFixture,
   makeResponseCountsFixture,
@@ -21,166 +31,17 @@ export const formerMemberId = "41000000-0000-4000-8000-000000000003";
 export const levelIdEts2 = "50000000-0000-4000-8000-000000000002";
 export const levelIdAts = "50000000-0000-4000-8000-000000000001";
 
+// The analytics and leaderboard builders moved to the pure fixtures module (VTC-148); the specs
+// keep importing them from here.
+export {
+  gameBuckets,
+  makeAnalyticsFixture,
+  makeFilteredAnalyticsFixture,
+  makeLeaderboardFixture,
+  makeSizedLeaderboardFixture,
+} from "./dashboard-fixtures.ts";
+
 const meta = { requestId: "synthetic-dashboard-request" };
-
-export function makeAnalyticsFixture(empty = false) {
-  if (empty) {
-    return {
-      data: {
-        acceptedTrips: 0,
-        actualDistanceM: "0",
-        reportingTimezone: "Europe/Moscow",
-        fromDate: "2026-10-01",
-        toDateExclusive: "2026-11-01",
-        granularity: "day" as const,
-        buckets: [],
-        computedAt: "2026-10-26T12:00:00.000Z",
-        projectionVersion: 1,
-        projectionPending: false,
-      },
-      meta,
-    };
-  }
-
-  return {
-    data: {
-      acceptedTrips: 42,
-      actualDistanceM: "125430000", // 125,430 km
-      reportingTimezone: "Europe/Moscow",
-      fromDate: "2026-10-01",
-      toDateExclusive: "2026-11-01",
-      granularity: "day" as const,
-      buckets: [
-        { date: "2026-10-01", acceptedTrips: 5, actualDistanceM: "15000000" },
-        { date: "2026-10-02", acceptedTrips: 12, actualDistanceM: "38000000" },
-        { date: "2026-10-03", acceptedTrips: 8, actualDistanceM: "24000000" },
-        { date: "2026-10-04", acceptedTrips: 17, actualDistanceM: "48430000" }, // max bar
-      ],
-      computedAt: "2026-10-26T12:00:00.000Z",
-      projectionVersion: 2,
-      projectionPending: false,
-      // Stage 4 aggregates the live API returns since VTC-143; the client must accept them.
-      period: "range" as const,
-      activeDrivers: 3,
-      activeMembers: 5,
-      byGame: [
-        { game: "ets2" as const, acceptedTrips: 30, actualDistanceM: "90000000" },
-        { game: "ats" as const, acceptedTrips: 12, actualDistanceM: "35430000" },
-      ],
-    },
-    meta,
-  };
-}
-
-export function makeLeaderboardFixture(empty = false) {
-  if (empty) {
-    return { data: { items: [], nextCursor: null }, meta };
-  }
-
-  return {
-    data: {
-      items: [
-        {
-          member: {
-            id: member1Id,
-            nickname: "AlphaDriver",
-            formerMember: false,
-            roles: ["director" as const, "driver" as const],
-          },
-          acceptedTrips: 24,
-          actualDistanceM: "72000000",
-        },
-        {
-          member: {
-            id: member2Id,
-            nickname: "BetaHauler",
-            formerMember: false,
-            roles: ["dispatcher" as const, "driver" as const],
-          },
-          acceptedTrips: 18,
-          actualDistanceM: "53430000",
-        },
-      ],
-      nextCursor: null,
-    },
-    meta,
-  };
-}
-
-/** Per-game daily buckets for filter tests; ETS2 + ATS add up to the all-games fixture. */
-const gameBuckets = {
-  ets2: [
-    { date: "2026-10-01", acceptedTrips: 3, actualDistanceM: "9000000" },
-    { date: "2026-10-02", acceptedTrips: 7, actualDistanceM: "22000000" },
-    { date: "2026-10-04", acceptedTrips: 10, actualDistanceM: "30430000" },
-  ],
-  ats: [
-    { date: "2026-10-01", acceptedTrips: 2, actualDistanceM: "6000000" },
-    { date: "2026-10-02", acceptedTrips: 5, actualDistanceM: "16000000" },
-    { date: "2026-10-03", acceptedTrips: 8, actualDistanceM: "24000000" },
-    { date: "2026-10-04", acceptedTrips: 7, actualDistanceM: "18000000" },
-  ],
-} as const;
-
-/**
- * Filter-aware analytics: buckets follow the requested game and granularity, totals are the exact
- * bucket sums, and the echoed period matches the request.
- */
-export function makeFilteredAnalyticsFixture(search: URLSearchParams, empty = false) {
-  const base = makeAnalyticsFixture(empty);
-  const game = search.get("game");
-  const daily: { date: string; acceptedTrips: number; actualDistanceM: string }[] = empty
-    ? []
-    : game === "ets2" || game === "ats"
-      ? gameBuckets[game].map((bucket) => ({ ...bucket }))
-      : base.data.buckets;
-  const acceptedTrips = daily.reduce((sum, bucket) => sum + bucket.acceptedTrips, 0);
-  const actualDistanceM = String(
-    daily.reduce((sum, bucket) => sum + BigInt(bucket.actualDistanceM), 0n),
-  );
-  const granularity = search.get("granularity") === "month" ? ("month" as const) : ("day" as const);
-  const buckets =
-    granularity === "month" && daily.length > 0
-      ? [{ date: "2026-10-01", acceptedTrips, actualDistanceM }]
-      : daily;
-  return {
-    data: {
-      ...base.data,
-      acceptedTrips,
-      actualDistanceM,
-      fromDate: search.get("fromDate") ?? base.data.fromDate,
-      toDateExclusive: search.get("toDateExclusive") ?? base.data.toDateExclusive,
-      granularity,
-      buckets,
-      // byGame lists only the filtered game, and its totals follow the buckets.
-      ...("byGame" in base.data && (game === "ets2" || game === "ats")
-        ? { byGame: [{ game, acceptedTrips, actualDistanceM }] }
-        : {}),
-    },
-    meta,
-  };
-}
-
-/** Leaderboard with `size` fictional entries; the first two match the default fixture. */
-export function makeSizedLeaderboardFixture(size: number, nextCursor: string | null = null) {
-  const base = makeLeaderboardFixture(false).data.items;
-  const items = Array.from({ length: size }, (_, index) => {
-    const known = base[index];
-    if (known) return known;
-    const number = String(index + 1).padStart(3, "0");
-    return {
-      member: {
-        id: `41000000-0000-4000-8000-000000001${number}`,
-        nickname: `Fictional Driver ${number}`,
-        formerMember: false,
-        roles: ["driver" as const],
-      },
-      acceptedTrips: Math.max(1, 17 - index),
-      actualDistanceM: String((200 - index) * 200000),
-    };
-  });
-  return { data: { items, nextCursor }, meta };
-}
 
 export function makeMembersListFixture() {
   return {
@@ -367,7 +228,22 @@ export type DashboardEndpoint =
   | "counts"
   | "rsvp"
   | "summary"
-  | "stats";
+  | "stats"
+  | "breakdownRoute"
+  | "breakdownCargo"
+  | "breakdownSource";
+
+const breakdownEndpoint = {
+  route: "breakdownRoute",
+  cargo: "breakdownCargo",
+  source: "breakdownSource",
+} as const satisfies Record<BreakdownDimension, DashboardEndpoint>;
+/** Endpoints that take the period parameters. */
+const periodEndpoints: readonly DashboardEndpoint[] = [
+  "analytics",
+  "leaderboard",
+  ...Object.values(breakdownEndpoint),
+];
 
 /** Planned outcome of the next RSVP PUT: a failure status (with Retry-After) or a network abort. */
 export type RsvpOutcome = { status: number; retryAfter?: number } | "abort";
@@ -413,6 +289,33 @@ export interface DashboardMockState {
   rsvpOutcomes: RsvpOutcome[];
   /** Zone in the public company stats; null returns the unavailable month. */
   reportingTimezone: string | null;
+  /** The viewer's place in the leaderboard (default: not ranked). */
+  leaderboardViewer: LeaderboardViewer;
+  /** Breakdowns answer a computed zero for the period. */
+  emptyBreakdowns: boolean;
+  /** False answers analytics and the leaderboard without their Stage 4 fields. */
+  stage4: boolean;
+  /** Requests answered with 422 because they break the API's period or limit rules. */
+  rejected: URL[];
+}
+
+/**
+ * The API's 422 rules for the period parameters: all time forbids dates, a range needs both,
+ * company analytics rejects day buckets for all time, and the source split rejects `limit`.
+ */
+function invalidQuery(endpoint: DashboardEndpoint, search: URLSearchParams) {
+  const period = search.get("period") ?? "range";
+  const dated = search.has("fromDate") || search.has("toDateExclusive");
+  if (period !== "range" && period !== "all_time") return true;
+  if (period === "all_time" && dated) return true;
+  if (period === "range" && !(search.has("fromDate") && search.has("toDateExclusive"))) return true;
+  if (endpoint === "analytics" && period === "all_time" && search.get("granularity") === "day")
+    return true;
+  if (endpoint === "breakdownSource" && search.has("limit")) return true;
+  const limit = Number(search.get("limit") ?? 1);
+  if (endpoint === "leaderboard" && !(limit >= 1 && limit <= 100)) return true;
+  if (endpoint.startsWith("breakdown") && !(limit >= 1 && limit <= 10)) return true;
+  return false;
 }
 
 /** The mocked endpoint of a request; trips are split by scope, my-response by method. */
@@ -420,6 +323,12 @@ function endpointOf(method: string, url: URL): DashboardEndpoint | undefined {
   const path = url.pathname;
   if (path === "/api/v1/analytics/company") return "analytics";
   if (path === "/api/v1/analytics/leaderboard") return "leaderboard";
+  if (path === "/api/v1/analytics/company/breakdown") {
+    const dimension = url.searchParams.get("dimension");
+    return dimension === "route" || dimension === "cargo" || dimension === "source"
+      ? breakdownEndpoint[dimension]
+      : undefined;
+  }
   if (path === "/api/v1/me/qualification-progress") return "progress";
   if (path === "/api/v1/me/upcoming-event") return "event";
   if (path === "/api/v1/me/workspace-summary") return "summary";
@@ -446,7 +355,9 @@ export async function mockDashboardRoutes(
     failures?: Partial<Record<DashboardEndpoint, number>>;
     capabilities?: string[];
     holdAnalytics?: boolean;
+    /** Ranked members (default 2, or 15 with the viewer below the page). */
     leaderboardSize?: number;
+    leaderboardViewer?: LeaderboardViewer;
     leaderboardNextCursor?: boolean;
     /** Public company stats zone (default Europe/Moscow); null: no reporting timezone. */
     reportingTimezone?: string | null;
@@ -493,6 +404,10 @@ export async function mockDashboardRoutes(
     rsvpOutcomes: [],
     reportingTimezone:
       options.reportingTimezone === undefined ? "Europe/Moscow" : options.reportingTimezone,
+    leaderboardViewer: options.leaderboardViewer ?? "unranked",
+    emptyBreakdowns: false,
+    stage4: true,
+    rejected: [],
   };
   if (options.holdAnalytics) state.holdAnalytics();
   await page.route("**/api/v1/**", async (route) => {
@@ -515,6 +430,14 @@ export async function mockDashboardRoutes(
     const failure = endpoint && state.failures[endpoint];
     if (failure)
       return route.fulfill({ status: failure, json: { error: { code: "SYNTHETIC_FAILURE" } } });
+    if (
+      endpoint &&
+      periodEndpoints.includes(endpoint) &&
+      invalidQuery(endpoint, url.searchParams)
+    ) {
+      state.rejected.push(url);
+      return route.fulfill({ status: 422, json: { error: { code: "VALIDATION_FAILED" } } });
+    }
 
     if (path === "/api/v1/auth/csrf") {
       return route.fulfill({ json: { data: { token: "NONFUNCTIONAL_FIXTURE" }, meta } });
@@ -525,22 +448,30 @@ export async function mockDashboardRoutes(
       else self.data.capabilities.push("trips.review", "company.read");
       return route.fulfill({ json: self });
     }
-    if (path === "/api/v1/analytics/company") {
-      if (options.filterAware)
-        return route.fulfill({
-          json: makeFilteredAnalyticsFixture(url.searchParams, options.emptyCompany),
-        });
-      return route.fulfill({ json: makeAnalyticsFixture(options.emptyCompany) });
+    if (endpoint === "analytics") {
+      const game = url.searchParams.get("game");
+      const fixture = options.filterAware
+        ? makeFilteredAnalyticsFixture(url.searchParams, options.emptyCompany)
+        : url.searchParams.get("period") === "all_time"
+          ? makeAllTimeAnalyticsFixture(
+              game === "ets2" || game === "ats" ? game : undefined,
+              options.emptyCompany,
+            )
+          : makeAnalyticsFixture(options.emptyCompany);
+      return route.fulfill({ json: state.stage4 ? fixture : analyticsWithoutStage4(fixture) });
     }
-    if (path === "/api/v1/analytics/leaderboard") {
-      if (options.leaderboardSize !== undefined || options.leaderboardNextCursor)
-        return route.fulfill({
-          json: makeSizedLeaderboardFixture(
-            options.leaderboardSize ?? 2,
-            options.leaderboardNextCursor ? "NONFUNCTIONAL_CURSOR" : null,
-          ),
-        });
-      return route.fulfill({ json: makeLeaderboardFixture(options.emptyCompany) });
+    if (endpoint === "leaderboard") {
+      const fixture = makeLeaderboardFixture({
+        empty: options.emptyCompany ?? false,
+        ...(options.leaderboardSize !== undefined ? { size: options.leaderboardSize } : {}),
+        nextCursor: options.leaderboardNextCursor ?? false,
+        viewer: state.leaderboardViewer,
+        search: url.searchParams,
+      });
+      return route.fulfill({ json: state.stage4 ? fixture : leaderboardWithoutStage4(fixture) });
+    }
+    if (endpoint && Object.values<string>(breakdownEndpoint).includes(endpoint)) {
+      return route.fulfill({ json: makeBreakdownFixture(url.searchParams, state.emptyBreakdowns) });
     }
     if (path === "/api/v1/me/trip-status-summary") {
       return route.fulfill({
@@ -623,7 +554,7 @@ export async function mockDashboardRoutes(
       return route.fulfill({ json: makeMembersListFixture() });
     }
     if (path.startsWith("/api/v1/members/") && path.endsWith("/analytics")) {
-      return route.fulfill({ json: makeAnalyticsFixture(false) });
+      return route.fulfill({ json: makeMemberAnalyticsFixture() });
     }
     if (path.startsWith("/api/v1/members/") && path.endsWith("/qualification-progress")) {
       const game = (url.searchParams.get("game") ?? "ets2") as "ets2" | "ats";

@@ -3,8 +3,11 @@ import { pagination } from "../../apps/api/src/modules/identity/pagination.ts";
 import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
 import {
   computePeriodDates,
+  effectiveGranularity,
+  overviewPeriods,
   PERIOD_FALLBACK_TIMEZONE,
   type PeriodFilter,
+  periodQuery,
   periods,
   periodTimeZone,
   progressPercent,
@@ -156,6 +159,37 @@ describe("Dashboard & Driver Profiles Unit Tests", () => {
     });
   });
 
+  describe("Overview periods with all time", () => {
+    const instant = new Date("2026-10-31T21:00:00.000Z");
+
+    it("keeps the shared calendar periods unchanged for the trip list", () => {
+      expect(periods).toEqual(["thisMonth", "lastMonth", "last30Days", "last7Days"]);
+      expect(overviewPeriods).toEqual([...periods, "allTime"]);
+    });
+
+    it("sends dates for every calendar period and none for all time", () => {
+      for (const period of periods)
+        expect(periodQuery(period, instant, "Europe/Moscow")).toEqual(
+          computePeriodDates(period, instant, "Europe/Moscow"),
+        );
+      expect(periodQuery("thisMonth", instant, "Europe/Moscow")).toEqual({
+        fromDate: "2026-11-01",
+        toDateExclusive: "2026-12-01",
+      });
+      for (const zone of ["Europe/Moscow", "UTC", "Not/A_Zone"])
+        expect(periodQuery("allTime", instant, zone)).toEqual({ period: "all_time" });
+    });
+
+    it("reports all time in months and keeps the chosen interval otherwise", () => {
+      expect(effectiveGranularity("allTime", "day")).toBe("month");
+      expect(effectiveGranularity("allTime", "month")).toBe("month");
+      for (const period of periods) {
+        expect(effectiveGranularity(period, "day")).toBe("day");
+        expect(effectiveGranularity(period, "month")).toBe("month");
+      }
+    });
+  });
+
   describe("periodTimeZone", () => {
     const stats = (zone: string | null) => makeCompanyStatsFixture(zone).data;
 
@@ -265,6 +299,11 @@ describe("Dashboard & Driver Profiles Unit Tests", () => {
       // The overview has no weekly period.
       expect(en.definitions.timezoneDesc).not.toMatch(/weeks/i);
       expect(ru.definitions.timezoneDesc).not.toMatch(/недели/i);
+      // All time is whole months in the same zone.
+      expect(en.filters.allTime).toBe("All time");
+      expect(ru.filters.allTime).toBe("За всё время");
+      expect(en.definitions.timezoneDesc).toContain("All time covers whole months");
+      expect(ru.definitions.timezoneDesc).toContain("«За всё время» — целые месяцы");
     });
 
     it("contains no empty values and no mockup-only slogan", () => {
