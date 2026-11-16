@@ -18486,7 +18486,7 @@
         "displayTimezone"
       ],
       "additionalProperties": false,
-      "description": "Preferences whose displayTimezone can be null. Until VTC-142 activates it the server never stores or returns null."
+      "description": "Preferences whose displayTimezone can be null (as on the device)."
     },
     "PreferencesStage4Envelope": {
       "type": "object",
