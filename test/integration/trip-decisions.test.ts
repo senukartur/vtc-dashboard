@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import type { components } from "@vtc/contracts";
 import {
   createUnitOfWork,
@@ -9,7 +9,12 @@ import {
   type UnitOfWork,
 } from "@vtc/db";
 import { applications } from "@vtc/db/admissions-schema";
-import { catalogCargoes } from "@vtc/db/catalogs-schema";
+import {
+  catalogCargoes,
+  catalogCompanies,
+  catalogCompanyCities,
+  catalogCompanyLogos,
+} from "@vtc/db/catalogs-schema";
 import { manualEvidence } from "@vtc/db/manual-reports-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
 import { reconciliationCandidates, reconciliationSearches } from "@vtc/db/reconciliation-schema";
@@ -280,6 +285,9 @@ async function report(
     trailerType?: string;
     origin?: S["ManualCatalogSelection"];
     eventId?: string;
+    originCompanyId?: string;
+    destinationCompanyId?: string;
+    cargoDamagePercent?: number;
   } = {},
 ) {
   const id = newId();
@@ -318,6 +326,11 @@ async function report(
       evidenceIds: [id],
       ...manualReferenceDates,
       ...(load.eventId ? { eventId: load.eventId } : {}),
+      ...(load.originCompanyId ? { originCompanyId: load.originCompanyId } : {}),
+      ...(load.destinationCompanyId ? { destinationCompanyId: load.destinationCompanyId } : {}),
+      ...(load.cargoDamagePercent === undefined
+        ? {}
+        : { cargoDamagePercent: load.cargoDamagePercent }),
     },
   });
 }
@@ -4999,15 +5012,417 @@ test("a later revision held by a held terminal's guards is never auto-accepted",
     await heldBy("actualDistanceM_conflict", first.tripId, await receive(corrected, who)),
   ).toMatchObject({ currentFactId: current, outcome: "open", actualDistanceM: null });
 });
-test("the author's private trip read adds no Stage 4 keys until VTC-141", async () => {
-  const telemetry = await receive(),
-    manualReport = await report();
-  for (const tripId of [telemetry.tripId, manualReport.tripId]) {
-    const view = await tripsService.detail(owner, tripId);
-    if (view.view !== "private") throw Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
-    expect(view).not.toHaveProperty("sources");
-    expect(view).not.toHaveProperty("qualificationCheck");
-    for (const key of ["cargoDamagePercent", "originCompany", "destinationCompany"])
-      expect(view.effectiveFacts ?? {}, key).not.toHaveProperty(key);
+
+// VTC-141: author-safe trip sources, cargo damage and depot companies.
+async function seedCompany(
+  code: string,
+  depots: { city: string; hidden?: boolean }[],
+  options: { name?: string; hidden?: boolean; logo?: Buffer } = {},
+) {
+  const companyId = newId(),
+    depotIds = new Map<string, string>();
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db.insert(catalogCompanies).values({
+      id: companyId,
+      game: "ets2",
+      code: Buffer.from(code),
+      nameEn: options.name ?? `Fictional ${code}`,
+      nameRu: null,
+      hidden: options.hidden ?? false,
+    });
+    for (const depot of depots) {
+      const id = newId();
+      depotIds.set(depot.city, id);
+      await db.insert(catalogCompanyCities).values({
+        id,
+        game: "ets2",
+        companyId,
+        cityId: ids.get(depot.city) as string,
+        hidden: depot.hidden ?? false,
+      });
+    }
+    if (options.logo)
+      await db.insert(catalogCompanyLogos).values({
+        companyId,
+        png: options.logo,
+        byteLength: options.logo.length,
+        sha256: createHash("sha256").update(options.logo).digest(),
+        updatedAt: iso(),
+      });
+  });
+  return { companyId, depot: (city: string) => depotIds.get(city) as string };
+}
+function located(origin: string | null, destination: string | null, damage: number | null) {
+  const p = payload();
+  for (const [place, code] of [
+    [p.snapshot.job.origin, origin],
+    [p.snapshot.job.destination, destination],
+  ] as const)
+    place.companyId =
+      code === null
+        ? { available: false, reason: "not-observed" }
+        : { available: true, value: code };
+  const cargoDamage =
+    damage === null
+      ? { available: false, reason: "not-observed", unit: "fraction" }
+      : { available: true, value: damage, unit: "fraction" };
+  p.snapshot.cargoDamage = cargoDamage as Telemetry["snapshot"]["cargoDamage"];
+  return p;
+}
+async function companyColumns(messageId: string) {
+  const [rows] = await control.execute<RowDataPacket[]>(
+    "SELECT CAST(origin_depot_id AS CHAR) originDepot, CAST(destination_depot_id AS CHAR) destinationDepot, CAST(origin_company_code AS CHAR) originCode, CAST(destination_company_code AS CHAR) destinationCode FROM trip_facts WHERE message_id=?",
+    [messageId],
+  );
+  return { ...rows[0] };
+}
+async function privateRead(actor: Actor, tripId: string, target: Trips = tripsService) {
+  const view = await target.detail(actor, tripId);
+  if (view.view !== "private") throw Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
+  return view;
+}
+const authorKeys = [
+  "decisions",
+  "effectiveFacts",
+  "evidence",
+  "manualRevision",
+  "pendingProposalId",
+  "qualificationCheck",
+  "reviewReasonCodes",
+  "sources",
+  "summary",
+  "view",
+];
+function expectAuthorSafe(view: S["TripPrivate"]) {
+  expect(Object.keys(view).sort()).toEqual(authorKeys);
+  expect(view.qualificationCheck).toBeNull();
+  for (const source of view.sources ?? [])
+    expect(Object.keys(source).sort()).toEqual([
+      "actualDistanceM",
+      "effective",
+      "kind",
+      "receivedAt",
+      "state",
+    ]);
+  expect(JSON.stringify(view)).not.toMatch(
+    /"acceptance"|"canDecide"|"blockedReasonCodes"|"candidates?"|"dismiss|"confidence"|"sourceRecordId"|"png"/,
+  );
+}
+
+test("author trip read shows telemetry sources, cargo damage and depot companies", async () => {
+  const logo = Buffer.from("fictional-vtc141-logo");
+  const alpha = await seedCompany("fixture_vtc141_alpha", [{ city: "fixture_north" }], {
+      name: "Fictional Depot Co",
+      logo,
+    }),
+    // Its only depot is in the origin city, so it is not recognized at the destination.
+    beta = await seedCompany("fixture_vtc141_beta", [{ city: "fixture_north" }]),
+    hidden = await seedCompany("fixture_vtc141_hidden", [{ city: "fixture_north", hidden: true }]);
+  const known = await receive(located("fixture_vtc141_alpha", "fixture_vtc141_beta", 0.375));
+  const view = await privateRead(owner, known.tripId);
+  expectAuthorSafe(view);
+  expect(view.effectiveFacts).toMatchObject({
+    provider: "ets2telemetry",
+    cargoDamagePercent: 37.5,
+    originCompany: {
+      state: "resolved",
+      companyId: alpha.companyId,
+      depotId: alpha.depot("fixture_north"),
+      name: "Fictional Depot Co",
+      code: "fixture_vtc141_alpha",
+      hidden: false,
+      logo: {
+        version: createHash("sha256").update(logo).digest("hex").slice(0, 16),
+        byteLength: logo.length,
+      },
+    },
+    destinationCompany: { state: "unresolved", code: "fixture_vtc141_beta" },
+  });
+  expect(view.effectiveFacts?.destinationCompany).toEqual({
+    state: "unresolved",
+    code: "fixture_vtc141_beta",
+  });
+  expect(view.sources).toEqual([
+    {
+      kind: "ets2telemetry",
+      receivedAt: known.firstReceivedAt,
+      actualDistanceM: "123400",
+      state: "delivered",
+      effective: true,
+    },
+  ]);
+  expect(await companyColumns(known.sourceRecordId)).toEqual({
+    originDepot: alpha.depot("fixture_north"),
+    destinationDepot: null,
+    originCode: "fixture_vtc141_alpha",
+    destinationCode: "fixture_vtc141_beta",
+  });
+  expect(beta.depot("fixture_south")).toBeUndefined();
+
+  const missing = await receive(located("fixture_vtc141_unknown", null, null));
+  const unresolved = await privateRead(owner, missing.tripId);
+  expectAuthorSafe(unresolved);
+  expect(unresolved.effectiveFacts).toMatchObject({
+    cargoDamagePercent: null,
+    originCompany: { state: "unresolved", code: "fixture_vtc141_unknown" },
+    destinationCompany: null,
+  });
+  expect(await companyColumns(missing.sourceRecordId)).toEqual({
+    originDepot: null,
+    destinationDepot: null,
+    originCode: "fixture_vtc141_unknown",
+    destinationCode: null,
+  });
+
+  const concealed = await receive(located("fixture_vtc141_hidden", null, 0));
+  expect((await privateRead(owner, concealed.tripId)).effectiveFacts).toMatchObject({
+    cargoDamagePercent: 0,
+    originCompany: {
+      state: "resolved",
+      depotId: hidden.depot("fixture_north"),
+      hidden: true,
+      logo: null,
+    },
+  });
+
+  // A fact stored before VTC-141 has no company columns and is never backfilled.
+  await control.execute(
+    "UPDATE trip_facts SET origin_depot_id=NULL, destination_depot_id=NULL, origin_company_code=NULL, destination_company_code=NULL WHERE message_id=?",
+    [known.sourceRecordId],
+  );
+  expect((await privateRead(owner, known.tripId)).effectiveFacts).toMatchObject({
+    cargoDamagePercent: 37.5,
+    originCompany: null,
+    destinationCompany: null,
+  });
+});
+
+test("author manual read shows selected depot companies, damage and the linked event", async () => {
+  const origin = await seedCompany("fixture_vtc141_gamma", [{ city: "fixture_north" }], {
+      name: "Fictional Origin Haulage",
+    }),
+    destination = await seedCompany("fixture_vtc141_delta", [{ city: "fixture_south" }]);
+  const title = "Fictional VTC-141 convoy";
+  const created = await events.create(director, newId(), {
+    title,
+    description: "Fictional linked event",
+    game: "ets2",
+    server: "Synthetic",
+    organizer: "Fictional company",
+    meetingLocation: "Fictional yard",
+    route: "Fictional route",
+    meetingAt: new Date(instant + 1800000).toISOString(),
+    startsAt: new Date(instant + 3600000).toISOString(),
+    endsAt: null,
+    visibility: "members",
+    originCityId: null,
+    destinationCityId: null,
+    prescribedCargoId: null,
+    prescribedMassKg: null,
+    prescribedTrailerTypeId: null,
+  });
+  const eventId = created.data.event.id;
+  const submitted = await report(owner, manual, {
+    eventId,
+    originCompanyId: origin.companyId,
+    destinationCompanyId: destination.companyId,
+    cargoDamagePercent: 12.5,
+  });
+  const view = await privateRead(owner, submitted.tripId);
+  expectAuthorSafe(view);
+  expect(view.summary.event).toEqual({ id: eventId, title });
+  expect(view.effectiveFacts).toMatchObject({
+    provider: "manual",
+    cargoDamagePercent: 12.5,
+    originCompany: {
+      state: "resolved",
+      companyId: origin.companyId,
+      depotId: origin.depot("fixture_north"),
+      name: "Fictional Origin Haulage",
+      code: "fixture_vtc141_gamma",
+      hidden: false,
+      logo: null,
+    },
+    destinationCompany: {
+      state: "resolved",
+      companyId: destination.companyId,
+      depotId: destination.depot("fixture_south"),
+      code: "fixture_vtc141_delta",
+    },
+  });
+  expect(view.sources).toEqual([
+    {
+      kind: "manual",
+      receivedAt: submitted.currentRevision.submittedAt,
+      actualDistanceM: "123400",
+      state: "delivered",
+      effective: true,
+    },
+  ]);
+  const [message] = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select({ messageId: tripFacts.messageId })
+      .from(tripFacts)
+      .where(eq(tripFacts.id, view.effectiveFacts?.factRevisionId as string)),
+  );
+  expect(await companyColumns(message?.messageId as string)).toEqual({
+    originDepot: origin.depot("fixture_north"),
+    destinationDepot: destination.depot("fixture_south"),
+    originCode: "fixture_vtc141_gamma",
+    destinationCode: "fixture_vtc141_delta",
+  });
+
+  const plain = await report();
+  const without = await privateRead(owner, plain.tripId);
+  expectAuthorSafe(without);
+  expect(without.summary.event).toBeNull();
+  expect(without.effectiveFacts).toMatchObject({
+    provider: "manual",
+    cargoDamagePercent: null,
+    originCompany: null,
+    destinationCompany: null,
+  });
+  expect(without.sources).toEqual([
+    expect.objectContaining({ kind: "manual", effective: true, state: "delivered" }),
+  ]);
+});
+
+test("author and reviewer share the author-safe sources of a two-source trip; reviewer fields stay reviewer-only", async () => {
+  const on = composedModules(undefined, true);
+  if (!on.trips || !on.manualReports || !on.tripDecisions)
+    throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+  const author = await member(),
+    stranger = await member();
+  const submitted = await report(author, on.manualReports);
+  await expect(on.trips.detail(stranger, submitted.tripId)).rejects.toMatchObject({
+    statusCode: 404,
+  });
+  const checked = await on.tripDecisions.reviewStage3(dispatcher, submitted.tripId);
+  const accepted = await on.tripDecisions.decide(
+    dispatcher,
+    submitted.tripId,
+    newId(),
+    checked.version,
+    {
+      decision: "accept",
+      proposalId: null,
+      factRevisionId: checked.data.factRevisionId,
+      reviewedRevisionId: submitted.currentRevision.id,
+      reason: "Fictional review",
+    },
+    true,
+  );
+  const telemetry = located(null, null, 0.25);
+  const incoming = await retryTransaction(
+    unit,
+    (tx) =>
+      on.trips?.storeInTransaction(tx, "ets2telemetry", telemetry, {
+        ownerUserId: author.userId,
+        connection: { state: "unknown", referenceId: null },
+        canonical: { tripId: submitted.tripId, expectedVersion: accepted.version },
+      }) ?? Promise.reject(new Error("SYNTHETIC_TRIPS_MISSING")),
+  );
+  const view = await privateRead(author, submitted.tripId, on.trips);
+  expectAuthorSafe(view);
+  expect(view.sources).toEqual([
+    {
+      kind: "ets2telemetry",
+      receivedAt: incoming.firstReceivedAt,
+      actualDistanceM: expect.any(String),
+      state: "delivered",
+      effective: false,
+    },
+    {
+      kind: "manual",
+      receivedAt: submitted.currentRevision.submittedAt,
+      actualDistanceM: "123400",
+      state: "delivered",
+      effective: true,
+    },
+  ]);
+  expect(view.effectiveFacts?.provider).toBe("manual");
+  const reviewer = await on.tripDecisions.reviewStage3(dispatcher, submitted.tripId);
+  expect(view.sources?.[0]?.actualDistanceM).toBe(
+    reviewer.data.sources.telemetry?.normalizedFacts.actualDistanceM,
+  );
+  expect(reviewer.data.sources.telemetry?.normalizedFacts.cargoDamagePercent).toBe(25);
+  expect(reviewer.data).toHaveProperty("acceptance");
+  expect(reviewer.data).toHaveProperty("canDecide");
+  expect(reviewer.data.effectiveFacts).toMatchObject({
+    cargoDamagePercent: null,
+    originCompany: null,
+    destinationCompany: null,
+  });
+  await expect(on.tripDecisions.reviewStage3(author, submitted.tripId)).rejects.toMatchObject({
+    statusCode: 403,
+  });
+  const staff = await privateRead(dispatcher, submitted.tripId, on.trips);
+  expect(Object.keys(staff).sort()).toEqual(authorKeys);
+  expect(staff.sources).toEqual(view.sources);
+  const company = await on.trips.detail(stranger, submitted.tripId);
+  expect(company.view).toBe("summary");
+  expect(company).not.toHaveProperty("sources");
+  expect(company).not.toHaveProperty("effectiveFacts");
+});
+
+test("a derived current fact keeps its telemetry source effective and drops a depot outside a changed city", async () => {
+  const alpha = await seedCompany("fixture_vtc141_epsilon", [{ city: "fixture_north" }]);
+  const r = await receive(located("fixture_vtc141_epsilon", null, null));
+  const a = await resolveDistance(r.tripId, "200000");
+  const view = await privateRead(owner, r.tripId);
+  expectAuthorSafe(view);
+  expect(view.effectiveFacts?.factRevisionId).toBe(a.result.data.basis.factRevisionId);
+  expect(view.sources).toEqual([
+    {
+      kind: "ets2telemetry",
+      receivedAt: r.firstReceivedAt,
+      actualDistanceM: "200000",
+      state: "delivered",
+      effective: true,
+    },
+  ]);
+  expect(view.effectiveFacts?.originCompany).toMatchObject({
+    state: "resolved",
+    depotId: alpha.depot("fixture_north"),
+  });
+  const moved = await resolveDistance(r.tripId, "210000", {
+    originCityId: ids.get("fixture_south") as string,
+  });
+  const after = await privateRead(owner, r.tripId);
+  expect(after.effectiveFacts?.factRevisionId).toBe(moved.result.data.basis.factRevisionId);
+  expect(after.effectiveFacts?.originCompany).toEqual({
+    state: "unresolved",
+    code: "fixture_vtc141_epsilon",
+  });
+  expect(after.sources?.[0]).toMatchObject({ kind: "ets2telemetry", effective: true });
+});
+
+test("HTTP author trip read serializes sources and a null qualification check", async () => {
+  const r = await receive(located(null, null, 0.5)),
+    login = await identity.login(`${owner.userId}@example.invalid`, password),
+    cookie = login.cookies.map((c) => c.split(";", 1)[0]).join("; "),
+    app = await createApp({
+      identity,
+      trips: tripsService,
+      tripDecisions: service,
+      checkReadiness: async () => true,
+    });
+  try {
+    const response = await app.inject({ url: `/api/v1/trips/${r.tripId}`, headers: { cookie } });
+    expect(response.statusCode).toBe(200);
+    const view = response.json().data as S["TripPrivate"];
+    expectAuthorSafe(view);
+    expect(view.sources).toEqual([
+      expect.objectContaining({ kind: "ets2telemetry", effective: true }),
+    ]);
+    expect(view.effectiveFacts).toMatchObject({
+      cargoDamagePercent: 50,
+      originCompany: null,
+      destinationCompany: null,
+    });
+  } finally {
+    await app.close();
   }
 });
