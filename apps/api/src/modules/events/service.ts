@@ -2181,6 +2181,10 @@ export function createEvents(
         title: current.title,
         game: current.game,
         startsAt: r.startsAt,
+        // The first revision of a direct create or a draft publication; never an edit.
+        published: r.version === 1 && ["created", "published"].includes(r.category),
+        status: e.status,
+        currentStartsAt: e.startsAt,
       };
     },
     /** Uses the same public/member visibility as event details. The game validates the trip reference. */

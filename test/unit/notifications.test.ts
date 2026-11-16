@@ -1,7 +1,9 @@
 import { newId } from "@vtc/db";
 import { expect, test } from "vitest";
+import { capabilities } from "../../apps/api/src/modules/identity/permissions.ts";
 import { notificationCursors } from "../../apps/api/src/modules/notifications/cursor.ts";
 import {
+  preferenceKeys,
   reminderWindow,
   sourceLiveUntil,
 } from "../../apps/api/src/modules/notifications/policy.ts";
@@ -126,4 +128,34 @@ test("typed event decoder rejects unknown family/version and leaked fields inste
     { ...e, aggregate: { ...e.aggregate, id: newId() } },
   ])
     expect(() => domainEvent(value)).toThrow();
+});
+test("readable preference keys follow the viewer's current capabilities", () => {
+  const six = [
+    "tripStarted",
+    "tripFinished",
+    "tripRejected",
+    "eventChanges",
+    "eventReminders",
+    "qualificationChanges",
+  ];
+  for (const [roles, extra] of [
+    [["trainee"], ["tripAccepted", "newEvent"]],
+    [["driver"], ["tripAccepted", "newEvent"]],
+    [["dispatcher"], ["reviewQueue", "tripAccepted", "newEvent"]],
+    [
+      ["driver", "dispatcher"],
+      ["reviewQueue", "tripAccepted", "newEvent"],
+    ],
+    [["deputy_director"], ["reviewQueue", "newApplications", "tripAccepted", "newEvent"]],
+    [["director"], ["reviewQueue", "newApplications", "tripAccepted", "newEvent"]],
+  ] as const)
+    expect(preferenceKeys(capabilities([...roles])), roles.join()).toEqual([...six, ...extra]);
+  // Each capability adds only its own toggle, independently of roles.
+  expect(preferenceKeys(["company.read", "applications.manage"])).toEqual([
+    ...six,
+    "newApplications",
+    "tripAccepted",
+    "newEvent",
+  ]);
+  expect(preferenceKeys([])).toEqual([...six, "tripAccepted", "newEvent"]);
 });

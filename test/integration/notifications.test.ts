@@ -228,6 +228,12 @@ async function drain(q = queue()) {
   }
   throw new Error("SYNTHETIC_NOTIFICATION_DRAIN_EXHAUSTED");
 }
+async function unreadCategories(actor: Actor) {
+  return (await service.poll(actor, { limit: 100 })).items
+    .filter((r) => r.readAt === null)
+    .map((r) => r.category)
+    .sort();
+}
 async function repairOneMaterial(eventService = events) {
   return unit.run(async (tx) => {
     await identity.notificationContextInTransaction(tx);
@@ -604,13 +610,14 @@ test("one-hour reminder is participating-only, RSVP invalidates unread, time rep
   expect(
     (await service.poll(owner)).items.filter((r) => r.category === "event.reminder"),
   ).toHaveLength(1);
-  expect((await service.poll(observer)).unreadCount).toBe(0);
+  // Every active member also received the publication; only participants get the reminder.
+  expect(await unreadCategories(observer)).toEqual(["event.published"]);
   const current = await events.myResponse(owner, id);
   await events.respond(owner, id, newId(), current.version, {
     response: "declined",
     reason: "Fictional confidential decline",
   });
-  expect((await service.poll(owner)).unreadCount).toBe(0);
+  expect(await unreadCategories(owner)).toEqual(["event.published"]);
   const declined = await events.myResponse(owner, id);
   await events.respond(owner, id, newId(), declined.version, { response: "participating" });
   await service.maintenance();
@@ -826,19 +833,25 @@ test("draft publication is one notification-eligible transition and its publishe
     [stagedNotifications.subscription],
   );
   await drain(queue);
-  expect((await stagedNotifications.poll(owner)).items).toEqual([]);
+  const publication = (await stagedNotifications.poll(owner)).items;
+  expect(publication.map((r) => [r.category, r.target])).toEqual([
+    ["event.published", { kind: "event", id }],
+  ]);
   await stagedEvents.respond(owner, id, newId(), 1, { response: "participating" });
   await drain(queue);
   instant += 1_000;
   await stagedNotifications.maintenance();
   await drain(queue);
   expect((await stagedNotifications.poll(owner)).items.map(({ category }) => category)).toEqual([
+    "event.published",
     "event.reminder",
   ]);
-  expect((await stagedNotifications.poll(observer)).items).toEqual([]);
+  expect((await stagedNotifications.poll(observer)).items.map(({ category }) => category)).toEqual([
+    "event.published",
+  ]);
   expect(await stagedNotifications.maintenance()).toBe(0);
   await drain(queue);
-  expect((await stagedNotifications.poll(owner)).items).toHaveLength(1);
+  expect((await stagedNotifications.poll(owner)).items).toHaveLength(2);
 });
 
 test("concurrent reminder maintenance owns pending rows and two workers retain one effect", async () => {
@@ -1560,7 +1573,14 @@ test("disabled event mutations filter obsolete unread generations immediately be
     [Buffer.from(reminder?.id as string)],
   );
   expect(retained[0]?.invalidated_at).toBeNull();
-  expect((await service.poll(owner, { limit: 1 })).unreadCount).toBe(3);
+  // Three trip starts and the event publication remain; the obsolete reminder is filtered.
+  expect(await unreadCategories(owner)).toEqual([
+    "event.published",
+    "trip.started",
+    "trip.started",
+    "trip.started",
+  ]);
+  expect((await service.poll(owner, { limit: 1 })).unreadCount).toBe(4);
   await expect(service.read(owner, reminder?.id as string, newId())).rejects.toMatchObject({
     statusCode: 404,
   });
@@ -1617,7 +1637,7 @@ test("read reminder history survives time changes, declined RSVP, cancellation a
     retained = history.items.find((r) => r.id === reminder.id);
   expect(retained?.readAt).toBeTruthy();
   expect(retained?.liveToastEligible).toBe(false);
-  expect((await service.poll(owner)).unreadCount).toBe(0);
+  expect(await unreadCategories(owner)).toEqual(["event.published"]);
   const [saved] = await control.query<RowDataPacket[]>(
     "SELECT invalidated_at FROM notifications WHERE id=?",
     [Buffer.from(reminder.id)],
@@ -1649,7 +1669,11 @@ test.each([false, true])(
         saved = history.items.filter((r) => r.category === "event.reminder");
       expect(saved.map((r) => r.id)).toEqual([reminder.id]);
       expect(Boolean(saved[0]?.readAt)).toBe(read);
-      expect((await service.poll(owner)).unreadCount).toBe(read ? 0 : 1);
+      // The unread publication of this event is counted with the reminder.
+      expect(await unreadCategories(owner)).toEqual(
+        read ? ["event.published"] : ["event.published", "event.reminder"],
+      );
+      expect((await service.poll(owner)).unreadCount).toBe(read ? 1 : 2);
       const [rows] = await control.query<RowDataPacket[]>(
         "SELECT COUNT(*) n FROM notifications WHERE recipient_id=? AND subject_id=? AND category='event.reminder'",
         [Buffer.from(owner.userId), Buffer.from(id)],
@@ -1668,7 +1692,7 @@ test.each([false, true])(
       afterRoute.items.filter((r) => r.category === "event.reminder").map((r) => r.id),
     ).toEqual([reminder.id]);
     expect(afterRoute.items.filter((r) => r.category === "event.route_changed")).toHaveLength(1);
-    expect((await service.poll(owner)).unreadCount).toBe(read ? 1 : 2);
+    expect((await service.poll(owner)).unreadCount).toBe(read ? 2 : 3);
   },
 );
 
@@ -2257,7 +2281,9 @@ test("same-event writers keep combined material anchors atomic and cancellation 
   const live = (await service.poll(owner)).items.filter(
     (r) => r.target?.id === id && r.liveToastEligible,
   );
+  // The publication delivered by the first drain is still inside its live window.
   expect(live.map((r) => r.category).sort()).toEqual([
+    "event.published",
     "event.route_changed",
     "event.start_changed",
   ]);
@@ -2268,10 +2294,11 @@ test("same-event writers keep combined material anchors atomic and cancellation 
   await drain();
   const final = (await service.poll(owner)).items.filter((r) => r.target?.id === id);
   expect(final.filter((r) => r.liveToastEligible).map((r) => r.category)).toEqual([
+    "event.published",
     "event.cancelled",
   ]);
-  expect(final).toHaveLength(3);
-  expect((await service.history(owner)).items.filter((r) => r.target?.id === id)).toHaveLength(3);
+  expect(final).toHaveLength(4);
+  expect((await service.history(owner)).items.filter((r) => r.target?.id === id)).toHaveLength(4);
   const [terminal] = await control.query<RowDataPacket[]>(
     "SELECT notification_material material FROM events WHERE id=?",
     [Buffer.from(id)],
@@ -2514,42 +2541,211 @@ test("workers replay legacy route text and use ordered city/depot identity after
   );
   expect(alerts).toHaveLength(3);
   expect(alerts.filter((item) => item.liveToastEligible)).toHaveLength(1);
-  expect((await stagedNotifications.history(observer)).items).toEqual([]);
+  // A non-participant receives only the original publication, never the route changes.
+  expect(
+    (await stagedNotifications.history(observer)).items.map((item) => [item.category, item.target]),
+  ).toEqual([["event.published", { kind: "event", id }]]);
 });
-test("Stage 4 toggles stay hidden and rejected for every viewer until VTC-142", async () => {
-  const six = [
-    "eventChanges",
-    "eventReminders",
-    "qualificationChanges",
-    "tripFinished",
-    "tripRejected",
-    "tripStarted",
-  ];
-  for (const roles of [["driver"], ["driver", "dispatcher"]] as const) {
-    const person = await member([...roles]);
-    const read = await service.getPreferences(person.actor);
-    expect(Object.keys(read.data).sort(), roles.join()).toEqual(six);
-    for (const extra of [
-      { reviewQueue: true },
-      { newApplications: false },
-      { tripAccepted: false },
-      { newEvent: true },
-    ])
-      await expect(
-        service.setPreferences(person.actor, newId(), read.version, { ...read.data, ...extra }),
-        JSON.stringify(extra),
-      ).rejects.toMatchObject({ statusCode: 422 });
-    const [rows] = await control.execute<RowDataPacket[]>(
-      "SELECT version,review_queue,new_applications,trip_accepted,new_event,(SELECT COUNT(*) FROM notification_commands WHERE recipient_id=?) receipts FROM notification_recipients WHERE recipient_id=?",
-      [person.actor.userId, person.actor.userId],
+const originalPreferences = [
+  "tripStarted",
+  "tripFinished",
+  "tripRejected",
+  "eventChanges",
+  "eventReminders",
+  "qualificationChanges",
+];
+const recipientState = async (userId: string) => {
+  const [rows] = await control.execute<RowDataPacket[]>(
+    "SELECT version,trip_rejected,event_changes,review_queue,new_applications,trip_accepted,new_event,(SELECT COUNT(*) FROM notification_commands WHERE recipient_id=?) receipts FROM notification_recipients WHERE recipient_id=?",
+    [userId, userId],
+  );
+  return rows.map((row) => Object.values(row).map(Number));
+};
+async function changePreferences(actor: Actor, change: Partial<S["NotificationPreferences"]>) {
+  const read = await service.getPreferences(actor);
+  return service.setPreferences(actor, newId(), read.version, { ...read.data, ...change });
+}
+async function categoriesOf(actor: Actor, notifications = service) {
+  return (await notifications.history(actor, { limit: 100 })).items.map((r) => r.category).sort();
+}
+// A synthetic telemetry trip has unknown qualification facts, so a reviewer cannot accept it.
+// Acceptance uses an owning-module fixture: a system decision row (as automatic evaluation
+// commits) and its trip.decision_changed event. Rejection goes through the real command.
+async function decideTrip(tripId: string, decision: "accept" | "reject") {
+  if (decision === "accept") {
+    const id = newId();
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT version,current_fact_id fact,(SELECT COALESCE(MAX(sequence),0) FROM trip_decisions WHERE trip_id=trips.id) sequence FROM trips WHERE id=?",
+      [Buffer.from(tripId)],
     );
-    expect(rows.map((row) => Object.values(row).map(Number))).toEqual([
-      [read.version, 1, 1, 1, 1, 0],
+    const trip = rows[0];
+    if (!trip?.fact) throw new Error("SYNTHETIC_ACCEPTED_TRIP_FACT_MISSING");
+    await control.execute(
+      "INSERT INTO trip_decisions (id,trip_id,sequence,fact_id,outcome,reason_codes,attribution_basis,supporting_facts,decided_at) VALUES (?,?,?,?,'accepted',JSON_ARRAY(),'unknown',JSON_ARRAY(),UTC_TIMESTAMP(3))",
+      [Buffer.from(id), Buffer.from(tripId), Number(trip.sequence) + 1, trip.fact],
+    );
+    await control.execute("UPDATE trips SET decision='accepted' WHERE id=?", [Buffer.from(tripId)]);
+    await appendEvents([
+      {
+        eventId: newId(),
+        type: "trip.decision_changed",
+        schemaVersion: 1,
+        aggregate: { kind: "trip", id: tripId, version: Number(trip.version) },
+        occurredAt: iso(),
+        correlationId: newId(),
+        causationId: null,
+        data: { decisionId: id, contributionVersion: 1 },
+      },
+    ]);
+    return id;
+  }
+  const review = await decisions.review(dispatcher, tripId);
+  await decisions.decide(dispatcher, tripId, newId(), review.version, {
+    decision,
+    reviewedRevisionId: review.data.factRevisionId,
+    factRevisionId: review.data.factRevisionId,
+    proposalId: null,
+    reason: "Fictional review explanation",
+  });
+}
+// Owner-module fixture rows for one pending manual review and one pending correction request.
+async function manualReviewEvents(tripId: string): Promise<DomainEvent[]> {
+  const report = newId(),
+    revision = newId(),
+    correction = newId();
+  await control.execute("UPDATE trips SET decision='pending_review' WHERE id=?", [
+    Buffer.from(tripId),
+  ]);
+  await control.execute(
+    "INSERT INTO manual_reports (id,owner_id,trip_id,version,current_revision_id,revision_number,created_at) VALUES (?,?,?,1,NULL,1,UTC_TIMESTAMP(3))",
+    [Buffer.from(report), Buffer.from(owner.userId), Buffer.from(tripId)],
+  );
+  await control.execute(
+    "INSERT INTO manual_revisions (id,report_id,number,format,fields,submitted_at) VALUES (?,?,1,'legacy',?,UTC_TIMESTAMP(3))",
+    [Buffer.from(revision), Buffer.from(report), JSON.stringify({ note: "Fictional fields" })],
+  );
+  await control.execute("UPDATE manual_reports SET current_revision_id=? WHERE id=?", [
+    Buffer.from(revision),
+    Buffer.from(report),
+  ]);
+  await control.execute(
+    "INSERT INTO manual_correction_requests (id,owner_id,trip_id,base_trip_version,base_revision_id,reason,status,requested_at) VALUES (?,?,?,1,?,?,'pending',UTC_TIMESTAMP(3))",
+    [
+      Buffer.from(correction),
+      Buffer.from(owner.userId),
+      Buffer.from(tripId),
+      Buffer.from(revision),
+      "Fictional correction reason",
+    ],
+  );
+  const base = {
+    schemaVersion: 1 as const,
+    occurredAt: iso(),
+    correlationId: newId(),
+    causationId: null,
+  };
+  return [
+    {
+      ...base,
+      eventId: newId(),
+      type: "manual.report_submitted",
+      aggregate: { kind: "manual_report", id: report, version: 1 },
+      data: { resourceId: revision, tripId },
+    },
+    {
+      ...base,
+      eventId: newId(),
+      type: "manual.correction_requested",
+      aggregate: { kind: "trip", id: tripId, version: 1 },
+      data: { resourceId: correction, tripId },
+    },
+  ];
+}
+async function appendEvents(list: DomainEvent[]) {
+  await unit.run(async (tx) => {
+    const outbox = createOutbox(unit, { notifications: true });
+    for (const e of list) await outbox.append(tx, e);
+  });
+}
+async function changeRoles(actor: Actor, roles: ("driver" | "dispatcher" | "deputy_director")[]) {
+  const me = await identity.current(actor);
+  await identity.administer(director, actor.userId, newId(), me.version, { kind: "roles", roles });
+}
+// Run one delivery reference again, as a replayed or duplicated job would.
+async function replay(eventId: string) {
+  await unit.run(async (tx) => {
+    await service.handler.local?.(tx, { eventId, after: null }, undefined as never);
+  });
+}
+// Forget every job so the routing sweep routes and delivers the whole outbox again.
+async function rerouteAll() {
+  await control.query("DELETE FROM job_effect_receipts");
+  await control.query("DELETE FROM durable_jobs");
+  await drain();
+}
+async function signInAgain(email: string) {
+  const login = await identity.login(email, password),
+    cookie = login.cookies.map((c) => c.split(";", 1)[0]).join("; ");
+  return identity.authenticate(new Headers({ cookie }));
+}
+
+test("Stage 4 toggles follow current capabilities and a write must send exactly the read keys", async () => {
+  for (const [roles, extra] of [
+    [["driver"], ["tripAccepted", "newEvent"]],
+    [
+      ["driver", "dispatcher"],
+      ["reviewQueue", "tripAccepted", "newEvent"],
+    ],
+    [["deputy_director"], ["reviewQueue", "newApplications", "tripAccepted", "newEvent"]],
+  ] as const) {
+    const person = await member([...roles]);
+    const has = (key: string) => (extra as readonly string[]).includes(key);
+    const read = await service.getPreferences(person.actor);
+    expect(Object.keys(read.data), roles.join()).toEqual([...originalPreferences, ...extra]);
+    expect(Object.values(read.data).every((value) => value === true)).toBe(true);
+    const before = await recipientState(person.actor.userId);
+    const { tripAccepted: _omitted, ...withoutAccepted } = read.data;
+    const invalid: unknown[] = [
+      // A key the read did not return.
+      has("newApplications")
+        ? { ...read.data, unknownToggle: true }
+        : { ...read.data, newApplications: true },
+      has("reviewQueue")
+        ? Object.fromEntries(Object.entries(read.data).filter(([key]) => key !== "reviewQueue"))
+        : { ...read.data, reviewQueue: false },
+      withoutAccepted,
+      { ...read.data, newEvent: "false" },
+    ];
+    for (const value of invalid)
+      await expect(
+        service.setPreferences(
+          person.actor,
+          newId(),
+          read.version,
+          value as S["NotificationPreferences"],
+        ),
+        JSON.stringify(value),
+      ).rejects.toMatchObject({ statusCode: 422 });
+    expect(await recipientState(person.actor.userId)).toEqual(before);
+    const value = {
+      ...read.data,
+      tripAccepted: false,
+      newEvent: false,
+      ...(has("reviewQueue") ? { reviewQueue: false } : {}),
+      ...(has("newApplications") ? { newApplications: false } : {}),
+    };
+    const key = newId(),
+      saved = await service.setPreferences(person.actor, key, read.version, value);
+    expect(saved).toEqual({ data: value, version: read.version + 1 });
+    expect(await service.setPreferences(person.actor, key, read.version, value)).toEqual(saved);
+    expect(await service.getPreferences(person.actor)).toEqual(saved);
+    expect(await recipientState(person.actor.userId)).toEqual([
+      [read.version + 1, 1, 1, has("reviewQueue") ? 0 : 1, has("newApplications") ? 0 : 1, 0, 0, 1],
     ]);
   }
 });
 
-test("Stage 4 toggles are rejected over HTTP without a change or receipt until VTC-142", async () => {
+test("Stage 4 toggles are validated over HTTP before a change or receipt", async () => {
   const app = await createApp({
     identity,
     notifications: service,
@@ -2562,6 +2758,13 @@ test("Stage 4 toggles are rejected over HTTP without a change or receipt until V
       headers: { cookie: person.cookie },
     });
     expect(read.statusCode).toBe(200);
+    const data = read.json().data;
+    expect(Object.keys(data)).toEqual([
+      ...originalPreferences,
+      "reviewQueue",
+      "tripAccepted",
+      "newEvent",
+    ]);
     const issued = csrfProtection(identityConfig).issue({}, person.actor);
     const headers = {
       cookie: `${person.cookie}; ${issued.cookie.split(";", 1)[0]}`,
@@ -2569,29 +2772,364 @@ test("Stage 4 toggles are rejected over HTTP without a change or receipt until V
       "x-csrf-token": issued.token,
       "if-match": String(read.headers.etag),
     };
-    for (const extra of [
-      { reviewQueue: true },
-      { newApplications: false },
-      { tripAccepted: false },
-      { newEvent: true },
-    ]) {
+    const { reviewQueue: _review, ...withoutReview } = data;
+    for (const payload of [{ ...data, newApplications: false }, withoutReview]) {
       const response = await app.inject({
         method: "PUT",
         url: "/api/v1/me/notification-preferences",
         headers: { ...headers, "idempotency-key": newId() },
-        payload: { ...read.json().data, ...extra },
+        payload,
       });
-      expect(response.statusCode, JSON.stringify(extra)).toBe(422);
+      expect(response.statusCode, JSON.stringify(payload)).toBe(422);
       expect(response.json().error.code).toBe("INVALID_PAYLOAD");
     }
-    const [rows] = await control.execute<RowDataPacket[]>(
-      "SELECT version,review_queue,new_applications,trip_accepted,new_event,(SELECT COUNT(*) FROM notification_commands WHERE recipient_id=?) receipts FROM notification_recipients WHERE recipient_id=?",
-      [person.actor.userId, person.actor.userId],
-    );
-    expect(rows.map((row) => Object.values(row).map(Number))).toEqual([
-      [Number(String(read.headers.etag).slice(2, -1)), 1, 1, 1, 1, 0],
-    ]);
+    const version = Number(String(read.headers.etag).slice(2, -1));
+    expect(await recipientState(person.actor.userId)).toEqual([[version, 1, 1, 1, 1, 1, 1, 0]]);
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/api/v1/me/notification-preferences",
+      headers: { ...headers, "idempotency-key": newId() },
+      payload: { ...data, reviewQueue: false },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.headers.etag).toBe(`"v${version + 1}"`);
+    expect(saved.json().data).toEqual({ ...data, reviewQueue: false });
+    expect(await recipientState(person.actor.userId)).toEqual([[version + 1, 1, 1, 0, 1, 1, 1, 1]]);
   } finally {
     await app.close();
   }
+});
+
+test("a role change between read and write gives 401 in session and 422 after sign-in; hidden values persist", async () => {
+  const person = await member(["driver", "dispatcher"]);
+  const stale = await changePreferences(person.actor, { reviewQueue: false });
+  await changeRoles(person.actor, ["driver"]);
+  await expect(
+    service.setPreferences(person.actor, newId(), stale.version, stale.data),
+  ).rejects.toMatchObject({ statusCode: 401 });
+  const driver = await signInAgain(person.email);
+  await expect(
+    service.setPreferences(driver, newId(), stale.version, stale.data),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  const read = await service.getPreferences(driver);
+  expect(read.version).toBe(stale.version);
+  expect(Object.keys(read.data)).toEqual([...originalPreferences, "tripAccepted", "newEvent"]);
+  const saved = await service.setPreferences(driver, newId(), read.version, {
+    ...read.data,
+    tripStarted: false,
+  });
+  expect(saved.data).not.toHaveProperty("reviewQueue");
+  const [rows] = await control.execute<RowDataPacket[]>(
+    "SELECT trip_started,review_queue FROM notification_recipients WHERE recipient_id=?",
+    [driver.userId],
+  );
+  expect(rows.map((row) => [Number(row.trip_started), Number(row.review_queue)])).toEqual([[0, 0]]);
+  await changeRoles(driver, ["driver", "dispatcher"]);
+  const reviewer = await signInAgain(person.email);
+  expect((await service.getPreferences(reviewer)).data).toMatchObject({
+    tripStarted: false,
+    reviewQueue: false,
+  });
+});
+
+test("review queue and trip rejection toggles gate reviewers and authors independently", async () => {
+  const reviewer = await member(["dispatcher"]),
+    rejected = await receive(payload("completed")),
+    reviewed = await receive(payload("completed"));
+  await decideTrip(rejected.tripId, "reject");
+  const review = await manualReviewEvents(reviewed.tripId);
+  // A stored copy can differ for an author without trips.review; the author keeps tripRejected.
+  await service.getPreferences(owner);
+  await control.execute(
+    "UPDATE notification_recipients SET review_queue=FALSE WHERE recipient_id=?",
+    [Buffer.from(owner.userId)],
+  );
+  await changePreferences(dispatcher, { reviewQueue: false });
+  await changePreferences(reviewer.actor, { tripRejected: false });
+  await appendEvents(review);
+  await drain();
+  const all = ["trip.correction_requested", "trip.rejected", "trip.review_required"];
+  const reviewCategories = async (actor: Actor) =>
+    (await categoriesOf(actor)).filter((category) => all.includes(category));
+  expect(await reviewCategories(dispatcher)).toEqual(["trip.rejected"]);
+  expect(await reviewCategories(reviewer.actor)).toEqual([
+    "trip.correction_requested",
+    "trip.review_required",
+  ]);
+  expect(await reviewCategories(owner)).toEqual(all);
+  expect(await reviewCategories(director)).toEqual(all);
+  expect(await reviewCategories(observer)).toEqual([]);
+
+  // The author without trips.review loses all three only through tripRejected.
+  await control.query("DELETE FROM notifications");
+  await changePreferences(owner, { tripRejected: false });
+  const again = await receive(payload("completed"));
+  await decideTrip(again.tripId, "reject");
+  await appendEvents(await manualReviewEvents((await receive(payload("completed"))).tripId));
+  await drain();
+  expect(await reviewCategories(owner)).toEqual([]);
+  expect(await reviewCategories(director)).toEqual(all);
+});
+
+test("new applications and event changes toggles split administration from member access", async () => {
+  const inbox = await member(["deputy_director"]),
+    access = await member(["deputy_director"]),
+    target = await member();
+  await changePreferences(inbox.actor, { newApplications: false });
+  await changePreferences(access.actor, { eventChanges: false });
+  await appendEvents([await applicationEvent()]);
+  await changeRoles(target.actor, ["driver", "dispatcher"]);
+  await drain();
+  const admin = async (actor: Actor) =>
+    (await categoriesOf(actor)).filter((c) =>
+      ["application.submitted", "member.access_changed"].includes(c),
+    );
+  expect(await admin(inbox.actor)).toEqual(["member.access_changed"]);
+  expect(await admin(access.actor)).toEqual(["application.submitted"]);
+  expect(await admin(director)).toEqual(["application.submitted", "member.access_changed"]);
+});
+
+test("values copied by the migration suppress exactly what their source toggles did", async () => {
+  const reviewer = await member(["dispatcher"]),
+    deputy = await member(["deputy_director"]),
+    target = await member();
+  for (const actor of [reviewer.actor, deputy.actor]) await service.getPreferences(actor);
+  // 0032/0033 copy trip_rejected into review_queue and event_changes into new_applications.
+  await control.execute(
+    "UPDATE notification_recipients SET trip_rejected=FALSE,review_queue=FALSE WHERE recipient_id=?",
+    [Buffer.from(reviewer.actor.userId)],
+  );
+  await control.execute(
+    "UPDATE notification_recipients SET event_changes=FALSE,new_applications=FALSE WHERE recipient_id=?",
+    [Buffer.from(deputy.actor.userId)],
+  );
+  const rejected = await receive(payload("completed"));
+  await decideTrip(rejected.tripId, "reject");
+  await appendEvents([
+    ...(await manualReviewEvents((await receive(payload("completed"))).tripId)),
+    await applicationEvent(),
+  ]);
+  await changeRoles(target.actor, ["driver", "dispatcher"]);
+  await drain();
+  const suppressed = [
+    "application.submitted",
+    "member.access_changed",
+    "trip.correction_requested",
+    "trip.rejected",
+    "trip.review_required",
+  ];
+  expect((await categoriesOf(reviewer.actor)).filter((c) => suppressed.includes(c))).toEqual([]);
+  // The deputy still reviews trips; only the administrative categories are suppressed.
+  expect((await categoriesOf(deputy.actor)).filter((c) => suppressed.includes(c))).toEqual([
+    "trip.correction_requested",
+    "trip.rejected",
+    "trip.review_required",
+  ]);
+});
+
+test("an accepted trip notifies only its author once per current accepting decision", async () => {
+  const saved = await receive(payload("completed"));
+  await drain();
+  await control.query("DELETE FROM notifications");
+  await decideTrip(saved.tripId, "accept");
+  await drain();
+  const accepted = async (actor: Actor) =>
+    (await service.history(actor, { limit: 100 })).items.filter(
+      (r) => r.category === "trip.accepted",
+    );
+  const [first] = await accepted(owner);
+  expect(first).toMatchObject({
+    category: "trip.accepted",
+    messageKey: "notifications.trip.accepted",
+    target: { kind: "trip", id: saved.tripId },
+    display: { actorNickname: null, game: "ets2", eventTitle: null },
+  });
+  expect(
+    (await service.poll(owner)).items.find((r) => r.category === "trip.accepted")
+      ?.liveToastEligible,
+  ).toBe(true);
+  for (const actor of [dispatcher, director, observer]) expect(await accepted(actor)).toEqual([]);
+  // Replaying the delivery reference or routing the same event again adds nothing.
+  const [decision] = await control.query<RowDataPacket[]>(
+    "SELECT CAST(id AS CHAR) id,JSON_UNQUOTE(JSON_EXTRACT(data,'$.decisionId')) decision FROM outbox_events WHERE CAST(type AS CHAR)='trip.decision_changed'",
+  );
+  expect(decision).toHaveLength(1);
+  await replay(decision[0]?.id as string);
+  await rerouteAll();
+  expect(await accepted(owner)).toHaveLength(1);
+  const [keys] = await control.query<RowDataPacket[]>(
+    "SELECT CAST(effect_key AS CHAR) effect FROM notifications WHERE category='trip.accepted'",
+  );
+  expect(keys.map((row) => row.effect)).toEqual([`trip.accepted:${decision[0]?.decision}`]);
+
+  // A rejection notifies no acceptance; a later re-acceptance is a new decision and a new row.
+  await decideTrip(saved.tripId, "reject");
+  await drain();
+  expect(await accepted(owner)).toHaveLength(1);
+  expect(
+    (await service.poll(owner)).items.find((r) => r.category === "trip.accepted")
+      ?.liveToastEligible,
+  ).toBe(false);
+  await decideTrip(saved.tripId, "accept");
+  await drain();
+  const rows = await accepted(owner);
+  expect(rows).toHaveLength(2);
+  expect(
+    (await service.poll(owner)).items
+      .filter((r) => r.category === "trip.accepted")
+      .map((r) => r.liveToastEligible),
+  ).toEqual([false, true]);
+});
+
+test("an acceptance superseded before delivery and a disabled toggle send no acceptance", async () => {
+  const decided = async () =>
+    (await categoriesOf(owner)).filter((c) => ["trip.accepted", "trip.rejected"].includes(c));
+  const superseded = await receive(payload("completed"));
+  await decideTrip(superseded.tripId, "accept");
+  await decideTrip(superseded.tripId, "reject");
+  await drain();
+  expect(await decided()).toEqual(["trip.rejected"]);
+  await control.query("DELETE FROM notifications");
+  // The toggle suppresses only acceptances.
+  await changePreferences(owner, { tripAccepted: false });
+  const quiet = await receive(payload("completed")),
+    rejected = await receive(payload("completed"));
+  await decideTrip(quiet.tripId, "accept");
+  await decideTrip(rejected.tripId, "reject");
+  await drain();
+  expect(await decided()).toEqual(["trip.rejected"]);
+});
+
+test("a published event notifies every active member once; drafts, edits and replays do not", async () => {
+  const credential = await identity.prepareCredential(password);
+  for (let n = 0; n < 26; n++) {
+    const id = newId();
+    await unit.run((tx) =>
+      identity.insertWithCredential(tx, {
+        userId: id,
+        email: `${id}@example.invalid`,
+        name: "Fictional Event Member",
+        ...credential,
+        roles: ["driver"],
+      }),
+    );
+  }
+  const departed = await member();
+  const me = await identity.current(departed.actor);
+  await identity.administer(director, departed.actor.userId, newId(), me.version, {
+    kind: "deactivate",
+  });
+  await drain();
+  await control.query("DELETE FROM notifications");
+  const [active] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM identity_memberships WHERE status='active'",
+  );
+  expect(Number(active[0]?.n)).toBeGreaterThan(25);
+  const published = async (eventId: string) => {
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) n,COUNT(DISTINCT recipient_id) recipients,SUM(recipient_id=?) departed,MIN(CAST(effect_key AS CHAR)) effect FROM notifications WHERE category='event.published' AND subject_id=?",
+      [Buffer.from(departed.actor.userId), Buffer.from(eventId)],
+    );
+    return {
+      count: Number(rows[0]?.n),
+      recipients: Number(rows[0]?.recipients),
+      departed: Number(rows[0]?.departed ?? 0),
+      effect: rows[0]?.effect,
+    };
+  };
+  const staged = createQueue(
+    unit,
+    [stagedNotifications.handler, stagedNotifications.reminderHandler],
+    [stagedNotifications.subscription],
+  );
+  // A draft save and a discarded draft write no notification.
+  const drafts = stagedEvents.drafts;
+  if (!drafts) throw new Error("DRAFT_FIXTURE_REQUIRED");
+  const { organizer: _organizer, ...fields } = eventInput({ visibility: "public" });
+  const discarded = await drafts.create(director, newId(), { title: "Fictional discarded draft" });
+  await drafts.discard(director, discarded.data.id, newId(), 1);
+  const draft = await drafts.create(director, newId(), { title: "Fictional new event draft" });
+  await drafts.update(director, draft.data.id, newId(), 1, {
+    ...fields,
+    organizerMemberId: director.userId,
+    platform: "truckersmp",
+  });
+  await drain(staged);
+  const [none] = await control.query<RowDataPacket[]>("SELECT COUNT(*) n FROM notifications");
+  expect(Number(none[0]?.n)).toBe(0);
+  await drafts.publish(director, draft.data.id, newId(), 2, "en");
+  await drain(staged);
+  expect(await published(draft.data.id)).toEqual({
+    count: Number(active[0]?.n),
+    recipients: Number(active[0]?.n),
+    departed: 0,
+    effect: `event.published:${draft.data.id}`,
+  });
+  // A direct members-only create notifies the same roster; its edit adds no publication.
+  const direct = await events.create(director, newId(), eventInput({ visibility: "members" }));
+  const id = direct.data.event.id;
+  await drain();
+  expect((await published(id)).count).toBe(Number(active[0]?.n));
+  await events.update(director, id, newId(), 1, {
+    ...eventInput({ visibility: "members" }),
+    title: "Fictional retitled convoy",
+  });
+  await rerouteAll();
+  expect((await published(id)).count).toBe(Number(active[0]?.n));
+  expect((await published(draft.data.id)).count).toBe(Number(active[0]?.n));
+  const [item] = (await service.history(observer, { limit: 100 })).items.filter(
+    (r) => r.category === "event.published" && r.target?.id === id,
+  );
+  expect(item).toMatchObject({
+    messageKey: "notifications.event.published",
+    target: { kind: "event", id },
+    display: { eventTitle: "Fictional notification convoy", game: "ets2" },
+  });
+  expect(
+    (await service.poll(observer)).items.find((r) => r.target?.id === id)?.liveToastEligible,
+  ).toBe(true);
+  // The toggle suppresses only this category.
+  await changePreferences(observer, { newEvent: false });
+  const muted = await events.create(director, newId(), eventInput());
+  await drain();
+  expect((await published(muted.data.event.id)).count).toBe(Number(active[0]?.n) - 1);
+  expect(
+    (await service.history(observer, { limit: 100 })).items.some(
+      (r) => r.target?.id === muted.data.event.id,
+    ),
+  ).toBe(false);
+});
+
+test("a published event cancelled or started before delivery is skipped for good", async () => {
+  const before = await events.create(director, newId(), eventInput());
+  await events.cancel(director, before.data.event.id, newId(), 1, "Fictional cancellation");
+  const started = await events.create(
+    director,
+    newId(),
+    eventInput({ startsAt: new Date(instant + 60000).toISOString() }),
+  );
+  instant += 120000;
+  await drain();
+  const count = async (eventId: string) => {
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM notifications WHERE category='event.published' AND subject_id=?",
+      [Buffer.from(eventId)],
+    );
+    return Number(rows[0]?.n);
+  };
+  expect(await count(before.data.event.id)).toBe(0);
+  expect(await count(started.data.event.id)).toBe(0);
+  const [jobs] = await control.query<RowDataPacket[]>(
+    "SELECT state,COUNT(*) n FROM durable_jobs WHERE CAST(consumer AS CHAR)='notifications.v1' GROUP BY state",
+  );
+  expect(jobs.map((row) => row.state)).toEqual(["completed"]);
+  // Replaying either publication reference after the skip still sends nothing.
+  const [created] = await control.query<RowDataPacket[]>(
+    "SELECT CAST(id AS CHAR) id FROM outbox_events WHERE CAST(type AS CHAR)='event.changed' AND JSON_UNQUOTE(JSON_EXTRACT(data,'$.category'))='created'",
+  );
+  expect(created).toHaveLength(2);
+  for (const row of created) await replay(row.id);
+  await rerouteAll();
+  expect(await count(before.data.event.id)).toBe(0);
+  expect(await count(started.data.event.id)).toBe(0);
 });

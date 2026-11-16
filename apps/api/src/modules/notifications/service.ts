@@ -15,7 +15,6 @@ import {
   notificationCommands,
   notifications,
   or,
-  preferenceNames,
   recipientStates,
   sql,
 } from "@vtc/db/notifications-schema";
@@ -41,13 +40,19 @@ import { canonicalJson } from "../sources/contracts/canonical.js";
 import type { TripDecisions } from "../trip-decisions/service.js";
 import type { Trips } from "../trips/service.js";
 import { notificationCursors } from "./cursor.js";
-import { freshnessMs, reminderWindow, sourceLiveUntil } from "./policy.js";
+import {
+  freshnessMs,
+  type PreferenceName,
+  preferenceKeys,
+  reminderWindow,
+  sourceLiveUntil,
+} from "./policy.js";
 
 type S = components["schemas"];
 type Row = typeof notifications.$inferSelect;
 type State = typeof recipientStates.$inferSelect;
 type Access = (typeof notificationAccess)[number];
-type Preference = (typeof preferenceNames)[number];
+type Preference = PreferenceName;
 type Route = typeof notificationCommands.$inferSelect.route;
 type Result = typeof notificationCommands.$inferSelect.result;
 export interface NotificationsConfig {
@@ -184,14 +189,9 @@ export function createNotifications(
     if (!row) throw new Error("NOTIFICATION_RECIPIENT_MISSING");
     return row;
   }
-  const preferences = (r: State): S["NotificationPreferences"] => ({
-    tripStarted: r.tripStarted,
-    tripFinished: r.tripFinished,
-    tripRejected: r.tripRejected,
-    eventChanges: r.eventChanges,
-    eventReminders: r.eventReminders,
-    qualificationChanges: r.qualificationChanges,
-  });
+  // Projects only the toggles the viewer's current capabilities make readable and writable.
+  const preferences = (r: State, keys: readonly Preference[]) =>
+    Object.fromEntries(keys.map((k) => [k, r[k]])) as S["NotificationPreferences"];
   function visible(a: Actor) {
     const access: Access[] = [
       "company",
@@ -290,7 +290,7 @@ export function createNotifications(
           rows
             .filter(
               (r) =>
-                r.category === "trip.rejected" &&
+                (r.category === "trip.rejected" || r.category === "trip.accepted") &&
                 r.readAt === null &&
                 r.liveUntil !== null &&
                 r.liveUntil >= at(),
@@ -350,6 +350,16 @@ export function createNotifications(
               currentDecisions.get(trip.canonicalId)?.outcome !== "rejected" ||
               r.effectKey.toString() !== `rejected:${currentDecisions.get(trip.canonicalId)?.id}`)
           ) &&
+          // An accepted toast is live only while that accepting decision is still current.
+          !(
+            r.category === "trip.accepted" &&
+            (!trip ||
+              trip.canonicalId !== r.subjectId ||
+              trip.decision !== "accepted" ||
+              currentDecisions.get(trip.canonicalId)?.outcome !== "accepted" ||
+              r.effectKey.toString() !==
+                `trip.accepted:${currentDecisions.get(trip.canonicalId)?.id}`)
+          ) &&
           !history &&
           r.readAt === null &&
           r.liveUntil !== null &&
@@ -361,7 +371,15 @@ export function createNotifications(
   interface Delivery {
     category: string;
     preference: Preference;
+    // The owner without the access capability keeps the toggle that gated it before Stage 4.
+    ownerPreference?: Preference;
     access: Access;
+    // A recipient must also hold this capability, e.g. company.read for new events.
+    capability?: string;
+    // Fixed recipients replace the roster and are never paginated.
+    recipients?: string[];
+    // Event deliveries default to participating members; "roster" targets every active member.
+    audience?: "roster";
     ownerId: string | null;
     subjectKind: Row["subjectKind"];
     subjectId: string;
@@ -394,8 +412,13 @@ export function createNotifications(
         !recipient.capabilities.includes(d.access))
     )
       return;
+    if (d.capability && !recipient.capabilities.includes(d.capability)) return;
     const s = await state(tx, recipient.id);
-    if (!s[d.preference]) return;
+    const preference =
+      d.ownerPreference && d.ownerId === recipient.id && !recipient.capabilities.includes(d.access)
+        ? d.ownerPreference
+        : d.preference;
+    if (!s[preference]) return;
     const [existing] = await c(tx)
       .select({ id: notifications.id })
       .from(notifications)
@@ -497,7 +520,24 @@ export function createNotifications(
       );
       if (decision.tripId !== e.aggregate.id)
         throw new Error("NOTIFICATION_DECISION_REFERENCE_CONFLICT");
-      if (!decision.current || decision.outcome !== "rejected") return null;
+      // A decision superseded before delivery notifies nobody.
+      if (!decision.current) return null;
+      if (decision.outcome === "accepted") {
+        const trip = await ports.trips.notificationStateInTransaction(tx, decision.tripId);
+        return {
+          ...base,
+          category: "trip.accepted",
+          preference: "tripAccepted",
+          access: "company",
+          ownerId: trip.ownerId,
+          subjectKind: "trip",
+          subjectId: trip.id,
+          effectKey: `trip.accepted:${e.data.decisionId}`,
+          game: trip.game,
+          recipients: [trip.ownerId],
+        };
+      }
+      if (decision.outcome !== "rejected") return null;
       const trip = await ports.trips.notificationStateInTransaction(tx, decision.tripId);
       return {
         ...base,
@@ -530,7 +570,8 @@ export function createNotifications(
           e.type === "manual.report_submitted"
             ? "trip.review_required"
             : "trip.correction_requested",
-        preference: "tripRejected",
+        preference: "reviewQueue",
+        ownerPreference: "tripRejected",
         access: "trips.review",
         ownerId: trip.ownerId,
         subjectKind: "trip",
@@ -599,7 +640,7 @@ export function createNotifications(
       return {
         ...base,
         category: e.type,
-        preference: "eventChanges",
+        preference: "newApplications",
         access: "applications.manage",
         ownerId: null,
         subjectKind: "application",
@@ -626,6 +667,31 @@ export function createNotifications(
     }
     if (e.type === "event.changed") {
       const change = await ports.events.notificationChangeInTransaction(tx, e);
+      if (e.data.category === "created") {
+        // Publication only (version 1, never a draft save, edit or republish). An event that is
+        // cancelled or has started by delivery is skipped for good: the job completes normally.
+        if (
+          !change.published ||
+          change.status !== "scheduled" ||
+          Date.parse(change.currentStartsAt) <= now().getTime()
+        )
+          return null;
+        return {
+          ...base,
+          category: "event.published",
+          preference: "newEvent",
+          access: "company",
+          capability: "company.read",
+          ownerId: null,
+          subjectKind: "event",
+          subjectId: change.eventId,
+          subjectVersion: 1,
+          effectKey: `event.published:${change.eventId}`,
+          title: change.title,
+          game: change.game,
+          audience: "roster",
+        };
+      }
       if (!change.effective || !change.category) return null;
       return {
         ...base,
@@ -691,8 +757,18 @@ export function createNotifications(
         await ports.events.repairNotificationScheduleInTransaction(tx, e);
       const d = await description(tx, e);
       if (!d) return;
+      if (d.recipients) {
+        // A fixed audience is delivered by the first page only.
+        if (ref.after !== null) return;
+        const fixed = await ports.identity.notificationMembersInTransaction(tx, d.recipients);
+        for (const id of d.recipients) {
+          const recipient = fixed.get(id);
+          if (recipient) await insert(tx, recipient, d);
+        }
+        return;
+      }
       const ids =
-        e.type === "event.changed"
+        e.type === "event.changed" && d.audience !== "roster"
           ? await ports.events.recipientsInTransaction(
               tx,
               e.data.eventId,
@@ -904,9 +980,9 @@ export function createNotifications(
     },
     async getPreferences(a: Actor) {
       return run(async (tx) => {
-        await authorize(tx, a);
+        const current = await authorize(tx, a);
         const s = await state(tx, a.userId);
-        return { data: preferences(s), version: s.version };
+        return { data: preferences(s, preferenceKeys(current.capabilities)), version: s.version };
       });
     },
     async setPreferences(
@@ -915,25 +991,33 @@ export function createNotifications(
       expected: number,
       value: S["NotificationPreferences"],
     ) {
-      try {
-        closed(value, preferenceNames);
-        if (preferenceNames.some((p) => typeof value[p] !== "boolean")) throw new Error();
-      } catch {
-        throw identityError(422);
-      }
       return run(async (tx) => {
-        await authorize(tx, a);
+        const current = await authorize(tx, a);
+        // A write carries exactly the keys the current read returns. Omitted capability toggles
+        // keep their stored values; a stale key set is rejected before any receipt or version.
+        const keys = preferenceKeys(current.capabilities);
+        let written: Partial<Record<Preference, boolean>>;
+        try {
+          const input = closed(value, keys);
+          if (keys.some((p) => typeof input[p] !== "boolean")) throw new Error();
+          written = Object.fromEntries(keys.map((p) => [p, input[p] as boolean]));
+        } catch {
+          throw identityError(422);
+        }
         const s = await state(tx, a.userId);
         const result = await once(tx, a, "preferences", key, [expected, value], async () => {
           if (s.version !== expected) throw identityError(412, "VERSION_CONFLICT");
           await c(tx)
             .update(recipientStates)
-            .set({ ...value, version: s.version + 1 })
+            .set({ ...written, version: s.version + 1 })
             .where(eq(recipientStates.recipientId, a.userId));
-          return { id: a.userId, version: s.version + 1, preferences: value };
+          return { id: a.userId, version: s.version + 1, preferences: written };
         });
         if (!result.preferences) throw new Error("NOTIFICATION_PREFERENCE_RECEIPT_MISSING");
-        return { data: result.preferences, version: result.version };
+        return {
+          data: result.preferences as S["NotificationPreferences"],
+          version: result.version,
+        };
       });
     },
     async read(a: Actor, id: string, key: string) {

@@ -31,7 +31,7 @@ Roles are additive and separate from ETS2/ATS qualifications. Nobody may approve
 - **Game catalogs**: per-game ETS2/ATS DLCs, regions, cities, companies, cargo and trailer types as plain editable lists, kept by hand or by CSV/JSON import. Telemetry is matched by exact code. DLCs and companies have one canonical name; other names are RU/EN with a visible English fallback, and a city can also carry its in-game canonical name, shown in the city autocomplete and beside the translated name; hidden rows stay readable but leave new selections. Companies also have city depots, offered in manual reports, and a staff-uploaded logo with a placeholder when missing.
 - **Analytics**: accepted trip counts and actual distance for company and driver, in one reporting timezone. Browse recent trips, filter by date, search or follow driver history links.
 - **Events**: staff draft and publish public or private convoys with platform, cities, depots, exact distance, DLCs and galleries with covers. Members see depot logos and RSVPs. Only authors and admins see decline reasons. One-hour reminders and nearest-event quick RSVP in the header and overview. Staff record actual attendance. Confirmed event trips may carry prescribed loads beyond qualification limits.
-- **Notifications**: in-app history and updates while the site is open.
+- **Notifications**: in-app history and updates while the site is open; per-kind toggles, own accepted trips, new events.
 - **Workspace attention**: counts by permission, promotion links.
 - **Administration**: members, roles, qualification levels, company settings, integrations and a filterable audit log. The serving Director transfers leadership using a ten-minute email code.
 
