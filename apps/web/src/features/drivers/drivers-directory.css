@@ -1,0 +1,264 @@
+/* Drivers directory (VTC-145). Scoped to the page and built from shared tokens only. */
+/* Portalled out of the page, so the class is not scoped under it. */
+.drivers-hint {
+  z-index: 70;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--secondary);
+  font-size: var(--font-small);
+  line-height: 1.5;
+  box-shadow: 0 16px 40px #00000066;
+}
+.drivers-hint p {
+  margin: 0;
+}
+.drivers-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  min-width: 0;
+}
+.drivers-page .drivers-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+.drivers-page .drivers-heading h1 {
+  margin: 0;
+}
+.drivers-page .drivers-summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.drivers-page .drivers-notice p {
+  margin: 0;
+}
+
+/* The ⓘ button: a small circle inside a target that grows to 40px on touch screens. */
+.drivers-page .drivers-hint-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.drivers-page .drivers-hint-button > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 10px;
+  font-style: italic;
+  line-height: 1;
+}
+.drivers-page .drivers-hint-button:hover {
+  color: var(--foreground);
+}
+
+.drivers-page .drivers-tab-count {
+  margin-inline-start: 6px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--surface-active);
+  color: var(--secondary);
+  font-size: var(--font-badge);
+  font-variant-numeric: tabular-nums;
+}
+.drivers-page .drivers-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Toolbar: search grows, the native selects keep compact widths and wrap on narrow screens. */
+.drivers-page .drivers-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.drivers-page .drivers-search {
+  flex: 1 1 200px;
+  max-width: 320px;
+  min-width: 0;
+}
+.drivers-page .drivers-search input,
+.drivers-page .drivers-filter select {
+  width: 100%;
+}
+.drivers-page .drivers-filter {
+  flex: 0 1 160px;
+  min-width: 0;
+}
+.drivers-page .drivers-reset {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Table columns: fixed layout, so every column but the driver has a width. */
+.drivers-page .drivers-table .table {
+  table-layout: fixed;
+}
+.drivers-page .drivers-table :is(th, td) {
+  overflow-wrap: break-word;
+}
+.drivers-page .drivers-table .drivers-col-level {
+  width: 150px;
+}
+.drivers-page .drivers-table .drivers-col-number {
+  width: 124px;
+  white-space: nowrap;
+}
+.drivers-page .drivers-table .drivers-col-last {
+  width: 140px;
+}
+.drivers-page .drivers-table .drivers-col-access {
+  width: 84px;
+}
+.drivers-page .drivers-driver {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.drivers-page .drivers-avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--focus);
+  font-size: var(--font-badge);
+  font-weight: 700;
+}
+.drivers-page .drivers-driver-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  min-width: 0;
+}
+.drivers-page .drivers-link,
+.drivers-page .drivers-access {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  font-weight: 500;
+  text-decoration: none;
+}
+.drivers-page .drivers-link:hover,
+.drivers-page .drivers-access:hover {
+  text-decoration: underline;
+}
+.drivers-page .drivers-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.drivers-page .drivers-self {
+  background: var(--accent-soft);
+  color: var(--focus);
+}
+.drivers-page .drivers-level {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-badge);
+  background: var(--surface-active);
+  color: var(--foreground);
+  font-size: var(--font-small);
+}
+.drivers-page .drivers-level-none {
+  border-style: dashed;
+  background: none;
+  color: var(--muted);
+}
+.drivers-page :is(.drivers-unavailable, .drivers-muted, .drivers-footnote) {
+  color: var(--muted);
+}
+.drivers-page .drivers-footnote {
+  font-size: var(--font-badge);
+}
+.drivers-page .drivers-invalid {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Invited tab: the state segment and the applications link share one wrapping row. */
+.drivers-page .drivers-invited {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.drivers-page .drivers-invited-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+.drivers-page .drivers-invited-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  font-size: var(--font-small);
+}
+.drivers-page .drivers-invited-table .drivers-col-expires {
+  width: 40%;
+}
+
+/* Phone and tablet cards: the driver spans the card, the figures sit in two columns. */
+@media (max-width: 800px) {
+  .drivers-page .drivers-search {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .drivers-page .drivers-filter {
+    flex: 1 1 140px;
+  }
+  .drivers-page .drivers-table .table tbody :is(.drivers-col-driver, .drivers-col-access) {
+    grid-column: 1 / -1;
+  }
+  .drivers-page .drivers-table .table tbody .drivers-col-number {
+    text-align: start;
+  }
+}
+@media (pointer: coarse) {
+  .drivers-page .drivers-hint-button {
+    min-width: var(--target-min);
+    min-height: var(--target-min);
+  }
+}

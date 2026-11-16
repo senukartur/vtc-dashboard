@@ -5,6 +5,8 @@ import {
   alphaId,
   analyticsFixture,
   betaId,
+  type DirectoryOptions,
+  directoryResponse,
   formerId,
   levelsFixture,
   profileFixture,
@@ -25,6 +27,8 @@ export type DriverEndpoint =
   | "progressAts"
   | "levels"
   | "trips"
+  /** The drivers directory list, `GET /members` (the All drivers link). */
+  | "directory"
   /** Public company stats: the reporting timezone that anchors the analytics window. */
   | "stats";
 
@@ -46,6 +50,9 @@ export interface DriverMockState {
   emptyAnalytics: boolean;
   /** Zone in the public company stats; null returns the unavailable month. */
   reportingTimezone: string | null;
+  /** Stage 4 profile shape: trips on (default), no accepted trips, or the Trips module off. */
+  profileTrips: "on" | "none" | "off";
+  directory: DirectoryOptions;
   /** Holds every response of an endpoint until `release` is called for it. */
   hold(endpoint: DriverEndpoint): void;
   release(endpoint: DriverEndpoint): void;
@@ -62,6 +69,7 @@ function endpointOf(url: URL): DriverEndpoint | null {
   if (path === "/api/v1/qualification-levels") return "levels";
   if (path === "/api/v1/trips") return "trips";
   if (path === "/api/v1/public/company-stats") return "stats";
+  if (path === "/api/v1/members") return "directory";
   return null;
 }
 
@@ -90,6 +98,8 @@ export async function mockDriverRoutes(
     emptyAnalytics?: boolean;
     /** Public company stats zone (default Europe/Moscow, as in the analytics fixture). */
     reportingTimezone?: string | null;
+    profileTrips?: "on" | "none" | "off";
+    directory?: DirectoryOptions;
   } = {},
 ): Promise<DriverMockState> {
   const gates = new Map<DriverEndpoint, { promise: Promise<void>; release: () => void }>();
@@ -104,6 +114,8 @@ export async function mockDriverRoutes(
     emptyAnalytics: options.emptyAnalytics ?? false,
     reportingTimezone:
       options.reportingTimezone === undefined ? "Europe/Moscow" : options.reportingTimezone,
+    profileTrips: options.profileTrips ?? "on",
+    directory: { ...options.directory },
     hold(endpoint) {
       if (gates.has(endpoint)) return;
       let release = () => {};
@@ -148,6 +160,10 @@ export async function mockDriverRoutes(
     const status = endpoint ? state.failures[endpoint] : undefined;
     if (status) return route.fulfill({ status, json: { error: { code: "SYNTHETIC_FAILURE" } } });
 
+    if (endpoint === "directory") {
+      const result = directoryResponse(url.searchParams, state.directory);
+      return route.fulfill({ status: result.status, json: result.body });
+    }
     if (endpoint === "stats")
       return route.fulfill({ json: makeCompanyStatsFixture(state.reportingTimezone) });
 
@@ -155,7 +171,7 @@ export async function mockDriverRoutes(
     if (endpoint === "profile") {
       if (!knownMembers.has(memberId))
         return route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND" } } });
-      return route.fulfill({ json: profileFixture(memberId) });
+      return route.fulfill({ json: profileFixture(memberId, state.profileTrips) });
     }
     if (endpoint === "analytics")
       return route.fulfill({

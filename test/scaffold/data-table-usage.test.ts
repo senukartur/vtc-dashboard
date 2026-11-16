@@ -29,7 +29,6 @@ const pending: Record<string, Rule[]> = {
   "features/catalogs/DepotRows.tsx": ["table-import"],
   "features/connections/ConnectionsSection.tsx": ["pager"],
   "features/dashboard/components.tsx": ["table-import"],
-  "features/drivers/DriversPage.tsx": ["table-import"],
   "features/drivers/components.tsx": ["table-import"],
   "features/qualifications/levels.tsx": ["table-import"],
   "features/review/decision-parts.tsx": ["table-markup"],

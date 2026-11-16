@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { computePeriodDates } from "../../apps/web/src/features/dashboard/model.ts";
 import {
@@ -18,7 +19,12 @@ import {
   alphaId,
   analyticsFixture,
   betaId,
+  type DirectoryOptions,
+  directoryCounts,
+  directoryMembers,
+  directoryResponse,
   formerId,
+  invitationsFixture,
   levelId,
   levelsFixture,
   profileFixture,
@@ -270,6 +276,17 @@ describe("driver profile translations", () => {
       expect(present).not.toContain(`profile.${key}`);
     expect(present).toContain("states.forbidden");
     expect(present).toContain("qualification.eligible");
+    // The client-side directory and the trips-card lifetime line are gone (VTC-145).
+    for (const key of [
+      "directory.subtitle",
+      "directory.searchPlaceholder",
+      "directory.totalMembers",
+      "directory.activeMember",
+      "directory.formerMember",
+      "directory.loadMore",
+      "trips.lifetime",
+    ])
+      expect(present).not.toContain(key);
   });
 });
 
@@ -279,7 +296,8 @@ describe("driver profile fixtures match the browser contract", () => {
 
   it("parses every builder with its envelope schema", () => {
     for (const id of [selfId, alphaId, betaId, formerId, topId])
-      expect(parses("EnvelopeMemberProfile", profileFixture(id))).toBe(true);
+      for (const trips of ["on", "none", "off"] as const)
+        expect(parses("EnvelopeMemberProfile", profileFixture(id, trips))).toBe(true);
     for (const game of ["ets2", "ats"] as const)
       expect(parses("EnvelopeListQualificationLevel", levelsFixture(game))).toBe(true);
     for (const search of ["", "game=ats", "game=ets2"])
@@ -319,5 +337,171 @@ describe("driver profile fixtures match the browser contract", () => {
     ]);
     for (const secret of ["@example.invalid", "email", "password", "token", "evidence"])
       expect(serialized).not.toContain(secret);
+  });
+});
+
+describe("drivers directory fixtures match the live Stage 4 contract", () => {
+  const parses = (name: Parameters<typeof schema>[0], value: unknown) =>
+    schema(name).safeParse(value).success;
+  type Example = { id: string; status: number; response: unknown };
+  const examples = (
+    JSON.parse(
+      readFileSync(
+        new URL("../../docs/contracts/dashboard/examples.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { cases: Example[] }
+  ).cases;
+  const example = (id: string) => {
+    const found = examples.find((item) => item.id === id);
+    if (!found) throw new Error(`MISSING_EXAMPLE ${id}`);
+    return found.response as Record<string, unknown>;
+  };
+  /** Key paths of an object; arrays contribute the union of their elements' key paths. */
+  function shape(value: unknown, prefix = ""): string[] {
+    if (Array.isArray(value))
+      return [...new Set(value.flatMap((item) => shape(item, `${prefix}[].`)))].sort();
+    if (value === null || typeof value !== "object") return [];
+    return Object.entries(value)
+      .flatMap(([key, item]) => [`${prefix}${key}`, ...shape(item, `${prefix}${key}.`)])
+      .sort();
+  }
+  const body = (search: string, options: DirectoryOptions = {}) => {
+    const result = directoryResponse(new URLSearchParams(search), options);
+    if (result.status !== 200) throw new Error(`UNEXPECTED_${result.status}`);
+    return result.body;
+  };
+  /**
+   * Data key paths without meta and the pre-Stage-4 assignment rows; the two games' level objects
+   * collapse into one, so a page whose ATS levels are all null still states the level shape.
+   */
+  const withoutMeta = (paths: string[]) =>
+    [
+      ...new Set(
+        paths
+          .filter((path) => !path.startsWith("meta") && !path.startsWith("data.qualifications."))
+          .map((path) => path.replace(/\.levels\.(?:ets2|ats)\./, ".levels.*.")),
+      ),
+    ].sort();
+
+  it("parses every directory variant with MemberStage4DirectoryListEnvelope", () => {
+    for (const options of [
+      {},
+      { tripsOff: true },
+      { qualificationsOff: true },
+      { tripsOff: true, qualificationsOff: true },
+      { empty: true },
+    ])
+      for (const search of [
+        "limit=25&status=active&sort=nickname&order=asc",
+        "limit=25&status=former&sort=nickname",
+        "limit=1&sort=nickname",
+      ])
+        expect(
+          parses("MemberStage4DirectoryListEnvelope", body(search, options)),
+          `${search} ${JSON.stringify(options)}`,
+        ).toBe(true);
+    for (const state of ["active", "expired"])
+      for (const limit of ["1", "25"])
+        expect(
+          parses(
+            "InvitationStage4ListEnvelope",
+            invitationsFixture(new URLSearchParams({ state, limit })),
+          ),
+        ).toBe(true);
+  });
+
+  it("keeps the list and row key sets of the matching examples.json cases", () => {
+    // A stub that keeps an older shape fails here instead of rendering as data (PR #199).
+    const active = body("limit=25&status=active&sort=distance30d");
+    const former = body("limit=25&status=former&sort=lastTrip");
+    const tripsOff = body("limit=25&status=active&sort=nickname", { tripsOff: true });
+    const qualificationsOff = body("limit=25&status=active&sort=distance30d", {
+      qualificationsOff: true,
+    });
+    expect(withoutMeta(shape(active))).toEqual(
+      withoutMeta(shape(example("listMembers:stage-4-active-tab"))),
+    );
+    expect(withoutMeta(shape(former))).toEqual(
+      withoutMeta(shape(example("listMembers:stage-4-former-tab"))),
+    );
+    expect(withoutMeta(shape(tripsOff))).toEqual(
+      withoutMeta(shape(example("listMembers:stage-4-without-trips"))),
+    );
+    // No example lacks Qualifications: the active case minus every `levels` path.
+    expect(withoutMeta(shape(qualificationsOff))).toEqual(
+      withoutMeta(shape(example("listMembers:stage-4-active-tab"))).filter(
+        (path) => !path.includes(".levels"),
+      ),
+    );
+    expect(withoutMeta(shape(invitationsFixture(new URLSearchParams("state=active"))))).toEqual(
+      withoutMeta(shape(example("listInvitations:stage-4-active"))),
+    );
+    expect(withoutMeta(shape(profileFixture(alphaId)))).toEqual(
+      withoutMeta(shape(example("getMember:stage-4-returned-member"))),
+    );
+    expect(withoutMeta(shape(profileFixture(alphaId, "none")))).toEqual(
+      withoutMeta(shape(example("getMember:stage-4-no-accepted-trip"))),
+    );
+  });
+
+  it("serves company-wide counters, filter-bound cursors and the server's validation", () => {
+    const counts = directoryCounts();
+    expect(counts).toEqual({
+      active: directoryMembers.active.length,
+      former: directoryMembers.former.length,
+      droveLast30Days: directoryMembers.active.filter((item) => item.trips > 0).length,
+    });
+    expect([counts.active, counts.former]).toEqual([18, 4]);
+    const filtered = body("limit=25&status=active&search=hauler&sort=nickname");
+    expect(filtered.data.items.map((item) => item.nickname)).toEqual([
+      "AlphaHauler",
+      "MikeHauler",
+      "Romeo Long Distance Hauler of the Northern Routes",
+    ]);
+    expect(filtered.data.statusCounts).toEqual(counts);
+    const first = body("limit=10&status=active&sort=distance30d&order=desc");
+    expect(first.data.items).toHaveLength(10);
+    const distances = first.data.items.map((item) => Number(item.last30Days?.actualDistanceM));
+    expect(distances).toEqual([...distances].sort((a, b) => b - a));
+    const cursor = first.data.nextCursor ?? "";
+    const second = body(
+      `limit=10&status=active&sort=distance30d&order=desc&cursor=${encodeURIComponent(cursor)}`,
+    );
+    expect(second.data.items).toHaveLength(8);
+    expect(second.data.nextCursor).toBeNull();
+    const other = directoryResponse(
+      new URLSearchParams({ limit: "10", status: "active", sort: "trips30d", cursor }),
+    );
+    expect(other.status).toBe(409);
+    // Members without an accepted trip sort last in both directions.
+    for (const order of ["asc", "desc"]) {
+      const items = body(`limit=25&status=active&sort=lastTrip&order=${order}`).data.items;
+      expect(items.slice(-2).map((item) => item.lastAcceptedTripAt)).toEqual([null, null]);
+    }
+    for (const search of [
+      "sort=distance30d&status=active",
+      `ets2Level=${levelId("ets2", "trainee")}&sort=nickname`,
+    ])
+      expect(
+        directoryResponse(new URLSearchParams(search), { tripsOff: true, qualificationsOff: true })
+          .status,
+      ).toBe(422);
+    for (const search of ["order=asc", "search=%20", "status=left", "ets2Level=bogus"])
+      expect(directoryResponse(new URLSearchParams(search)).status).toBe(422);
+    expect(
+      body(`limit=25&status=former&ets2Level=${levelId("ets2", "driver_ii")}&sort=nickname`).data
+        .items,
+    ).toEqual([]);
+  });
+
+  it("keeps the directory and invitation fixtures free of links and tokens", () => {
+    const serialized = JSON.stringify([
+      body("limit=25&status=active&sort=nickname"),
+      invitationsFixture(new URLSearchParams("state=active")),
+      invitationsFixture(new URLSearchParams("state=expired")),
+    ]);
+    for (const secret of ["token", "link", "secret", "password", "http"])
+      expect(serialized.toLowerCase()).not.toContain(secret);
   });
 });
