@@ -4,7 +4,7 @@ import type { SQL, SQLWrapper } from "drizzle-orm";
 import type { Admissions } from "../modules/admissions/service.js";
 import { type Actor, type Identity, identityError } from "../modules/identity/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
-import { type Page, pagination } from "../modules/qualifications/pagination.js";
+import { type Page, pagination } from "../platform/http/cursor-pagination.js";
 import { createTripActivity } from "../modules/trips/activity.js";
 
 const MEMBER_ACTIVITY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;

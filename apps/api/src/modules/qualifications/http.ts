@@ -1,15 +1,9 @@
 import type { components } from "@vtc/contracts";
-import { applicationId } from "@vtc/db";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import {
-  browserRef as ref,
-  stage3Envelope,
-  stage3QuerySelection,
-} from "../../platform/http/stage3.js";
+import { browserRef as ref } from "../../platform/http/stage3.js";
 import { csrfProtection } from "../identity/http.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
-import type { Game } from "./initialization.js";
-import type { Page } from "./pagination.js";
+import type { Game } from "./ladder.js";
 import type { Qualifications } from "./service.js";
 
 type S = components["schemas"];
@@ -24,13 +18,10 @@ const id = {
     format: "uuid",
     pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
   },
-  game = { type: "string", enum: ["ets2", "ats"] },
-  view = { type: "string", const: "stage3" },
-  nicknameSearch = { type: "string", minLength: 1, maxLength: 128, pattern: "\\S" },
-  page = {
-    limit: { type: "integer", minimum: 1, maximum: 100 },
-    cursor: { type: "string", minLength: 1, maxLength: 2048 },
-  };
+  game = { type: "string", enum: ["ets2", "ats"] };
+const LEVELS = "/api/v1/qualification-levels",
+  ADMIN_LEVELS = "/api/v1/admin/qualification-levels";
+
 export async function registerQualificationRoutes(
   app: FastifyInstance,
   identity: Identity,
@@ -39,19 +30,12 @@ export async function registerQualificationRoutes(
   const actors = new WeakMap<FastifyRequest, Actor>(),
     csrf = csrfProtection(identity.config);
   const owned = (path: string) =>
-    path.startsWith("/api/v1/qualification-levels") ||
-    path.startsWith("/api/v1/admin/qualification-levels") ||
-    path.startsWith("/api/v1/admin/qualification-ladders/") ||
-    [
-      "/api/v1/admin/qualification-members",
-      "/api/v1/admin/promotion-candidates",
-      "/api/v1/admin/promotion-history",
-    ].includes(path) ||
-    path === "/api/v1/admin/qualification-rule-previews" ||
-    /^\/api\/v1\/(?:admin\/)?members\/:memberId\/(?:qualification-progress|qualification-assignments|qualification-action-history|promotions)$/.test(
-      path,
-    ) ||
-    ["/api/v1/me/qualification-progress", "/api/v1/me/qualification-assignments"].includes(path);
+    path.startsWith(LEVELS) ||
+    path.startsWith(ADMIN_LEVELS) ||
+    path === "/api/v1/me/qualifications" ||
+    path === "/api/v1/members/:memberId/qualifications" ||
+    path === "/api/v1/admin/members/:memberId/qualifications/:game";
+  const writes = ["POST", "PUT"];
   async function actor(request: FastifyRequest) {
     let current = actors.get(request);
     if (!current) {
@@ -68,421 +52,157 @@ export async function registerQualificationRoutes(
       await identity.rateLimit(request.method === "GET" ? "read" : "command", request.ip);
     const current = await actor(request);
     await qualifications.authorize(current, path.startsWith("/api/v1/admin/"));
-    if (["POST", "PATCH"].includes(request.method)) csrf.check(request, current);
+    if (writes.includes(request.method)) csrf.check(request, current);
   });
   app.addHook("preValidation", async (request) => {
     if (
       request.routeOptions.url &&
       owned(request.routeOptions.url) &&
-      ["POST", "PATCH"].includes(request.method) &&
+      writes.includes(request.method) &&
       request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json"
     )
       throw identityError(415);
   });
-  function key(request: FastifyRequest) {
-    try {
-      return applicationId(request.headers["idempotency-key"] as string);
-    } catch {
-      throw identityError(422);
-    }
-  }
-  function expected(request: FastifyRequest) {
-    const value = request.headers["if-match"];
-    if (value === undefined) throw identityError(428);
-    if (
-      typeof value !== "string" ||
-      !/^"v[1-9]\d*"$/.test(value) ||
-      !Number.isSafeInteger(Number(value.slice(2, -1)))
-    )
-      throw identityError(422);
-    return Number(value.slice(2, -1));
-  }
   const envelope = (request: FastifyRequest, data: unknown) => ({
     data,
     meta: { requestId: request.id },
   });
-  const ladderPath = "/api/v1/admin/qualification-ladders/:game";
-  const ladderParams = object({ game }, ["game"]);
-  app.get<{ Params: { game: Game } }>(
-    ladderPath,
+  const levelParams = object({ levelId: id }, ["levelId"]);
+  app.get<{ Querystring: { game: Game } }>(
+    LEVELS,
     {
       schema: {
-        params: ladderParams,
-        querystring: object({}),
-        response: { 200: ref("EnvelopeQualificationLadder") },
+        querystring: object({ game }, ["game"]),
+        response: { 200: ref("EnvelopeQualificationLevelList") },
       },
     },
-    async (request, reply) => {
-      const result = await qualifications.ladder(await actor(request), request.params.game);
-      reply.header("ETag", `"v${result.version}"`);
-      return envelope(request, result.data);
-    },
+    async (request) =>
+      envelope(request, await qualifications.list(await actor(request), request.query.game)),
   );
-  for (const [type, method, path, body, status] of [
-    ["add", "POST", "/levels", "QualificationLadderAddInput", 201],
-    ["reorder", "PATCH", "/order", "QualificationLadderOrderInput", 200],
-    ["archive", "POST", "/levels/:levelId/archive", "QualificationLadderArchiveInput", 200],
-  ] as const) {
-    app.route<{ Params: { game: Game; levelId?: string }; Body: S[typeof body] }>({
-      method,
-      url: ladderPath + path,
-      schema: {
-        params:
-          type === "archive" ? object({ game, levelId: id }, ["game", "levelId"]) : ladderParams,
-        querystring: object({}),
-        body: ref(body),
-        response: { [status]: ref("EnvelopeQualificationLadderRevision") },
-      },
-      handler: async (request, reply) => {
-        const result = await qualifications.changeLadder(
-          await actor(request),
-          request.params.game,
-          key(request),
-          expected(request),
-          type === "archive"
-            ? {
-                type,
-                levelId: request.params.levelId as string,
-                input: request.body as S["QualificationLadderArchiveInput"],
-              }
-            : type === "add"
-              ? { type, input: request.body as S["QualificationLadderAddInput"] }
-              : { type, input: request.body as S["QualificationLadderOrderInput"] },
-        );
-        reply.header("ETag", `"v${result.version}"`);
-        return reply.code(status).send(envelope(request, result.data));
-      },
-    });
-  }
-  const memberEnvelope = stage3Envelope(
-    "EnvelopeListMemberSummary",
-    "QualificationStage3MemberSearchListEnvelope",
-  );
-  const actionEnvelope = stage3Envelope(
-    "EnvelopeListQualificationActionHistory",
-    "QualificationStage3ActionHistoryListEnvelope",
-  );
-  app.get<{ Querystring: Page & { view?: "stage3"; search?: string } }>(
-    "/api/v1/admin/qualification-members",
+  app.get<{ Params: { levelId: string } }>(
+    `${LEVELS}/:levelId`,
     {
       schema: {
-        querystring: stage3QuerySelection(
-          object(page),
-          true,
-          object(
-            {
-              ...page,
-              view,
-              search: nicknameSearch,
-            },
-            ["view"],
-          ),
-        ),
+        params: levelParams,
+        querystring: object({}),
+        response: { 200: ref("EnvelopeQualificationLevelDetail") },
+      },
+    },
+    async (request) =>
+      envelope(request, await qualifications.detail(await actor(request), request.params.levelId)),
+  );
+  app.get(
+    "/api/v1/me/qualifications",
+    {
+      schema: {
+        querystring: object({}),
+        response: { 200: ref("EnvelopeMyQualificationList") },
       },
     },
     async (request) => {
-      const result = await qualifications.members(await actor(request), request.query);
-      return memberEnvelope(request.query.view === "stage3", envelope(request, result));
+      const current = await actor(request);
+      return envelope(request, await qualifications.memberQualifications(current, current.userId));
     },
   );
-  app.get<{ Querystring: Page & { game: Game; status?: "eligible" | "all"; search?: string } }>(
-    "/api/v1/admin/promotion-candidates",
-    {
-      schema: {
-        querystring: object(
-          {
-            ...page,
-            game,
-            status: { type: "string", enum: ["eligible", "all"] },
-            search: nicknameSearch,
-          },
-          ["game"],
-        ),
-        response: { 200: ref("QualificationStage3PromotionCandidateListEnvelope") },
-      },
-    },
-    async (request) =>
-      envelope(
-        request,
-        await qualifications.promotionCandidates(await actor(request), request.query),
-      ),
-  );
-  app.get<{ Querystring: Page & { game?: Game; memberId?: string } }>(
-    "/api/v1/admin/promotion-history",
-    {
-      schema: {
-        querystring: object({ ...page, game, memberId: id }),
-        response: { 200: ref("QualificationStage3PromotionHistoryListEnvelope") },
-      },
-    },
-    async (request) =>
-      envelope(request, await qualifications.promotionHistory(await actor(request), request.query)),
-  );
-  app.post<{ Body: S["QualificationPreviewInput"] }>(
-    "/api/v1/admin/qualification-rule-previews",
-    {
-      bodyLimit: 131072,
-      schema: {
-        querystring: object({}),
-        body: ref("QualificationPreviewInput"),
-        response: { 200: ref("EnvelopeQualificationPreview") },
-      },
-    },
-    async (request) =>
-      envelope(request, await qualifications.preview(await actor(request), request.body)),
-  );
-  app.get<{ Params: { memberId: string }; Querystring: Page & { game: Game; view?: "stage3" } }>(
-    "/api/v1/admin/members/:memberId/qualification-action-history",
+  app.get<{ Params: { memberId: string } }>(
+    "/api/v1/members/:memberId/qualifications",
     {
       schema: {
         params: object({ memberId: id }, ["memberId"]),
-        querystring: object({ ...page, game, view }, ["game"]),
-      },
-    },
-    async (request, reply) => {
-      const result = await qualifications.actionHistory(
-        await actor(request),
-        request.params.memberId,
-        request.query.game,
-        request.query,
-      );
-      reply.header("ETag", `"v${result.version}"`);
-      return actionEnvelope(request.query.view === "stage3", envelope(request, result.data));
-    },
-  );
-  app.get<{ Querystring: Page & { game: Game } }>(
-    "/api/v1/admin/qualification-levels/archived",
-    {
-      schema: {
-        querystring: object({ ...page, game }, ["game"]),
-        response: { 200: ref("EnvelopeListQualificationArchivedLevel") },
+        querystring: object({}),
+        response: { 200: ref("EnvelopeMyQualificationList") },
       },
     },
     async (request) =>
       envelope(
         request,
-        await qualifications.archivedLevels(
+        await qualifications.memberQualifications(await actor(request), request.params.memberId),
+      ),
+  );
+  app.post<{ Body: S["QualificationLevelCreateInput"] }>(
+    ADMIN_LEVELS,
+    {
+      schema: {
+        querystring: object({}),
+        body: ref("QualificationLevelCreateInput"),
+        response: { 201: ref("EnvelopeQualificationLevelCommandResult") },
+      },
+    },
+    async (request, reply) =>
+      reply
+        .code(201)
+        .send(envelope(request, await qualifications.create(await actor(request), request.body))),
+  );
+  app.put<{ Params: { levelId: string }; Body: S["QualificationLevelUpdateInput"] }>(
+    `${ADMIN_LEVELS}/:levelId`,
+    {
+      schema: {
+        params: levelParams,
+        querystring: object({}),
+        body: ref("QualificationLevelUpdateInput"),
+        response: { 200: ref("EnvelopeQualificationLevelCommandResult") },
+      },
+    },
+    async (request) =>
+      envelope(
+        request,
+        await qualifications.update(await actor(request), request.params.levelId, request.body),
+      ),
+  );
+  app.put<{ Params: { levelId: string }; Body: S["QualificationLevelMoveInput"] }>(
+    `${ADMIN_LEVELS}/:levelId/position`,
+    {
+      schema: {
+        params: levelParams,
+        querystring: object({}),
+        body: ref("QualificationLevelMoveInput"),
+        response: { 200: ref("EnvelopeQualificationLevelCommandResult") },
+      },
+    },
+    async (request) =>
+      envelope(
+        request,
+        await qualifications.move(await actor(request), request.params.levelId, request.body),
+      ),
+  );
+  app.post<{ Params: { levelId: string }; Body: S["QualificationLevelRemovalInput"] }>(
+    `${ADMIN_LEVELS}/:levelId/removal`,
+    {
+      schema: {
+        params: levelParams,
+        querystring: object({}),
+        body: ref("QualificationLevelRemovalInput"),
+        response: { 200: ref("EnvelopeQualificationLevelRemovalResult") },
+      },
+    },
+    async (request) =>
+      envelope(
+        request,
+        await qualifications.remove(await actor(request), request.params.levelId, request.body),
+      ),
+  );
+  app.put<{
+    Params: { memberId: string; game: Game };
+    Body: S["QualificationManualChangeInput"];
+  }>(
+    "/api/v1/admin/members/:memberId/qualifications/:game",
+    {
+      schema: {
+        params: object({ memberId: id, game }, ["memberId", "game"]),
+        querystring: object({}),
+        body: ref("QualificationManualChangeInput"),
+        response: { 200: ref("EnvelopeQualificationManualChangeResult") },
+      },
+    },
+    async (request) =>
+      envelope(
+        request,
+        await qualifications.changeMember(
           await actor(request),
-          request.query.game,
-          request.query,
+          request.params.memberId,
+          request.params.game,
+          request.body,
         ),
       ),
-  );
-  app.get<{ Params: { levelId: string }; Querystring: Page }>(
-    "/api/v1/admin/qualification-levels/:levelId/rule-versions",
-    {
-      schema: {
-        params: object({ levelId: id }, ["levelId"]),
-        querystring: object(page),
-        response: { 200: ref("EnvelopeListQualificationRuleHistory") },
-      },
-    },
-    async (request) =>
-      envelope(
-        request,
-        await qualifications.rules(
-          await actor(request),
-          request.params.levelId,
-          request.query,
-          undefined,
-          true,
-        ),
-      ),
-  );
-  app.get<{ Querystring: Page & { game: Game } }>(
-    "/api/v1/qualification-levels",
-    {
-      schema: {
-        querystring: object({ ...page, game }, ["game"]),
-        response: { 200: ref("EnvelopeListQualificationLevel") },
-      },
-    },
-    async (request) =>
-      envelope(
-        request,
-        await qualifications.levels(await actor(request), request.query.game, request.query),
-      ),
-  );
-  app.get<{ Params: { levelId: string }; Querystring: Page }>(
-    "/api/v1/qualification-levels/:levelId/rule-versions",
-    {
-      schema: {
-        params: object({ levelId: id }, ["levelId"]),
-        querystring: object(page),
-        response: { 200: ref("EnvelopeListQualificationRuleVersion") },
-      },
-    },
-    async (request) =>
-      envelope(
-        request,
-        await qualifications.rules(await actor(request), request.params.levelId, request.query),
-      ),
-  );
-  app.get<{ Params: { levelId: string; ruleVersionId: string } }>(
-    "/api/v1/qualification-levels/:levelId/rule-versions/:ruleVersionId",
-    {
-      schema: {
-        params: object({ levelId: id, ruleVersionId: id }, ["levelId", "ruleVersionId"]),
-        querystring: object({}),
-        response: { 200: ref("EnvelopeQualificationRuleVersion") },
-      },
-    },
-    async (request) =>
-      envelope(
-        request,
-        (
-          await qualifications.rules(
-            await actor(request),
-            request.params.levelId,
-            {},
-            request.params.ruleVersionId,
-          )
-        ).items[0],
-      ),
-  );
-  for (const scope of ["owner", "public", "admin"] as const) {
-    const path =
-      scope === "owner"
-        ? "/api/v1/me/qualification-progress"
-        : `/api/v1/${scope === "admin" ? "admin/" : ""}members/:memberId/qualification-progress`;
-    app.get<{ Params: { memberId?: string }; Querystring: { game: Game } }>(
-      path,
-      {
-        schema: {
-          ...(scope === "owner" ? {} : { params: object({ memberId: id }, ["memberId"]) }),
-          querystring: object({ game }, ["game"]),
-          response: {
-            200: ref(scope === "public" ? "EnvelopeProgressPublic" : "EnvelopeProgress"),
-          },
-        },
-      },
-      async (request, reply) => {
-        const current = await actor(request),
-          result = await qualifications.progress(
-            current,
-            request.params.memberId ?? current.userId,
-            request.query.game,
-            scope,
-          );
-        reply.header("ETag", `"v${result.version}"`);
-        return envelope(request, result.data);
-      },
-    );
-  }
-  for (const admin of [false, true]) {
-    const path = admin
-      ? "/api/v1/admin/members/:memberId/qualification-assignments"
-      : "/api/v1/me/qualification-assignments";
-    app.get<{ Params: { memberId?: string }; Querystring: Page & { game: Game } }>(
-      path,
-      {
-        schema: {
-          ...(admin ? { params: object({ memberId: id }, ["memberId"]) } : {}),
-          querystring: object({ ...page, game }, ["game"]),
-          response: { 200: ref("EnvelopeListAssignmentHistory") },
-        },
-      },
-      async (request, reply) => {
-        const current = await actor(request),
-          result = await qualifications.history(
-            current,
-            request.params.memberId ?? current.userId,
-            request.query.game,
-            request.query,
-            admin,
-          );
-        reply.header("ETag", `"v${result.version}"`);
-        return envelope(request, result.data);
-      },
-    );
-  }
-  app.patch<{ Params: { levelId: string }; Body: S["LevelInput"] }>(
-    "/api/v1/admin/qualification-levels/:levelId",
-    {
-      schema: {
-        params: object({ levelId: id }, ["levelId"]),
-        querystring: object({}),
-        body: ref("LevelInput"),
-        response: { 200: ref("EnvelopeQualificationLevel") },
-      },
-    },
-    async (request, reply) => {
-      const result = await qualifications.rename(
-        await actor(request),
-        request.params.levelId,
-        key(request),
-        expected(request),
-        request.body,
-      );
-      reply.header("ETag", `"v${result.version}"`);
-      return envelope(request, result.data);
-    },
-  );
-  app.post<{ Params: { levelId: string }; Body: S["QualificationRulePublicationInput"] }>(
-    "/api/v1/admin/qualification-levels/:levelId/rule-versions",
-    {
-      bodyLimit: 131072,
-      schema: {
-        params: object({ levelId: id }, ["levelId"]),
-        querystring: object({}),
-        body: ref("QualificationRulePublicationInput"),
-        response: { 201: ref("EnvelopeQualificationLevel") },
-      },
-    },
-    async (request, reply) => {
-      const result = await qualifications.publish(
-        await actor(request),
-        request.params.levelId,
-        key(request),
-        expected(request),
-        request.body,
-      );
-      reply.header("ETag", `"v${result.version}"`);
-      return reply.code(201).send(envelope(request, result.data));
-    },
-  );
-  app.post<{ Params: { memberId: string }; Body: S["AssignmentInput"] }>(
-    "/api/v1/admin/members/:memberId/qualification-assignments",
-    {
-      schema: {
-        params: object({ memberId: id }, ["memberId"]),
-        querystring: object({}),
-        body: ref("AssignmentInput"),
-        response: { 201: ref("EnvelopeAssignment") },
-      },
-    },
-    async (request, reply) => {
-      const result = await qualifications.assign(
-        await actor(request),
-        request.params.memberId,
-        key(request),
-        expected(request),
-        request.body,
-      );
-      reply.header("ETag", `"v${result.version}"`);
-      return reply.code(201).send(envelope(request, result.data));
-    },
-  );
-  app.post<{ Params: { memberId: string }; Body: S["PromotionInput"] }>(
-    "/api/v1/admin/members/:memberId/promotions",
-    {
-      schema: {
-        params: object({ memberId: id }, ["memberId"]),
-        querystring: object({}),
-        body: ref("PromotionInput"),
-        response: { 200: ref("EnvelopeAssignment") },
-      },
-    },
-    async (request, reply) => {
-      const result = await qualifications.promote(
-        await actor(request),
-        request.params.memberId,
-        key(request),
-        expected(request),
-        request.body,
-      );
-      reply.header("ETag", `"v${result.version}"`);
-      return envelope(request, result.data);
-    },
   );
 }

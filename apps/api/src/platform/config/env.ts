@@ -14,7 +14,6 @@ import {
 } from "../../modules/notifications/service.js";
 import {
   type QualificationsConfig,
-  validateEligibilityTrackingSince,
   validateQualificationsConfig,
 } from "../../modules/qualifications/service.js";
 import {
@@ -173,61 +172,13 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
   let qualifications: QualificationsConfig | undefined;
   if (![undefined, "true", "false"].includes(input.QUALIFICATIONS_ENABLED))
     throw new Error("Invalid environment fields: QUALIFICATIONS_ENABLED");
-  if (
-    ![undefined, "true", "false"].includes(input.QUALIFICATION_LADDER_EDITS_ENABLED) ||
-    (input.QUALIFICATION_LADDER_EDITS_ENABLED === "true" && input.QUALIFICATIONS_ENABLED !== "true")
-  )
-    throw new Error(
-      "Invalid environment fields: QUALIFICATION_LADDER_EDITS_ENABLED, QUALIFICATIONS_ENABLED",
-    );
-  const eligibilityTracking = input.QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED;
-  const eligibilitySince = input.QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE;
-  if (
-    ![undefined, "true", "false"].includes(eligibilityTracking) ||
-    (eligibilityTracking === "true" &&
-      (input.QUALIFICATIONS_ENABLED !== "true" || !eligibilitySince))
-  )
-    throw new Error(
-      "Invalid environment fields: QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED, QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE, QUALIFICATIONS_ENABLED",
-    );
-  if (eligibilitySince) {
-    try {
-      validateEligibilityTrackingSince(eligibilitySince);
-    } catch {
-      throw new Error("Invalid environment fields: QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE");
-    }
-  }
   if (input.QUALIFICATIONS_ENABLED === "true") {
-    try {
-      if (!identity || !trips) throw new Error();
-      qualifications = {
-        cursorKey: input.QUALIFICATIONS_CURSOR_KEY ?? "",
-        ...(input.QUALIFICATION_LADDER_EDITS_ENABLED === "true" && { ladderEditsEnabled: true }),
-        ...(eligibilityTracking === "true" && eligibilitySince !== undefined
-          ? { eligibilityTrackingSince: eligibilitySince }
-          : {}),
-      };
-      validateQualificationsConfig(qualifications);
-      if (
-        [
-          identity.secret,
-          trips.cursorKey,
-          catalogs?.cursorKey,
-          mail?.key,
-          input.TELEMETRY_CURSOR_KEY,
-          input.MANUAL_REPORTS_KEY,
-        ].includes(qualifications.cursorKey) ||
-        (admissions &&
-          Buffer.from(qualifications.cursorKey, "hex").equals(
-            Buffer.from(admissions.key, "base64url"),
-          ))
-      )
-        throw new Error();
-    } catch {
+    if (!identity || !trips)
       throw new Error(
-        "Invalid environment fields: QUALIFICATIONS_ENABLED, QUALIFICATIONS_CURSOR_KEY, IDENTITY_ENABLED, TRIPS_ENABLED",
+        "Invalid environment fields: QUALIFICATIONS_ENABLED, IDENTITY_ENABLED, TRIPS_ENABLED",
       );
-    }
+    qualifications = {};
+    validateQualificationsConfig(qualifications);
   }
   let telemetry: TelemetryConfig | undefined;
   if (![undefined, "true", "false"].includes(input.TELEMETRY_ENABLED))
@@ -284,7 +235,6 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
           trips.cursorKey,
           catalogs.cursorKey,
           telemetry?.cursorKey,
-          qualifications?.cursorKey,
           mail?.key,
         ].includes(manualReports.key) ||
         (admissions &&
@@ -329,7 +279,6 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
           mail?.key,
           catalogs?.cursorKey,
           trips?.cursorKey,
-          qualifications?.cursorKey,
           telemetry?.cursorKey,
           manualReports?.key,
         ].includes(events.cursorKey) ||
@@ -403,7 +352,6 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
           mail?.key,
           catalogs?.cursorKey,
           trips.cursorKey,
-          qualifications.cursorKey,
           telemetry?.cursorKey,
           manualReports?.key,
           events?.cursorKey,
@@ -441,7 +389,6 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
           mail?.key,
           catalogs.cursorKey,
           trips.cursorKey,
-          qualifications.cursorKey,
           telemetry?.cursorKey,
           manualReports.key,
           events.cursorKey,
@@ -475,7 +422,6 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
           mail?.key,
           catalogs?.cursorKey,
           trips.cursorKey,
-          qualifications?.cursorKey,
           telemetry?.cursorKey,
           manualReports?.key,
           events?.cursorKey,
@@ -509,7 +455,6 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
           mail?.key,
           catalogs?.cursorKey,
           trips.cursorKey,
-          qualifications.cursorKey,
           telemetry?.cursorKey,
           manualReports?.key,
           events.cursorKey,

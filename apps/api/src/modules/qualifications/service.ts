@@ -11,136 +11,106 @@ import {
 } from "@vtc/db";
 import {
   and,
-  asc,
-  desc,
   eq,
   gt,
   inArray,
+  isNotNull,
   isNull,
-  lt,
   lte,
+  maxQualificationLevels,
   or,
-  promotionReviews,
   qualificationAssignments,
   qualificationLevels,
-  qualificationPromotions,
-  qualificationRules,
-  qualificationStates,
+  qualificationLevelTrailers,
   sql,
 } from "@vtc/db/qualifications-schema";
-import { closed, createOutbox, type QualificationEvent } from "../../platform/outbox/events.js";
+import { closed, createOutbox } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
-import {
-  defaultRegistry,
-  evaluateQualificationProgress,
-  type Rule,
-} from "../qualification-rules/index.js";
 import { decimal } from "../sources/contracts/canonical.js";
-import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
+import { compareDecimal } from "../sources/contracts/decimal.js";
+import type { AdrClass, NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import type { ContributionChange } from "../trips/contributions.js";
 import type { Trips } from "../trips/service.js";
-import { createAssignmentWriter } from "./assignment-writer.js";
 import {
-  type CompanyHistoryFilters,
-  createCompanyHistory,
-  qualificationActor,
-  qualificationMembersById,
-} from "./company-history.js";
-import { createEligibility, promotionEligible, successor } from "./eligibility.js";
-import type { Game } from "./initialization.js";
-import { type ActiveLevel, activeLevels, createLadder, ladderReason } from "./ladder.js";
-import { levelReceipt } from "./level-receipts.js";
-import { type Page, pagination } from "./pagination.js";
-import { previewRules, validateDraftRules } from "./preview.js";
+  ATTRIBUTION_UNKNOWN,
+  adrClasses,
+  type CheckedRule,
+  NO_LEVEL,
+  type QualificationConditions,
+  type QualificationLimits,
+  type QualificationSnapshot,
+} from "./check.js";
+import {
+  type ActiveLevel,
+  activeLevels,
+  conditionsOf,
+  type Game,
+  type LevelRow,
+  levelTrailers,
+  limitsOf,
+} from "./ladder.js";
+import { type Assignment, createAssignments } from "./promotion.js";
 
 type S = components["schemas"];
-type Assignment = typeof qualificationAssignments.$inferSelect;
-type Level = typeof qualificationLevels.$inferSelect;
-type PublishedRule = typeof qualificationRules.$inferSelect;
-
-export interface QualificationsConfig {
-  cursorKey: string;
-  ladderEditsEnabled?: boolean;
-  eligibilityTrackingSince?: string;
-}
-export function validateEligibilityTrackingSince(since: string, instant = new Date()) {
-  if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(since) ||
-    utcIso(utcDateTime(since)) !== since ||
-    since > instant.toISOString()
-  )
-    throw new Error("INVALID_ELIGIBILITY_TRACKING_SINCE");
-}
-
-export function validateQualificationsConfig(config: QualificationsConfig, instant?: Date) {
-  if (
-    !/^[0-9a-f]{64}$/.test(config.cursorKey) ||
-    (config.ladderEditsEnabled !== undefined && typeof config.ladderEditsEnabled !== "boolean")
-  )
+type Locale = "en" | "ru";
+// Qualifications needs no settings of its own; its presence enables the module.
+export type QualificationsConfig = Record<string, never>;
+export function validateQualificationsConfig(config: QualificationsConfig) {
+  if (!config || typeof config !== "object" || Object.keys(config).length)
     throw new Error("INVALID_QUALIFICATIONS_CONFIG");
-  if (config.eligibilityTrackingSince !== undefined)
-    validateEligibilityTrackingSince(config.eligibilityTrackingSince, instant);
 }
 interface Ports {
   identity: Pick<
     Identity,
     | "transaction"
-    | "externalCommand"
     | "qualificationContextInTransaction"
-    | "completeTraineeInTransaction"
-    | "qualificationMembersInTransaction"
+    | "completeTraineeAsSystemInTransaction"
     | "memberSummariesInTransaction"
+    | "authorizeInTransaction"
   >;
   trips: Pick<Trips, "contributions">;
-  catalogs?: Pick<Catalogs, "selectionsInTransaction">;
+  catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction">;
   events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
+const MAX_DRIVERS = 1000;
+const LEVEL_OPERATIONS = {
+  "qualification.level_created": "created",
+  "qualification.level_edited": "edited",
+  "qualification.level_moved": "moved",
+  "qualification.level_removed": "removed",
+} as const;
+type LevelChange = "name" | "limits" | "conditions" | "position";
+
 export function createQualifications(
   unit: UnitOfWork,
   config: QualificationsConfig,
   ports: Ports,
   now = () => new Date(),
 ) {
-  validateQualificationsConfig(
-    config,
-    config.eligibilityTrackingSince === undefined ? undefined : now(),
-  );
+  validateQualificationsConfig(config);
   const c = (tx: TxContext) => unit.client(tx),
     at = () => now().toISOString(),
     audit = createAudit(unit),
     outbox = ports.events ?? createOutbox(unit),
-    page = pagination(config.cursorKey),
-    companyHistory = createCompanyHistory(unit, ports.identity),
-    eligibility = createEligibility(
+    assignments = createAssignments(
       unit,
-      ports.trips.contributions,
-      ports.identity,
-      config.eligibilityTrackingSince,
+      {
+        identity: ports.identity,
+        totals: ports.trips.contributions,
+        events: outbox,
+      },
+      at,
     );
-  const assignmentWriter = createAssignmentWriter(
-    unit,
-    outbox,
-    at,
-    config.eligibilityTrackingSince !== undefined,
-  );
-  const ladder = createLadder(
-    unit,
-    {
-      identity: ports.identity,
-      assignment: assignmentWriter,
-      updateEligibility: eligibility.applyTopology,
-      emit: (tx, id, version, instant) =>
-        emit(tx, "qualification.rules_changed", id, version, null, null, instant),
-    },
-    config.ladderEditsEnabled === true,
-    at,
-  );
   function game(value: string): asserts value is Game {
     if (!["ets2", "ats"].includes(value)) throw identityError(422);
   }
-  function reason(value: string) {
-    if (typeof value !== "string" || !value.trim() || value.length > 2048) throw identityError(422);
+  function id(value: string) {
+    try {
+      return applicationId(value);
+    } catch {
+      throw identityError(422);
+    }
   }
   function date(value: string) {
     try {
@@ -149,214 +119,415 @@ export function createQualifications(
       throw identityError(422);
     }
   }
-  function exact(value: string) {
+  function amount(value: string | null, positive: boolean) {
+    if (value === null) return null;
+    let exact: string;
     try {
-      return decimal(decimal38_18(value));
+      exact = decimal(decimal38_18(value));
     } catch {
       throw identityError(422);
     }
+    if (positive && compareDecimal(exact, "0") <= 0) throw identityError(422);
+    return exact;
   }
-  async function emit(
-    tx: TxContext,
-    type: QualificationEvent["type"],
-    id: string,
-    version: number,
-    userId: string | null,
-    assignmentId: string | null,
-    occurredAt = at(),
-  ) {
-    const eventId = newId();
-    await outbox.append(tx, {
-      eventId,
-      type,
-      schemaVersion: 1,
-      aggregate: { kind: "qualification", id, version },
-      occurredAt,
-      correlationId: eventId,
-      causationId: null,
-      data: { userId, assignmentId },
+  function text(value: string, max: number) {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (!trimmed || [...trimmed].length > max) throw identityError(422);
+    return trimmed;
+  }
+  async function locale(tx: TxContext, actor: Actor): Promise<Locale> {
+    const current = await ports.identity.authorizeInTransaction(tx, actor, "company.read");
+    return current.locale === "ru" ? "ru" : "en";
+  }
+  async function trailerLabels(tx: TxContext, ids: readonly string[], language: Locale) {
+    if (!ids.length || !ports.catalogs) return new Map<string, S["CatalogLabel"]>();
+    return ports.catalogs.labelsInTransaction(
+      tx,
+      [...new Set(ids)].map((value) => ({ kind: "trailer" as const, id: value })),
+      language,
+    );
+  }
+  const labelsOf = (labels: Map<string, S["CatalogLabel"]>, ids: readonly string[]) =>
+    ids.flatMap((value) => {
+      const label = labels.get(value);
+      return label ? [label] : [];
     });
-  }
-  async function state(tx: TxContext, userId: string, selectedGame: Game) {
-    let [row] = await c(tx)
-      .select({
-        assignmentId: qualificationStates.assignmentId,
-        version: qualificationStates.version,
-      })
-      .from(qualificationStates)
-      .where(
-        and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, selectedGame)),
-      )
-      .for("update");
-    if (!row) {
-      await c(tx)
-        .insert(qualificationStates)
-        .values({ userId, game: selectedGame, assignmentId: null, version: 1 });
-      [row] = await c(tx)
-        .select({
-          assignmentId: qualificationStates.assignmentId,
-          version: qualificationStates.version,
-        })
-        .from(qualificationStates)
-        .where(
-          and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, selectedGame)),
-        )
-        .for("update");
-    }
-    if (!row) throw new Error("QUALIFICATION_STATE_MISSING");
-    return row;
-  }
-  async function level(tx: TxContext, id: string) {
-    const [row] = await c(tx)
-      .select()
-      .from(qualificationLevels)
-      .where(eq(qualificationLevels.id, applicationId(id)))
-      .for("update");
-    if (!row) throw identityError(404);
-    return row;
-  }
-  async function ruleAt(tx: TxContext, levelId: string, instant: string) {
-    const [row] = await c(tx)
-      .select()
-      .from(qualificationRules)
-      .where(
-        and(eq(qualificationRules.levelId, levelId), lte(qualificationRules.effectiveAt, instant)),
-      )
-      .orderBy(desc(qualificationRules.effectiveAt))
-      .limit(1)
-      .for("share");
-    return row;
-  }
-  async function effectiveRules(tx: TxContext, levels: ActiveLevel[], instant: string) {
-    if (!levels.length) return new Map<string, PublishedRule>();
-    const latest = c(tx)
-      .select({
-        levelId: qualificationRules.levelId,
-        effectiveAt: sql<string>`MAX(${qualificationRules.effectiveAt})`.as("latest_effective_at"),
-      })
-      .from(qualificationRules)
-      .where(
-        and(
-          inArray(
-            qualificationRules.levelId,
-            levels.map((row) => row.id),
-          ),
-          lte(qualificationRules.effectiveAt, instant),
-        ),
-      )
-      .groupBy(qualificationRules.levelId)
-      .as("latest_rule");
-    const rows = await c(tx)
-      .select({ rule: qualificationRules })
-      .from(qualificationRules)
-      .innerJoin(
-        latest,
-        and(
-          eq(qualificationRules.levelId, latest.levelId),
-          eq(qualificationRules.effectiveAt, latest.effectiveAt),
-        ),
-      );
-    return new Map(rows.map(({ rule }) => [rule.levelId, rule]));
-  }
-  function assignmentDto(row: Assignment): S["Assignment"] {
+  async function limitsDto(
+    tx: TxContext,
+    limits: QualificationLimits,
+    language: Locale,
+  ): Promise<S["QualificationLimits"]> {
+    const labels = await trailerLabels(tx, limits.trailers.typeIds, language);
     return {
-      id: row.id,
-      periodId: row.id,
-      game: row.game,
-      levelId: row.levelId,
-      assignedAt: row.assignedAt,
+      massMinKg: limits.massMinKg,
+      massMaxKg: limits.massMaxKg,
+      distanceMinM: limits.distanceMinM,
+      distanceMaxM: limits.distanceMaxM,
+      trailers: { mode: limits.trailers.mode, types: labelsOf(labels, limits.trailers.typeIds) },
+      adr: { mode: limits.adr.mode, classes: [...limits.adr.classes] },
+      hardModeRequired: limits.hardModeRequired,
     };
   }
-  async function actors(tx: TxContext, ids: (string | null)[]) {
-    const unique = [...new Set(ids.filter((id): id is string => id !== null))].sort();
+  async function driverCounts(tx: TxContext, levelIds: string[]) {
+    const counts = new Map<string, number>();
+    if (!levelIds.length) return counts;
+    const rows = await c(tx)
+      .select({ levelId: qualificationAssignments.levelId, count: sql<number | string>`COUNT(*)` })
+      .from(qualificationAssignments)
+      .where(
+        and(
+          inArray(qualificationAssignments.levelId, levelIds),
+          isNull(qualificationAssignments.endedAt),
+        ),
+      )
+      .groupBy(qualificationAssignments.levelId);
+    for (const row of rows) counts.set(row.levelId, Number(row.count));
+    return counts;
+  }
+  async function summaries(
+    tx: TxContext,
+    ladder: ActiveLevel[],
+    language: Locale,
+  ): Promise<S["QualificationLevelSummary"][]> {
+    const ids = ladder.map((row) => row.id);
+    const [trailers, counts] = [await levelTrailers(unit, tx, ids), await driverCounts(tx, ids)];
+    const result: S["QualificationLevelSummary"][] = [];
+    for (const [index, row] of ladder.entries()) {
+      const next = ladder[index + 1];
+      result.push({
+        id: row.id,
+        game: row.game,
+        name: row.name,
+        position: row.position,
+        version: row.version,
+        limits: await limitsDto(tx, limitsOf(row, trailers.get(row.id) ?? []), language),
+        conditions: conditionsOf(row),
+        nextLevel: next ? { id: next.id, name: next.name } : null,
+        driverCount: counts.get(row.id) ?? 0,
+      });
+    }
+    return result;
+  }
+  async function totals(tx: TxContext, ids: string[]) {
+    const result = new Map<string, { trips: number; distanceM: string }>();
+    for (let offset = 0; offset < ids.length; offset += 100) {
+      const found = await ports.trips.contributions.totalsByAssignment(
+        tx,
+        ids.slice(offset, offset + 100),
+        "share",
+      );
+      for (const [key, value] of found)
+        result.set(key, { trips: value.completedTrips, distanceM: value.completedDistanceM });
+    }
+    return (key: string) => result.get(key) ?? { trips: 0, distanceM: "0" };
+  }
+  async function mine(
+    tx: TxContext,
+    userId: string,
+    selected: Game,
+    ladder?: ActiveLevel[],
+  ): Promise<S["MyQualification"]> {
+    const [current] = await c(tx)
+      .select()
+      .from(qualificationAssignments)
+      .where(
+        and(
+          eq(qualificationAssignments.userId, userId),
+          eq(qualificationAssignments.game, selected),
+          isNull(qualificationAssignments.endedAt),
+        ),
+      )
+      .for("share");
+    const levels = ladder ?? (await activeLevels(unit, tx, selected));
+    const index = current ? levels.findIndex((row) => row.id === current.levelId) : -1;
+    const level = levels[index];
+    if (!current || !level)
+      return {
+        game: selected,
+        level: null,
+        since: null,
+        progress: { trips: 0, distanceM: "0" },
+        conditions: null,
+        nextLevel: null,
+      };
+    const next = levels[index + 1];
+    return {
+      game: selected,
+      level: { id: level.id, name: level.name, position: level.position },
+      since: current.assignedAt,
+      progress: (await totals(tx, [current.id]))(current.id),
+      conditions: conditionsOf(level),
+      nextLevel: next ? { id: next.id, name: next.name } : null,
+    };
+  }
+  async function memberNames(tx: TxContext, ids: string[]) {
+    const unique = [...new Set(ids)].sort();
     const names = new Map<string, string>();
     for (let offset = 0; offset < unique.length; offset += 100) {
       const members = await ports.identity.memberSummariesInTransaction(
         tx,
         unique.slice(offset, offset + 100),
       );
-      for (const [id, member] of members) names.set(id, member.nickname);
+      for (const [key, member] of members) names.set(key, member.nickname);
     }
-    return (id: string | null): S["QualificationActionActor"] | null =>
-      id === null ? null : { id, nickname: names.get(id) ?? null };
+    return names;
   }
-  function promotionRule(row: Level, terminal: boolean, rule: PublishedRule | undefined) {
-    return !terminal && rule?.promotionGeneration === row.promotionGeneration ? rule : undefined;
+  async function history(tx: TxContext, levelId: string) {
+    const rows = await audit.subjectHistory(tx, {
+      subjectKind: "qualification_level",
+      subjectId: levelId,
+      limit: 50,
+    });
+    const contexts = rows.map((row) =>
+      "context" in row && row.context && "changes" in row.context ? row.context : null,
+    );
+    const transferIds = [
+      ...new Set(
+        contexts.flatMap((context) => (context?.transferLevelId ? [context.transferLevelId] : [])),
+      ),
+    ];
+    const transfers = transferIds.length
+      ? await c(tx)
+          .select({ id: qualificationLevels.id, name: qualificationLevels.name })
+          .from(qualificationLevels)
+          .where(inArray(qualificationLevels.id, transferIds))
+      : [];
+    const names = await memberNames(
+      tx,
+      rows.flatMap((row) => (row.actorId ? [row.actorId] : [])),
+    );
+    return rows.map((row, index): S["QualificationLevelHistoryEntry"] => {
+      const context = contexts[index];
+      const operation =
+        context && row.action in LEVEL_OPERATIONS
+          ? LEVEL_OPERATIONS[row.action as keyof typeof LEVEL_OPERATIONS]
+          : "legacy";
+      const transfer = transfers.find((level) => level.id === context?.transferLevelId);
+      const name = row.actorId ? names.get(row.actorId) : undefined;
+      return {
+        at: row.occurredAt,
+        actor: row.actorId && name ? { id: row.actorId, displayName: name } : null,
+        operation,
+        changes: context?.changes ?? [],
+        position: context?.position ?? null,
+        transferLevel: transfer ? { id: transfer.id, name: transfer.name } : null,
+      };
+    });
   }
-  function freightRuleSummary(
-    rule: PublishedRule | undefined,
-  ): S["QualificationFreightRuleSummary"] | null {
-    if (!rule) return null;
-    const summary: S["QualificationFreightRuleSummary"] = {
-      maxMassKg: null,
-      allowedTrailerTypeCount: null,
-      allowedAdrCategoryCount: null,
-    };
-    for (const restriction of rule.rules as S["Rule"][]) {
-      if (restriction.type === "max_mass") summary.maxMassKg = restriction.maxKg;
-      if (restriction.type === "allowed_trailer_types")
-        summary.allowedTrailerTypeCount = restriction.entityIds.length;
-      if (restriction.type === "allowed_adr_categories")
-        summary.allowedAdrCategoryCount = restriction.classes.length;
-    }
-    return summary;
-  }
-  function levelDto(
-    row: ActiveLevel,
-    terminal: boolean,
-    rule: PublishedRule | undefined,
-  ): S["QualificationLevel"] {
-    const requirements = promotionRule(row, terminal, rule);
-    return {
-      id: row.id,
-      game: row.game,
-      name: row.name,
-      version: row.version,
-      position: row.activePosition,
-      terminal,
-      ruleVersionId: rule?.id ?? null,
-      configured: !!rule,
-      freightRuleSummary: freightRuleSummary(rule),
-      promotionConfigured: !!requirements,
-      requiredTrips: requirements?.requiredTrips ?? null,
-      requiredDistanceM:
-        requirements?.requiredDistanceM == null ? null : decimal(requirements.requiredDistanceM),
-    };
-  }
-  async function historical(tx: TxContext, userId: string, selectedGame: Game, instant: string) {
-    const rows = await c(tx)
+  async function detail(
+    tx: TxContext,
+    actor: Actor,
+    levelId: string,
+    canManage: boolean,
+  ): Promise<S["QualificationLevelDetail"]> {
+    const [found] = await c(tx)
+      .select({ game: qualificationLevels.game })
+      .from(qualificationLevels)
+      .where(and(eq(qualificationLevels.id, levelId), isNotNull(qualificationLevels.position)))
+      .for("share");
+    if (!found) throw identityError(404);
+    const ladder = await activeLevels(unit, tx, found.game);
+    const language = await locale(tx, actor);
+    const summary = (await summaries(tx, ladder, language)).find((row) => row.id === levelId);
+    if (!summary) throw identityError(404);
+    const open = await c(tx)
       .select()
       .from(qualificationAssignments)
       .where(
         and(
-          eq(qualificationAssignments.userId, userId),
-          eq(qualificationAssignments.game, selectedGame),
-          lte(qualificationAssignments.assignedAt, instant),
-          or(
-            isNull(qualificationAssignments.endedAt),
-            gt(qualificationAssignments.endedAt, instant),
-          ),
+          eq(qualificationAssignments.levelId, levelId),
+          isNull(qualificationAssignments.endedAt),
         ),
       )
-      .orderBy(desc(qualificationAssignments.assignedAt))
-      .limit(2)
+      .orderBy(qualificationAssignments.assignedAt, qualificationAssignments.id)
+      .limit(MAX_DRIVERS)
       .for("share");
-    if (rows.length !== 1)
-      return { status: "unresolved" as const, reasonCode: "qualification_history_unknown" };
-    const assignment = rows[0];
-    if (!assignment) throw new Error("QUALIFICATION_HISTORY_MISSING");
-    const rule = await ruleAt(tx, assignment.levelId, instant);
-    if (!rule)
-      return { status: "unresolved" as const, reasonCode: "qualification_rules_unconfigured" };
+    const credited = await totals(
+      tx,
+      open.map((row) => row.id),
+    );
+    const names = await memberNames(
+      tx,
+      open.map((row) => row.userId),
+    );
     return {
-      status: "resolved" as const,
-      assignmentId: assignment.id,
-      levelId: assignment.levelId,
-      ruleVersionId: rule.id,
-      rules: defaultRegistry.validateRuleSet(rule.rules),
-      assignedAt: assignment.assignedAt,
-      endedAt: assignment.endedAt,
+      ...summary,
+      levelCount: ladder.length,
+      canManage,
+      mine: await mine(tx, actor.userId, found.game, ladder),
+      drivers: open.map((row) => ({
+        memberId: row.userId,
+        displayName: names.get(row.userId) ?? "Former member",
+        since: row.assignedAt,
+        credited: credited(row.id),
+      })),
+      history: canManage ? await history(tx, levelId) : null,
     };
+  }
+  async function readContext(tx: TxContext, actor: Actor, targets: string[] = []) {
+    const authority = await ports.identity.qualificationContextInTransaction(
+      tx,
+      targets,
+      actor,
+      "company.read",
+    );
+    return { ...authority, canManage: actor.capabilities.includes("qualifications.manage") };
+  }
+  async function writeContext(tx: TxContext, actor: Actor, targets: string[] = []) {
+    return ports.identity.qualificationContextInTransaction(
+      tx,
+      targets,
+      actor,
+      "qualifications.manage",
+    );
+  }
+  // Validates a level command against the catalog; selected modes need at least one item.
+  async function validLimits(
+    tx: TxContext,
+    selected: Game,
+    input: S["QualificationLimitsInput"],
+  ): Promise<QualificationLimits> {
+    const limits = closed(input, [
+      "massMinKg",
+      "massMaxKg",
+      "distanceMinM",
+      "distanceMaxM",
+      "trailers",
+      "adr",
+      "hardModeRequired",
+    ]) as unknown as S["QualificationLimitsInput"];
+    const massMinKg = amount(limits.massMinKg, false),
+      massMaxKg = amount(limits.massMaxKg, true),
+      distanceMinM = amount(limits.distanceMinM, false),
+      distanceMaxM = amount(limits.distanceMaxM, true);
+    for (const [min, max] of [
+      [massMinKg, massMaxKg],
+      [distanceMinM, distanceMaxM],
+    ] as const)
+      if (min !== null && max !== null && compareDecimal(min, max) > 0) throw identityError(422);
+    const typeIds = [...new Set(limits.trailers.typeIds.map(id))].sort();
+    if (
+      typeIds.length !== limits.trailers.typeIds.length ||
+      (limits.trailers.mode === "selected") !== typeIds.length > 0 ||
+      typeIds.length > 100
+    )
+      throw identityError(422);
+    if (typeIds.length) {
+      if (!ports.catalogs) throw identityError(503);
+      const found = await ports.catalogs.selectionsInTransaction(
+        tx,
+        typeIds.map((value) => ({ kind: "trailer" as const, id: value })),
+      );
+      if (
+        typeIds.some((value) => {
+          const entity = found.get(value);
+          return entity?.kind !== "trailer" || entity.game !== selected;
+        })
+      )
+        throw identityError(422);
+    }
+    const classes = [...new Set(limits.adr.classes)].sort() as AdrClass[];
+    if (
+      classes.length !== limits.adr.classes.length ||
+      classes.some((value) => !(adrClasses as readonly string[]).includes(value)) ||
+      (limits.adr.mode === "selected") !== classes.length > 0
+    )
+      throw identityError(422);
+    if (typeof limits.hardModeRequired !== "boolean") throw identityError(422);
+    return {
+      massMinKg,
+      massMaxKg,
+      distanceMinM,
+      distanceMaxM,
+      trailers: { mode: limits.trailers.mode, typeIds },
+      adr: { mode: limits.adr.mode, classes },
+      hardModeRequired: limits.hardModeRequired,
+    };
+  }
+  function validConditions(input: S["QualificationConditions"], top: boolean) {
+    const requiredTrips = input.requiredTrips;
+    if (
+      requiredTrips !== null &&
+      (!Number.isInteger(requiredTrips) || requiredTrips < 1 || requiredTrips > 4294967295)
+    )
+      throw identityError(422);
+    const conditions: QualificationConditions = {
+      requiredTrips,
+      requiredDistanceM: amount(input.requiredDistanceM, true),
+    };
+    if (!top && conditions.requiredTrips === null && conditions.requiredDistanceM === null)
+      throw identityError(422, "QUALIFICATION_CONDITIONS_REQUIRED");
+    return conditions;
+  }
+  const levelValues = (limits: QualificationLimits, conditions: QualificationConditions) => ({
+    massMinKg: limits.massMinKg,
+    massMaxKg: limits.massMaxKg,
+    distanceMinM: limits.distanceMinM,
+    distanceMaxM: limits.distanceMaxM,
+    trailerMode: limits.trailers.mode,
+    adrMode: limits.adr.mode,
+    adrClasses: limits.adr.mode === "selected" ? [...limits.adr.classes] : null,
+    hardModeRequired: limits.hardModeRequired,
+    requiredTrips: conditions.requiredTrips,
+    requiredDistanceM: conditions.requiredDistanceM,
+  });
+  async function writeTrailers(tx: TxContext, level: { id: string; game: Game }, ids: string[]) {
+    await c(tx)
+      .delete(qualificationLevelTrailers)
+      .where(eq(qualificationLevelTrailers.levelId, level.id));
+    if (ids.length)
+      await c(tx)
+        .insert(qualificationLevelTrailers)
+        .values(ids.map((trailerId) => ({ levelId: level.id, game: level.game, trailerId })));
+  }
+  // Positions are unique per game: shift rows one at a time in an order that never collides.
+  async function shift(tx: TxContext, rows: ActiveLevel[], delta: 1 | -1) {
+    const ordered = [...rows].sort((a, b) => (b.position - a.position) * delta);
+    for (const row of ordered)
+      await c(tx)
+        .update(qualificationLevels)
+        .set({ position: row.position + delta, version: row.version + 1 })
+        .where(eq(qualificationLevels.id, row.id));
+  }
+  async function levelAudit(
+    tx: TxContext,
+    actor: Actor,
+    companyId: string,
+    operation: keyof typeof LEVEL_OPERATIONS,
+    level: { id: string; game: Game; name: string },
+    position: number | null,
+    changes: LevelChange[],
+    transferLevelId: string | null = null,
+    occurredAt = at(),
+  ) {
+    await audit.append(tx, {
+      actorKind: "user",
+      actorId: actor.userId,
+      reason: "operator_request",
+      occurredAt,
+      companyId,
+      operation,
+      subjectKind: "qualification_level",
+      subjectId: level.id,
+      details: { game: level.game, name: level.name, position, changes, transferLevelId },
+    });
+  }
+  async function lockedLadder(tx: TxContext, levelId: string, expectedVersion?: number) {
+    const [found] = await c(tx)
+      .select({ game: qualificationLevels.game })
+      .from(qualificationLevels)
+      .where(eq(qualificationLevels.id, id(levelId)))
+      .for("update");
+    if (!found) throw identityError(404);
+    const ladder = await activeLevels(unit, tx, found.game, "update");
+    const level = ladder.find((row) => row.id === levelId);
+    if (!level) throw identityError(404);
+    if (expectedVersion !== undefined && level.version !== expectedVersion)
+      throw identityError(409, "VERSION_CONFLICT");
+    return { ladder, level };
+  }
+  function same(a: unknown, b: unknown) {
+    return JSON.stringify(a) === JSON.stringify(b);
   }
   async function lookup(
     tx: TxContext,
@@ -377,171 +548,53 @@ export function createQualifications(
     if (!instant)
       return {
         status: "unresolved" as const,
-        reasonCode: "qualification_attribution_time_unknown",
+        reasonCode: ATTRIBUTION_UNKNOWN,
         attributionBasis: basis,
         attributionAt: null,
       };
-    const resolved = await historical(tx, evidence.ownerUserId, evidence.game, instant);
-    return { ...resolved, attributionBasis: basis, attributionAt: instant };
-  }
-  async function reviewProofs(tx: TxContext, assignmentIds: string[]) {
-    for (const id of [...new Set(assignmentIds)].sort()) {
-      const [assignment] = await c(tx)
-        .select()
-        .from(qualificationAssignments)
-        .where(eq(qualificationAssignments.id, id))
-        .for("update");
-      if (!assignment) throw new Error("CONTRIBUTION_ASSIGNMENT_MISSING");
-      await c(tx)
-        .update(qualificationAssignments)
-        .set({ revision: assignment.revision + 1 })
-        .where(eq(qualificationAssignments.id, id));
-      await emit(
-        tx,
-        "qualification.progress_changed",
-        assignment.id,
-        assignment.revision + 1,
-        assignment.userId,
-        assignment.id,
-      );
-      const [proof] = await c(tx)
-        .select()
-        .from(qualificationPromotions)
-        .where(eq(qualificationPromotions.sourceAssignmentId, id))
-        .for("share");
-      if (!proof) continue;
-      const totals = await ports.trips.contributions.totals(tx, id),
-        required = !evaluateQualificationProgress(
-          { requiredTrips: proof.requiredTrips, requiredDistanceM: proof.requiredDistanceM },
-          totals,
-        ).eligibleForPromotion;
-      const [previous] = await c(tx)
-        .select()
-        .from(promotionReviews)
-        .where(eq(promotionReviews.promotionId, proof.id))
-        .for("update");
-      const version = (previous?.version ?? 0) + (previous?.reviewRequired !== required ? 1 : 0);
-      const values = {
-        reviewRequired: required,
-        version: Math.max(1, version),
-        checkedRevision: assignment.revision + 1,
-        checkedAt: at(),
-      };
-      if (previous)
-        await c(tx)
-          .update(promotionReviews)
-          .set(values)
-          .where(eq(promotionReviews.promotionId, proof.id));
-      else
-        await c(tx)
-          .insert(promotionReviews)
-          .values({ promotionId: proof.id, ...values });
-      if (required && previous?.reviewRequired !== true)
-        await emit(
-          tx,
-          "promotion.review_required",
-          proof.id,
-          values.version,
-          assignment.userId,
-          assignment.id,
-        );
-    }
-  }
-  async function progress(
-    tx: TxContext,
-    userId: string,
-    selectedGame: Game,
-    privateRead: boolean,
-    instant = at(),
-  ) {
-    const current = await state(tx, userId, selectedGame);
-    if (!current.assignmentId) throw identityError(409, "SETUP_REQUIRED");
-    const [assignment] = await c(tx)
+    const rows = await c(tx)
       .select()
       .from(qualificationAssignments)
-      .where(eq(qualificationAssignments.id, current.assignmentId))
-      .for("update");
-    if (!assignment || assignment.endedAt !== null || assignment.assignedAt > instant)
-      throw identityError(409, "SETUP_REQUIRED");
-    const selected = await level(tx, assignment.levelId),
-      successor = await ladder.nextLevelInTransaction(tx, { id: selected.id, game: selectedGame }),
-      rule = promotionRule(selected, !successor, await ruleAt(tx, assignment.levelId, instant)),
-      totals = await ports.trips.contributions.totals(tx, assignment.id);
-    const requirements = {
-      requiredTrips: rule?.requiredTrips ?? null,
-      requiredDistanceM: rule?.requiredDistanceM == null ? null : decimal(rule.requiredDistanceM),
-    };
-    const eligible = promotionEligible(successor !== null, rule, totals);
-    const data: S["ProgressPublic"] = {
-      assignment: assignmentDto(assignment),
-      acceptedTrips: totals.completedTrips,
-      actualDistanceM: totals.completedDistanceM,
-      ...requirements,
-      eligibleForConfirmation: eligible,
-      computedAt: instant,
-      projectionVersion: assignment.revision,
-      projectionPending: false,
-    };
-    if (!privateRead) return { data, version: current.version, rule };
-    const reviews = await c(tx)
-      .select({ required: promotionReviews.reviewRequired })
-      .from(promotionReviews)
-      .innerJoin(
-        qualificationPromotions,
-        eq(qualificationPromotions.id, promotionReviews.promotionId),
-      )
-      .innerJoin(
-        qualificationAssignments,
-        eq(qualificationAssignments.id, qualificationPromotions.sourceAssignmentId),
-      )
       .where(
         and(
-          eq(qualificationAssignments.userId, userId),
-          eq(qualificationAssignments.game, selectedGame),
-          eq(promotionReviews.reviewRequired, true),
+          eq(qualificationAssignments.userId, evidence.ownerUserId),
+          eq(qualificationAssignments.game, evidence.game),
+          lte(qualificationAssignments.assignedAt, instant),
+          or(
+            isNull(qualificationAssignments.endedAt),
+            gt(qualificationAssignments.endedAt, instant),
+          ),
         ),
       )
-      .limit(1);
-    const reviewRequired = reviews.length > 0;
+      .limit(2)
+      .for("share");
+    const assignment = rows.length === 1 ? rows[0] : undefined;
+    const [level] = assignment
+      ? await c(tx)
+          .select()
+          .from(qualificationLevels)
+          .where(eq(qualificationLevels.id, assignment.levelId))
+          .for("share")
+      : [];
+    if (!assignment || !level)
+      return {
+        status: "unresolved" as const,
+        reasonCode: NO_LEVEL,
+        attributionBasis: basis,
+        attributionAt: instant,
+      };
+    const trailers = await levelTrailers(unit, tx, [level.id]);
     return {
-      data: {
-        ...data,
-        reviewRequired,
-        reviewReasonCodes: reviewRequired ? ["promotion_requirements_no_longer_met"] : [],
-      } as S["Progress"],
-      version: current.version,
-      rule,
+      status: "resolved" as const,
+      assignmentId: assignment.id,
+      levelId: level.id,
+      levelName: level.name,
+      editVersion: level.version,
+      limits: limitsOf(level, trailers.get(level.id) ?? []),
+      attributionBasis: basis,
+      attributionAt: instant,
     };
   }
-  async function writeAssignment(
-    tx: TxContext,
-    actor: Actor,
-    userId: string,
-    selectedGame: Game,
-    levelId: string,
-    purpose: Assignment["purpose"],
-    assignedAt: string,
-    endedAt: string | null,
-    text: string,
-    options?: { companyId: string; instant: string },
-  ) {
-    const result = await assignmentWriter(
-      tx,
-      actor,
-      {
-        userId,
-        game: selectedGame,
-        levelId,
-        purpose,
-        assignedAt,
-        endedAt,
-        reason: text,
-      },
-      options,
-    );
-    return { data: assignmentDto(result.row), version: result.version };
-  }
-
   async function prepare(tx: TxContext, owners: { ownerId: string; game: Game }[], actor?: Actor) {
     const authority = await ports.identity.qualificationContextInTransaction(
       tx,
@@ -552,167 +605,24 @@ export function createQualifications(
     const unique = [...new Map(owners.map((r) => [`${r.ownerId}:${r.game}`, r])).values()].sort(
       (a, b) => `${a.ownerId}:${a.game}`.localeCompare(`${b.ownerId}:${b.game}`),
     );
-    for (const row of unique) {
-      await state(tx, row.ownerId, row.game);
-      await c(tx)
-        .select({ id: qualificationAssignments.id })
-        .from(qualificationAssignments)
-        .where(
-          and(
-            eq(qualificationAssignments.userId, row.ownerId),
-            eq(qualificationAssignments.game, row.game),
-          ),
-        )
-        .orderBy(asc(qualificationAssignments.id))
-        .for("update");
-    }
+    for (const row of unique) await assignments.openFor(tx, row.ownerId, row.game);
     return authority;
+  }
+  function ruleDto(
+    rule: CheckedRule,
+    labels: Map<string, S["CatalogLabel"]>,
+  ): S["QualificationRuleCheck"] {
+    if (rule.rule !== "trailer_types") return rule;
+    return {
+      rule: rule.rule,
+      result: rule.result,
+      mode: rule.mode,
+      allowed: labelsOf(labels, rule.allowedIds).slice(0, 100),
+      observed: labelsOf(labels, rule.observedIds).slice(0, 10),
+    };
   }
   return {
     config,
-    nextLevelInTransaction: ladder.nextLevelInTransaction,
-    changeLadder(
-      actor: Actor,
-      selectedGame: Game,
-      key: string,
-      expected: number,
-      change: Parameters<typeof ladder.change>[4],
-    ) {
-      game(selectedGame);
-      return ladder.change(actor, selectedGame, key, expected, change);
-    },
-    async ladder(actor: Actor, selectedGame: Game) {
-      game(selectedGame);
-      return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(tx, [], actor);
-        const instant = at();
-        const rows = await activeLevels(unit, tx, selectedGame);
-        const rules = await effectiveRules(tx, rows, instant);
-        const counts = await ladder.counts(
-          tx,
-          selectedGame,
-          rows.map((row) => row.id),
-        );
-        const revision = ladder.revision(rows);
-        return {
-          version: revision,
-          data: {
-            game: selectedGame,
-            revision,
-            asOf: instant,
-            ladderEditsEnabled: config.ladderEditsEnabled === true,
-            levels: rows.map((row, index) => {
-              const rule = rules.get(row.id);
-              return {
-                ...levelDto(row, index === rows.length - 1, rule),
-                currentDriverCount: counts.get(row.id) ?? 0,
-                effectiveRule: rule
-                  ? {
-                      id: rule.id,
-                      levelId: row.id,
-                      game: row.game,
-                      effectiveAt: rule.effectiveAt,
-                      publishedAt: rule.publishedAt,
-                      rules: rule.rules as S["Rule"][],
-                      requiredTrips: rule.requiredTrips,
-                      requiredDistanceM:
-                        rule.requiredDistanceM === null ? null : decimal(rule.requiredDistanceM),
-                    }
-                  : null,
-              };
-            }),
-          } satisfies S["QualificationLadder"],
-        };
-      });
-    },
-    async prepareInTransaction(
-      tx: TxContext,
-      owners: { ownerId: string; game: Game }[],
-      actor?: Actor,
-    ) {
-      await prepare(tx, owners, actor);
-    },
-    nextLevelInGame: successor,
-    workspacePromotionsReadyInTransaction: eligibility.ready,
-    async notificationAssignmentInTransaction(tx: TxContext, id: string) {
-      const [row] = await c(tx)
-        .select({
-          id: qualificationAssignments.id,
-          userId: qualificationAssignments.userId,
-          game: qualificationAssignments.game,
-          purpose: qualificationAssignments.purpose,
-          endedAt: qualificationAssignments.endedAt,
-          revision: qualificationAssignments.revision,
-          assignedAt: qualificationAssignments.assignedAt,
-          levelId: qualificationAssignments.levelId,
-        })
-        .from(qualificationAssignments)
-        .where(eq(qualificationAssignments.id, applicationId(id)))
-        .for("share");
-      if (!row) throw new Error("NOTIFICATION_ASSIGNMENT_MISSING");
-      let eligible = false;
-      const instant = at();
-      if (row.endedAt === null && row.assignedAt <= instant) {
-        // Notification consumption never creates state or takes writer-only locks. The caller
-        // holds Identity's shared company fence; all qualification/contribution writers take X.
-        const [current] = await c(tx)
-          .select({ assignmentId: qualificationStates.assignmentId })
-          .from(qualificationStates)
-          .where(
-            and(eq(qualificationStates.userId, row.userId), eq(qualificationStates.game, row.game)),
-          )
-          .for("share");
-        if (!current) throw new Error("NOTIFICATION_QUALIFICATION_STATE_MISSING");
-        if (current.assignmentId === row.id) {
-          const [selected] = await c(tx)
-            .select()
-            .from(qualificationLevels)
-            .where(eq(qualificationLevels.id, row.levelId))
-            .for("share");
-          if (!selected) throw new Error("NOTIFICATION_QUALIFICATION_LEVEL_MISSING");
-          const successor = await ladder.nextLevelInTransaction(tx, {
-            id: row.levelId,
-            game: row.game,
-          });
-          const rule = promotionRule(selected, !successor, await ruleAt(tx, row.levelId, instant));
-          if (rule)
-            eligible = promotionEligible(
-              true,
-              rule,
-              await ports.trips.contributions.totals(tx, row.id, "share"),
-            );
-        }
-      }
-      return {
-        ...row,
-        eligible,
-      };
-    },
-    async notificationPromotionReviewInTransaction(
-      tx: TxContext,
-      id: string,
-      version: number,
-      assignmentId: string,
-    ) {
-      const [row] = await c(tx)
-        .select({
-          reviewRequired: promotionReviews.reviewRequired,
-          version: promotionReviews.version,
-        })
-        .from(promotionReviews)
-        .innerJoin(
-          qualificationPromotions,
-          eq(qualificationPromotions.id, promotionReviews.promotionId),
-        )
-        .where(
-          and(
-            eq(promotionReviews.promotionId, applicationId(id)),
-            eq(qualificationPromotions.sourceAssignmentId, applicationId(assignmentId)),
-          ),
-        )
-        .for("share");
-      return row?.version === version && row.reviewRequired;
-    },
     async authorize(actor: Actor, manage = false) {
       return ports.identity.transaction((tx) =>
         ports.identity.qualificationContextInTransaction(
@@ -723,446 +633,243 @@ export function createQualifications(
         ),
       );
     },
-    async members(actor: Actor, options: Page & { view?: "stage3"; search?: string } = {}) {
-      const search = options.search?.trim();
-      if (
-        options.search !== undefined &&
-        (options.view !== "stage3" || !search || options.search.length > 128)
-      )
-        throw identityError(422);
+    async list(actor: Actor, selected: Game): Promise<S["QualificationLevelList"]> {
+      game(selected);
       return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(tx, [], actor);
-        const paging = page(
-          actor,
-          options.view === "stage3"
-            ? ["stage3-qualification-members", search ?? null]
-            : ["qualification-members"],
-          options,
-        );
-        return paging.finish(
-          await ports.identity.qualificationMembersInTransaction(
-            tx,
-            paging.after?.id ?? null,
-            paging.limit,
-            search,
-          ),
-          (row) => ({ id: row.id, time: null }),
-        );
+        const { canManage } = await readContext(tx, actor);
+        const ladder = await activeLevels(unit, tx, selected);
+        return {
+          game: selected,
+          canManage,
+          levels: await summaries(tx, ladder, await locale(tx, actor)),
+          mine: await mine(tx, actor.userId, selected, ladder),
+        };
       });
     },
-    async promotionCandidates(
-      actor: Actor,
-      options: Page & { game: Game; status?: "eligible" | "all"; search?: string },
-    ): Promise<S["QualificationStage3PromotionCandidateList"]> {
-      game(options.game);
-      const status = options.status ?? "eligible";
-      if (status !== "eligible" && status !== "all") throw identityError(422);
-      const search = options.search?.trim();
-      if (options.search !== undefined && (!search || options.search.length > 128))
-        throw identityError(422);
+    async detail(actor: Actor, levelId: string) {
+      const selected = id(levelId);
       return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(tx, [], actor);
-        const instant = at();
-        const gameLevels = await eligibility.levels(tx, options.game);
-        const paging = page(
-          actor,
-          [
-            "promotion-candidates",
-            options.game,
-            status,
-            ladder.revision(gameLevels),
-            ...(search === undefined ? [] : [search]),
-          ],
-          options,
-        );
-        const { rows, total } = await eligibility.candidates(
-          tx,
-          options.game,
-          status,
-          instant,
-          paging.after,
-          paging.limit,
-          gameLevels,
-          search,
-        );
-        const { items, nextCursor } = paging.finish(rows, (row) => ({
-          id: row.id,
-          time: row.eligibleSince,
-        }));
-        return { items: items.map(({ id: _id, ...row }) => row), nextCursor, total };
+        const { canManage } = await readContext(tx, actor);
+        return detail(tx, actor, selected, canManage);
       });
     },
-    async promotionHistory(
-      actor: Actor,
-      options: Page & CompanyHistoryFilters = {},
-    ): Promise<S["QualificationStage3PromotionHistoryList"]> {
-      if (options.game !== undefined) game(options.game);
-      if (options.memberId !== undefined) applicationId(options.memberId);
+    async memberQualifications(actor: Actor, memberId: string): Promise<S["MyQualificationList"]> {
+      const target = id(memberId);
       return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(tx, [], actor);
-        const paging = page(
-          actor,
-          ["company-qualification-history", options.game ?? null, options.memberId ?? null],
-          options,
-        );
-        const result = await companyHistory(tx, options, paging.after, paging.limit);
-        const { items, nextCursor } = paging.finish(result.actions, ({ id, time, kind }) => ({
-          id,
-          time,
-          kind,
-        }));
-        return { items: items.map(result.dto), nextCursor, total: result.total };
+        await readContext(tx, actor, target === actor.userId ? [] : [target]);
+        const items: S["MyQualification"][] = [];
+        for (const selected of ["ets2", "ats"] as const) {
+          const item = await mine(tx, target, selected);
+          if (item.level) items.push(item);
+        }
+        return { items };
       });
     },
-    async preview(actor: Actor, input: S["QualificationPreviewInput"]) {
+    async create(actor: Actor, input: S["QualificationLevelCreateInput"]) {
       game(input.game);
+      const name = text(input.name, 128);
       return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(tx, [], actor);
-        return previewRules(input);
-      });
-    },
-    async levels(actor: Actor, selectedGame: Game, options: Page = {}) {
-      game(selectedGame);
-      return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(tx, [], actor, "company.read");
-        const rows = await activeLevels(unit, tx, selectedGame);
-        const paging = page(actor, ["levels", selectedGame, ladder.revision(rows)], options);
-        const start = paging.after ? rows.findIndex((row) => row.id === paging.after?.id) + 1 : 0;
-        if (paging.after && !start) throw identityError(409, "VERSION_CONFLICT");
-        const visible = rows.slice(start, start + paging.limit + 1);
-        const rules = await effectiveRules(tx, visible, at());
-        return paging.finish(
-          visible.map((row) =>
-            levelDto(row, row.activePosition === rows.length, rules.get(row.id)),
-          ),
-          (row) => ({
-            id: row.id,
-            time: null,
-          }),
-        );
-      });
-    },
-    async archivedLevels(
-      actor: Actor,
-      selectedGame: Game,
-      options: Page = {},
-    ): Promise<S["ListQualificationArchivedLevel"]> {
-      game(selectedGame);
-      return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(tx, [], actor);
-        const paging = page(actor, ["archived-levels", selectedGame, options.limit ?? 25], options);
-        const rows = await c(tx)
-          .select({
-            id: qualificationLevels.id,
-            game: qualificationLevels.game,
-            name: qualificationLevels.name,
-          })
-          .from(qualificationLevels)
-          .where(
-            and(
-              eq(qualificationLevels.game, selectedGame),
-              isNull(qualificationLevels.activePosition),
-              paging.after ? gt(qualificationLevels.id, paging.after.id) : undefined,
-            ),
-          )
-          .orderBy(asc(qualificationLevels.id))
-          .limit(paging.limit + 1)
-          .for("share");
-        return paging.finish(rows, (row) => ({ id: row.id, time: null }));
-      });
-    },
-    async rules(
-      actor: Actor,
-      levelId: string,
-      options: Page = {},
-      ruleVersionId?: string,
-      staff = false,
-    ) {
-      return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(
+        const { companyId } = await writeContext(tx, actor);
+        const ladder = await activeLevels(unit, tx, input.game, "update");
+        if (ladder.length >= maxQualificationLevels) throw identityError(409);
+        if (
+          !Number.isInteger(input.position) ||
+          input.position < 1 ||
+          input.position > ladder.length + 1
+        )
+          throw identityError(422);
+        const limits = await validLimits(tx, input.game, input.limits);
+        const conditions = validConditions(input.conditions, input.position === ladder.length + 1);
+        await shift(
           tx,
+          ladder.filter((row) => row.position >= input.position),
+          1,
+        );
+        const level = { id: newId(), game: input.game, name };
+        await c(tx)
+          .insert(qualificationLevels)
+          .values({
+            ...level,
+            version: 1,
+            position: input.position,
+            ...levelValues(limits, conditions),
+          });
+        await writeTrailers(tx, level, limits.trailers.typeIds as string[]);
+        await levelAudit(
+          tx,
+          actor,
+          companyId,
+          "qualification.level_created",
+          level,
+          input.position,
           [],
-          actor,
-          staff ? "qualifications.manage" : "company.read",
         );
-        const selected = await level(tx, levelId);
-        const paging = page(
-          actor,
-          staff
-            ? ["staff-rule-history", levelId, selected.game, selected.version]
-            : ["rules", levelId],
-          options,
+        const promotedCount = await assignments.recheckGameInTransaction(tx, input.game, companyId);
+        return { level: await detail(tx, actor, level.id, true), promotedCount };
+      });
+    },
+    async update(actor: Actor, levelId: string, input: S["QualificationLevelUpdateInput"]) {
+      const name = text(input.name, 128);
+      return ports.identity.transaction(async (tx) => {
+        const { companyId } = await writeContext(tx, actor);
+        const { ladder, level } = await lockedLadder(tx, levelId, input.expectedVersion);
+        const limits = await validLimits(tx, level.game, input.limits);
+        const conditions = validConditions(input.conditions, level.position === ladder.length);
+        const before = limitsOf(
+          level,
+          (await levelTrailers(unit, tx, [level.id])).get(level.id) ?? [],
         );
-        const rows = await c(tx)
-          .select()
-          .from(qualificationRules)
-          .where(
-            and(
-              eq(qualificationRules.levelId, selected.id),
-              ruleVersionId ? eq(qualificationRules.id, applicationId(ruleVersionId)) : undefined,
-              paging.after?.time
-                ? or(
-                    lt(qualificationRules.effectiveAt, paging.after.time),
-                    and(
-                      eq(qualificationRules.effectiveAt, paging.after.time),
-                      lt(qualificationRules.id, paging.after.id),
-                    ),
-                  )
-                : undefined,
+        const changes: LevelChange[] = [
+          ...(name !== level.name ? (["name"] as const) : []),
+          ...(!same(before, limits) ? (["limits"] as const) : []),
+          ...(!same(conditionsOf(level), conditions) ? (["conditions"] as const) : []),
+        ];
+        await c(tx)
+          .update(qualificationLevels)
+          .set({ name, version: level.version + 1, ...levelValues(limits, conditions) })
+          .where(eq(qualificationLevels.id, level.id));
+        await writeTrailers(tx, level, limits.trailers.typeIds as string[]);
+        await levelAudit(
+          tx,
+          actor,
+          companyId,
+          "qualification.level_edited",
+          { ...level, name },
+          level.position,
+          changes,
+        );
+        const promotedCount = await assignments.recheckGameInTransaction(tx, level.game, companyId);
+        return { level: await detail(tx, actor, level.id, true), promotedCount };
+      });
+    },
+    async move(actor: Actor, levelId: string, input: S["QualificationLevelMoveInput"]) {
+      return ports.identity.transaction(async (tx) => {
+        const { companyId } = await writeContext(tx, actor);
+        const { ladder, level } = await lockedLadder(tx, levelId, input.expectedVersion);
+        if (
+          !Number.isInteger(input.position) ||
+          input.position < 1 ||
+          input.position > ladder.length
+        )
+          throw identityError(422);
+        if (input.position !== level.position) {
+          const instant = at();
+          // Park the moved level outside the ladder, shift the rest, then place it.
+          await c(tx)
+            .update(qualificationLevels)
+            .set({ position: null, deletedAt: instant })
+            .where(eq(qualificationLevels.id, level.id));
+          const down = input.position > level.position;
+          await shift(
+            tx,
+            ladder.filter((row) =>
+              down
+                ? row.position > level.position && row.position <= input.position
+                : row.position >= input.position && row.position < level.position,
             ),
-          )
-          .orderBy(desc(qualificationRules.effectiveAt), desc(qualificationRules.id))
-          .limit(paging.limit + 1);
-        const result = paging.finish(rows, (row) => ({ id: row.id, time: row.effectiveAt }));
-        const publishers = staff
-          ? await qualificationMembersById(
-              ports.identity,
-              tx,
-              result.items.map((row) => row.actorId),
-            )
-          : undefined;
-        const items = result.items.map((row) => ({
-          id: row.id,
+            down ? -1 : 1,
+          );
+          await c(tx)
+            .update(qualificationLevels)
+            .set({ position: input.position, deletedAt: null, version: level.version + 1 })
+            .where(eq(qualificationLevels.id, level.id));
+          await levelAudit(
+            tx,
+            actor,
+            companyId,
+            "qualification.level_moved",
+            level,
+            input.position,
+            ["position"],
+            null,
+            instant,
+          );
+        }
+        const promotedCount = await assignments.recheckGameInTransaction(tx, level.game, companyId);
+        return { level: await detail(tx, actor, level.id, true), promotedCount };
+      });
+    },
+    async remove(actor: Actor, levelId: string, input: S["QualificationLevelRemovalInput"]) {
+      const transferId = id(input.transferLevelId);
+      return ports.identity.transaction(async (tx) => {
+        const { companyId } = await writeContext(tx, actor);
+        const { ladder, level } = await lockedLadder(tx, levelId, input.expectedVersion);
+        const target = ladder.find((row) => row.id === transferId);
+        if (!target || target.id === level.id) throw identityError(422);
+        const instant = at();
+        for (const row of await assignments.openOnLevelsInTransaction(tx, [level.id]))
+          await assignments.assign(tx, {
+            userId: row.userId,
+            game: row.game,
+            levelId: target.id,
+            kind: "level_removed",
+            actorId: actor.userId,
+            comment: null,
+            companyId,
+            at: instant,
+            previous: row,
+          });
+        await c(tx)
+          .update(qualificationLevels)
+          .set({ position: null, deletedAt: instant, version: level.version + 1 })
+          .where(eq(qualificationLevels.id, level.id));
+        await shift(
+          tx,
+          ladder.filter((row) => row.position > level.position),
+          -1,
+        );
+        await levelAudit(
+          tx,
+          actor,
+          companyId,
+          "qualification.level_removed",
+          level,
+          null,
+          [],
+          target.id,
+          instant,
+        );
+        const promotedCount = await assignments.recheckGameInTransaction(tx, level.game, companyId);
+        return { transferLevel: await detail(tx, actor, target.id, true), promotedCount };
+      });
+    },
+    async changeMember(
+      actor: Actor,
+      memberId: string,
+      selected: Game,
+      input: S["QualificationManualChangeInput"],
+    ) {
+      game(selected);
+      const target = id(memberId),
+        levelId = id(input.levelId),
+        comment = text(input.reason, 2048);
+      return ports.identity.transaction(async (tx) => {
+        const authority = await writeContext(tx, actor, [target]);
+        if (authority.members.get(target)?.status !== "active") throw identityError(409);
+        const ladder = await activeLevels(unit, tx, selected);
+        if (!ladder.some((row) => row.id === levelId)) throw identityError(422);
+        const current = await assignments.openFor(tx, target, selected);
+        if (current?.levelId === levelId) throw identityError(409);
+        await assignments.assign(tx, {
+          userId: target,
+          game: selected,
           levelId,
-          game: selected.game,
-          publishedAt: row.publishedAt,
-          effectiveAt: row.effectiveAt,
-          rules: row.rules as S["Rule"][],
-          requiredTrips: row.requiredTrips,
-          requiredDistanceM: row.requiredDistanceM == null ? null : decimal(row.requiredDistanceM),
-          ...(publishers ? { publisher: qualificationActor(publishers, row.actorId) } : {}),
-        }));
-        if (ruleVersionId && !items.length) throw identityError(404);
-        return { ...result, items };
-      });
-    },
-    async rename(
-      actor: Actor,
-      levelId: string,
-      key: string,
-      expected: number,
-      input: S["LevelInput"],
-    ) {
-      if (!input.name.trim() || input.name.length > 128) throw identityError(422);
-      const rationale = ladderReason(input.reason);
-      return ports.identity.transaction(async (tx) => {
-        const { companyId } = await ports.identity.qualificationContextInTransaction(tx, [], actor);
-        if (rationale !== null && !config.ladderEditsEnabled) throw identityError(503);
-        const result = await ports.identity.externalCommand(
-          tx,
-          `${actor.userId}:qualification:rename:${levelId}`,
-          key,
-          { expected, input },
-          async () => {
-            const stored = await level(tx, levelId);
-            if (stored.version !== expected) throw identityError(409, "VERSION_CONFLICT");
-            if (stored.activePosition === null) throw identityError(409);
-            const row = { ...stored, activePosition: stored.activePosition };
-            const next = { ...row, name: input.name, version: row.version + 1 };
-            await c(tx)
-              .update(qualificationLevels)
-              .set({ name: next.name, version: next.version })
-              .where(eq(qualificationLevels.id, row.id));
-            const instant = at();
-            await ladder.auditLevel(tx, actor, companyId, row, next, instant, rationale);
-            await emit(
-              tx,
-              "qualification.rules_changed",
-              row.id,
-              next.version,
-              null,
-              null,
-              instant,
-            );
-            const terminal = !(await ladder.nextLevelInTransaction(tx, row));
-            return {
-              data: levelDto(next, terminal, await ruleAt(tx, next.id, instant)),
-              version: next.version,
-            };
-          },
-        );
-        return levelReceipt(result, levelId);
-      });
-    },
-    async publish(
-      actor: Actor,
-      levelId: string,
-      key: string,
-      expected: number,
-      input: S["QualificationRulePublicationInput"],
-    ) {
-      const rationale = ladderReason(input.reason);
-      let rules: Rule[];
-      try {
-        rules = validateDraftRules(input.rules);
-      } catch {
-        throw identityError(422);
-      }
-      if (
-        rules.length > 32 ||
-        new Set(rules.map((rule) => rule.type)).size !== rules.length ||
-        (input.requiredTrips !== null &&
-          (!Number.isInteger(input.requiredTrips) ||
-            input.requiredTrips < 0 ||
-            input.requiredTrips > 2147483647))
-      )
-        throw identityError(422);
-      const distance = input.requiredDistanceM === null ? null : exact(input.requiredDistanceM);
-      return ports.identity.transaction(async (tx) => {
-        const { companyId } = await ports.identity.qualificationContextInTransaction(tx, [], actor);
-        const result = await ports.identity.externalCommand(
-          tx,
-          `${actor.userId}:qualification:publish:${levelId}`,
-          key,
-          { expected, input },
-          async () => {
-            const stored = await level(tx, levelId);
-            if (stored.version !== expected) throw identityError(409, "VERSION_CONFLICT");
-            if (stored.activePosition === null) throw identityError(409);
-            const selected = { ...stored, activePosition: stored.activePosition };
-            const terminal = !(await ladder.nextLevelInTransaction(tx, selected));
-            if (terminal && (input.requiredTrips !== null || distance !== null))
-              throw identityError(422);
-            const publishedAt = at(),
-              effectiveAt = input.effectiveAt ? date(input.effectiveAt) : publishedAt;
-            if (effectiveAt < publishedAt) throw identityError(422);
-            const [latest] = await c(tx)
-              .select()
-              .from(qualificationRules)
-              .where(eq(qualificationRules.levelId, levelId))
-              .orderBy(desc(qualificationRules.effectiveAt))
-              .limit(1)
-              // Company/level writer fences serialize publication; prior rule versions are immutable.
-              .for("share");
-            if (latest && effectiveAt <= latest.effectiveAt) throw identityError(409);
-            for (const rule of rules) {
-              if (rule.type === "max_mass") exact(rule.maxKg as string);
-              if (rule.type === "allowed_trailer_types") {
-                const ids = (rule as { entityIds?: unknown }).entityIds;
-                if (!ports.catalogs || !Array.isArray(ids) || ids.length > 1000)
-                  throw identityError(422);
-                const found = await ports.catalogs.selectionsInTransaction(
-                  tx,
-                  (ids as string[]).map((id) => ({ kind: "trailer" as const, id })),
-                );
-                const kept = new Set(
-                  ((latest?.rules ?? []) as { type: string; entityIds?: string[] }[]).flatMap(
-                    (previous) =>
-                      previous.type === "allowed_trailer_types" ? (previous.entityIds ?? []) : [],
-                  ),
-                );
-                for (const id of ids as string[]) {
-                  const row = found.get(id);
-                  if (!row || row.game !== selected.game) throw identityError(422);
-                  if (row.hidden && !kept.has(id))
-                    throw identityError(422, "CATALOG_SELECTION_HIDDEN");
-                }
-              }
-            }
-            if (effectiveAt === publishedAt)
-              await eligibility.applyImmediateRule(tx, selected, effectiveAt, {
-                requiredTrips: input.requiredTrips,
-                requiredDistanceM: distance,
-              });
-            const ruleId = newId();
-            await c(tx).insert(qualificationRules).values({
-              id: ruleId,
-              levelId,
-              publishedAt,
-              effectiveAt,
-              rules,
-              requiredTrips: input.requiredTrips,
-              requiredDistanceM: distance,
-              actorId: actor.userId,
-              reason: rationale,
-              promotionGeneration: selected.promotionGeneration,
-            });
-            await c(tx)
-              .update(qualificationLevels)
-              .set({ version: selected.version + 1 })
-              .where(eq(qualificationLevels.id, levelId));
-            const version = selected.version + 1;
-            await audit.append(tx, {
-              actorKind: "user",
-              actorId: actor.userId,
-              companyId,
-              operation: "qualification.rules_published",
-              subjectKind: "qualification_rule_version",
-              subjectId: ruleId,
-              occurredAt: publishedAt,
-              reason: "operator_request",
-              details: {
-                before: latest
-                  ? {
-                      game: selected.game,
-                      levelId,
-                      ruleVersionId: latest.id,
-                      version: selected.version,
-                    }
-                  : null,
-                after: { game: selected.game, levelId, ruleVersionId: ruleId, version },
-              },
-            });
-            await emit(
-              tx,
-              "qualification.rules_changed",
-              levelId,
-              version,
-              null,
-              null,
-              publishedAt,
-            );
-            return {
-              data: levelDto(
-                { ...selected, version },
-                terminal,
-                await ruleAt(tx, levelId, publishedAt),
-              ),
-              version,
-            };
-          },
-        );
-        return levelReceipt(result, levelId);
+          kind: "manual",
+          actorId: actor.userId,
+          comment,
+          companyId: authority.companyId,
+          previous: current ?? null,
+        });
+        return { qualification: await mine(tx, target, selected) };
       });
     },
     lookupInTransaction: lookup,
-    async tripAssignmentsInTransaction(
+    async prepareInTransaction(
       tx: TxContext,
-      ownerId: string,
-      selectedGame: Game,
-      after: { id: string; time: string | null } | null = null,
-      limit = 101,
+      owners: { ownerId: string; game: Game }[],
+      actor?: Actor,
     ) {
-      const rows = await c(tx)
-        .select({ assignment: qualificationAssignments, levelName: qualificationLevels.name })
-        .from(qualificationAssignments)
-        .innerJoin(
-          qualificationLevels,
-          eq(qualificationLevels.id, qualificationAssignments.levelId),
-        )
-        .where(
-          and(
-            eq(qualificationAssignments.userId, ownerId),
-            eq(qualificationAssignments.game, selectedGame),
-            after?.time
-              ? or(
-                  lt(qualificationAssignments.assignedAt, after.time),
-                  and(
-                    eq(qualificationAssignments.assignedAt, after.time),
-                    lt(qualificationAssignments.id, after.id),
-                  ),
-                )
-              : undefined,
-          ),
-        )
-        .orderBy(desc(qualificationAssignments.assignedAt), desc(qualificationAssignments.id))
-        .limit(limit)
-        .for("share");
-      return rows.map(({ assignment, levelName }) => ({
-        ...assignmentDto(assignment),
-        endedAt: assignment.endedAt,
-        levelName,
-      }));
+      await prepare(tx, owners, actor);
     },
     async replaceContributionsInTransaction(tx: TxContext, changes: readonly ContributionChange[]) {
       if (!changes.length || changes.length > 100) throw identityError(422);
@@ -1209,14 +916,9 @@ export function createQualifications(
         tx,
         changes.map((change) => change.tripId),
       );
-      const locked = await prepare(tx, owners);
+      const authority = await prepare(tx, owners);
       const contexts = await ports.trips.contributions.contexts(tx, changes);
       const changedAt = at();
-      const finishEligibility = await eligibility.prepareContributionBatch(
-        tx,
-        owners.filter(({ ownerId }) => locked.members.get(ownerId)?.status === "active"),
-        changedAt,
-      );
       const affected: string[] = [];
       for (const context of contexts) {
         const resolved = await lookup(tx, context.evidence, context.change.manualConfirmedAt);
@@ -1226,7 +928,6 @@ export function createQualifications(
             context,
             {
               assignmentId: resolved.status === "resolved" ? resolved.assignmentId : null,
-              ruleVersionId: resolved.status === "resolved" ? resolved.ruleVersionId : null,
               attributionAt: resolved.attributionAt,
               attributionBasis: resolved.attributionBasis,
             },
@@ -1234,400 +935,55 @@ export function createQualifications(
           )),
         );
       }
-      await finishEligibility(new Set(affected));
-      await reviewProofs(tx, affected);
-      return { affectedPeriods: [...new Set(affected)] };
+      // The completing credit promotes in this transaction. A revoked trip never demotes.
+      const promotedCount = await assignments.promoteInTransaction(
+        tx,
+        affected,
+        authority.companyId,
+      );
+      return { affectedPeriods: [...new Set(affected)], promotedCount };
     },
-    async progress(
-      actor: Actor,
-      userId: string,
-      selectedGame: Game,
-      scope: "public" | "owner" | "admin",
-    ) {
-      game(selectedGame);
-      applicationId(userId);
-      if (scope === "owner" && actor.userId !== userId) throw identityError(404);
-      return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(
-          tx,
-          [userId],
-          actor,
-          scope === "admin"
-            ? "qualifications.manage"
-            : scope === "owner"
-              ? "trips.submit_own"
-              : "company.read",
-        );
-        const { data, version } = await progress(tx, userId, selectedGame, scope !== "public");
-        return { data, version };
-      });
+    async notificationAssignmentInTransaction(tx: TxContext, assignmentId: string) {
+      const [row] = await c(tx)
+        .select({
+          id: qualificationAssignments.id,
+          userId: qualificationAssignments.userId,
+          game: qualificationAssignments.game,
+          kind: qualificationAssignments.kind,
+          endedAt: qualificationAssignments.endedAt,
+          assignedAt: qualificationAssignments.assignedAt,
+          levelId: qualificationAssignments.levelId,
+        })
+        .from(qualificationAssignments)
+        .where(eq(qualificationAssignments.id, applicationId(assignmentId)))
+        .for("share");
+      if (!row) throw new Error("NOTIFICATION_ASSIGNMENT_MISSING");
+      return row;
     },
-    async history(
+    /** Contract view of a stored or live check, with trailer labels in the viewer locale. */
+    async checkViewInTransaction(
+      tx: TxContext,
       actor: Actor,
-      userId: string,
-      selectedGame: Game,
-      options: Page = {},
-      admin = false,
-    ) {
-      game(selectedGame);
-      applicationId(userId);
-      if (!admin && userId !== actor.userId) throw identityError(404);
-      return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(
-          tx,
-          [userId],
-          actor,
-          admin ? "qualifications.manage" : "company.read",
-        );
-        const current = await state(tx, userId, selectedGame);
-        const paging = page(actor, ["history", userId, selectedGame, current.version], options);
-        const rows = await c(tx)
-          .select({ assignment: qualificationAssignments, levelName: qualificationLevels.name })
-          .from(qualificationAssignments)
-          .innerJoin(
-            qualificationLevels,
-            eq(qualificationLevels.id, qualificationAssignments.levelId),
-          )
-          .where(
-            and(
-              eq(qualificationAssignments.userId, userId),
-              eq(qualificationAssignments.game, selectedGame),
-              paging.after?.time
-                ? or(
-                    lt(qualificationAssignments.assignedAt, paging.after.time),
-                    and(
-                      eq(qualificationAssignments.assignedAt, paging.after.time),
-                      lt(qualificationAssignments.id, paging.after.id),
-                    ),
-                  )
-                : undefined,
-            ),
-          )
-          .orderBy(desc(qualificationAssignments.assignedAt), desc(qualificationAssignments.id))
-          .limit(paging.limit + 1);
-        return {
-          data: paging.finish(
-            rows.map(({ assignment, levelName }) => ({
-              ...assignmentDto(assignment),
-              endedAt: assignment.endedAt,
-              levelName,
-            })),
-            (row) => ({ id: row.id, time: row.assignedAt }),
-          ),
-          version: current.version,
-        };
-      });
-    },
-    async actionHistory(
-      actor: Actor,
-      userId: string,
-      selectedGame: Game,
-      options: Page & { view?: "stage3" } = {},
-    ) {
-      game(selectedGame);
-      applicationId(userId);
-      return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(tx, [userId], actor);
-        const stage3 = options.view === "stage3";
-        // Staff history is readable for former members or games that have no current assignment.
-        const [current] = await c(tx)
-          .select({ version: qualificationStates.version })
-          .from(qualificationStates)
-          .where(
-            and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, selectedGame)),
-          )
-          .for("share");
-        const version = current?.version ?? 1;
-        const paging = page(
-          actor,
-          [
-            stage3 ? "stage3-staff-action-history" : "staff-action-history",
-            userId,
-            selectedGame,
-            version,
-          ],
-          options,
-        );
-        const rows = await c(tx)
-          .select({ assignment: qualificationAssignments, levelName: qualificationLevels.name })
-          .from(qualificationAssignments)
-          .innerJoin(
-            qualificationLevels,
-            eq(qualificationLevels.id, qualificationAssignments.levelId),
-          )
-          .where(
-            and(
-              eq(qualificationAssignments.userId, userId),
-              eq(qualificationAssignments.game, selectedGame),
-              paging.after?.time
-                ? or(
-                    lt(qualificationAssignments.assignedAt, paging.after.time),
-                    and(
-                      eq(qualificationAssignments.assignedAt, paging.after.time),
-                      lt(qualificationAssignments.id, paging.after.id),
-                    ),
-                  )
-                : undefined,
-            ),
-          )
-          .orderBy(desc(qualificationAssignments.assignedAt), desc(qualificationAssignments.id))
-          .limit(paging.limit + 1);
-        const result = paging.finish(
-          rows.map(({ assignment, levelName }) => ({ ...assignment, levelName })),
-          (row) => ({ id: row.id, time: row.assignedAt }),
-        );
-        const proofs = result.items.length
-          ? await c(tx)
-              .select({
-                id: qualificationPromotions.id,
-                targetAssignmentId: qualificationPromotions.targetAssignmentId,
-                confirmedAt: qualificationPromotions.confirmedAt,
-                actorId: qualificationPromotions.actorId,
-                reason: qualificationPromotions.reason,
-              })
-              .from(qualificationPromotions)
-              .where(
-                inArray(
-                  qualificationPromotions.targetAssignmentId,
-                  result.items.map((row) => row.id),
-                ),
-              )
-              .limit(result.items.length + 1)
-          : [];
-        if (proofs.length > result.items.length)
-          throw new Error("AMBIGUOUS_QUALIFICATION_PROMOTION");
-        const byTarget = new Map<string, (typeof proofs)[number]>();
-        for (const proof of proofs) {
-          if (byTarget.has(proof.targetAssignmentId))
-            throw new Error("AMBIGUOUS_QUALIFICATION_PROMOTION");
-          byTarget.set(proof.targetAssignmentId, proof);
-        }
-        const members = await qualificationMembersById(ports.identity, tx, [
-          ...result.items.map((row) => row.actorId),
-          ...(stage3 ? proofs.map((proof) => proof.actorId) : []),
-        ]);
-        const items = result.items.map(
-          (row): S["QualificationActionHistory"] | S["QualificationStage3ActionHistory"] => {
-            const proof = byTarget.get(row.id);
-            const common = {
-              ...assignmentDto(row),
-              endedAt: row.endedAt,
-              purpose: row.purpose,
-              actor: qualificationActor(members, row.actorId),
-            };
-            if (!stage3)
-              return {
-                ...common,
-                levelName: row.levelName,
-                promotion: proof ? { id: proof.id, confirmedAt: proof.confirmedAt } : null,
-              };
-            return {
-              ...common,
-              assignmentReason: row.reason.trim() ? row.reason : null,
-              promotion: proof
-                ? {
-                    id: proof.id,
-                    confirmedAt: proof.confirmedAt,
-                    actor: qualificationActor(members, proof.actorId),
-                    reason: proof.reason.trim() ? proof.reason : null,
-                  }
-                : null,
-            };
-          },
-        );
-        return { data: { ...result, items }, version };
-      });
-    },
-    async assign(
-      actor: Actor,
-      userId: string,
-      key: string,
-      expected: number,
-      input: S["AssignmentInput"],
-    ) {
-      game(input.game);
-      reason(input.reason);
-      return ports.identity.transaction(async (tx) => {
-        const authority = await ports.identity.qualificationContextInTransaction(
-          tx,
-          [userId],
-          actor,
-        );
-        return ports.identity.externalCommand(
-          tx,
-          `${actor.userId}:qualification:assign:${userId}`,
-          key,
-          { expected, input },
-          async () => {
-            const current = await state(tx, userId, input.game),
-              target = await level(tx, input.levelId);
-            if (current.version !== expected) throw identityError(409, "VERSION_CONFLICT");
-            if (
-              target.game !== input.game ||
-              (target.activePosition === null && input.purpose !== "historical_resolution")
-            )
-              throw identityError(422);
-            const instant = at();
-            let assignedAt = instant,
-              endedAt: string | null = null;
-            if (input.purpose === "historical_resolution") {
-              if (!input.assignedAt || !input.endedAt) throw identityError(422);
-              assignedAt = date(input.assignedAt);
-              endedAt = date(input.endedAt);
-              if (endedAt <= assignedAt || endedAt > instant) throw identityError(422);
-              const rows = await c(tx)
-                .select({ id: qualificationAssignments.id })
-                .from(qualificationAssignments)
-                .where(
-                  and(
-                    eq(qualificationAssignments.userId, userId),
-                    eq(qualificationAssignments.game, input.game),
-                    sql`${qualificationAssignments.assignedAt} < ${utcDateTime(endedAt)}`,
-                    or(
-                      isNull(qualificationAssignments.endedAt),
-                      gt(qualificationAssignments.endedAt, assignedAt),
-                    ),
-                  ),
-                )
-                .limit(1)
-                .for("update");
-              if (rows.length) throw identityError(409);
-            } else {
-              if (
-                input.assignedAt !== undefined ||
-                input.endedAt !== undefined ||
-                authority.members.get(userId)?.status !== "active"
-              )
-                throw identityError(409);
-              if (input.purpose !== "administrative_correction" && current.assignmentId)
-                throw identityError(409);
-              if (input.purpose === "initial") {
-                const [history] = await c(tx)
-                  .select({ id: qualificationAssignments.id })
-                  .from(qualificationAssignments)
-                  .where(
-                    and(
-                      eq(qualificationAssignments.userId, userId),
-                      eq(qualificationAssignments.game, input.game),
-                    ),
-                  )
-                  .limit(1);
-                if (history || target.activePosition !== 1) throw identityError(409);
-              }
-              if (input.purpose === "administrative_correction" && current.assignmentId) {
-                const [old] = await c(tx)
-                  .select()
-                  .from(qualificationAssignments)
-                  .where(eq(qualificationAssignments.id, current.assignmentId));
-                const oldPosition = old ? (await level(tx, old.levelId)).activePosition : null;
-                if (
-                  target.activePosition === null ||
-                  oldPosition === null ||
-                  target.activePosition > oldPosition
-                )
-                  throw identityError(409);
-              }
-            }
-            return writeAssignment(
-              tx,
-              actor,
-              userId,
-              input.game,
-              target.id,
-              input.purpose,
-              assignedAt,
-              endedAt,
-              input.reason,
-              { companyId: authority.companyId, instant },
-            );
-          },
-        );
-      });
-    },
-    async promote(
-      actor: Actor,
-      userId: string,
-      key: string,
-      expected: number,
-      input: S["PromotionInput"],
-    ) {
-      game(input.game);
-      reason(input.reason);
-      return ports.identity.transaction(async (tx) => {
-        const authority = await ports.identity.qualificationContextInTransaction(
-          tx,
-          [userId],
-          actor,
-        );
-        return ports.identity.externalCommand(
-          tx,
-          `${actor.userId}:qualification:promote:${userId}`,
-          key,
-          { expected, input },
-          async () => {
-            const current = await state(tx, userId, input.game);
-            if (authority.members.get(userId)?.status !== "active") throw identityError(409);
-            if (current.version !== expected || current.assignmentId !== input.assignmentId)
-              throw identityError(409, "VERSION_CONFLICT");
-            const [assignment] = await c(tx)
-              .select()
-              .from(qualificationAssignments)
-              .where(eq(qualificationAssignments.id, input.assignmentId))
-              .for("update");
-            if (!assignment) throw identityError(409);
-            const source = await level(tx, assignment.levelId);
-            const target = await ladder.nextLevelInTransaction(tx, {
-              id: source.id,
-              game: input.game,
-            });
-            if (!target || target.id !== input.targetLevelId) throw identityError(409);
-            // One confirmation instant selects the immutable rule used by evaluation and proof.
-            const confirmedAt = at(),
-              currentProgress = await progress(tx, userId, input.game, true, confirmedAt),
-              rule = currentProgress.rule;
-            if (!currentProgress.data.eligibleForConfirmation || !rule) throw identityError(409);
-            const result = await writeAssignment(
-              tx,
-              actor,
-              userId,
-              input.game,
-              target.id,
-              "promotion",
-              confirmedAt,
-              null,
-              input.reason,
-              { companyId: authority.companyId, instant: confirmedAt },
-            );
-            await c(tx).insert(qualificationPromotions).values({
-              id: newId(),
-              sourceAssignmentId: assignment.id,
-              targetAssignmentId: result.data.id,
-              ruleVersionId: rule.id,
-              requiredTrips: rule.requiredTrips,
-              requiredDistanceM: rule.requiredDistanceM,
-              acceptedTrips: currentProgress.data.acceptedTrips,
-              actualDistanceM: currentProgress.data.actualDistanceM,
-              periodRevision: currentProgress.data.projectionVersion,
-              confirmedAt,
-              actorId: actor.userId,
-              reason: input.reason,
-            });
-            if (source.activePosition === 1)
-              await ports.identity.completeTraineeInTransaction(tx, actor, userId);
-            await emit(
-              tx,
-              "qualification.promoted",
-              result.data.id,
-              result.version,
-              userId,
-              result.data.id,
-              confirmedAt,
-            );
-            return result;
-          },
-        );
-      });
+      snapshot: QualificationSnapshot,
+      basis: "decision" | "current",
+    ): Promise<S["QualificationCheck"]> {
+      const trailerIds = snapshot.rules.flatMap((rule) =>
+        rule.rule === "trailer_types" ? [...rule.allowedIds, ...rule.observedIds] : [],
+      );
+      const labels = await trailerLabels(tx, trailerIds.slice(0, 300), await locale(tx, actor));
+      return {
+        status: snapshot.eventExempt ? "event_exempt" : snapshot.levelId ? "checked" : "no_level",
+        basis,
+        level:
+          snapshot.levelId && snapshot.levelName
+            ? { id: snapshot.levelId, name: snapshot.levelName }
+            : null,
+        outcome: snapshot.outcome,
+        reasonCode: snapshot.reasonCode,
+        rules: snapshot.rules.map((rule) => ruleDto(rule, labels)),
+      };
     },
   };
 }
 export type Qualifications = ReturnType<typeof createQualifications>;
+export type { Assignment };

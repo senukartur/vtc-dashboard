@@ -132,11 +132,7 @@ export function composeIdentity(
         },
       )
     : undefined;
-  const qualificationsLifecycle = createQualificationInitialization(
-    unit,
-    outbox,
-    qualificationsConfig?.eligibilityTrackingSince,
-  );
+  const qualificationsLifecycle = createQualificationInitialization(unit, outbox);
   identity = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit, outbox),
     ...(tripsConfig
@@ -410,7 +406,6 @@ export function composeIdentity(
         })
       : undefined;
   const workspaceSummary = createWorkspaceSummary(identity, {
-    ...(qualifications ? { qualifications } : {}),
     ...(tripWorkspace ? { trips: tripWorkspace } : {}),
     ...(dispatchReviewStage3Enabled && tripDecisions
       ? { dispatch: tripDecisions.reviewQueue }

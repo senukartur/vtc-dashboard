@@ -335,69 +335,41 @@ try {
     const director = await identity.authenticate(new Headers({ cookie }));
     operationStep = "seed_qualification_rules";
     for (const game of ["ets2", "ats"] as const)
-      for (const level of (await composed.qualifications!.levels(director, game)).items) {
-        const input: S["RulesInput"] = {
-          rules: [{ type: "max_mass", maxKg: "50000" }],
-          requiredTrips: level.terminal ? null : 2,
-          requiredDistanceM: level.terminal ? null : "1000",
-          reason: "Fictional isolated acceptance limits",
+      for (const level of (await composed.qualifications!.list(director, game)).levels) {
+        const input: S["QualificationLevelUpdateInput"] = {
+          expectedVersion: level.version,
+          name: level.name,
+          limits: {
+            massMinKg: null,
+            massMaxKg: "50000",
+            distanceMinM: null,
+            distanceMaxM: null,
+            trailers: { mode: "any", typeIds: [] },
+            adr: { mode: "any", classes: [] },
+            hardModeRequired: false,
+          },
+          conditions: level.nextLevel
+            ? { requiredTrips: 2, requiredDistanceM: "1000" }
+            : { requiredTrips: null, requiredDistanceM: null },
         };
         if (game === "ets2" && level.position === 1) {
-          const keys = [newId(), newId()];
+          // Two edits from the same version: the company lock serializes them and one conflicts.
           const attempts = await Promise.allSettled(
-            keys.map((key) =>
-              composed.qualifications!.publish(director, level.id, key, level.version, input),
-            ),
+            [0, 1].map(() => composed.qualifications!.update(director, level.id, input)),
           );
           assert.equal(attempts.filter((result) => result.status === "fulfilled").length, 1);
           const failed = attempts.find((result) => result.status === "rejected");
           assert.ok(failed?.status === "rejected" && failed.reason?.statusCode === 409);
-          const winnerIndex = attempts.findIndex((result) => result.status === "fulfilled"),
-            winner = attempts[winnerIndex];
-          assert.ok(winner?.status === "fulfilled");
-          assert.deepEqual(
-            await composed.qualifications!.publish(
-              director,
-              level.id,
-              keys[winnerIndex]!,
-              level.version,
-              input,
-            ),
-            winner.value,
-          );
-          const [count] = await rows<{ n: number }>(
-            sql`SELECT COUNT(*) n FROM qualification_rule_versions WHERE level_id=${Buffer.from(level.id)}`,
-          );
-          assert.equal(Number(count?.n), 1);
-          await assert.rejects(
-            unit.run((tx) =>
-              unit
-                .client(tx)
-                .execute(
-                  sql`UPDATE qualification_rule_versions SET reason=reason WHERE level_id=${Buffer.from(level.id)}`,
-                ),
-            ),
-            (error) => {
-              let cause: unknown = error;
-              for (let depth = 0; depth < 5 && cause && typeof cause === "object"; depth++) {
-                if ("errno" in cause && [1142, 1143].includes(Number(cause.errno))) return true;
-                cause = "cause" in cause ? cause.cause : undefined;
-              }
-              return false;
-            },
-          );
           console.log(
             JSON.stringify({
               event: "notifications_fixture",
-              phase: "restricted_concurrent_rule_publication",
+              phase: "concurrent_level_edit",
               result: "pass",
-              publications: 1,
+              edits: 1,
               conflicts: 1,
-              historyMutationDenied: true,
             }),
           );
-        } else
-          await composed.qualifications!.publish(director, level.id, newId(), level.version, input);
+        } else await composed.qualifications!.update(director, level.id, input);
       }
     operationStep = "seed_reconciliation_permissions";
     await rejectSqlPermission(sql`UPDATE reconciliation_rules SET version=version WHERE 1=0`);

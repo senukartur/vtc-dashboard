@@ -2130,6 +2130,37 @@ export function createIdentity(
         },
       });
     },
+    // Leaving the first qualification level ends the trainee role (VTC-157). The caller already
+    // holds the company and member locks of its qualification command. actorId is the staff
+    // member of a manual change or removal, or null for an automatic promotion.
+    async completeTraineeAsSystemInTransaction(
+      tx: TxContext,
+      targetId: string,
+      actorId: string | null = null,
+    ) {
+      const current = await lockCompany(tx);
+      const locked = await lockMembers(tx, [targetId]);
+      const member = locked.get(targetId);
+      if (member?.status !== "active") return;
+      const assigned = await memberRoles(tx, targetId, current);
+      if (!assigned.includes("trainee")) return;
+      await client(tx)
+        .delete(roles)
+        .where(and(eq(roles.userId, targetId), eq(roles.role, "trainee")));
+      if (!assigned.includes("driver"))
+        await client(tx).insert(roles).values({ userId: targetId, role: "driver" });
+      await client(tx)
+        .update(membership)
+        .set({ version: member.version + 1 })
+        .where(eq(membership.userId, targetId));
+      await changed(tx, actorId, targetId, current, {
+        operation: "membership.changed",
+        details: {
+          before: membershipSnapshot(member.status, assigned),
+          after: membershipSnapshot(member.status, ["driver"]),
+        },
+      });
+    },
     // Transaction-scoped seam for future source/qualification coordinators. Current state is authoritative.
     async authorizeInTransaction(tx: TxContext, actor: Actor, capability: string) {
       const current = await lockCompany(tx);

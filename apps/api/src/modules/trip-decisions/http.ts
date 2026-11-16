@@ -112,17 +112,6 @@ export async function registerTripDecisionRoutes(
       return envelope(result.data, r);
     },
   );
-  app.get<{ Params: { tripId: string }; Querystring: Page }>(
-    "/api/v1/trips/:tripId/qualification-assignments",
-    {
-      schema: {
-        params,
-        querystring: paging,
-        response: { 200: ref("EnvelopeListAssignmentHistory") },
-      },
-    },
-    async (r) => envelope(await service.assignments(await actor(r), r.params.tripId, r.query), r),
-  );
   app.post<{
     Params: { tripId: string };
     Querystring: { view?: "stage3" };

@@ -1,38 +1,29 @@
 import type { components } from "@vtc/contracts";
+import type { ConfirmedEventContext } from "../events/contracts.js";
 import {
-  type ConfirmedEventContext,
-  REASON_CODES,
-  type Rule,
-  type RuleEvaluationDetail,
-} from "../qualification-rules/contracts.js";
-import { compareDecimal } from "../qualification-rules/decimal.js";
-import { defaultRegistry } from "../qualification-rules/registry.js";
+  checkTrip,
+  QUALIFICATION_REASONS,
+  QUALIFICATION_UNKNOWN,
+  type QualificationSnapshot,
+  type TripCheck,
+} from "../qualifications/check.js";
 import type { Qualifications } from "../qualifications/service.js";
+import { compareDecimal } from "../sources/contracts/decimal.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 
 type S = components["schemas"];
 export type Historical = Awaited<ReturnType<Qualifications["lookupInTransaction"]>>;
-// Only these qualification limits can be waived by an explicit staff override (policy 204).
-export const OVER_LIMIT_CODES: ReadonlySet<string> = new Set([
-  REASON_CODES.RULE_MASS_EXCEEDED,
-  REASON_CODES.RULE_TRAILER_TYPE_DISALLOWED,
-  REASON_CODES.RULE_ADR_CATEGORY_DISALLOWED,
-]);
+// Only the five level limits can be waived by an explicit staff override (policy 204).
+export const OVER_LIMIT_CODES: ReadonlySet<string> = new Set(Object.values(QUALIFICATION_REASONS));
 export const ACCEPTED_OVER_LIMITS = "accepted_over_limits";
-const DECIMAL = /^(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$/,
-  UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-  ADR_CLASS = /^[123468]$/;
 const sorted = (values: readonly string[]) => [...new Set(values)].sort();
-function evaluateRules(
+// A confirmed company event trip is credited without the level limits (VTC-157).
+function check(
   e: NormalizedTripEvidence,
-  history: Extract<Historical, { status: "resolved" }>,
+  history: Historical,
   event: ConfirmedEventContext | null,
-) {
-  return defaultRegistry.evaluate(e, history.rules, {
-    qualificationAssignmentId: history.assignmentId,
-    ruleVersionId: history.ruleVersionId,
-    confirmedEvent: event,
-  });
+): TripCheck | null {
+  return history.status === "resolved" && !event ? checkTrip(history.limits, e) : null;
 }
 // Knowledge and qualification gates of a non-open trip; callers handle open trips first.
 function examine(
@@ -43,7 +34,6 @@ function examine(
 ) {
   const missing: string[] = [],
     violations: string[] = [];
-  let rules: ReturnType<typeof evaluateRules> | null = null;
   if (e.outcome === "cancelled") violations.push("terminal_outcome_not_delivered");
   if (e.outcome === "none") missing.push("terminal_outcome_unknown");
   if (e.provider === "ets2telemetry") {
@@ -75,19 +65,16 @@ function examine(
     e.trailers.items.some((t) => t.status !== "known")
   )
     missing.push("trailer_context_unknown");
+  const result = check(e, history, event);
   if (history.status !== "resolved") missing.push(history.reasonCode);
-  else {
-    rules = evaluateRules(e, history, event);
-    if (rules.outcome === "fail")
-      violations.push(
-        ...rules.ruleResults.filter((r) => r.outcome === "fail").map((r) => r.reasonCode),
-      );
-    if (rules.outcome === "unknown")
-      missing.push(
-        ...rules.ruleResults.filter((r) => r.outcome === "unknown").map((r) => r.reasonCode),
-      );
+  else if (result) {
+    violations.push(
+      ...result.rules.filter((r) => r.result === "fail").map((r) => QUALIFICATION_REASONS[r.rule]),
+    );
+    // A proven failure outranks unknown rules; unknown alone goes to staff review.
+    if (result.outcome === "unknown") missing.push(QUALIFICATION_UNKNOWN);
   }
-  return { missing, violations, rules };
+  return { missing, violations, result };
 }
 // Lifecycle and knowledge gates precede pure qualification checks. Missing evidence is never proof of violation.
 export function classify(
@@ -131,52 +118,33 @@ export function classify(
     reasons: reasons.length ? reasons : ["supported_rules_passed"],
   };
 }
-function ruleCheck(
-  r: RuleEvaluationDetail,
-  rule: Rule | undefined,
-  e: NormalizedTripEvidence,
-): S["QualificationRuleCheck"] {
-  const mass = r.ruleType === "max_mass",
-    limit = mass && rule && "maxKg" in rule ? rule.maxKg : null,
-    offending =
-      r.outcome !== "fail"
-        ? []
-        : r.ruleType === "allowed_trailer_types"
-          ? r.reasonDetails?.disallowedEntityIds
-          : r.ruleType === "allowed_adr_categories"
-            ? [r.observed]
-            : [];
-  return {
-    ruleType: r.ruleType,
-    outcome: r.outcome,
-    reasonCode: r.reasonCode,
-    bypassedByEvent: r.bypassedByEvent === true,
-    // Unknown or malformed values stay null and are never shown as zero.
-    observedMassKg:
-      mass && e.cargoMassKg.status === "known" && DECIMAL.test(e.cargoMassKg.value)
-        ? e.cargoMassKg.value
-        : null,
-    limitMassKg: typeof limit === "string" && DECIMAL.test(limit) ? limit : null,
-    entityIds: sorted(
-      (Array.isArray(offending) ? offending : []).filter(
-        (id): id is string => typeof id === "string" && (UUID.test(id) || ADR_CLASS.test(id)),
-      ),
-    ).slice(0, 10),
-  };
-}
-// Per-rule details of the same historical rules that classify() applies.
-export function qualificationCheck(
+/** The check stored with a decision and shown for a pending trip. */
+export function qualificationSnapshot(
   e: NormalizedTripEvidence,
   history: Historical,
   event: ConfirmedEventContext | null,
-): S["QualificationCheck"] {
+): QualificationSnapshot {
   if (history.status !== "resolved")
-    return { status: "unresolved", reasonCode: history.reasonCode, rules: [] };
-  const rules = evaluateRules(e, history, event);
+    return {
+      levelId: null,
+      levelName: null,
+      editVersion: null,
+      limits: null,
+      eventExempt: false,
+      outcome: null,
+      reasonCode: history.reasonCode,
+      rules: [],
+    };
+  const result = check(e, history, event);
   return {
-    status: "resolved",
+    levelId: history.levelId,
+    levelName: history.levelName,
+    editVersion: history.editVersion,
+    limits: history.limits,
+    eventExempt: result === null,
+    outcome: result?.outcome ?? null,
     reasonCode: null,
-    rules: rules.ruleResults.map((r, i) => ruleCheck(r, history.rules[i], e)),
+    rules: result?.rules ?? [],
   };
 }
 export interface AcceptanceContext {
@@ -186,7 +154,7 @@ export interface AcceptanceContext {
 }
 // How a different human reviewer may accept: ordinarily, only over qualification limits with
 // explicit confirmation, or not at all. Over-limit acceptance requires a group without any
-// telemetry source or event exception and with every other gate satisfied (policy 204).
+// telemetry source and with every other gate satisfied (policy 204).
 export function acceptance(
   e: NormalizedTripEvidence,
   history: Historical,
@@ -201,12 +169,11 @@ export function acceptance(
       exceeded: [],
       blockedReasonCodes: sorted(["trip_open", ...eventCodes]),
     };
-  const { missing, violations, rules } = examine(e, history, event, true),
-    results = rules?.ruleResults ?? [];
+  const { missing, violations, result } = examine(e, history, event, true);
   // A proven failure hides unknown rules in classify(); every limit must still be known here.
   const gaps = [
       ...missing,
-      ...results.filter((r) => r.outcome === "unknown").map((r) => r.reasonCode),
+      ...(result?.rules.some((r) => r.result === "unknown") ? [QUALIFICATION_UNKNOWN] : []),
     ],
     exceeded = sorted(violations.filter((code) => OVER_LIMIT_CODES.has(code)));
   if (!violations.length && !gaps.length && !eventCodes.length)
@@ -216,9 +183,6 @@ export function acceptance(
     ...gaps,
     ...eventCodes,
     ...(exceeded.length && context.hasTelemetrySource ? ["telemetry_source_present"] : []),
-    ...(exceeded.length && results.some((r) => r.bypassedByEvent)
-      ? ["event_exception_applied"]
-      : []),
   ]);
   return {
     mode: exceeded.length && !blockedReasonCodes.length ? "over_limits" : "unavailable",
@@ -236,7 +200,6 @@ export function evaluationSnapshot(
     factRevisionId: e.factRevisionId,
     qualificationAssignmentId: h.status === "resolved" ? h.assignmentId : null,
     levelId: h.status === "resolved" ? h.levelId : null,
-    ruleVersionId: h.status === "resolved" ? h.ruleVersionId : null,
     eventId: event?.eventId ?? null,
     attendanceRevisionId: event?.attendanceRevisionId ?? null,
     attributionAt: h.attributionAt,

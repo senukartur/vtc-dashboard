@@ -81,7 +81,10 @@ export const qualificationLevels = mysqlTable(
       "qual_level_distance_range",
       sql`${t.distanceMinM} IS NULL OR ${t.distanceMaxM} IS NULL OR ${t.distanceMinM} <= ${t.distanceMaxM}`,
     ),
-    check("qual_level_adr_classes", sql`(${t.adrMode} = 'selected') = (${t.adrClasses} IS NOT NULL)`),
+    check(
+      "qual_level_adr_classes",
+      sql`(${t.adrMode} = 'selected') = (${t.adrClasses} IS NOT NULL)`,
+    ),
     check("qual_level_required_trips", sql`${t.requiredTrips} IS NULL OR ${t.requiredTrips} > 0`),
     check(
       "qual_level_required_distance",
@@ -132,10 +135,9 @@ export const qualificationAssignments = mysqlTable(
     actorId: idColumn("actor_id"),
     comment: varchar("comment", { length: 2048 }),
     previousAssignmentId: idColumn("previous_assignment_id"),
-    openMarker: tinyint("open_marker").generatedAlwaysAs(
-      sql`IF(ended_at IS NULL, 1, NULL)`,
-      { mode: "stored" },
-    ),
+    openMarker: tinyint("open_marker").generatedAlwaysAs(sql`IF(ended_at IS NULL, 1, NULL)`, {
+      mode: "stored",
+    }),
   },
   (t) => [
     fk("qual_assignment_member_fk", t.userId, membership.userId),

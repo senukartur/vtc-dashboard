@@ -389,18 +389,13 @@ export function accessEvent(value: unknown): AccessEvent {
 }
 export interface QualificationEvent {
   eventId: string;
-  type:
-    | "qualification.rules_changed"
-    | "qualification.assigned"
-    | "qualification.promoted"
-    | "qualification.progress_changed"
-    | "promotion.review_required";
+  type: "qualification.assigned" | "qualification.promoted";
   schemaVersion: 1;
   aggregate: { kind: "qualification"; id: string; version: number };
   occurredAt: string;
   correlationId: string;
   causationId: string | null;
-  data: { userId: string | null; assignmentId: string | null };
+  data: { userId: string; assignmentId: string };
 }
 export function qualificationEvent(value: unknown): QualificationEvent {
   const e = closed(value, [
@@ -416,19 +411,12 @@ export function qualificationEvent(value: unknown): QualificationEvent {
     a = closed(e.aggregate, ["kind", "id", "version"]),
     d = closed(e.data, ["userId", "assignmentId"]);
   if (
-    ![
-      "qualification.rules_changed",
-      "qualification.assigned",
-      "qualification.promoted",
-      "qualification.progress_changed",
-      "promotion.review_required",
-    ].includes(e.type as string) ||
+    !["qualification.assigned", "qualification.promoted"].includes(e.type as string) ||
     e.schemaVersion !== 1 ||
     a.kind !== "qualification" ||
     typeof e.occurredAt !== "string" ||
-    (e.type === "qualification.rules_changed"
-      ? d.userId !== null || d.assignmentId !== null
-      : d.userId === null || d.assignmentId === null)
+    d.userId === null ||
+    d.assignmentId === null
   )
     throw new Error("UNSUPPORTED_EVENT");
   return {
@@ -444,8 +432,8 @@ export function qualificationEvent(value: unknown): QualificationEvent {
     correlationId: applicationId(e.correlationId as string),
     causationId: e.causationId === null ? null : applicationId(e.causationId as string),
     data: {
-      userId: d.userId === null ? null : applicationId(d.userId as string),
-      assignmentId: d.assignmentId === null ? null : applicationId(d.assignmentId as string),
+      userId: applicationId(d.userId as string),
+      assignmentId: applicationId(d.assignmentId as string),
     },
   };
 }
@@ -546,8 +534,6 @@ export const notificationEventTypes = [
   "manual.correction_requested",
   "qualification.assigned",
   "qualification.promoted",
-  "qualification.progress_changed",
-  "promotion.review_required",
   "event.changed",
   "event.response_changed",
 ] as const;
@@ -584,11 +570,8 @@ export function domainEvent(input: unknown): DomainEvent {
     case "manual.report_submitted":
     case "manual.correction_requested":
       return manualEvent(input);
-    case "qualification.rules_changed":
     case "qualification.assigned":
     case "qualification.promoted":
-    case "qualification.progress_changed":
-    case "promotion.review_required":
       return qualificationEvent(input);
     case "event.changed":
     case "event.response_changed":
@@ -664,8 +647,7 @@ export function createOutbox(unit: UnitOfWork, options: { notifications?: boolea
                         "trip.facts_changed",
                       ].includes(input.type)
                     ? tripEvent(input)
-                    : input.type.startsWith("qualification.") ||
-                        input.type === "promotion.review_required"
+                    : input.type.startsWith("qualification.")
                       ? qualificationEvent(input)
                       : input.type.startsWith("event.")
                         ? companyEvent(input)
