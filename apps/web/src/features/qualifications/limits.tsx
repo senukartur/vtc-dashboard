@@ -10,7 +10,9 @@ import {
 import { FlameIcon } from "../../shared/ui/flame-icon.js";
 import { Badge } from "../../shared/ui/primitives.js";
 import { percent, setLimits } from "./model.js";
-import { type Conditions, type DTO, type Limits, QualificationFailure } from "./transport.js";
+
+export { failureText } from "./model.js";
+import type { Conditions, DTO, Limits } from "./transport.js";
 
 type T = TFunction<"qualifications">;
 export function useLocale(): Locale {
@@ -208,22 +210,4 @@ export function Time({ value }: { value: string | null }) {
     session = useSession(),
     zone = accountTimeZone(session.self?.preferences.displayTimezone);
   return <time dateTime={value ?? undefined}>{formatUtc(value, locale, zone)}</time>;
-}
-export function failureText(t: T, failure: unknown) {
-  if (!(failure instanceof QualificationFailure)) return t("errorUncertain");
-  if (failure.code === "QUALIFICATION_CONDITIONS_REQUIRED") return t("errorConditions");
-  switch (failure.kind) {
-    case "conflict":
-      return t("errorConflict");
-    case "forbidden":
-      return t("errorForbidden");
-    case "limited":
-      return t("errorLimited");
-    case "invalid":
-      return t("errorInvalid");
-    case "unavailable":
-      return t("errorUnavailable");
-    default:
-      return t("errorUncertain");
-  }
 }

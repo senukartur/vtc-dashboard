@@ -1,7 +1,7 @@
 // Pure presentation helpers. The server applies every limit and promotes drivers; these only
 // format its data, convert form units and preview a draft.
 import { decimalShift } from "../../shared/formatting.js";
-import type { Conditions, DTO, Limits } from "./transport.js";
+import { type Conditions, type DTO, type Limits, QualificationFailure } from "./transport.js";
 
 const DECIMAL = /^(0|[1-9]\d*)(\.\d+)?$/;
 
@@ -90,4 +90,31 @@ export function setLimits(limits: Limits) {
     adr: limits.adr.mode !== "any",
     hardMode: limits.hardModeRequired,
   };
+}
+/** The message key text for a failed command; the 422 conditions code has its own message. */
+type FailureKey =
+  | "errorConditions"
+  | "errorConflict"
+  | "errorForbidden"
+  | "errorLimited"
+  | "errorInvalid"
+  | "errorUnavailable"
+  | "errorUncertain";
+export function failureText(t: (key: FailureKey) => string, failure: unknown) {
+  if (!(failure instanceof QualificationFailure)) return t("errorUncertain");
+  if (failure.code === "QUALIFICATION_CONDITIONS_REQUIRED") return t("errorConditions");
+  switch (failure.kind) {
+    case "conflict":
+      return t("errorConflict");
+    case "forbidden":
+      return t("errorForbidden");
+    case "limited":
+      return t("errorLimited");
+    case "invalid":
+      return t("errorInvalid");
+    case "unavailable":
+      return t("errorUnavailable");
+    default:
+      return t("errorUncertain");
+  }
 }
