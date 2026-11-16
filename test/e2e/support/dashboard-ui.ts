@@ -20,6 +20,7 @@ import {
   makeRsvpFixture,
   recentTrips,
   upcomingEvent,
+  withActiveDrivers,
 } from "./dashboard-fixtures.ts";
 import { inertNotifications } from "./notifications.ts";
 
@@ -293,6 +294,8 @@ export interface DashboardMockState {
   leaderboardViewer: LeaderboardViewer;
   /** Breakdowns answer a computed zero for the period. */
   emptyBreakdowns: boolean;
+  /** Breakdowns with unrecognized trips: routes and cargo only undetermined, a third source part. */
+  unrecognizedBreakdowns: boolean;
   /** False answers analytics and the leaderboard without their Stage 4 fields. */
   stage4: boolean;
   /** Requests answered with 422 because they break the API's period or limit rules. */
@@ -406,6 +409,7 @@ export async function mockDashboardRoutes(
       options.reportingTimezone === undefined ? "Europe/Moscow" : options.reportingTimezone,
     leaderboardViewer: options.leaderboardViewer ?? "unranked",
     emptyBreakdowns: false,
+    unrecognizedBreakdowns: false,
     stage4: true,
     rejected: [],
   };
@@ -448,9 +452,17 @@ export async function mockDashboardRoutes(
       else self.data.capabilities.push("trips.review", "company.read");
       return route.fulfill({ json: self });
     }
+    const leaderboardFor = (search: URLSearchParams) =>
+      makeLeaderboardFixture({
+        empty: options.emptyCompany ?? false,
+        ...(options.leaderboardSize !== undefined ? { size: options.leaderboardSize } : {}),
+        nextCursor: options.leaderboardNextCursor ?? false,
+        viewer: state.leaderboardViewer,
+        search,
+      });
     if (endpoint === "analytics") {
       const game = url.searchParams.get("game");
-      const fixture = options.filterAware
+      const answered = options.filterAware
         ? makeFilteredAnalyticsFixture(url.searchParams, options.emptyCompany)
         : url.searchParams.get("period") === "all_time"
           ? makeAllTimeAnalyticsFixture(
@@ -458,20 +470,25 @@ export async function mockDashboardRoutes(
               options.emptyCompany,
             )
           : makeAnalyticsFixture(options.emptyCompany);
+      // With a ranked viewer the active drivers equal the leaderboard's ranked members.
+      const ranked = state.leaderboardViewer === "onPage" || state.leaderboardViewer === "offPage";
+      const fixture = ranked
+        ? withActiveDrivers(answered, leaderboardFor(url.searchParams).data.rankedMembers)
+        : answered;
       return route.fulfill({ json: state.stage4 ? fixture : analyticsWithoutStage4(fixture) });
     }
     if (endpoint === "leaderboard") {
-      const fixture = makeLeaderboardFixture({
-        empty: options.emptyCompany ?? false,
-        ...(options.leaderboardSize !== undefined ? { size: options.leaderboardSize } : {}),
-        nextCursor: options.leaderboardNextCursor ?? false,
-        viewer: state.leaderboardViewer,
-        search: url.searchParams,
-      });
+      const fixture = leaderboardFor(url.searchParams);
       return route.fulfill({ json: state.stage4 ? fixture : leaderboardWithoutStage4(fixture) });
     }
     if (endpoint && Object.values<string>(breakdownEndpoint).includes(endpoint)) {
-      return route.fulfill({ json: makeBreakdownFixture(url.searchParams, state.emptyBreakdowns) });
+      return route.fulfill({
+        json: makeBreakdownFixture(
+          url.searchParams,
+          state.emptyBreakdowns,
+          state.unrecognizedBreakdowns,
+        ),
+      });
     }
     if (path === "/api/v1/me/trip-status-summary") {
       return route.fulfill({

@@ -272,6 +272,20 @@ const activity = {
   activeMembers: 5,
 };
 
+/**
+ * Analytics whose active drivers equal the leaderboard's ranked members for the same period and
+ * filters, as the API guarantees. Scenarios with a ranked viewer use it; the default fixtures keep
+ * their own count so a test can prove that the KPI never counts leaderboard rows.
+ */
+export function withActiveDrivers<T extends S["AnalyticsStage4CompanyEnvelope"]>(
+  envelope: T,
+  rankedMembers: number | undefined,
+): T {
+  if (rankedMembers === undefined || envelope.data.activeDrivers === undefined) return envelope;
+  if (envelope.data.acceptedTrips === 0) return envelope;
+  return { ...envelope, data: { ...envelope.data, activeDrivers: rankedMembers } } as T;
+}
+
 /** Company analytics without the Stage 4 aggregates (absent means unavailable, never zero). */
 export function analyticsWithoutStage4(envelope: S["AnalyticsStage4CompanyEnvelope"]) {
   const {
@@ -605,13 +619,17 @@ const sourceItems = {
   ets2: { ets2telemetry: 17, manual: 3 },
   ats: { ets2telemetry: 15, manual: 7 },
 } as const;
+/** Telemetry trips whose source was not recognized in the `unrecognized` variant. */
+const unrecognizedSource = { ets2: 1, ats: 2 } as const;
 
 /**
  * A breakdown as the API answers `search` (dimension, game, period or dates, locale and limit).
  * Items plus remainder plus undetermined equal the totals, which equal the analytics totals.
- * `empty` is a computed zero for the period.
+ * `empty` is a computed zero for the period. `unrecognized` keeps the same totals but moves some
+ * telemetry trips of the source split to undetermined, and every route and cargo trip to
+ * undetermined (no ranked items).
  */
-export function makeBreakdownFixture(search: URLSearchParams, empty = false) {
+export function makeBreakdownFixture(search: URLSearchParams, empty = false, unrecognized = false) {
   const dimension = (search.get("dimension") ?? "route") as BreakdownDimension;
   const locale: FixtureLocale = search.get("locale") === "ru" ? "ru" : "en";
   const requested = search.get("game");
@@ -634,16 +652,20 @@ export function makeBreakdownFixture(search: URLSearchParams, empty = false) {
     projectionPending: false,
   };
   if (dimension === "source") {
-    const items = (["ets2telemetry", "manual"] as const).map((source) => ({
-      source,
-      ...trips(count(games.reduce((total, item) => total + sourceItems[item][source], 0))),
-    }));
+    const moved = unrecognized
+      ? count(games.reduce((total, item) => total + unrecognizedSource[item], 0))
+      : 0;
+    const items = (["ets2telemetry", "manual"] as const).map((source) => {
+      const listed = count(games.reduce((total, item) => total + sourceItems[item][source], 0));
+      return { source, ...trips(source === "ets2telemetry" ? listed - moved : listed) };
+    });
+    const undetermined = trips(moved);
     return {
       data: {
         dimension: "source" as const,
         ...common,
-        totals: sum(items),
-        undetermined: trips(0),
+        totals: sum([...items, undetermined]),
+        undetermined,
         remainder: trips(0),
         items,
       },
@@ -658,11 +680,13 @@ export function makeBreakdownFixture(search: URLSearchParams, empty = false) {
     .map((item) => ({ item, ...trips(count(item.trips)) }))
     .filter((entry) => entry.acceptedTrips > 0)
     .sort((a, b) => b.acceptedTrips - a.acceptedTrips);
-  const shown = ranked.slice(0, limit);
+  const shown = unrecognized ? [] : ranked.slice(0, limit);
   const remainder = trips(extra("remainder") + sum(ranked.slice(limit)).acceptedTrips);
   const undetermined = trips(extra("undetermined"));
   const totals = sum([...ranked, trips(extra("remainder")), undetermined]);
-  const shared = { ...common, limit, totals, undetermined, remainder };
+  const shared = unrecognized
+    ? { ...common, limit, totals, undetermined: totals, remainder: trips(0) }
+    : { ...common, limit, totals, undetermined, remainder };
   if (dimension === "route")
     return {
       data: {

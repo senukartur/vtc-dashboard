@@ -144,7 +144,7 @@ test.describe("Company Dashboard E2E", () => {
         "ETS2 61,430 km · ATS 64,000 km",
         "ETS2 20 · ATS 22",
         "Active members: 5",
-        "No accepted trips in this period",
+        "No accepted trips for the period",
       ]);
 
       await expect(
@@ -242,7 +242,7 @@ test.describe("Company Dashboard E2E", () => {
       // One game: no game split under the totals.
       await expect(kpis(page).locator("dd.dashboard-kpi-sub")).toHaveText([
         "Active members: 5",
-        "No accepted trips in this period",
+        "No accepted trips for the period",
       ]);
 
       const chart = chartCard(page);
@@ -1190,6 +1190,7 @@ test.describe("Company Dashboard E2E", () => {
       ]);
       await expect(own.getByRole("link")).toHaveAttribute("href", `/account/drivers/${fixtureId}`);
       await expect(kpiValues(page).nth(3)).toHaveText("14 of 15");
+      await expect(kpiValues(page).nth(2)).toHaveText("15");
       await expect(kpiSubs(page).nth(3)).toHaveText("37,400 km · trips: 4");
       expect(lastRequest(state, "/api/v1/analytics/leaderboard")?.searchParams.get("limit")).toBe(
         "10",
@@ -1213,6 +1214,7 @@ test.describe("Company Dashboard E2E", () => {
       );
       await expect(board.getByText("· you")).toHaveCount(1);
       await expect(kpiValues(page).nth(3)).toHaveText("3 of 3");
+      await expect(kpiValues(page).nth(2)).toHaveText("3");
     },
   );
 
@@ -1224,7 +1226,7 @@ test.describe("Company Dashboard E2E", () => {
       await page.goto("/account/dashboard");
       await loaded(page);
       await expect(kpiValues(page).nth(3)).toHaveText("Not ranked");
-      await expect(kpiSubs(page).nth(3)).toHaveText("No accepted trips in this period");
+      await expect(kpiSubs(page).nth(3)).toHaveText("No accepted trips for the period");
       await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
       await expect(leaderboardCard(page).locator(".dashboard-leaderboard-self")).toHaveCount(0);
       await expect(leaderboardCard(page)).not.toContainText("you");
@@ -1261,7 +1263,8 @@ test.describe("Company Dashboard E2E", () => {
       await periodSelect(page).selectOption("allTime");
       await expect(periodSelect(page)).toHaveValue("allTime");
       await expect(periodSelect(page).locator("option:checked")).toHaveText("All time");
-      await expect(kpiValues(page)).toHaveText(["1,505,160 km", "504", "9", "14 of 15"]);
+      // Active drivers equal the ranked members of the same period, as the API guarantees.
+      await expect(kpiValues(page)).toHaveText(["1,505,160 km", "504", "15", "14 of 15"]);
       await expect(kpiSubs(page)).toHaveText([
         "ETS2 737,160 km · ATS 768,000 km",
         "ETS2 240 · ATS 264",
@@ -1515,7 +1518,7 @@ test.describe("Company Dashboard E2E", () => {
       await loaded(page);
       for (const card of [routesCard(page), cargoCard(page), sourceCard(page)]) {
         await expect(
-          card.getByText("No accepted trips in this period", { exact: true }),
+          card.getByText("No accepted trips in the selected period", { exact: true }),
         ).toBeVisible();
         await expect(card).not.toContainText(/0\s?%/);
         await expect(card.getByRole("button")).toHaveCount(0);
@@ -1525,8 +1528,49 @@ test.describe("Company Dashboard E2E", () => {
       await expect(kpiValues(page).first()).toHaveText("125,430 km");
       await switchLanguage(page, "ru");
       await expect(
-        sourceCard(page).getByText("За этот период нет принятых рейсов", { exact: true }),
+        sourceCard(page).getByText("За выбранный период нет принятых рейсов", { exact: true }),
       ).toBeVisible();
+    },
+  );
+
+  test(
+    "shows unrecognized trips without an empty list and as a third source part",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDashboardRoutes(page);
+      state.unrecognizedBreakdowns = true;
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      // Every route and cargo trip is unrecognized: no ranked list, bars or empty state.
+      for (const [card, text] of [
+        [routesCard(page), "City not recognized42 trips"],
+        [cargoCard(page), "Cargo not recognized42 trips"],
+      ] as const) {
+        await expect(card.locator(".dashboard-breakdown-extra li")).toHaveText([text]);
+        await expect(card.locator(".dashboard-breakdown-list")).toHaveCount(0);
+        await expect(card.locator("ol, .dashboard-breakdown-bar")).toHaveCount(0);
+        await expect(card.locator(".dashboard-empty")).toHaveCount(0);
+      }
+      // The neutral third part follows telemetry and manual reports, with its count and share.
+      const source = sourceCard(page);
+      await expect(source.locator(".dashboard-source-legend li")).toHaveText([
+        "Telemetry29 trips69%",
+        "Manual reports10 trips24%",
+        "Source not recognized3 trips7%",
+      ]);
+      await expect(source.locator(".dashboard-source-bar > span")).toHaveClass([
+        "dashboard-source-ets2telemetry",
+        "dashboard-source-manual",
+        "dashboard-source-undetermined",
+      ]);
+      await switchLanguage(page, "ru");
+      await expect(source.locator(".dashboard-source-legend li").last()).toHaveText(
+        /^Источник не определён3 рейса7\s%$/,
+      );
+      await expect(routesCard(page).locator(".dashboard-breakdown-extra li")).toHaveText(
+        "Город не распознан42 рейса",
+      );
+      expect(state.rejected).toEqual([]);
     },
   );
 

@@ -515,6 +515,8 @@ for (const locale of ["en", "ru"] as const) {
       const metrics = kpis(page);
       await expect(metrics.locator("dd.dashboard-kpi-sub")).toHaveCount(4);
       await expect(metrics.locator("dd.dashboard-kpi-value").nth(3)).toHaveText(t.place);
+      // Active drivers equal the ranked members behind the place.
+      await expect(metrics.locator("dd.dashboard-kpi-value").nth(2)).toHaveText("15");
       await expect(metrics.locator("dd.dashboard-kpi-sub").nth(3)).toHaveText(t.placeTotals);
       const own = leaderboardCard(page).locator(".dashboard-leaderboard-self tr");
       await expect(own.locator("td").nth(1)).toHaveText(t.you);

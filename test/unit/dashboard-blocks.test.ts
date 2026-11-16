@@ -63,6 +63,7 @@ import {
   recentTripItems,
   recentTrips,
   upcomingEvent,
+  withActiveDrivers,
 } from "../e2e/support/dashboard-fixtures.ts";
 
 const MINUTE = 60_000;
@@ -804,17 +805,35 @@ describe("trip breakdown views", () => {
   it("is empty only for a zero total, not for undetermined trips alone", () => {
     const empty = makeBreakdownFixture(new URLSearchParams({ dimension: "route" }), true).data;
     expect(breakdownEmpty(empty)).toBe(true);
-    const data = breakdown("route");
-    if (data.dimension !== "route") throw new Error("ROUTE_EXPECTED");
-    const onlyUndetermined = {
-      ...data,
-      items: [],
-      remainder: { acceptedTrips: 0, actualDistanceM: "0" },
-      undetermined: { acceptedTrips: 2, actualDistanceM: "2000000" },
-      totals: { acceptedTrips: 2, actualDistanceM: "2000000" },
-    };
+    // The unrecognized fixture: every trip undetermined, no ranked items and no remainder.
+    const onlyUndetermined = makeBreakdownFixture(
+      new URLSearchParams({ dimension: "route" }),
+      false,
+      true,
+    ).data;
+    if (onlyUndetermined.dimension !== "route") throw new Error("ROUTE_EXPECTED");
     expect(breakdownEmpty(onlyUndetermined)).toBe(false);
-    expect(breakdownRows(onlyUndetermined)).toMatchObject({ rows: [], undetermined: 2 });
+    expect(breakdownRows(onlyUndetermined)).toEqual({
+      rows: [],
+      chips: true,
+      remainder: null,
+      undetermined: 42,
+    });
+  });
+
+  it("adds the undetermined part of the source fixture with its count and share", () => {
+    const data = makeBreakdownFixture(
+      new URLSearchParams({ dimension: "source" }),
+      false,
+      true,
+    ).data;
+    if (data.dimension !== "source") throw new Error("SOURCE_EXPECTED");
+    // 29, 10 and 3 of 42, rounded per part.
+    expect(sourceShares(data)).toEqual([
+      { source: "ets2telemetry", acceptedTrips: 29, percent: 69 },
+      { source: "manual", acceptedTrips: 10, percent: 24 },
+      { source: "undetermined", acceptedTrips: 3, percent: 7 },
+    ]);
   });
 
   it("shares the source split per part and adds undetermined trips only when present", () => {
@@ -941,14 +960,18 @@ describe("overview statistics fixtures", () => {
       for (const locale of ["en", "ru"])
         for (const game of [undefined, "ets2", "ats"])
           for (const period of [undefined, "all_time"])
-            for (const empty of [false, true]) {
+            for (const [empty, unrecognized] of [
+              [false, false],
+              [true, false],
+              [false, true],
+            ] as const) {
               const search = new URLSearchParams({
                 dimension,
                 locale,
                 ...(game ? { game } : {}),
                 ...(period ? { period } : {}),
               });
-              const fixture = makeBreakdownFixture(search, empty);
+              const fixture = makeBreakdownFixture(search, empty, unrecognized);
               expect(breakdowns.safeParse(fixture).success, search.toString()).toBe(true);
               // Items, remainder and undetermined add up to the totals.
               const { items, remainder, undetermined, totals } = fixture.data;
@@ -960,12 +983,33 @@ describe("overview statistics fixtures", () => {
                 totals.acceptedTrips,
               );
             }
-    // The breakdown totals agree with the analytics totals for the same filters.
+    // The breakdown totals agree with the analytics totals for the same filters, also when
+    // trips are unrecognized.
     for (const game of ["ets2", "ats"] as const)
       for (const dimension of ["route", "cargo", "source"] as const)
-        expect(
-          makeBreakdownFixture(new URLSearchParams({ dimension, game })).data.totals.acceptedTrips,
-        ).toBe(makeFilteredAnalyticsFixture(new URLSearchParams({ game })).data.acceptedTrips);
+        for (const unrecognized of [false, true])
+          expect(
+            makeBreakdownFixture(new URLSearchParams({ dimension, game }), false, unrecognized).data
+              .totals.acceptedTrips,
+          ).toBe(makeFilteredAnalyticsFixture(new URLSearchParams({ game })).data.acceptedTrips);
+  });
+
+  it("keep active drivers equal to the ranked members when asked", () => {
+    const board = makeLeaderboardFixture({ viewer: "offPage" });
+    const analytics = withActiveDrivers(makeAnalyticsFixture(), board.data.rankedMembers);
+    expect(analytics.data.activeDrivers).toBe(15);
+    expect(board.data.rankedMembers).toBe(15);
+    const allTime = new URLSearchParams({ period: "all_time" });
+    expect(
+      withActiveDrivers(
+        makeAllTimeAnalyticsFixture(),
+        makeLeaderboardFixture({ viewer: "offPage", search: allTime }).data.rankedMembers,
+      ).data.activeDrivers,
+    ).toBe(15);
+    // A computed zero and an API without Stage 4 fields stay as they are.
+    expect(withActiveDrivers(makeAnalyticsFixture(true), 15).data.activeDrivers).toBe(0);
+    const bare = analyticsWithoutStage4(makeAnalyticsFixture());
+    expect("activeDrivers" in withActiveDrivers(bare, 15).data).toBe(false);
   });
 
   it("cover the catalog label cases and reject a body for another dimension", () => {
