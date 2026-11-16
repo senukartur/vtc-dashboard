@@ -58,7 +58,7 @@ The landing no longer imports `EventsPage`, so that route chunk is lazy again; t
 
 ## Submission and recovery
 
-The form collects nickname, invitation email, Steam profile URL and at least one ETS2/ATS choice. Discord and introduction are optional; blank optional fields are omitted. Client technical validation uses generated contract bounds/patterns with the backend's supported Steam URL/mailbox/text constraints. Server validation is authoritative. No provider ownership check is claimed.
+The form collects nickname, invitation email, Steam profile URL and at least one ETS2/ATS choice. Discord and introduction are optional; blank optional fields are omitted. The optional "How did you hear about us?" select (VTC-149) follows the introduction; only Other reveals a free-text field with a 200-character counter, and an unanswered question adds nothing to the payload. Client technical validation uses generated contract bounds/patterns with the backend's supported Steam URL/mailbox/text constraints. Server validation is authoritative. No provider ownership check is claimed.
 
 A user action obtains same-origin CSRF, then sends one JSON POST to `/api/v1/public/applications` with credentials, a UUID idempotency key and RU/EN `Accept-Language`. Strict success-envelope checks use the generated DTO and runtime-schema bounds/patterns. Only a validated 201 produces the generic acknowledgement. New, duplicate and existing-identity receipts have the same message; receipt IDs, application statuses and email existence are never displayed or looked up.
 
