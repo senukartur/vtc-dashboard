@@ -30,6 +30,7 @@ import { type Actor, type Identity, identityError } from "../identity/service.js
 import { selectQuality } from "../reconciliation/quality.js";
 import { canonicalJson, contentHash, decimal, sourceKey } from "../sources/contracts/canonical.js";
 import type {
+  CompanyFact,
   NormalizedTripEvidence,
   Provider,
   TripSourceAdapter,
@@ -38,7 +39,7 @@ import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
 import { createTripAdjudication } from "./adjudication.js";
 import { createContributionRegister } from "./contributions.js";
-import { createFactRepository, effectiveGameMode } from "./facts.js";
+import { createFactRepository, damagePercent, effectiveGameMode } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
 import {
   type ListOptions,
@@ -66,6 +67,8 @@ type ManualProjection = {
   evidence: S["Evidence"][];
   eventId?: string | null;
 };
+type DepotRef =
+  Awaited<ReturnType<Catalogs["depotRefsInTransaction"]>> extends Map<string, infer T> ? T : never;
 type SummaryRead = {
   manual: ReadonlyMap<string, ManualRevisionSummary>;
   privateViewer?: Actor;
@@ -98,7 +101,9 @@ export interface TripsPorts {
     Catalogs,
     "resolveInTransaction" | "selectionsInTransaction" | "labelsInTransaction"
   > &
-    Partial<Pick<Catalogs, "labelSearchCondition">>;
+    Partial<
+      Pick<Catalogs, "labelSearchCondition" | "depotInTransaction" | "depotRefsInTransaction">
+    >;
   eventTitles?: Events["tripTitlesInTransaction"];
   eventAssociations?: (tx: TxContext, tripIds: string[]) => Promise<Map<string, string>>;
   // VTC-025 supplies a caller-transaction check of immutable validated evidence references.
@@ -121,6 +126,8 @@ export interface SourceContext {
   connection: { state: "unknown" | "bound" | "disconnected"; referenceId: string | null };
   // Explicit trusted coordinator selection; never copied from source payloads or inferred.
   canonical?: { tripId: string; expectedVersion: number };
+  // Validated manual revision companies; trusted like `canonical`, never read from payloads.
+  manualCompanies?: { originCompanyId: string | null; destinationCompanyId: string | null };
 }
 function tripCount(value: number | string) {
   const count = typeof value === "number" || /^(0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;
@@ -378,6 +385,14 @@ export function createTrips(
             },
           }
         : {}),
+      ...(context.manualCompanies
+        ? {
+            manualCompanies: {
+              originCompanyId: context.manualCompanies.originCompanyId,
+              destinationCompanyId: context.manualCompanies.destinationCompanyId,
+            },
+          }
+        : {}),
     };
     applicationId(context.ownerUserId);
     if (!["unknown", "bound", "disconnected"].includes(context.connection.state))
@@ -390,6 +405,10 @@ export function createTrips(
         context.canonical.expectedVersion < 1
       )
         throw identityError(422);
+    }
+    if (context.manualCompanies) {
+      if (provider !== "manual") throw identityError(422);
+      for (const id of Object.values(context.manualCompanies)) if (id !== null) applicationId(id);
     }
     const adapter = adapters.get(provider);
     if (!adapter) throw identityError(422);
@@ -546,6 +565,7 @@ export function createTrips(
       sourceRecordId: messageId,
       factRevisionId: factId,
       ...(ports.catalogs ? { catalogs: ports.catalogs } : {}),
+      ...(context.manualCompanies ? { manualCompanies: context.manualCompanies } : {}),
     });
     const current = trip.currentFactId
       ? (await factsRepository.read(tx, [trip.currentFactId], true)).get(trip.currentFactId)
@@ -845,6 +865,125 @@ export function createTrips(
       ],
     ]);
   }
+  const reconciliation = createTripReconciliation(unit, now, config.dispatchReviewStage3Enabled);
+  // Display reference of a company fact; a depot outside the effective city stays unresolved.
+  function companyRef(
+    fact: CompanyFact | undefined,
+    city: NormalizedTripEvidence["origin"],
+    depots: ReadonlyMap<string, DepotRef>,
+  ): S["TripStage4CompanyRef"] | null {
+    if (!fact || (fact.depotId === null && fact.code === null)) return null;
+    const depot = fact.depotId ? depots.get(fact.depotId) : undefined;
+    if (depot && city.status === "known" && depot.cityId === city.value.entityId)
+      return {
+        state: "resolved",
+        companyId: depot.companyId,
+        depotId: depot.depotId,
+        name: depot.name,
+        code: depot.code,
+        hidden: depot.hidden,
+        logo: depot.logo,
+      };
+    return { state: "unresolved", code: fact.code ?? depot?.code ?? null };
+  }
+  // Damage of the effective fact: telemetry carries it; a manual fact takes its current revision's.
+  function effectiveDamage(
+    current: NormalizedTripEvidence,
+    manual: NormalizedTripEvidence | undefined,
+    revision: S["ManualRevisionRead"] | null,
+  ) {
+    if (current.provider === "ets2telemetry") return damagePercent(current);
+    const value =
+      manual?.sourceRecordId === current.sourceRecordId &&
+      revision &&
+      "representation" in revision &&
+      revision.representation === "extended"
+        ? revision.fields.cargoDamagePercent
+        : undefined;
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
+      ? value
+      : null;
+  }
+  async function privateFacts(
+    tx: TxContext,
+    id: string,
+    manualRevision: S["ManualRevisionRead"] | null,
+  ): Promise<{
+    effectiveFacts: S["EffectiveTripFacts"] | null;
+    sources: S["TripStage4Source"][];
+  }> {
+    const row = await groups.resolve(tx, id, "share");
+    const saved = row.currentFactId
+      ? (await factsRepository.read(tx, [row.currentFactId], true)).get(row.currentFactId)
+      : undefined;
+    if (saved && !(await groups.contains(tx, row.id, saved.tripId, true)))
+      throw new Error("TRIP_FACT_POINTER_INVALID");
+    const current = saved?.evidence;
+    // The reviewer's telemetry selection over the same (first 100) latest source facts.
+    const members = (await groups.members(tx, [row.id], "share")).map((t) => t.id);
+    const { facts } = await reconciliation.matchingEvidence(tx, members);
+    if (current && !facts.some((f) => f.factRevisionId === current.factRevisionId))
+      facts.push(current);
+    const telemetry = selectQuality(
+      facts.filter((f) => f.provider === "ets2telemetry"),
+      row.currentFactId,
+    ).selected;
+    const [manualMessage] = manualRevision
+      ? await c(tx)
+          .select({ factId: tripFacts.id })
+          .from(sourceMessages)
+          .innerJoin(tripFacts, eq(tripFacts.messageId, sourceMessages.id))
+          .where(
+            and(
+              eq(sourceMessages.provider, "manual"),
+              eq(sourceMessages.eventKey, sourceKey(applicationId(manualRevision.id))),
+            ),
+          )
+          .for("share")
+      : [];
+    const manualFact = manualMessage
+      ? (await factsRepository.read(tx, [manualMessage.factId], true)).get(manualMessage.factId)
+      : undefined;
+    if (manualFact && !(await groups.contains(tx, row.id, manualFact.tripId, true)))
+      throw new Error("TRIP_SOURCE_SCOPE_INVALID");
+    const manual = manualFact?.evidence;
+    const entry = (e: NormalizedTripEvidence, receivedAt: string): S["TripStage4Source"] => ({
+      kind: e.provider,
+      receivedAt,
+      actualDistanceM: e.actualDistanceM.status === "known" ? e.actualDistanceM.value : null,
+      state: e.outcome,
+      effective: current?.sourceRecordId === e.sourceRecordId,
+    });
+    const sources: S["TripStage4Source"][] = [];
+    if (telemetry) {
+      const [message] = await c(tx)
+        .select({ receivedAt: sourceMessages.receivedAt })
+        .from(sourceMessages)
+        .where(eq(sourceMessages.id, telemetry.sourceRecordId))
+        .for("share");
+      if (!message) throw new Error("SOURCE_MESSAGE_MISSING");
+      sources.push(entry(telemetry, message.receivedAt));
+    }
+    if (manual && manualRevision) sources.push(entry(manual, manualRevision.submittedAt));
+    if (!current) return { effectiveFacts: null, sources };
+    const companies = current.companies,
+      depotIds = [companies?.origin.depotId, companies?.destination.depotId].flatMap((v) =>
+        v ? [v] : [],
+      );
+    const depots: ReadonlyMap<string, DepotRef> =
+      depotIds.length && ports.catalogs?.depotRefsInTransaction
+        ? await ports.catalogs.depotRefsInTransaction(tx, depotIds)
+        : new Map();
+    return {
+      effectiveFacts: {
+        ...(await factsRepository.projectEffective(tx, current)),
+        cargoDamagePercent: effectiveDamage(current, manual, manualRevision),
+        originCompany: companyRef(companies?.origin, current.origin, depots),
+        destinationCompany: companyRef(companies?.destination, current.destination, depots),
+      },
+      sources,
+    };
+  }
   return {
     config,
     groups,
@@ -856,7 +995,7 @@ export function createTrips(
       config.dispatchReviewStage3Enabled,
       ports.adjudicationChanged,
     ),
-    reconciliation: createTripReconciliation(unit, now, config.dispatchReviewStage3Enabled),
+    reconciliation,
     reviewRootsInTransaction(
       tx: TxContext,
       viewerId: string,
@@ -976,15 +1115,11 @@ export function createTrips(
       if (!result) throw new Error("TRIP_SUMMARY_MISSING");
       return result;
     },
-    async effectiveFactsInTransaction(tx: TxContext, id: string) {
-      const row = await groups.resolve(tx, id, "share");
-      const saved = row.currentFactId
-        ? (await factsRepository.read(tx, [row.currentFactId], true)).get(row.currentFactId)
-        : undefined;
-      if (saved && !(await groups.contains(tx, row.id, saved.tripId, true)))
-        throw new Error("TRIP_FACT_POINTER_INVALID");
-      return saved ? factsRepository.projectEffective(tx, saved.evidence) : null;
-    },
+    /**
+     * Author-safe effective facts and sources of a private trip read. The caller authorizes the
+     * viewer and passes the group's current manual revision. Shared locks only; no writes.
+     */
+    privateFactsInTransaction: privateFacts,
     contributions: createContributionRegister(unit),
     // Caller owns binding/token validation and the outer transaction/ACK, not the payload.
     storeInTransaction: store,
@@ -1254,18 +1389,16 @@ export function createTrips(
           ...(privateRead && { privateViewer: current }),
         });
         if (!summary) throw new Error("TRIP_SUMMARY_MISSING");
-        // summaries already checked the selected fact against the locked group membership.
-        const savedFact =
-          privateRead && row.currentFactId
-            ? (await factsRepository.read(tx, [row.currentFactId], true)).get(row.currentFactId)
-            : undefined;
-        return privateRead
+        const facts = privateRead
+          ? await privateFacts(tx, row.id, projection?.manualRevision ?? null)
+          : undefined;
+        return facts
           ? {
               view: "private",
               summary,
-              effectiveFacts: savedFact
-                ? await factsRepository.projectEffective(tx, savedFact.evidence)
-                : null,
+              effectiveFacts: facts.effectiveFacts,
+              sources: facts.sources,
+              qualificationCheck: null,
               manualRevision: projection?.manualRevision ?? null,
               evidence: projection?.evidence ?? [],
               decisions: [],

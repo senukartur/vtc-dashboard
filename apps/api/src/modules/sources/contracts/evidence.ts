@@ -19,6 +19,8 @@ export type RecordedTelemetry = {
   gameMode: "single-player" | "truckersmp" | "haulmp" | "unknown";
   hardModeResult: "qualified" | "not-qualified" | "unknown";
 };
+/** Origin or destination company: the depot recognized in the trip city and the raw provider code. */
+export type CompanyFact = { depotId: string | null; code: string | null };
 export interface NormalizedTripEvidence {
   sourceRecordId: string;
   factRevisionId: string;
@@ -47,6 +49,8 @@ export interface NormalizedTripEvidence {
   adrCategory: Fact<AdrClass>;
   ruleContextComplete: boolean;
   reasonCodes: readonly string[];
+  // Display context only: quality, conflict, acceptance and reconciliation rules never read it.
+  companies?: { origin: CompanyFact; destination: CompanyFact };
 }
 export interface SourceIdentity {
   provider: Provider;
@@ -81,6 +85,11 @@ export interface CatalogPort {
       }
     >
   >;
+  /** A depot of the company in the city; hidden rows are still recognized. Pass one of the keys. */
+  depotInTransaction?(
+    tx: TxContext,
+    input: { game: Game; cityId: string; companyCode?: string; companyId?: string },
+  ): Promise<{ id: string; companyCode: string } | null>;
 }
 export interface AdapterContext {
   tx: TxContext;
@@ -88,6 +97,8 @@ export interface AdapterContext {
   sourceRecordId: string;
   factRevisionId: string;
   catalogs?: CatalogPort;
+  // Trusted coordinator selection of a manual revision; never read from the source payload.
+  manualCompanies?: { originCompanyId: string | null; destinationCompanyId: string | null };
 }
 // Future providers implement this same boundary after their own reviewed contract/registration.
 export interface TripSourceAdapter {
