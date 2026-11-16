@@ -1,7 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { publicSummaryCache } from "../../platform/http/cache.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
-import type { AnalyticsQuery, AnalyticsService, LeaderboardQuery } from "./service.js";
+import type {
+  AnalyticsQuery,
+  AnalyticsService,
+  CompanyAnalyticsQuery,
+  LeaderboardQuery,
+} from "./service.js";
 
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 
@@ -23,17 +28,23 @@ const analyticsQuery = {
   additionalProperties: false,
 };
 
+// Dates are required for period=range and forbidden for all_time; periodQuery() enforces it.
+const companyQuery = {
+  type: "object",
+  properties: {
+    ...analyticsQuery.properties,
+    period: { type: "string", enum: ["range", "all_time"] },
+  },
+  additionalProperties: false,
+};
+
 const leaderboardQuery = {
   type: "object",
   properties: {
     limit: { type: "integer", minimum: 1, maximum: 100 },
     cursor: { type: "string", minLength: 1, maxLength: 2048 },
-    game: { type: "string", enum: ["ets2", "ats"] },
-    fromDate: { type: "string", format: "date" },
-    toDateExclusive: { type: "string", format: "date" },
-    granularity: { type: "string", enum: ["day", "month"] },
+    ...companyQuery.properties,
   },
-  required: ["fromDate", "toDateExclusive"],
   additionalProperties: false,
 };
 
@@ -100,12 +111,12 @@ export async function registerAnalyticsRoutes(
     },
   );
 
-  app.get<{ Querystring: AnalyticsQuery }>(
+  app.get<{ Querystring: CompanyAnalyticsQuery }>(
     "/api/v1/analytics/company",
     {
       schema: {
-        querystring: analyticsQuery,
-        response: { 200: ref("EnvelopeAnalytics") },
+        querystring: companyQuery,
+        response: { 200: ref("AnalyticsStage4CompanyEnvelope") },
       },
     },
     async (r) => envelope(await service.getCompanyAnalytics(await actor(r), r.query), r),
