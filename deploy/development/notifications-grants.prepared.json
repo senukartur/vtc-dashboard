@@ -28,11 +28,7 @@
     "manual_revisions": ["SELECT"],
     "manual_correction_requests": ["SELECT"],
     "qualification_assignments": ["SELECT"],
-    "qualification_states": ["SELECT"],
     "qualification_levels": ["SELECT"],
-    "qualification_rule_versions": ["SELECT"],
-    "qualification_promotions": ["SELECT"],
-    "qualification_promotion_reviews": ["SELECT"],
     "trip_contributions": ["SELECT"],
     "outbox_routing_scans": ["SELECT", "INSERT", "UPDATE"]
   }

@@ -588,7 +588,7 @@ class Window:
         for feature in ['IDENTITY', 'ADMISSIONS', 'CATALOGS', 'TRIPS', 'QUALIFICATIONS', 'MANUAL_REPORTS', 'EVENTS', 'RECONCILIATION', 'TRIP_DECISIONS', 'NOTIFICATIONS']:
             shared[feature + '_ENABLED'] = 'true'
         for key in ['IDENTITY_SECRET', 'ADMISSIONS_ENCRYPTION_KEY', 'CATALOGS_CURSOR_KEY', 'TRIPS_CURSOR_KEY',
-                    'QUALIFICATIONS_CURSOR_KEY', 'MANUAL_REPORTS_KEY', 'EVENTS_CURSOR_KEY', 'RECONCILIATION_KEY',
+                    'MANUAL_REPORTS_KEY', 'EVENTS_CURSOR_KEY', 'RECONCILIATION_KEY',
                     'TRIP_DECISIONS_KEY', 'NOTIFICATIONS_CURSOR_KEY']:
             shared[key] = secrets.token_hex(32) if key != 'ADMISSIONS_ENCRYPTION_KEY' else secrets.token_urlsafe(32)
         (self.directory / 'shared.env').write_text(''.join(f'{k}={v}\n' for k, v in shared.items()))

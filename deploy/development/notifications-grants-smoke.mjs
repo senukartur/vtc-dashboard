@@ -45,7 +45,7 @@ const composed = composeIdentity(
         { cursorKey: key("trips") },
         undefined,
         { key: key("manual"), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
-        { cursorKey: key("qualifications") },
+        {},
         { cursorKey: key("events") },
         { key: key("reconciliation") },
         { key: key("decisions") },
@@ -175,16 +175,16 @@ try {
   } else if (phase === "worker") {
     step = "worker_business_reads";
     const [assignments] = await connection.execute(
-      "SELECT assignment_id FROM qualification_states WHERE user_id=? AND game='ets2'",
+      "SELECT id FROM qualification_assignments WHERE user_id=? AND game='ets2' AND ended_at IS NULL",
       [Buffer.from(refs.owner)],
     );
-    assert.ok(Buffer.isBuffer(assignments[0]?.assignment_id));
+    assert.ok(Buffer.isBuffer(assignments[0]?.id));
     await unit.run(async (tx) => {
       await identity.notificationContextInTransaction(tx);
-      const id = assignments[0].assignment_id.toString();
+      const id = assignments[0].id.toString();
       assert.equal(
-        typeof (await composed.qualifications.notificationAssignmentInTransaction(tx, id)).eligible,
-        "boolean",
+        (await composed.qualifications.notificationAssignmentInTransaction(tx, id)).endedAt,
+        null,
       );
       await composed.trips.contributions.totals(tx, id, "share");
     });
@@ -236,7 +236,7 @@ try {
       "UPDATE outbox_events SET schema_version=99",
       "DELETE FROM notifications",
       "UPDATE outbox_routing SET event_type=event_type",
-      "UPDATE qualification_levels SET code=code",
+      "UPDATE qualification_levels SET name=name",
       "UPDATE event_responses SET status=status",
       "UPDATE events SET starts_at=starts_at",
       "UPDATE events SET version=version",
@@ -246,8 +246,7 @@ try {
       await assert.rejects(connection.query(statement), denied);
     for (const statement of [
       "UPDATE identity_memberships SET status=status WHERE user_id=?",
-      "UPDATE qualification_assignments SET purpose=purpose WHERE user_id=?",
-      "UPDATE qualification_states SET version=version WHERE user_id=?",
+      "UPDATE qualification_assignments SET kind=kind WHERE user_id=?",
       "UPDATE trips SET owner_id=owner_id WHERE owner_id=?",
     ])
       await assert.rejects(connection.execute(statement, [Buffer.from(refs.owner)]), denied);
