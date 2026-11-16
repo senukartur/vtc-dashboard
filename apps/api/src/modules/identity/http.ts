@@ -166,7 +166,7 @@ export async function registerIdentityRoutes(
   });
   app.post<{ Body: Schemas["LoginInput"] }>(
     "/api/v1/auth/login",
-    { schema: schema("EnvelopeSelf", "LoginInput") },
+    { schema: schema("SelfStage4Envelope", "LoginInput") },
     async (request, reply) => {
       csrf.check(request, await optionalActor(request));
       const { email, password, rememberMe } = request.body;
@@ -191,7 +191,7 @@ export async function registerIdentityRoutes(
   app.get(
     "/api/v1/me",
     {
-      schema: schema("EnvelopeSelf"),
+      schema: schema("SelfStage4Envelope"),
       onSend: async (request, reply) => {
         if (request.method === "GET" && reply.statusCode === 200) {
           if (eventsStage2Enabled) reply.header("X-VTC-Events-Stage2", "1");
@@ -263,7 +263,7 @@ export async function registerIdentityRoutes(
   );
   app.patch<{ Body: Schemas["PreferencesInput"] }>(
     "/api/v1/me/preferences",
-    { schema: schema("EnvelopePreferences", "PreferencesInput") },
+    { schema: schema("PreferencesStage4Envelope", "PreferencesInput") },
     async (request, reply) => {
       const current = await actor(request);
       csrf.check(request, current);
