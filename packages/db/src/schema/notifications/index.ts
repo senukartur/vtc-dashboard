@@ -43,7 +43,8 @@ export const recipientStates = mysqlTable(
     eventChanges: boolean("event_changes").notNull().default(true),
     eventReminders: boolean("event_reminders").notNull().default(true),
     qualificationChanges: boolean("qualification_changes").notNull().default(true),
-    // Stage 4 toggles (VTC-142). Not in preferenceNames until that lane activates them.
+    // Stage 4 toggles (VTC-142). preferenceNames keeps the six always-present toggles; the
+    // notifications policy adds these per viewer capability.
     reviewQueue: boolean("review_queue").notNull().default(true),
     newApplications: boolean("new_applications").notNull().default(true),
     tripAccepted: boolean("trip_accepted").notNull().default(true),
@@ -120,7 +121,17 @@ export const notificationCommands = mysqlTable(
       .$type<{
         id: string;
         version: number;
-        preferences?: Record<(typeof preferenceNames)[number], boolean>;
+        // Exactly the keys written by that command: older receipts hold the six original ones.
+        preferences?: Partial<
+          Record<
+            | (typeof preferenceNames)[number]
+            | "reviewQueue"
+            | "newApplications"
+            | "tripAccepted"
+            | "newEvent",
+            boolean
+          >
+        >;
       }>()
       .notNull(),
   },

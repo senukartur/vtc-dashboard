@@ -24,6 +24,7 @@ import {
   selfEnvelope,
 } from "../../apps/web/src/features/account/transport.ts";
 import { publicContent } from "../../apps/web/src/features/landing/content.ts";
+import { accountTimeZone, savedTimeZone } from "../../apps/web/src/shared/formatting.ts";
 import {
   localeStorageKey,
   readStoredLocale,
@@ -414,6 +415,38 @@ test("account sections follow navigation order, hide Connections without company
   expect(legacyAccountSection("#preferences")).toBe("preferences");
   for (const hash of ["#verification", "#password", "#email", "", "#unknown"])
     expect(legacyAccountSection(hash)).toBe("security");
+});
+test("a null display time zone parses in the Stage 4 envelopes and resolves to the device zone", () => {
+  const ajv = new Ajv2020({ strict: false });
+  addFormats.default(ajv);
+  ajv.addSchema(browserSchemaDocument);
+  const self = accountFixture("en");
+  const device = {
+    ...self,
+    data: { ...self.data, preferences: { locale: "en", displayTimezone: null } },
+  };
+  expect(ajv.compile(browserSchemaRef("SelfStage4Envelope"))(device)).toBe(true);
+  expect(selfEnvelope.safeParse(device).success).toBe(true);
+  expect(operations.login.schema.safeParse(device).success).toBe(true);
+  const saved = { data: { locale: "ru", displayTimezone: null }, meta };
+  expect(ajv.compile(browserSchemaRef("PreferencesStage4Envelope"))(saved)).toBe(true);
+  expect(operations.preferences.schema.safeParse(saved).success).toBe(true);
+  expect(
+    operations.preferences.schema.safeParse({
+      ...saved,
+      data: { ...saved.data, displayTimezone: "" },
+    }).success,
+  ).toBe(false);
+  // Null follows the browser's resolved zone; nothing hardcodes a particular device zone.
+  const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  expect(accountTimeZone(null)).toBe(timezoneValid(resolved) ? resolved : "UTC");
+  expect(accountTimeZone(undefined)).toBe("UTC");
+  expect(accountTimeZone("Mars/Base")).toBe("UTC");
+  expect(accountTimeZone("Europe/Warsaw")).toBe("Europe/Warsaw");
+  // Only null is resolved for callers that must still see an invalid saved zone.
+  expect(savedTimeZone(null)).toBe(resolved || "UTC");
+  expect(savedTimeZone("Mars/Base")).toBe("Mars/Base");
+  expect(savedTimeZone("Europe/Warsaw")).toBe("Europe/Warsaw");
 });
 test("display timezone validation and suggestions keep the existing technical bounds", () => {
   for (const zone of ["UTC", "Europe/Warsaw"]) expect(timezoneValid(zone)).toBe(true);

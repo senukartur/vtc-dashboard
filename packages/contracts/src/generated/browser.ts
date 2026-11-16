@@ -5594,7 +5594,7 @@ export interface components {
             /** @enum {string} */
             locale?: "en" | "ru";
         };
-        /** @description Preferences whose displayTimezone can be null. Until VTC-142 activates it the server never stores or returns null. */
+        /** @description Preferences whose displayTimezone can be null (as on the device). */
         PreferencesStage4: {
             /** @description IANA time zone for displayed times. Null means as on the device; server-generated texts use the company reporting time zone. */
             displayTimezone: string | null;
