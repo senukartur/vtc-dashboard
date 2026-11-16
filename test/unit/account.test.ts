@@ -384,6 +384,7 @@ test("account settings copy covers every section and row in RU/EN and drops the 
       "timezoneDevice",
       "timezoneUnknown",
       "timezoneUnknownHint",
+      "timezoneChooseListed",
       "timezoneNow",
       "saveShort",
       "steamHint",
@@ -525,6 +526,25 @@ test("cached runtime zones keep their list while the saved entries follow the cu
   expect(alias.map((choice) => choice.value)).toEqual(alias.map((choice) => choice.value).sort());
   expect(zones).toEqual(snapshot);
   expect(timezoneChoices(null, at, zones)).toEqual(timezoneChoices(null, at));
+  // The current selection always stays displayable, so the select shows what Save would send.
+  const kept = timezoneChoices("UTC", at, zones, "US/Eastern");
+  expect(kept.filter((choice) => choice.value === "US/Eastern")).toEqual([
+    { value: "US/Eastern", zone: "US/Eastern", offset: "UTC-5", kind: "zone" },
+  ]);
+  const unknownDraft = timezoneChoices("UTC", at, zones, "Mars/Base");
+  expect(unknownDraft[1]).toEqual({
+    value: "Mars/Base",
+    zone: "Mars/Base",
+    offset: null,
+    kind: "unknown",
+  });
+  expect(
+    timezoneChoices("Mars/Base", at, zones, "Mars/Base").filter((c) => c.kind === "unknown"),
+  ).toHaveLength(1);
+  expect(timezoneChoices("UTC", at, zones, "")).toEqual(timezoneChoices("UTC", at, zones));
+  expect(timezoneChoices("UTC", at, zones, "Europe/Warsaw")).toEqual(
+    timezoneChoices("UTC", at, zones),
+  );
 });
 test("language preference persistence in client storage and initial resolution", () => {
   const store = new Map<string, string>();

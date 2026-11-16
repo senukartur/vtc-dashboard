@@ -1961,7 +1961,9 @@ test.describe("display time zone as on the device", () => {
       );
       await expect(page.getByText("Now 12:00 · UTC", { exact: true })).toBeVisible();
       await save.click();
-      await expect(page.getByText("Check Display timezone.", { exact: true })).toBeVisible();
+      await expect(
+        page.getByText("Choose a zone from the list to save.", { exact: true }),
+      ).toBeVisible();
       await expect(timezone).toHaveAttribute("aria-invalid", "true");
       await expect(timezone).toBeFocused();
       expect(state.preferences).toHaveLength(2);
@@ -1971,6 +1973,9 @@ test.describe("display time zone as on the device", () => {
       await expect(timezoneRu.locator("option:checked")).toHaveText("Mars/Base (неизвестен здесь)");
       await expect(
         page.getByText("Этот пояс неизвестен браузеру; время показано в UTC.", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("Выберите пояс из списка, чтобы сохранить.", { exact: true }),
       ).toBeVisible();
       await capture(page, info, "ru-preferences-unknown-zone");
       await language(page, "en");
@@ -1988,6 +1993,68 @@ test.describe("display time zone as on the device", () => {
     },
   );
 });
+
+test(
+  "an untouched timezone field follows a saved value changed elsewhere; an edited one keeps the edit",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await settingsWorkspace(page, { verified: true });
+    const elsewhere = async (displayTimezone: string | null) => {
+      state.self.data.preferences = { locale: "en", displayTimezone };
+      state.version++;
+      // The session refetches /me when the window regains focus.
+      const refetched = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/me",
+      );
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await refetched;
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+    };
+    for (const legacy of ["US/Eastern", "Mars/Base"]) {
+      state.self.data.preferences = { locale: "en", displayTimezone: legacy };
+      await page.goto("/account/preferences");
+      await language(page, "en");
+      const timezone = page.getByLabel("Display timezone", { exact: true });
+      const save = page.getByRole("button", { name: "Save", exact: true });
+      await expect(timezone).toHaveValue(legacy);
+      await elsewhere("UTC");
+      // The legacy entry is gone and the select shows the new saved zone, which Save sends.
+      await expect(timezone).toHaveValue("UTC");
+      await expect(timezone.locator("option:checked")).toHaveText("UTC (UTC+0)");
+      await expect(timezone.locator(`option[value="${legacy}"]`)).toHaveCount(0);
+      await expect(
+        page.getByText("This zone is unknown to this browser; times are shown in UTC.", {
+          exact: true,
+        }),
+      ).toHaveCount(0);
+      await save.click();
+      await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
+      expect(state.preferences.at(-1)?.body).toEqual({ locale: "en", displayTimezone: "UTC" });
+    }
+    // An edit survives the refetch, stays visible as selected and is what Save sends.
+    const timezone = page.getByLabel("Display timezone", { exact: true });
+    await timezone.selectOption("Asia/Tokyo");
+    await elsewhere("Europe/Warsaw");
+    await expect(timezone).toHaveValue("Asia/Tokyo");
+    await expect(timezone.locator("option:checked")).toHaveText("Asia/Tokyo (UTC+9)");
+    await expect(page.locator(".settings-timezone-now")).toContainText("Asia/Tokyo");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
+    expect(state.preferences.at(-1)?.body).toEqual({
+      locale: "en",
+      displayTimezone: "Asia/Tokyo",
+    });
+    // After the save the field is untouched again and follows the next change elsewhere.
+    await elsewhere(null);
+    await expect(timezone).toHaveValue("");
+    await expect(timezone.locator("option:checked")).toHaveText(/^As on the device — /);
+  },
+);
 
 for (const viewer of [
   { name: "member", capabilities: undefined, rows: 8 },

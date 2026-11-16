@@ -82,32 +82,29 @@ export function runtimeZones(at: number | Date = Date.now()): TimezoneChoice[] {
 }
 
 /**
- * Display timezone options for the currently saved value: "as on the device" first, then a saved
- * zone this browser does not know (kept selectable so the form shows the truth), then the cached
- * runtime zones with a valid saved alias merged in, unique and sorted by ID.
+ * Display timezone options for the currently saved value and the form's current selection: "as
+ * on the device" first, then any of those zones this browser does not know (kept selectable so the
+ * form shows the truth), then the cached runtime zones with valid aliases among them merged in,
+ * unique and sorted by ID. Including the selection keeps the select showing exactly what Save
+ * would send, even after the saved value changed elsewhere.
  */
 export function timezoneChoices(
   saved: string | null,
   at: number | Date = Date.now(),
   zones: readonly TimezoneChoice[] = runtimeZones(at),
+  selected: string | null = null,
 ): TimezoneChoice[] {
   const device = accountTimeZone(null);
   const choices: TimezoneChoice[] = [
     { value: "", zone: device, offset: utcOffset(device, at), kind: "device" },
   ];
-  let listed: TimezoneChoice[] = [...zones];
-  if (saved !== null) {
-    if (!timezoneValid(saved))
-      choices.push({ value: saved, zone: saved, offset: null, kind: "unknown" });
-    else if (!zones.some((choice) => choice.value === saved)) {
-      const alias: TimezoneChoice = {
-        value: saved,
-        zone: saved,
-        offset: utcOffset(saved, at),
-        kind: "zone",
-      };
-      listed = [...listed, alias].sort(byValue);
-    }
+  const listed: TimezoneChoice[] = [...zones];
+  for (const zone of new Set([saved, selected])) {
+    if (!zone || listed.some((choice) => choice.value === zone)) continue;
+    if (!timezoneValid(zone)) {
+      if (!choices.some((choice) => choice.value === zone))
+        choices.push({ value: zone, zone, offset: null, kind: "unknown" });
+    } else listed.push({ value: zone, zone, offset: utcOffset(zone, at), kind: "zone" });
   }
-  return [...choices, ...listed];
+  return [...choices, ...listed.sort(byValue)];
 }

@@ -47,6 +47,7 @@ export const accountTranslations = {
     timezoneDevice: "As on the device — {{zone}} ({{offset}})",
     timezoneUnknown: "{{zone}} (unknown here)",
     timezoneUnknownHint: "This zone is unknown to this browser; times are shown in UTC.",
+    timezoneChooseListed: "Choose a zone from the list to save.",
     timezoneNow: "Now {{time}} · {{zone}}",
     saveShort: "Save",
     steamHint:
@@ -209,6 +210,7 @@ export const accountTranslations = {
     timezoneDevice: "Как на устройстве — {{zone}} ({{offset}})",
     timezoneUnknown: "{{zone}} (неизвестен здесь)",
     timezoneUnknownHint: "Этот пояс неизвестен браузеру; время показано в UTC.",
+    timezoneChooseListed: "Выберите пояс из списка, чтобы сохранить.",
     timezoneNow: "Сейчас {{time}} · {{zone}}",
     saveShort: "Сохранить",
     steamHint:

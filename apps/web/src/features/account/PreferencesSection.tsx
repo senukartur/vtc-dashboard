@@ -59,17 +59,20 @@ function TimezoneForm({
   initial: string | null;
   busy: boolean;
   onEdit: () => void;
-  save: (value: string | null) => void;
+  save: (value: string | null) => Promise<boolean>;
 }) {
   const { t, i18n } = useTranslation("account");
-  const [value, setValue] = useState(initial ?? "");
+  // The user's selection, or null while untouched: an untouched field follows the saved value
+  // when the session refreshes, while an edit is never overwritten.
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? initial ?? "";
   const [invalid, setInvalid] = useState(false);
   const select = useRef<HTMLSelectElement>(null);
   const now = useMinuteNow();
   // Several hundred offset formatters: built once per mount. The device and saved entries follow
   // the current saved value, so a saved replacement drops an unknown legacy zone without a remount.
   const [zones] = useState(() => runtimeZones());
-  const choices = timezoneChoices(initial, now, zones);
+  const choices = timezoneChoices(initial, now, zones, value);
   const unknown = choices.some((choice) => choice.kind === "unknown" && choice.value === value);
   const id = "preferences-timezone";
   // The preview follows the selection before it is saved; an unknown zone shows UTC honestly.
@@ -102,7 +105,12 @@ function TimezoneForm({
           return;
         }
         setInvalid(false);
-        save(value === "" ? null : value);
+        const sent = value;
+        void save(sent === "" ? null : sent).then((saved) => {
+          // A saved selection is the saved value again, so the field follows it from now on,
+          // unless the user already picked something else while the save was pending.
+          if (saved) setDraft((current) => (current === sent ? null : current));
+        });
       }}
     >
       <Select
@@ -113,7 +121,7 @@ function TimezoneForm({
         aria-invalid={invalid}
         value={value}
         onChange={(event) => {
-          setValue(event.target.value);
+          setDraft(event.target.value);
           setInvalid(false);
           onEdit();
         }}
@@ -135,9 +143,7 @@ function TimezoneForm({
       <p className="settings-timezone-now">
         {t("timezoneNow", { time: clock, zone: zoneName(zone) })}
       </p>
-      <FieldError id={`${id}-error`}>
-        {invalid ? t("invalidField", { field: t("timezone") }) : undefined}
-      </FieldError>
+      <FieldError id={`${id}-error`}>{invalid ? t("timezoneChooseListed") : undefined}</FieldError>
     </form>
   );
 }
@@ -167,7 +173,7 @@ export function PreferencesSection({
   const waiting = request.seconds > 0;
   const saved = self.preferences;
   async function save(row: Row, preferences: { locale: Locale; displayTimezone: string | null }) {
-    if (!etag || busy || waiting) return;
+    if (!etag || busy || waiting) return false;
     setStatus({ row, state: "pending" });
     const result = await request.run("preferences", preferences, etag);
     if (result) {
@@ -179,10 +185,11 @@ export function PreferencesSection({
         await i18n.changeLanguage(preferences.locale);
       }
       setStatus({ row, state: "saved" });
-    } else {
-      setStatus(null);
-      if (request.lastFailure()?.kind === "unauthorized") await session.refresh();
+      return true;
     }
+    setStatus(null);
+    if (request.lastFailure()?.kind === "unauthorized") await session.refresh();
+    return false;
   }
   const rowState = (row: Row) => (status?.row === row ? status.state : null);
   return (
@@ -228,9 +235,7 @@ export function PreferencesSection({
             onEdit={() => {
               if (status?.state === "saved") setStatus(null);
             }}
-            save={(displayTimezone) =>
-              void save("timezone", { locale: saved.locale, displayTimezone })
-            }
+            save={(displayTimezone) => save("timezone", { locale: saved.locale, displayTimezone })}
           />
           <RowStatus state={rowState("timezone")} saved={t("timezoneSaved")} />
         </SettingsRow>
