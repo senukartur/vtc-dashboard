@@ -211,7 +211,7 @@ New operations are staged in OpenAPI and stay unmounted until their feature lane
 
 | Method and route | Operation ID | Capability | Feature owner |
 | --- | --- | --- | --- |
-| `GET /api/v1/members?search&role&ets2Level&atsLevel&sort&order` | `listMembers` | `company.read` | VTC-140 |
+| `GET /api/v1/members?search&role&status&ets2Level&atsLevel&sort&order` | `listMembers` | `company.read` | VTC-140 |
 | `GET /api/v1/members/{memberId}` | `getMember` | `company.read` | VTC-140 |
 | `GET /api/v1/admin/invitations?state=active\|expired` | `listInvitations` | `applications.manage` | VTC-140 |
 | `GET /api/v1/trips/{tripId}` | `getTrip` | `company.read`, private view for the author | VTC-141 |
