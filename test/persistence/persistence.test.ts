@@ -78,7 +78,7 @@ import {
   withPrefixMembershipJoinedAt,
 } from "./support.ts";
 
-const currentMigrationCount = 35;
+const currentMigrationCount = 36;
 
 const values = mysqlTable("synthetic_values", {
   id: idColumn("id").primaryKey(),
@@ -206,10 +206,10 @@ async function serializedFreshMigrations(
     })),
   );
   const expectedTables = Object.keys(
-    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0034_snapshot.json"), "utf8"))
+    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0035_snapshot.json"), "utf8"))
       .tables,
   ).sort();
-  assert.equal(expectedTables.length, 106);
+  assert.equal(expectedTables.length, 101);
   const gate = await journalAckGate("finalize", currentMigrationCount);
   const lock = migrationLockName(settings.database);
   const history = async () => {
@@ -770,33 +770,25 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 10",
         );
         assert.deepEqual(after, before);
-        const [evidence] = await connection.query<RowDataPacket[]>(
-          "SELECT HEX(id) id,HEX(user_id) userId,game,level,CAST(assigned_at AS CHAR) assignedAt FROM qualification_initial_assignments ORDER BY id",
+        // 0035 folds onboarding evidence and states into the admission assignment itself.
+        assert.equal(original.length, 3);
+        const [retired] = await connection.query<RowDataPacket[]>(
+          "SELECT TABLE_NAME n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('qualification_initial_assignments','qualification_states','qualification_rule_versions')",
         );
-        assert.deepEqual(evidence, original);
+        assert.deepEqual(retired, []);
         const [assignments] = await connection.query<RowDataPacket[]>(
-          "SELECT CAST(id AS CHAR) id,CAST(assigned_at AS CHAR) assignedAt,ended_at FROM qualification_assignments",
+          "SELECT CAST(id AS CHAR) id,CAST(assigned_at AS CHAR) assignedAt,ended_at,kind FROM qualification_assignments",
         );
         assert.equal(assignments.length, 1);
         assert.equal(assignments[0]?.id, activeAssignment);
         assert.equal(assignments[0]?.assignedAt, "2026-01-02 03:04:05.678");
         assert.equal(assignments[0]?.ended_at, null);
-        const [states] = await connection.query<RowDataPacket[]>(
-          "SELECT CAST(user_id AS CHAR) userId,CAST(assignment_id AS CHAR) assignmentId FROM qualification_states",
-        );
-        assert.deepEqual(
-          states.map((row) => [row.userId, row.assignmentId]),
-          [[activeId, activeAssignment]],
-        );
+        assert.equal(assignments[0]?.kind, "admission");
         const [unsupported] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) n FROM qualification_assignments WHERE user_id IN (?,?)",
           [inactiveId, returnedId],
         );
         assert.equal(Number(unsupported[0]?.n), 0);
-        const [rules] = await connection.query<RowDataPacket[]>(
-          "SELECT COUNT(*) n FROM qualification_rule_versions",
-        );
-        assert.equal(Number(rules[0]?.n), 0);
       } finally {
         await rm(folder, { recursive: true });
       }

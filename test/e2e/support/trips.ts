@@ -97,15 +97,21 @@ export async function tripBrowserFixture() {
         }));
       ids[code] = item.id;
     }
-    const level = (await qualifications.levels(staff, "ets2")).items.find(
-      (v) => v.id === structuralLevels.ets2[0],
-    );
-    if (!level) throw Error("TRIP_BROWSER_LEVEL_MISSING");
-    await qualifications.publish(staff, level.id, randomUUID(), level.version, {
-      rules: [{ type: "max_mass", maxKg: "20000" }],
-      requiredTrips: 1,
-      requiredDistanceM: "100",
-      reason: "Synthetic browser fixture, not production settings",
+    // Synthetic browser fixture, not production settings.
+    const level = await qualifications.detail(staff, structuralLevels.ets2[0]);
+    await qualifications.update(staff, level.id, {
+      expectedVersion: level.version,
+      name: level.name,
+      limits: {
+        massMinKg: null,
+        massMaxKg: "20000",
+        distanceMinM: null,
+        distanceMaxM: null,
+        trailers: { mode: "any", typeIds: [] },
+        adr: { mode: "any", classes: [] },
+        hardModeRequired: false,
+      },
+      conditions: { requiredTrips: 1, requiredDistanceM: "100" },
     });
     const supportedStart = Date.now();
     const pin = (name: string): components["schemas"]["ManualResolvedSelection"] => ({

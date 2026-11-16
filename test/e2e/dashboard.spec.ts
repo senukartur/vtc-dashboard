@@ -576,23 +576,28 @@ test.describe("Company Dashboard E2E", () => {
     },
   );
 
-  for (const qualificationLevels of ["unavailable", "missing"] as const) {
+  test(
+    "shows progress toward the next level and the unavailable and no-level states",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
+      const widget = page.getByRole("region", { name: "My Qualification", exact: true });
+      await expect(widget).toContainText("15 / 20");
+      await expect(widget.getByRole("link", { name: "All qualifications" })).toBeVisible();
+    },
+  );
+
+  for (const qualifications of ["unavailable", "missing"] as const) {
     test(
-      `keeps qualification progress when level names are ${qualificationLevels}`,
+      `shows a calm state when my qualifications are ${qualifications}`,
       browserCase(["@functional"]),
       async ({ page }) => {
-        await mockDashboardRoutes(page, { qualificationLevels });
+        await mockDashboardRoutes(page, { qualifications });
         await page.goto("/account/dashboard");
         const widget = page.getByRole("region", { name: "My Qualification", exact: true });
-        await expect(widget.getByText("Level name unavailable", { exact: true })).toHaveCount(2);
         await expect(widget).not.toContainText(levelIdEts2);
-        await expect(widget).not.toContainText(levelIdAts);
-        await expect(widget).toContainText("15 / 20");
-        await switchLanguage(page, "ru");
-        const russianWidget = page.getByRole("region", { name: "Моя квалификация", exact: true });
-        await expect(
-          russianWidget.getByText("Название уровня недоступно", { exact: true }),
-        ).toHaveCount(2);
+        await expect(widget).not.toContainText("15 / 20");
       },
     );
   }

@@ -9,7 +9,6 @@ import {
   nextConvoy,
 } from "../../apps/web/src/features/landing/model.ts";
 import { readCompanyStats, statsView } from "../../apps/web/src/features/landing/stats.ts";
-import { qualificationTranslations } from "../../apps/web/src/features/qualifications/translations.ts";
 
 type EventPublic = components["schemas"]["EventPublic"];
 const examples = JSON.parse(
@@ -63,8 +62,7 @@ describe("U1 landing content", () => {
     expect(publicContent.ru.requirementsTitle).toBe("Три шага до первого рейса");
     expect(publicContent.en.requirementsTitle).toBe("Three steps to your first run");
     for (const locale of ["ru", "en"] as const) {
-      const c = publicContent[locale],
-        q = qualificationTranslations[locale];
+      const c = publicContent[locale];
       // The rendered H1 is the lead and accent joined by one space.
       expect(`${c.headingLead} ${c.headingAccent}`).toBe(c.heading);
       expect(c.eventFormats).toHaveLength(9);
@@ -72,13 +70,11 @@ describe("U1 landing content", () => {
       expect(c.ranks).toHaveLength(9);
       expect(new Set(c.ranks).size).toBe(9);
       // The nine ranks are presentation; the product still starts every member as a Trainee.
-      expect(c.ranksNote.toLowerCase()).toContain(
-        locale === "ru" ? "стажёр" : q.trainee.toLowerCase(),
-      );
+      expect(c.ranksNote.toLowerCase()).toContain(locale === "ru" ? "стажёр" : "trainee");
       expect(c.joinSteps).toHaveLength(3);
       expect(c.joinSteps[1]?.text).toContain(locale === "ru" ? "7 дней" : "seven");
       expect(c.joinSteps[2]?.text.toLowerCase()).toContain(
-        locale === "ru" ? "стажёром" : q.trainee.toLowerCase(),
+        locale === "ru" ? "стажёром" : "trainee",
       );
       for (const removed of ["values", "ladder", "ladderTitle", "contactPage", "contactsText"])
         expect(removed in c).toBe(false);

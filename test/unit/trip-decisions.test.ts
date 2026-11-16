@@ -13,8 +13,8 @@ import {
   knownFact,
   pinnedEntityFact,
   unknownFact,
-} from "../fixtures/qualification-rules/fixtures.ts";
-import { SYNTHETIC_IDS } from "../fixtures/qualification-rules/synthetic-rules.ts";
+} from "../fixtures/trip-evidence.ts";
+import { SYNTHETIC_IDS } from "../fixtures/trip-evidence.ts";
 
 const history: Historical = {
   status: "resolved",

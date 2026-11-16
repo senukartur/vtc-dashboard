@@ -10,7 +10,7 @@ import {
   formerId,
   levelsFixture,
   profileFixture,
-  progressFixture,
+  qualificationsFixture,
   selfId,
   topId,
   tripsFixture,
@@ -23,8 +23,7 @@ const knownMembers = new Set([selfId, alphaId, betaId, formerId, topId]);
 export type DriverEndpoint =
   | "profile"
   | "analytics"
-  | "progressEts2"
-  | "progressAts"
+  | "qualifications"
   | "levels"
   | "trips"
   /** The drivers directory list, `GET /members` (the All drivers link). */
@@ -64,8 +63,7 @@ function endpointOf(url: URL): DriverEndpoint | null {
   const path = url.pathname;
   if (/^\/api\/v1\/members\/[^/]+$/.test(path)) return "profile";
   if (/^\/api\/v1\/members\/[^/]+\/analytics$/.test(path)) return "analytics";
-  if (/^\/api\/v1\/members\/[^/]+\/qualification-progress$/.test(path))
-    return url.searchParams.get("game") === "ats" ? "progressAts" : "progressEts2";
+  if (/^\/api\/v1\/members\/[^/]+\/qualifications$/.test(path)) return "qualifications";
   if (path === "/api/v1/qualification-levels") return "levels";
   if (path === "/api/v1/trips") return "trips";
   if (path === "/api/v1/public/company-stats") return "stats";
@@ -177,12 +175,8 @@ export async function mockDriverRoutes(
       return route.fulfill({
         json: analyticsFixture(url.searchParams, { empty: state.emptyAnalytics }),
       });
-    if (endpoint === "progressEts2" || endpoint === "progressAts") {
-      const fixture = progressFixture(memberId, endpoint === "progressAts" ? "ats" : "ets2");
-      if (!fixture)
-        return route.fulfill({ status: 409, json: { error: { code: "NO_ASSIGNMENT" } } });
-      return route.fulfill({ json: fixture });
-    }
+    if (endpoint === "qualifications")
+      return route.fulfill({ json: qualificationsFixture(memberId) });
     if (endpoint === "levels")
       return route.fulfill({
         json: levelsFixture(url.searchParams.get("game") === "ats" ? "ats" : "ets2"),
