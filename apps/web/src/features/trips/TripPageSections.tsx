@@ -2,13 +2,14 @@ import { type ReactNode, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { formatQuantity, formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { Badge, Card } from "../../shared/ui/primitives.js";
 import { CompanyLogo } from "../catalogs/CompanyLogo.js";
 import { formatDamage } from "../manual-reports/model.js";
 import { CatalogName } from "./TripTable.js";
 import {
   damageValue,
+  emptyAllowlist,
   extraTrailerTypes,
   ruleRows,
   sourceOutcomeKey,
@@ -22,7 +23,8 @@ function useDisplay() {
     session = useSession();
   return {
     locale: i18n.resolvedLanguage === "en" ? ("en" as const) : ("ru" as const),
-    timezone: session.self?.preferences.displayTimezone ?? "UTC",
+    // Null means "as on the device", like every other trip time on the page.
+    timezone: accountTimeZone(session.self?.preferences.displayTimezone),
   };
 }
 
@@ -166,7 +168,9 @@ function RuleDetail({ row }: { row: TripRuleRow }) {
     });
   } else if (rule.ruleType === "allowed_trailer_types") {
     const extra = extraTrailerTypes(rule);
-    if (rule.allowedTrailerTypes.length || extra)
+    // An empty configured allowlist permits nothing; say so instead of omitting the value.
+    if (emptyAllowlist(rule)) lines.push({ key: "allowed", line: t("ruleAllowedNone") });
+    else
       lines.push({
         key: "allowed",
         line: (
@@ -187,7 +191,9 @@ function RuleDetail({ row }: { row: TripRuleRow }) {
       });
   } else {
     const adr = (value: string) => t("catalogs:adrClass", { class: value });
-    if (rule.allowedAdrClasses.length)
+    // No ADR class allowed still permits non-hazardous cargo (see the qualification editor).
+    if (emptyAllowlist(rule)) lines.push({ key: "allowed", line: t("ruleAdrNone") });
+    else
       lines.push({
         key: "allowed",
         line: `${t("ruleAllowed")} ${rule.allowedAdrClasses.map(adr).join(", ")}`,

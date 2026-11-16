@@ -43,6 +43,17 @@ export function extraTrailerTypes(rule: {
   return Math.max(0, rule.allowedTrailerTypeCount - rule.allowedTrailerTypes.length);
 }
 
+/**
+ * True when an allowlist rule is configured with nothing allowed, which permits nothing. A
+ * truncated trailer list still counts its configured entries, so it is never empty here.
+ */
+export function emptyAllowlist(rule: TripRuleCheck): boolean {
+  if (rule.ruleType === "allowed_trailer_types")
+    return !rule.allowedTrailerTypes.length && rule.allowedTrailerTypeCount === 0;
+  if (rule.ruleType === "allowed_adr_categories") return !rule.allowedAdrClasses.length;
+  return false;
+}
+
 /** Cargo damage of the effective fact; unknown stays null and is never shown as zero. */
 export function damageValue(facts: DTO["EffectiveTripFacts"] | null | undefined): number | null {
   const value = facts?.cargoDamagePercent;

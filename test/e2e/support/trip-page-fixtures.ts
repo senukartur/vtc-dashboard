@@ -79,6 +79,13 @@ export function returnedTrip() {
   const { envelope, view } = stage4("telemetry");
   view.summary.decision = "rejected";
   view.summary.event = null;
+  // Empty configured allowlists: no trailer type and no ADR class is allowed.
+  const trailer = trailerRule(view);
+  trailer.allowedTrailerTypes = [];
+  trailer.allowedTrailerTypeCount = 0;
+  const adr = rules(view).find((r) => r.ruleType === "allowed_adr_categories");
+  if (adr?.ruleType !== "allowed_adr_categories") throw new Error("MISSING_ADR_RULE");
+  adr.allowedAdrClasses = [];
   view.decisions = [
     {
       id: "41500000-0000-4000-8000-000000000340",

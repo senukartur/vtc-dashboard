@@ -23,11 +23,19 @@ import {
 } from "./support/trip-page-fixtures.ts";
 
 const tripPath = `/account/trips/${tripPageId}`;
+// A device zone other than UTC, so a saved zone and "as on the device" (null) render differently.
+const deviceZone = "Asia/Tokyo";
+test.use({ timezoneId: deviceZone });
 
-/** The trip's author without staff capabilities, reading the mutable stub through the trip mock. */
-async function author(page: Page, initial: TripEnvelope) {
+/**
+ * The trip's author without staff capabilities, reading the mutable stub through the trip mock.
+ * The saved display zone is UTC unless null ("as on the device") is requested.
+ */
+async function author(page: Page, initial: TripEnvelope, displayTimezone: string | null = "UTC") {
   await mockTrips(page);
-  await page.route("**/api/v1/me", (route) => route.fulfill({ json: accountFixture("en") }));
+  const self = accountFixture("en");
+  const json = { ...self, data: { ...self.data, preferences: { locale: "en", displayTimezone } } };
+  await page.route("**/api/v1/me", (route) => route.fulfill({ json }));
   const state = { view: initial, status: 200, calls: 0 };
   await page.route(`**/api/v1/trips/${tripPageId}`, (route) => {
     state.calls++;
@@ -192,7 +200,7 @@ test(
   "F3 reconciled accepted trip lists both sources in order and falls back from a failed logo",
   browserCase(["@functional"]),
   async ({ page }) => {
-    await author(page, reconciledAccepted());
+    await author(page, reconciledAccepted(), null);
     await page.route(new RegExp(`/api/v1/catalogs/companies/${senderCompanyId}/logo`), (route) =>
       route.fulfill({ status: 500, json: { error: { code: "PRIVATE_SENTINEL" } } }),
     );
@@ -211,6 +219,10 @@ test(
     await expect(fact(items.nth(0), "Driven distance")).toHaveText("812.4005 km");
     await expect(fact(items.nth(1), "Driven distance")).toHaveText("810 km");
     await expect(fact(items.nth(1), "Source outcome")).toHaveText("Delivered");
+    // A null saved zone follows the device, exactly like the summary block above.
+    await expect(page.locator(".trip-row small", { hasText: deviceZone })).toBeVisible();
+    await expect(sources).toContainText(`Times in ${deviceZone}`);
+    await expect(fact(items.nth(0), "Received")).toHaveText(/11 Nov 2026.*03:00/);
 
     const sender = fact(delivery(page), "Sender company");
     await expect(sender.locator(".company-logo")).toHaveAttribute("data-logo", "placeholder");
@@ -239,7 +251,13 @@ test(
     await expect(history.getByRole("heading", { name: "Rejected", exact: true })).toBeVisible();
     await expect(history).toContainText(returnedReason);
     await expect(region(page, "Sources").getByRole("listitem")).toHaveCount(2);
-    await expect(region(page, "Qualification check").getByRole("listitem")).toHaveCount(3);
+    const rules = region(page, "Qualification check").getByRole("listitem");
+    await expect(rules).toHaveCount(3);
+    // Empty configured allowlists are stated, not omitted.
+    await expect(rules.nth(1)).toContainText("Allowed: none");
+    await expect(rules.nth(1)).toContainText("Not allowed: Fictional Tanker");
+    await expect(rules.nth(1)).not.toContainText("more");
+    await expect(rules.nth(2)).toContainText("Allowed: non-hazardous cargo only");
     await expect(fact(delivery(page), "Sender company")).toContainText("Fictional Logistics");
     await expect(
       page.getByRole("heading", { name: "Request correction", exact: true }),

@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   damageValue,
+  emptyAllowlist,
   extraTrailerTypes,
   ruleRows,
   sourceOutcomeKey,
@@ -9,6 +10,7 @@ import { tripTranslations } from "../../apps/web/src/features/trips/translations
 import { type DTO, schema } from "../../apps/web/src/features/trips/transport.ts";
 import {
   manualUnknown,
+  returnedTrip,
   telemetryWithEvent,
   tripPageStubs,
 } from "../e2e/support/trip-page-fixtures.ts";
@@ -42,6 +44,16 @@ test("an unresolved check is one unavailable row and a missing check is no rows 
   expect(ruleRows(privateView(manualUnknown("no-rules")).qualificationCheck)).toEqual([]);
 });
 
+test("an empty configured allowlist is detected, while a truncated trailer list is not", () => {
+  const configured = privateView(telemetryWithEvent()).qualificationCheck?.rules ?? [];
+  const empty = privateView(returnedTrip()).qualificationCheck?.rules ?? [];
+  expect(configured.map(emptyAllowlist)).toEqual([false, false, false]);
+  expect(empty.map(emptyAllowlist)).toEqual([false, true, true]);
+  const trailer = empty.find((rule) => rule.ruleType === "allowed_trailer_types");
+  if (trailer?.ruleType !== "allowed_trailer_types") throw new Error("MISSING_TRAILER_RULE");
+  expect(emptyAllowlist({ ...trailer, allowedTrailerTypeCount: 2 })).toBe(false);
+});
+
 test("trailer overflow, source outcome keys and unknown damage stay distinct from zero", () => {
   expect(extraTrailerTypes({ allowedTrailerTypes: [{}], allowedTrailerTypeCount: 3 })).toBe(2);
   expect(extraTrailerTypes({ allowedTrailerTypes: [{}], allowedTrailerTypeCount: 1 })).toBe(0);
@@ -68,6 +80,8 @@ test("the trip page keys exist in both languages", () => {
     "receiverCompany",
     "companyUnknown",
     "ruleAllowed",
+    "ruleAllowedNone",
+    "ruleAdrNone",
     "ruleMore",
     "massUnknown",
     "ruleAdrObserved",
