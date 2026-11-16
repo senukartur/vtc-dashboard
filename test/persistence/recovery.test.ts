@@ -1163,7 +1163,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 19);
       await seedCatalogUpgradeRows(connection);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_facts"), 1);
-      assert.equal(await runMigrations(settings), 14);
+      assert.equal(await runMigrations(settings), 15);
       assert.equal(await runMigrations(settings), 0);
 
       for (const table of [
