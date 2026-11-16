@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
-import { formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatUtc } from "../../shared/formatting.js";
 import i18n from "../../shared/i18n.js";
 import { Button } from "../../shared/ui/primitives.js";
 import {
@@ -32,7 +32,7 @@ function useFormat() {
   const { i18n: current } = useTranslation("applicationChecks"),
     session = useSession();
   const locale = current.resolvedLanguage === "en" ? "en" : "ru",
-    timezone = session.self?.preferences.displayTimezone ?? "UTC";
+    timezone = accountTimeZone(session.self?.preferences.displayTimezone);
   return (value: string | null | undefined) => formatUtc(value ?? null, locale, timezone);
 }
 function Parts({ parts }: { parts: CheckPart[] }) {
