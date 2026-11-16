@@ -99,6 +99,27 @@ class ActivationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, '^UNEXPECTED_EFFECTIVE_PRIVILEGES$'):
                 activation.check_privileges(ops, expected + [extra], complete=True)
 
+    def test_admissions_truckers_check_grants_are_exact_and_never_delete(self):
+        (self.base / 'activation-grants.json').write_bytes(
+            pathlib.Path(__file__).with_name('activation-grants.json').read_bytes())
+        baseline = activation.matrix(ops)
+        # Runtime creates and restarts checks; the worker only locks and updates them.
+        self.assertEqual(baseline['runtime']['admissions_truckers_checks'], ['SELECT', 'INSERT', 'UPDATE'])
+        self.assertEqual(baseline['jobs']['admissions_truckers_checks'], ['SELECT', 'UPDATE'])
+        statements = activation.grant_sql(ops)
+        self.assertIn("GRANT SELECT,INSERT,UPDATE ON vtc.admissions_truckers_checks TO 'vtc_runtime'@'%';", statements)
+        self.assertIn("GRANT SELECT,UPDATE ON vtc.admissions_truckers_checks TO 'vtc_jobs'@'%';", statements)
+        expected = [[f"'vtc_{role}'@'%'", 'vtc', table, privilege, 'NO']
+                    for role, tables in baseline.items()
+                    for table, permissions in tables.items() for privilege in permissions]
+        for extra in [["'vtc_runtime'@'%'", 'vtc', 'admissions_truckers_checks', 'DELETE', 'NO'],
+                      ["'vtc_jobs'@'%'", 'vtc', 'admissions_truckers_checks', 'INSERT', 'NO']]:
+            with self.assertRaisesRegex(RuntimeError, '^UNEXPECTED_EFFECTIVE_PRIVILEGES$'):
+                activation.check_privileges(ops, expected + [extra], complete=True)
+        missing = [row for row in expected if row[2] != 'admissions_truckers_checks' or row[0] != "'vtc_jobs'@'%'"]
+        with self.assertRaisesRegex(RuntimeError, '^MISSING_EFFECTIVE_PRIVILEGES$'):
+            activation.check_privileges(ops, missing, complete=True)
+
     def test_partial_control_replacement_keeps_fence_and_same_source_retry_preserves_backup(self):
         source = pathlib.Path(__file__).parent
         original = b'# previous reviewed disabled controls\n'

@@ -253,22 +253,47 @@ export function parseTruckers(
   };
   return { found: true, profile };
 }
+// One bounded player request shared by the member cache and the applicant check.
+async function requestTruckers(id: string, transport: ProviderFetch): Promise<unknown> {
+  const receipt = await boundedRequest(
+    `https://api.truckersmp.com/v2/player/${steamId(id)}`,
+    { method: "GET", headers: { accept: "application/json" } },
+    65536,
+    transport,
+  );
+  try {
+    return JSON.parse(receipt);
+  } catch {
+    throw new ProviderFailure("invalid_response");
+  }
+}
 export function truckersProvider(transport: ProviderFetch = fetch) {
   return {
     async lookup(id: string) {
-      const receipt = await boundedRequest(
-        `https://api.truckersmp.com/v2/player/${steamId(id)}`,
-        { method: "GET", headers: { accept: "application/json" } },
-        65536,
-        transport,
-      );
-      let value: unknown;
-      try {
-        value = JSON.parse(receipt);
-      } catch {
-        throw new ProviderFailure("invalid_response");
-      }
-      return parseTruckers(value, id);
+      return parseTruckers(await requestTruckers(id, transport), id);
+    },
+  };
+}
+// Only the count and the any-ban flag leave the provider payload; ban history never does.
+// The provider reports a null count for staff accounts, which stays unknown rather than zero.
+export function parseTruckersBans(value: unknown): { any: boolean; count: number } | null {
+  const response = object(object(value).response);
+  if (response.bansCount === undefined || response.bansCount === null) return null;
+  if (
+    typeof response.bansCount !== "number" ||
+    !Number.isSafeInteger(response.bansCount) ||
+    response.bansCount < 0 ||
+    (response.banned !== undefined && typeof response.banned !== "boolean")
+  )
+    throw new ProviderFailure("invalid_response");
+  return { any: response.banned === true || response.bansCount > 0, count: response.bansCount };
+}
+export function truckersApplicantProvider(transport: ProviderFetch = fetch) {
+  return {
+    async lookup(id: string) {
+      const value = await requestTruckers(id, transport);
+      const result = parseTruckers(value, id);
+      return { ...result, bans: result.found ? parseTruckersBans(value) : null };
     },
   };
 }

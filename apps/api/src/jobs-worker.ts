@@ -169,6 +169,7 @@ export async function runJobsWorker(): Promise<void> {
         "trips.reevaluate",
         "notifications.deliver",
         "notifications.remind",
+        "admissions.truckers-check",
         ...mediaJobKinds,
       ]);
     phase("jobs_pass");
