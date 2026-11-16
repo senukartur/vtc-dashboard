@@ -1647,7 +1647,7 @@ test("VTC-112 breakdown validates its query and needs the catalogs facade for la
   ).toEqual(await breakdown(`dimension=source&${october}`));
 });
 
-test("VTC-112 breakdown statements use trip_analytics_reporting and primary-key joins", async () => {
+test("VTC-112 breakdown statements can use trip_analytics_reporting and primary-key joins", async () => {
   await control.query("ANALYZE TABLE trips, trip_facts, source_messages");
   // Keep in sync with readKnownSplit, readTopRoutes, readTopCargo and readSources in breakdown.ts.
   const accepted =
