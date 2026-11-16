@@ -1837,15 +1837,3 @@ test("concurrent expired-generation reissue and cleanup preserve consistent resu
     instant = saved;
   }
 });
-
-test("Stage 4 invitation list routes stay inactive until VTC-140", async () => {
-  const app = await createApp({ identity, admissions, checkReadiness: async () => true });
-  const login = await identity.login("admissions-director@example.invalid", password);
-  const headers = { cookie: login.cookies.map((c) => c.split(";", 1)[0]).join("; ") };
-  try {
-    for (const url of ["/api/v1/admin/invitations", "/api/v1/admin/invitations?state=expired"])
-      expect((await app.inject({ url, headers })).statusCode, url).toBe(404);
-  } finally {
-    await app.close();
-  }
-});

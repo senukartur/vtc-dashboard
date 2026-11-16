@@ -1385,7 +1385,7 @@
             "MemberStage4DirectoryEntry.last30Days",
             "MemberStage4DirectoryEntry.lastAcceptedTripAt"
           ],
-          "description": "Stage 4 directory: optional nickname search, role and per-game level filters, sort and order, and 30-day accepted totals with the last accepted trip time per row. Filters apply before paging. Omitting sort keeps the existing ascending member ID order. Until VTC-140 activates them the route rejects the new parameters with 422 and returns the existing rows."
+          "description": "Stage 4 directory: optional nickname search, role and per-game level filters, sort and order, and 30-day accepted totals with the last accepted trip time per row. Filters apply before paging. Omitting sort keeps the existing ascending member ID order."
         },
         "description": "Company member directory. Filters and the optional nickname search apply before paging. Omitted sort keeps ascending member ID order; each sort is a stable keyset on (sort value, member ID). Signed cursors bind the actor, session, access epoch, normalized filters, sort, order and windowEndsAt; mismatches return 409 VERSION_CONFLICT. last30Days counts accepted canonical trips whose reportingAt lies in [windowEndsAt - 30 days, windowEndsAt], including zeros."
       }
@@ -31628,7 +31628,7 @@
           "roles"
         ],
         "additionalProperties": false,
-        "description": "MemberSummary plus optional Stage 4 directory facts. Once VTC-140 activates them every row carries both."
+        "description": "MemberSummary plus the Stage 4 directory facts. Every row carries both when accepted-trip facts are available; both are absent, never zero, when they are not."
       },
       "MemberStage4DirectoryList": {
         "type": "object",

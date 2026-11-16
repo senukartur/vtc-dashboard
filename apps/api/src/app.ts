@@ -5,6 +5,10 @@ import fastifyStatic from "@fastify/static";
 import { readinessSchema } from "@vtc/contracts";
 import Fastify from "fastify";
 import { registerAdmissionsRoutes } from "./modules/admissions/http.js";
+import {
+  type InvitationList,
+  registerInvitationListRoutes,
+} from "./modules/admissions/invitation-list.js";
 import type { Admissions } from "./modules/admissions/service.js";
 import { registerAnalyticsRoutes } from "./modules/analytics/http.js";
 import type { AnalyticsService } from "./modules/analytics/service.js";
@@ -67,6 +71,7 @@ export interface AppOptions {
   administration?: Administration;
   messaging?: Messaging;
   admissions?: Admissions;
+  invitationList?: InvitationList;
   externalIdentities?: ExternalIdentities;
   catalogs?: Catalogs;
   trips?: Trips;
@@ -225,6 +230,9 @@ export async function createApp(options: AppOptions) {
     await registerMessagingRoutes(app, options.identity, options.messaging);
   if (options.identity && options.admissions)
     await registerAdmissionsRoutes(app, options.identity, options.admissions);
+  // After the admissions routes, whose hook authenticates and meters /api/v1/admin/invitations.
+  if (options.identity && options.admissions && options.invitationList)
+    await registerInvitationListRoutes(app, options.identity, options.invitationList);
   if (options.identity && options.externalIdentities)
     await registerExternalIdentityRoutes(app, options.identity, options.externalIdentities);
   if (options.identity && options.catalogs)

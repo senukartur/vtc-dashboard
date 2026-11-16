@@ -6,14 +6,17 @@ VTC-033 delivers the company overview dashboard, driver directory, and individua
 
 ### Identity Module Endpoints (VTC-033 Owned)
 
-- `GET /api/v1/members`:
-  - Returns paginated list of company members (`EnvelopeListMemberSummary`).
-  - Supports `limit` (default 50, bounded 1..100) and signed cursor pagination (`nextCursor`).
-  - Each item contains `id`, `nickname`, `roles`, and `formerMember` boolean flag.
-  - Requires `company.read` capability.
+- `GET /api/v1/members` (VTC-140 directory, `MemberStage4DirectoryListEnvelope`):
+  - Requires `company.read`. Lists active and former members; `limit` is 1..100 (default 25; the web asks for 50).
+  - Filters apply before paging and combine with AND. `search` is the `listAdminMembers` nickname rule: trimmed, case-insensitive, literal `%` and `_`, blank or over 128 characters is 422. `role` is a current role; `director` matches only the serving director pointer.
+  - `ets2Level` and `atsLevel` accept a level that `listQualificationLevels` returns to the reader for that game, which is any active level of the game. Archived, other-game and unknown IDs return 422, as does any level filter without the Qualifications module. A member matches when its current qualification in that game is the level, so former members never match. The lookup is the single swappable function in `apps/api/src/modules/qualifications/directory-level-filter.ts`; the qualification model change (VTC-157) replaces only that file.
+  - `sort` is `nickname`, `distance30d`, `trips30d` or `lastTrip`. `order` defaults to `asc` for `nickname` and `desc` otherwise; `order` without `sort` returns 422. Omitting `sort` keeps ascending member ID order. Every sort breaks ties by ascending member ID, and `nickname` compares with the column's case-insensitive collation. Members without an accepted trip sort last for `lastTrip` in both orders.
+  - With Trips configured each row has `last30Days` (accepted unique canonical trips and exact distance with `reportingAt` in `[windowEndsAt - 30 days, windowEndsAt]`, zeros included) and `lastAcceptedTripAt` (null without any accepted trip, not capped by the window), and the page has `windowEndsAt`. Without Trips these fields are absent, never zero, and the three activity sorts return 422.
+  - The first page takes `windowEndsAt` from the server clock. The signed cursor binds the actor, session, access epoch, normalized filters, sort and effective order, and carries the keyset position and `windowEndsAt`, so later pages keep the first page's window. Any mismatch or tampering returns 409 `VERSION_CONFLICT`. Activity comes from correlated subqueries over the `trip_owner_accepted_reporting` index; trip rows are not locked.
 - `GET /api/v1/members/:memberId`:
   - Returns driver profile envelope (`EnvelopeMemberProfile`).
   - Contains `member` summary and active qualification `qualifications` assignments per game.
+  - `memberSince` is the latest join or return (`identity_memberships.joined_at`). Registration writes it with the account creation instant and every reinstatement moves it to the return instant, the same instant as the reinstatement assignment and its audit entry; role and membership changes, deactivation and failed commands leave it. The first join stays in membership history. With Trips, `lastAcceptedTripAt` is the latest accepted trip time, or null.
   - Requires `company.read` capability.
 
 ### Consumed APIs
