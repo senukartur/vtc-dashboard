@@ -2929,7 +2929,7 @@ test("values copied by the migration suppress exactly what their source toggles 
     deputy = await member(["deputy_director"]),
     target = await member();
   for (const actor of [reviewer.actor, deputy.actor]) await service.getPreferences(actor);
-  // 0032/0033 copy trip_rejected into review_queue and event_changes into new_applications.
+  // 0032/0034 copy trip_rejected into review_queue and event_changes into new_applications.
   await control.execute(
     "UPDATE notification_recipients SET trip_rejected=FALSE,review_queue=FALSE WHERE recipient_id=?",
     [Buffer.from(reviewer.actor.userId)],
