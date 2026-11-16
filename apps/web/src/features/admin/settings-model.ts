@@ -145,6 +145,10 @@ export const auditActions = {
   "qualification.assigned": "qualification_assigned",
   "qualification.promoted": "qualification_promoted",
   "qualification.level_changed": "qualification_level_changed",
+  "qualification.level_created": "qualification_level_created",
+  "qualification.level_edited": "qualification_level_edited",
+  "qualification.level_moved": "qualification_level_moved",
+  "qualification.level_removed": "qualification_level_removed",
   "qualification.rules_published": "qualification_rules_published",
 } as const;
 type AuditAction = keyof typeof auditActions;

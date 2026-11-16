@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover.js";
 
 /**
- * A small ⓘ button that opens a short explanation on click, tap or keyboard. Important hints live
+ * A small circled "i" button that opens a short explanation on click, tap or keyboard. Important hints live
  * here instead of in small print; the label names the button for assistive technology.
  */
 export function InfoTip({

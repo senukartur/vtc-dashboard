@@ -137,7 +137,7 @@ function Ladder({ game }: { game: Game }) {
                   disabled={command.pending || level.position === 1}
                   onClick={() => move(level, level.position - 1)}
                 >
-                  ▲
+                  ↑
                 </Button>
                 <Button
                   type="button"
@@ -147,7 +147,7 @@ function Ladder({ game }: { game: Game }) {
                   disabled={command.pending || level.position === levels.length}
                   onClick={() => move(level, level.position + 1)}
                 >
-                  ▼
+                  ↓
                 </Button>
                 <Button asChild size="xs" variant="outline">
                   <Link

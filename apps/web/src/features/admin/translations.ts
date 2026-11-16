@@ -134,6 +134,10 @@ export const administrationTranslations = {
       qualification_assigned: "Qualification assigned",
       qualification_promoted: "Qualification promoted",
       qualification_level_changed: "Qualification level changed",
+      qualification_level_created: "Qualification level added",
+      qualification_level_edited: "Qualification level edited",
+      qualification_level_moved: "Qualification level moved",
+      qualification_level_removed: "Qualification level removed",
       qualification_rules_published: "Qualification rules published",
     },
     auditHelp:
@@ -653,6 +657,10 @@ export const administrationTranslations = {
       qualification_assigned: "Квалификация назначена",
       qualification_promoted: "Квалификация повышена",
       qualification_level_changed: "Уровень квалификации изменён",
+      qualification_level_created: "Добавлен уровень квалификации",
+      qualification_level_edited: "Отредактирован уровень квалификации",
+      qualification_level_moved: "Перемещён уровень квалификации",
+      qualification_level_removed: "Удалён уровень квалификации",
       qualification_rules_published: "Правила квалификации опубликованы",
     },
     auditHelp:
