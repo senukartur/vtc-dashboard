@@ -40,7 +40,10 @@ import {
   invalidateEventNotifications,
   type NotificationsConfig,
 } from "../modules/notifications/service.js";
-import { createDirectoryLevelFilter } from "../modules/qualifications/directory-level-filter.js";
+import {
+  createDirectoryCurrentLevels,
+  createDirectoryLevelFilter,
+} from "../modules/qualifications/directory-level-filter.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
 import {
   createQualifications,
@@ -145,7 +148,12 @@ export function composeIdentity(
           memberActivity: createMemberDirectoryActivity(),
         }
       : {}),
-    ...(qualificationsConfig ? { memberLevelFilter: createDirectoryLevelFilter(unit) } : {}),
+    ...(qualificationsConfig
+      ? {
+          memberLevelFilter: createDirectoryLevelFilter(unit),
+          memberCurrentLevels: createDirectoryCurrentLevels(unit),
+        }
+      : {}),
     qualificationsLifecycle,
     ...(telemetryConfig
       ? { invalidateTelemetryCredentials: (tx, id) => invalidateTelemetryCredentials(unit, tx, id) }

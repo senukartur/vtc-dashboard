@@ -1,10 +1,21 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createUnitOfWork, migrationFolder, newId, runMigrations, type UnitOfWork } from "@vtc/db";
+import {
+  createUnitOfWork,
+  dedicatedConnection,
+  migrationFolder,
+  newId,
+  runMigrations,
+  type UnitOfWork,
+} from "@vtc/db";
 import { membership, user } from "@vtc/db/identity-schema";
-import { qualificationLevels } from "@vtc/db/qualifications-schema";
+import {
+  qualificationAssignments,
+  qualificationLevels,
+  qualificationStates,
+} from "@vtc/db/qualifications-schema";
 import { trips } from "@vtc/db/trips-schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
   beforeEach,
@@ -21,7 +32,12 @@ import {
   type Identity,
   type IdentityPorts,
 } from "../../apps/api/src/modules/identity/service.ts";
-import { createDirectoryLevelFilter } from "../../apps/api/src/modules/qualifications/directory-level-filter.ts";
+import { pagination } from "../../apps/api/src/modules/identity/pagination.ts";
+import {
+  createDirectoryCurrentLevels,
+  createDirectoryLevelFilter,
+  type DirectoryGameLevels,
+} from "../../apps/api/src/modules/qualifications/directory-level-filter.ts";
 import {
   createQualificationInitialization,
   structuralLevels,
@@ -66,6 +82,12 @@ interface Item {
   roles: string[];
   last30Days?: { acceptedTrips: number; actualDistanceM: string };
   lastAcceptedTripAt?: string | null;
+  levels?: DirectoryGameLevels;
+}
+interface Counts {
+  active: number;
+  former: number;
+  droveLast30Days?: number;
 }
 
 let control: Connection;
@@ -75,6 +97,11 @@ let identity: Identity;
 let plain: Identity;
 let app: Awaited<ReturnType<typeof createApp>>;
 let plainApp: Awaited<ReturnType<typeof createApp>>;
+// Trips without Qualifications, and Qualifications without Trips.
+let tripsOnlyApp: Awaited<ReturnType<typeof createApp>>;
+let levelsOnlyApp: Awaited<ReturnType<typeof createApp>>;
+// Member IDs of every current level lookup the directory makes.
+const levelCalls: string[][] = [];
 let director: { id: string; cookie: string; actor: Actor };
 let driverCookie: string;
 const recorded: { sql: string; params: unknown[] }[] = [];
@@ -86,7 +113,7 @@ const basePorts = (u: UnitOfWork): IdentityPorts => ({
   accessEvents: identityAccessEvents(u),
 });
 
-// Records the final SQL of every select so the directory statement can be explained verbatim.
+// Records the final SQL of the directory, count and level selects so they can be explained.
 function recordingUnit(inner: UnitOfWork): UnitOfWork {
   function wrap(builder: object): object {
     return new Proxy(builder, {
@@ -94,7 +121,11 @@ function recordingUnit(inner: UnitOfWork): UnitOfWork {
         const value = Reflect.get(target, property);
         if (property === "then" && typeof value === "function") {
           const query = (target as { toSQL?: () => { sql: string; params: unknown[] } }).toSQL?.();
-          if (query?.sql.includes("directory_window_trips")) recorded.push(query);
+          if (
+            query?.sql.includes("directory_window_trips") ||
+            query?.sql.includes("`qualification_states`")
+          )
+            recorded.push(query);
           return value.bind(target);
         }
         if (typeof value !== "function") return value;
@@ -204,17 +235,22 @@ async function page(query: string, cookie = driverCookie, target = app) {
     items: Item[];
     nextCursor: string | null;
     windowEndsAt?: string;
+    statusCounts?: Counts;
   };
 }
 
-async function traverse(query: string, limit: number, beforeNext?: () => void) {
+async function traverse(query: string, limit: number, beforeNext?: () => void, target = app) {
   const items: Item[] = [];
   const windows = new Set<string | undefined>();
+  const counts: (Counts | undefined)[] = [];
   let cursor: string | null = null;
   for (let pages = 0; pages < 100; pages++) {
     const data = await page(
       `${query}${query ? "&" : ""}limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+      driverCookie,
+      target,
     );
+    counts.push(data.statusCounts);
     expect(data.items.length).toBeLessThanOrEqual(limit);
     items.push(...data.items);
     windows.add(data.windowEndsAt);
@@ -224,7 +260,7 @@ async function traverse(query: string, limit: number, beforeNext?: () => void) {
   }
   const seen = items.map((item) => item.id);
   expect(new Set(seen).size, `${query} has no duplicates`).toBe(seen.length);
-  return { items, ids: seen, windows };
+  return { items, ids: seen, windows, counts };
 }
 
 const scaled = (value: string) => {
@@ -269,6 +305,7 @@ beforeAll(async () => {
   await reset(control);
   await runMigrations(guardedSettings());
   recording = recordingUnit(unit);
+  const currentLevels = createDirectoryCurrentLevels(recording);
   identity = createIdentity(
     recording,
     identityConfig,
@@ -276,11 +313,31 @@ beforeAll(async () => {
       ...basePorts(unit),
       memberActivity: createMemberDirectoryActivity(),
       memberLevelFilter: createDirectoryLevelFilter(unit),
+      memberCurrentLevels: (tx, userIds) => {
+        levelCalls.push([...userIds]);
+        return currentLevels(tx, userIds);
+      },
     },
     now,
   );
   // Without Trips and qualifications: no activity facts and no level filter.
   plain = createIdentity(unit, identityConfig, basePorts(unit), now);
+  const tripsOnly = createIdentity(
+    unit,
+    identityConfig,
+    { ...basePorts(unit), memberActivity: createMemberDirectoryActivity() },
+    now,
+  );
+  const levelsOnly = createIdentity(
+    unit,
+    identityConfig,
+    {
+      ...basePorts(unit),
+      memberLevelFilter: createDirectoryLevelFilter(unit),
+      memberCurrentLevels: createDirectoryCurrentLevels(unit),
+    },
+    now,
+  );
 
   // Everyone registers before the fixture returns and the window end.
   clock = W - 30000;
@@ -368,6 +425,8 @@ beforeAll(async () => {
 
   app = await createApp({ checkReadiness: async () => true, identity });
   plainApp = await createApp({ checkReadiness: async () => true, identity: plain });
+  tripsOnlyApp = await createApp({ checkReadiness: async () => true, identity: tripsOnly });
+  levelsOnlyApp = await createApp({ checkReadiness: async () => true, identity: levelsOnly });
 }, SCHEMA_SETUP_TIMEOUT_MS);
 
 beforeEach(async () => {
@@ -378,13 +437,15 @@ beforeEach(async () => {
 afterAll(async () => {
   await app?.close();
   await plainApp?.close();
+  await tripsOnlyApp?.close();
+  await levelsOnlyApp?.close();
   await unit?.close();
   await control?.end();
 });
 
 test("directory rows carry the activity facts, zeros and null last trips without private fields", async () => {
   const data = await page("limit=100");
-  expect(Object.keys(data).sort()).toEqual(["items", "nextCursor", "windowEndsAt"]);
+  expect(Object.keys(data).sort()).toEqual(["items", "nextCursor", "statusCounts", "windowEndsAt"]);
   expect(data.windowEndsAt).toBe(iso(W));
   expect(data.nextCursor).toBeNull();
   expect(data.items.map((item) => item.id)).toEqual(expectedOrder());
@@ -394,6 +455,7 @@ test("directory rows carry the activity facts, zeros and null last trips without
       "id",
       "last30Days",
       "lastAcceptedTripAt",
+      "levels",
       "nickname",
       "roles",
     ]);
@@ -583,7 +645,8 @@ test("without Trips the directory omits activity facts and rejects activity sort
   const response = await get("/api/v1/members?limit=100", driverCookie, plainApp);
   expect(response.statusCode).toBe(200);
   const data = response.json().data;
-  expect(Object.keys(data).sort()).toEqual(["items", "nextCursor"]);
+  expect(Object.keys(data).sort()).toEqual(["items", "nextCursor", "statusCounts"]);
+  expect(Object.keys(data.statusCounts).sort()).toEqual(["active", "former"]);
   for (const item of data.items)
     expect(Object.keys(item).sort()).toEqual(["formerMember", "id", "nickname", "roles"]);
   for (const sort of ["distance30d", "trips30d", "lastTrip"])
@@ -735,9 +798,19 @@ test("joined_at is the registration instant and moves to the latest return only"
 test("the directory statement uses the accepted reporting index for its trip subqueries", async () => {
   recorded.length = 0;
   await page("sort=lastTrip&limit=5");
-  const statement = recorded.at(-1);
-  if (!statement) throw new Error("SYNTHETIC_DIRECTORY_SQL_MISSING");
+  // The rows statement is the only one with the last-trip subquery; the count statement follows.
+  const statement = recorded.find((query) => query.sql.includes("directory_last_trip"));
+  const counts = recorded.find(
+    (query) =>
+      query.sql.includes("directory_window_trips") && !query.sql.includes("directory_last_trip"),
+  );
+  if (!statement || !counts) throw new Error("SYNTHETIC_DIRECTORY_SQL_MISSING");
   await control.query("ANALYZE TABLE trips, identity_users, identity_memberships");
+  const [countPlan] = await control.query<RowDataPacket[]>(`EXPLAIN ${counts.sql}`, counts.params);
+  const counted = countPlan.filter((row) => row.table === "directory_window_trips");
+  expect(counted).toHaveLength(1);
+  expect(String(counted[0]?.possible_keys)).toContain("trip_owner_accepted_reporting");
+  expect(counts.sql).not.toMatch(/for (share|update)/i);
   const [rows] = await control.query<RowDataPacket[]>(`EXPLAIN ${statement.sql}`, statement.params);
   const subqueries = rows.filter((row) => String(row.table).startsWith("directory_"));
   expect(subqueries.map((row) => row.table).sort()).toEqual([
@@ -757,4 +830,440 @@ test("the directory statement uses the accepted reporting index for its trip sub
     .replace(/0x[0-9a-f]+/g, "<id>")
     .replace(/'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?'/g, "'<instant>'");
   console.info(JSON.stringify({ event: "vtc140_directory_explain", plan: text }));
+});
+
+// VTC-150 follow-up: status filter, company-wide counts and current levels.
+const keyed = (...keys: string[]) => keys.map((key) => ids[key] as string).sort();
+const formerOf = (status: "active" | "former") => (item: Item) =>
+  item.formerMember === (status === "former");
+
+async function baselineCounts(): Promise<Counts> {
+  const [[row]] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(CASE WHEN m.status='active' THEN 1 END) active, COUNT(CASE WHEN m.status='inactive' THEN 1 END) former FROM identity_users u JOIN identity_memberships m ON m.user_id=u.id",
+  );
+  return { active: Number(row?.active), former: Number(row?.former) };
+}
+async function levelRows() {
+  const [rows] = await control.query<RowDataPacket[]>(
+    "SELECT CAST(id AS CHAR) id, game, name, active_position position FROM qualification_levels",
+  );
+  return new Map(
+    rows.map((row) => [
+      String(row.id),
+      {
+        game: row.game as "ets2" | "ats",
+        name: String(row.name),
+        position: row.position === null ? null : Number(row.position),
+      },
+    ]),
+  );
+}
+
+test("the status filter lists active or former members before paging with every sort", async () => {
+  for (const sort of [undefined, "nickname", "distance30d", "trips30d", "lastTrip"] as const)
+    for (const order of sort ? (["asc", "desc"] as const) : [undefined]) {
+      const base = [sort && `sort=${sort}`, order && `order=${order}`].filter(Boolean).join("&");
+      const all = (await traverse(base, 100)).items;
+      for (const status of ["active", "former"] as const)
+        for (const limit of [1, 2]) {
+          const query = [base, `status=${status}`].filter(Boolean).join("&");
+          const result = await traverse(query, limit);
+          expect(result.items, `${query} limit ${limit}`).toEqual(all.filter(formerOf(status)));
+          expect([...result.windows]).toEqual([iso(W)]);
+        }
+    }
+  const all = (await traverse("", 100)).items;
+  expect(all.filter(formerOf("former")).map((item) => item.id)).toContain(ids.former);
+  const of = async (query: string) => (await traverse(query, 2)).ids;
+  const ofAll = (predicate: (item: Item) => boolean) =>
+    all
+      .filter(predicate)
+      .map((item) => item.id)
+      .sort();
+  expect(await of("status=active&search=tie")).toEqual(keyed("tie", "tieLower"));
+  expect(await of("status=former&search=driver")).toEqual(
+    ofAll((item) => item.formerMember && item.nickname.toLowerCase().includes("driver")),
+  );
+  for (const role of ["driver", "dispatcher", "director"])
+    for (const status of ["active", "former"] as const)
+      expect(await of(`status=${status}&role=${role}`), `${status} ${role}`).toEqual(
+        ofAll((item) => formerOf(status)(item) && item.roles.includes(role)),
+      );
+  const [ets2First] = structuralLevels.ets2;
+  expect(await of(`status=former&ets2Level=${ets2First}`)).toEqual([]);
+  expect(await of(`status=active&ets2Level=${ets2First}`)).toEqual(
+    await of(`ets2Level=${ets2First}`),
+  );
+  // The former tab keeps the 30-day facts and the activity sorts.
+  for (const sort of ["trips30d", "distance30d", "lastTrip"]) {
+    const former = (await page(`status=former&sort=${sort}&limit=100`)).items.find(
+      (item) => item.id === ids.former,
+    );
+    expect(former, sort).toMatchObject({
+      formerMember: true,
+      last30Days: { acceptedTrips: 1, actualDistanceM: "1" },
+      lastAcceptedTripAt: iso(W - 5 * DAY),
+    });
+  }
+  for (const query of [
+    "status=inactive",
+    "status=Active",
+    "status=",
+    "status=active&status=former",
+    "status=active&status=active",
+  ])
+    expect((await get(`/api/v1/members?${query}`)).statusCode, query).toBe(422);
+  await expect(
+    identity.listMembers(director.actor, { status: "inactive" as "active" }),
+  ).rejects.toMatchObject({ statusCode: 422 });
+});
+
+test("cursors bind the status filter and keep cursors minted without it", async () => {
+  const conflict = async (query: string, cursor: string | null) => {
+    const response = await get(
+      `/api/v1/members?${query}${query ? "&" : ""}limit=1&cursor=${encodeURIComponent(cursor as string)}`,
+    );
+    expect(response.statusCode, query).toBe(409);
+    expect(response.json().error.code).toBe("VERSION_CONFLICT");
+  };
+  const active = await page("status=active&limit=1");
+  expect(
+    (
+      await get(
+        `/api/v1/members?status=active&limit=1&cursor=${encodeURIComponent(active.nextCursor as string)}`,
+      )
+    ).statusCode,
+  ).toBe(200);
+  for (const query of ["", "status=former"]) await conflict(query, active.nextCursor);
+  const omitted = await page("limit=1");
+  for (const query of ["status=active", "status=former"]) await conflict(query, omitted.nextCursor);
+
+  // A cursor bound to the eight-element scope used before the status filter keeps working.
+  const actor = await identity.authenticate(new Headers({ cookie: driverCookie }));
+  const [first] = omitted.items;
+  if (!first) throw new Error("SYNTHETIC_DIRECTORY_EMPTY");
+  const legacy = pagination(identityConfig.secret)(
+    actor,
+    ["members", "directory", null, null, null, null, null, null],
+    { limit: 1 },
+    { sort: undefined, windowed: true },
+  ).finish(
+    [first, first],
+    (item) => ({ id: item.id, value: null }),
+    omitted.windowEndsAt ?? null,
+  ).nextCursor;
+  const next = await page(`limit=1&cursor=${encodeURIComponent(omitted.nextCursor as string)}`);
+  const resumed = await page(`limit=1&cursor=${encodeURIComponent(legacy as string)}`);
+  expect(resumed.items).toEqual(next.items);
+  expect(resumed.windowEndsAt).toBe(omitted.windowEndsAt);
+});
+
+test("status counts are company-wide, ignore every filter and match the row facts", async () => {
+  const baseline = await baselineCounts();
+  const all = (await traverse("", 100)).items;
+  const drove = all
+    .filter((item) => !item.formerMember && (item.last30Days?.acceptedTrips ?? 0) > 0)
+    .map((item) => item.id)
+    .sort();
+  // ATS-only trips count; former, rejected, pending, alias and old trips do not.
+  expect(drove).toEqual(keyed("tie", "tieLower", "exact", "round"));
+  expect(baseline.former).toBe(all.filter(formerOf("former")).length);
+  expect(baseline.active).toBe(all.filter(formerOf("active")).length);
+  const expected = { ...baseline, droveLast30Days: drove.length };
+  for (const query of [
+    "limit=100",
+    "limit=1",
+    "search=zz-no-such-member",
+    "status=former",
+    "status=active&role=dispatcher",
+    `ets2Level=${structuralLevels.ets2[1]}`,
+    "sort=trips30d&order=asc&limit=2",
+  ])
+    expect((await page(query)).statusCounts, query).toEqual(expected);
+  for (const query of ["", "status=active", "sort=lastTrip"]) {
+    const { counts } = await traverse(query, 2);
+    expect(counts.length, query).toBeGreaterThan(1);
+    for (const value of counts) expect(value, query).toEqual(expected);
+  }
+});
+
+test("droveLast30Days uses the page window, its inclusive edge and only accepted trips", async () => {
+  const before = (await page("limit=1")).statusCounts as Counts;
+  const root = newId();
+  const edge = trip(ids.quiet as string, W - 30 * DAY, "2");
+  const excluded = [
+    trip(ids.old as string, W - DAY, "4", { id: root, decision: "rejected" }),
+    trip(ids.old as string, W - DAY, "5", { decision: "pending_review" }),
+  ];
+  const alias = trip(ids.old as string, W, "6", { aliasOf: root });
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .insert(trips)
+      .values([edge, ...excluded]),
+  );
+  await unit.run((tx) => unit.client(tx).insert(trips).values(alias));
+  try {
+    const result = await traverse("", 1, () => {
+      clock = W + 1;
+    });
+    expect([...result.windows]).toEqual([iso(W)]);
+    for (const counts of result.counts)
+      expect(counts).toEqual({ ...before, droveLast30Days: (before.droveLast30Days ?? 0) + 1 });
+    expect(result.items.find((item) => item.id === ids.quiet)?.last30Days).toEqual({
+      acceptedTrips: 1,
+      actualDistanceM: "2",
+    });
+    // A fresh first page one millisecond later leaves the edge trip outside the window.
+    clock = W + 1;
+    const fresh = await page("limit=100");
+    expect(fresh.windowEndsAt).toBe(iso(W + 1));
+    expect(fresh.statusCounts).toEqual(before);
+    expect(fresh.items.find((item) => item.id === ids.old)?.last30Days?.acceptedTrips).toBe(0);
+  } finally {
+    await unit.run(async (tx) => {
+      await unit
+        .client(tx)
+        .delete(trips)
+        .where(eq(trips.id, alias.id as string));
+      for (const row of [edge, ...excluded])
+        await unit
+          .client(tx)
+          .delete(trips)
+          .where(eq(trips.id, row.id as string));
+    });
+  }
+});
+
+test("without Trips the counts omit droveLast30Days and the status filter still applies", async () => {
+  const baseline = await baselineCounts();
+  for (const target of [plainApp, levelsOnlyApp]) {
+    for (const query of ["limit=100", "status=former&limit=100", "status=active&limit=1"]) {
+      const data = await page(query, driverCookie, target);
+      expect(data).not.toHaveProperty("windowEndsAt");
+      expect(data.statusCounts, query).toEqual(baseline);
+      expect(Object.keys(data.statusCounts as Counts).sort()).toEqual(["active", "former"]);
+    }
+    const former = (await traverse("status=former", 1, undefined, target)).items;
+    expect(former.map((item) => item.id)).toContain(ids.former);
+    expect(former.every((item) => item.formerMember)).toBe(true);
+    const active = (await traverse("status=active", 2, undefined, target)).items;
+    expect(active.length).toBe(baseline.active);
+    expect(active.some((item) => item.formerMember)).toBe(false);
+  }
+});
+
+test("each row shows its current level per game as listQualificationLevels returns it", async () => {
+  const levels = await levelRows();
+  const data = await page("limit=100");
+  const at = (game: "ets2" | "ats", index: number) => {
+    const id = structuralLevels[game][index] as string;
+    const row = levels.get(id);
+    return { id, name: row?.name, position: row?.position };
+  };
+  const byKey = (key: string) => data.items.find((item) => item.id === ids[key])?.levels;
+  for (const key of ["tie", "tieLower"])
+    expect(byKey(key), key).toEqual({ ets2: at("ets2", 0), ats: at("ats", 0) });
+  expect(byKey("exact")).toEqual({ ets2: at("ets2", 1), ats: at("ats", 0) });
+  expect(byKey("round")).toEqual({ ets2: null, ats: at("ats", 1) });
+  expect(byKey("returner")).toEqual({ ets2: at("ets2", 0), ats: null });
+  for (const key of ["former", "quiet", "old", "excluded"])
+    expect(byKey(key), key).toEqual({ ets2: null, ats: null });
+  for (const item of data.items) {
+    for (const game of ["ets2", "ats"] as const) {
+      const level = item.levels?.[game];
+      if (!level) continue;
+      expect(item.formerMember).toBe(false);
+      const row = levels.get(level.id);
+      expect(row?.game).toBe(game);
+      expect(row?.position).not.toBeNull();
+      expect(level).toEqual({ id: level.id, name: row?.name, position: row?.position });
+    }
+  }
+  // The level filter and the shown level agree for every active level of each game.
+  const all = (await traverse("", 100)).items;
+  for (const [id, row] of levels) {
+    if (row.position === null) continue;
+    const filtered = (await traverse(`${row.game}Level=${id}`, 2)).ids;
+    expect(filtered, `${row.game} ${row.name}`).toEqual(
+      all
+        .filter((item) => item.levels?.[row.game]?.id === id)
+        .map((item) => item.id)
+        .sort(),
+    );
+    for (const item of (await page(`${row.game}Level=${id}&limit=100`)).items)
+      expect(item.levels?.[row.game]?.id).toBe(id);
+  }
+});
+
+test("a level that left the active ladder shows null without leaking its name", async () => {
+  const quiet = ids.quiet as string;
+  const retired = newId();
+  const assignment = newId();
+  const name = "Fictional retired ladder level";
+  await unit.run(async (tx) => {
+    await unit.client(tx).insert(qualificationLevels).values({
+      id: retired,
+      game: "ets2",
+      name,
+      version: 1,
+      activePosition: null,
+    });
+    await unit
+      .client(tx)
+      .insert(qualificationAssignments)
+      .values({
+        id: assignment,
+        userId: quiet,
+        game: "ets2",
+        levelId: retired,
+        assignedAt: iso(W - 1000),
+        purpose: "administrative_correction",
+        reason: "Fictional retired level",
+      });
+    await unit
+      .client(tx)
+      .insert(qualificationStates)
+      .values({ userId: quiet, game: "ets2", assignmentId: assignment, version: 1 });
+  });
+  try {
+    const response = await get("/api/v1/members?limit=100");
+    expect(response.statusCode).toBe(200);
+    const items = response.json().data.items as Item[];
+    expect(items.find((item) => item.id === quiet)?.levels).toEqual({ ets2: null, ats: null });
+    expect(response.body).not.toContain(name);
+    expect((await get(`/api/v1/members?ets2Level=${retired}`)).statusCode).toBe(422);
+    const direct = await unit.run((tx) => createDirectoryCurrentLevels(unit)(tx, [quiet]));
+    expect(direct.get(quiet)).toEqual({ ets2: null, ats: null });
+  } finally {
+    await unit.run(async (tx) => {
+      await unit
+        .client(tx)
+        .delete(qualificationStates)
+        .where(and(eq(qualificationStates.userId, quiet), eq(qualificationStates.game, "ets2")));
+      await unit
+        .client(tx)
+        .delete(qualificationAssignments)
+        .where(eq(qualificationAssignments.id, assignment));
+      await unit.client(tx).delete(qualificationLevels).where(eq(qualificationLevels.id, retired));
+    });
+  }
+});
+
+test("former members show no levels even when a state still points at an assignment", async () => {
+  const former = ids.former as string;
+  const [[state]] = await control.query<RowDataPacket[]>(
+    "SELECT CAST(assignment_id AS CHAR) assignmentId FROM qualification_states WHERE user_id=? AND game='ets2'",
+    [former],
+  );
+  expect(state?.assignmentId).toBeNull();
+  const [[ended]] = await control.query<RowDataPacket[]>(
+    "SELECT CAST(id AS CHAR) id FROM qualification_assignments WHERE user_id=? AND game='ets2' AND ended_at IS NOT NULL ORDER BY assigned_at DESC LIMIT 1",
+    [former],
+  );
+  if (!ended) throw new Error("SYNTHETIC_ENDED_ASSIGNMENT_MISSING");
+  await control.query(
+    "UPDATE qualification_states SET assignment_id=? WHERE user_id=? AND game='ets2'",
+    [ended.id, former],
+  );
+  try {
+    levelCalls.length = 0;
+    const formerTab = await page("status=former&limit=100");
+    expect(formerTab.items.find((item) => item.id === former)?.levels).toEqual({
+      ets2: null,
+      ats: null,
+    });
+    // Only former rows on the page: the lookup is not called at all.
+    expect(levelCalls).toEqual([]);
+    const all = await page("limit=100");
+    expect(all.items.find((item) => item.id === former)?.levels).toEqual({
+      ets2: null,
+      ats: null,
+    });
+    expect(levelCalls.flat()).not.toContain(former);
+  } finally {
+    await control.query(
+      "UPDATE qualification_states SET assignment_id=NULL WHERE user_id=? AND game='ets2'",
+      [former],
+    );
+  }
+});
+
+test("without Qualifications rows carry no levels and Trips facts stay", async () => {
+  for (const target of [plainApp, tripsOnlyApp]) {
+    const data = await page("limit=100", driverCookie, target);
+    for (const item of data.items) expect(item).not.toHaveProperty("levels");
+    expect(
+      (await get(`/api/v1/members?ets2Level=${structuralLevels.ets2[0]}`, driverCookie, target))
+        .statusCode,
+    ).toBe(422);
+  }
+  const trips30 = await page("limit=100", driverCookie, tripsOnlyApp);
+  const full = await page("limit=100");
+  expect(trips30.windowEndsAt).toBe(iso(W));
+  expect(trips30.statusCounts).toEqual(full.statusCounts);
+  expect(trips30.statusCounts).toHaveProperty("droveLast30Days");
+  expect(trips30.items).toEqual(full.items.map(({ levels: _levels, ...item }) => item));
+});
+
+test("current levels come from one bounded non-locking read per page", async () => {
+  for (const limit of [2, 100]) {
+    recorded.length = 0;
+    levelCalls.length = 0;
+    const data = await page(`limit=${limit}`);
+    const reads = recorded.filter(
+      (query) =>
+        query.sql.includes("`qualification_states`") &&
+        !query.sql.includes("directory_window_trips"),
+    );
+    expect(reads, `limit ${limit}`).toHaveLength(1);
+    expect(reads[0]?.sql).not.toMatch(/for (share|update)/i);
+    // Active rows of the page only; the lookahead row is not looked up.
+    expect(levelCalls).toEqual([
+      data.items.filter((item) => !item.formerMember).map((item) => item.id),
+    ]);
+  }
+  const lookup = createDirectoryCurrentLevels(unit);
+  const batch = Array.from({ length: 101 }, () => newId());
+  const result = await unit.run((tx) => lookup(tx, batch));
+  expect(result.size).toBe(101);
+  for (const id of batch) expect(result.get(id)).toEqual({ ets2: null, ats: null });
+  await expect(unit.run((tx) => lookup(tx, [...batch, newId()]))).rejects.toThrow(
+    "DIRECTORY_LEVEL_BOUND_EXCEEDED",
+  );
+});
+
+test("the directory waits for no qualification or trip row lock", async () => {
+  const holder = await dedicatedConnection(guardedSettings());
+  const members = [ids.tie, ids.exact, ids.round] as string[];
+  try {
+    await holder.query("START TRANSACTION");
+    await holder.query("SELECT version FROM qualification_states WHERE user_id IN (?) FOR UPDATE", [
+      members,
+    ]);
+    await holder.query("SELECT id FROM qualification_assignments WHERE user_id IN (?) FOR UPDATE", [
+      members,
+    ]);
+    await holder.query("SELECT id FROM qualification_levels FOR UPDATE");
+    await holder.query("SELECT id FROM trips WHERE owner_id IN (?) FOR UPDATE", [members]);
+    let timer: NodeJS.Timeout | undefined;
+    const bound = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), 5000);
+    });
+    try {
+      for (const query of ["limit=100", "status=active&sort=trips30d&limit=2"]) {
+        const response = await Promise.race([get(`/api/v1/members?${query}`), bound]);
+        expect(response, query).not.toBe("timeout");
+        if (response === "timeout") continue;
+        expect(response.statusCode, query).toBe(200);
+        const items = response.json().data.items as Item[];
+        expect(items.find((item) => item.id === ids.tie)?.levels?.ets2).not.toBeNull();
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  } finally {
+    await holder.query("ROLLBACK");
+    await holder.end();
+  }
 });
