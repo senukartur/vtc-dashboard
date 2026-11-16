@@ -91,7 +91,14 @@ test(
         )
         .toBe(true);
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-      const row = page.locator("main .notification-row").filter({ hasText: event.input.title });
+      // Every member also has the publication row for this event; select the reminder.
+      const published = page
+        .locator("main .notification-row")
+        .filter({ hasText: `New event: ${event.input.title}` });
+      const row = page
+        .locator("main .notification-row")
+        .filter({ hasText: `Starting in about one hour: ${event.input.title}` });
+      await expect(published).toHaveCount(1);
       await expect(row).toHaveCount(1);
       await expect(page.locator(".event-nearest")).toContainText(event.input.title);
       await expect(row.getByRole("link", { name: "Open", exact: true })).toHaveAttribute(

@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
-import { Button, FieldError, Input } from "../../shared/ui/primitives.js";
 import { writeStoredLocale } from "../../shared/i18n.js";
+import { Button, FieldError, Input } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { SettingsRow } from "./SettingsRow.js";
 import { timezoneOptions, timezoneValid } from "./settings.js";
@@ -112,7 +112,13 @@ function TimezoneForm({
  * Saved account preferences. Language saves as soon as another option is chosen; the timezone
  * saves explicitly. Each command sends the other preference's saved value, never an unsaved edit.
  */
-export function PreferencesSection({ self, etag }: { self: DTO["Self"]; etag: string | null }) {
+export function PreferencesSection({
+  self,
+  etag,
+}: {
+  self: DTO["SelfStage4"];
+  etag: string | null;
+}) {
   const { t, i18n } = useTranslation("account");
   const session = useSession();
   const request = useCommand();
@@ -124,7 +130,7 @@ export function PreferencesSection({ self, etag }: { self: DTO["Self"]; etag: st
   // A rate-limit wait blocks saving too; Save shows it as aria-disabled like other forms.
   const waiting = request.seconds > 0;
   const saved = self.preferences;
-  async function save(row: Row, preferences: { locale: Locale; displayTimezone: string }) {
+  async function save(row: Row, preferences: { locale: Locale; displayTimezone: string | null }) {
     if (!etag || busy || waiting) return;
     setStatus({ row, state: "pending" });
     const result = await request.run("preferences", preferences, etag);
@@ -174,7 +180,7 @@ export function PreferencesSection({ self, etag }: { self: DTO["Self"]; etag: st
         <SettingsRow id="preferences-timezone" title={t("timezone")} hint={t("timezoneHelp")}>
           <TimezoneForm
             key={revision}
-            initial={saved.displayTimezone}
+            initial={saved.displayTimezone ?? ""}
             busy={busy || waiting || !etag}
             onEdit={() => {
               if (status?.state === "saved") setStatus(null);

@@ -27,8 +27,7 @@ export const notificationTranslations = {
     emptyUnread: "No unread notifications in loaded history.",
     retry: "Refresh notifications",
     preferences: "Notification preferences",
-    preferenceHelp:
-      "Disabled categories stop future delivery. Saved history stays available. Administrative updates share event changes; trip review updates share trip rejections.",
+    preferenceHelp: "Disabled categories stop future delivery. Saved history stays available.",
     save: "Save preferences",
     reload: "Reload preferences",
     saved: "Preferences saved.",
@@ -86,6 +85,8 @@ export const notificationTranslations = {
       "application.submitted": "A membership application was submitted",
       "application.decided": "A membership application was reviewed",
       "member.access_changed": "Member access changed: {{actor}}",
+      "trip.accepted": "Your trip was accepted · {{game}}",
+      "event.published": "New event: {{event}}",
     },
   },
   ru: {
@@ -118,7 +119,7 @@ export const notificationTranslations = {
     retry: "Обновить уведомления",
     preferences: "Настройки уведомлений",
     preferenceHelp:
-      "Выключенные категории не доставляются в будущем. Сохранённая история остаётся. Административные обновления входят в изменения событий, а проверка рейсов — в отклонения рейсов.",
+      "Выключенные категории не доставляются в будущем. Сохранённая история остаётся.",
     save: "Сохранить настройки",
     reload: "Перезагрузить настройки",
     saved: "Настройки сохранены.",
@@ -176,6 +177,8 @@ export const notificationTranslations = {
       "application.submitted": "Подана заявка на вступление",
       "application.decided": "Заявка на вступление рассмотрена",
       "member.access_changed": "Доступ участника изменён: {{actor}}",
+      "trip.accepted": "Ваш рейс принят · {{game}}",
+      "event.published": "Новое событие: {{event}}",
     },
   },
 };

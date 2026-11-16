@@ -9,7 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { formatQuantity, formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { RecordedTelemetryFields, State } from "./components.js";
 import { useTripQuery } from "./queries.js";
@@ -45,7 +45,7 @@ export function TripPanel({
     session = useSession(),
     headingId = useId(),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    timezone = session.self?.preferences.displayTimezone ?? "UTC";
+    timezone = accountTimeZone(session.self?.preferences.displayTimezone);
   const query = useTripQuery(`/trips/${tripId}`, "EnvelopeTripView", validId(tripId));
   const view = query.data?.data.data,
     summary = view?.view === "private" ? view.summary : view,

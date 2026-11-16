@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { useSession } from "../../app/Session.js";
+import { accountTimeZone } from "../../shared/formatting.js";
 import { Badge, Button } from "../../shared/ui/primitives.js";
 import { AccountFailure } from "../account/transport.js";
 import { eventTime } from "../events/model.js";
@@ -67,7 +68,7 @@ export function NotificationTime({ value }: { value: string }) {
     const timer = window.setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(timer);
   }, []);
-  const timezone = session.self?.preferences.displayTimezone ?? "UTC",
+  const timezone = accountTimeZone(session.self?.preferences.displayTimezone),
     locale = i18n.resolvedLanguage ?? "en";
   const minutes = Math.round((Date.parse(value) - now) / 60000),
     unit = Math.abs(minutes) < 60 ? "minute" : Math.abs(minutes) < 1440 ? "hour" : "day",
@@ -124,7 +125,7 @@ export function useTimeDisplay() {
   const session = useSession(),
     { i18n } = useTranslation("notifications");
   return {
-    timezone: session.self?.preferences.displayTimezone ?? "UTC",
+    timezone: accountTimeZone(session.self?.preferences.displayTimezone),
     locale: i18n.resolvedLanguage ?? "en",
   };
 }

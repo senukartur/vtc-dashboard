@@ -58,3 +58,18 @@ export function chartGeometry(value: string): number | null {
   const converted = Number(value);
   return Number.isFinite(converted) && converted <= Number.MAX_SAFE_INTEGER ? converted : null;
 }
+
+/**
+ * Display time zone for a saved account preference. Null means "as on the device": the browser's
+ * resolved zone. A missing or invalid zone falls back to UTC.
+ */
+export function accountTimeZone(saved: string | null | undefined): string {
+  const zone = saved === null ? Intl.DateTimeFormat().resolvedOptions().timeZone : saved;
+  if (!zone) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: zone });
+    return zone;
+  } catch {
+    return "UTC";
+  }
+}

@@ -33,6 +33,7 @@ import {
 import { depotListSchema, depotSchema, summarySchema } from "./transport.js";
 import { useCatalogCommand } from "./useCatalogCommand.js";
 import "./catalogs.css";
+import { accountTimeZone } from "../../shared/formatting.js";
 
 const games = [
   { value: "ets2", label: "ETS2" },
@@ -63,7 +64,7 @@ function CatalogWorkspace() {
     [params, setParams] = useSearchParams();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const filters = parseFilters(params);
-  const timezone = session.self?.preferences.displayTimezone ?? "UTC";
+  const timezone = accountTimeZone(session.self?.preferences.displayTimezone);
   useEffect(() => {
     const canonical = filterParams(parseFilters(params));
     const next = new URLSearchParams(params);

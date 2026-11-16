@@ -26,6 +26,7 @@ import {
 import "../trips/trips.css";
 import "../trips/trips-list.css";
 import "./review.css";
+import { accountTimeZone } from "../../shared/formatting.js";
 
 function queueAge(seconds: number, locale: string) {
   const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "always" });
@@ -62,7 +63,7 @@ function LegacyReviewQueuePage() {
     location = useLocation(),
     wide = useWideLayout(),
     [search, setSearch] = useSearchParams(),
-    timezone = session.self?.preferences.displayTimezone ?? "UTC",
+    timezone = accountTimeZone(session.self?.preferences.displayTimezone),
     params = queueParams(search),
     listLocale = i18n.resolvedLanguage === "en" ? "en" : "ru",
     pages = useCursorPages(queryString(listQuery(params, null, listLocale)));

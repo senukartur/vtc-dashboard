@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
+import { accountTimeZone } from "../../shared/formatting.js";
 import {
   Dialog,
   DialogContent,
@@ -75,7 +76,9 @@ function TimezoneEditor({
           {t("settingsUi.timezoneRowHelp")}
         </p>
         <p className="muted">
-          {t("personalTimezone", { timezone: session.self?.preferences.displayTimezone })}
+          {t("personalTimezone", {
+            timezone: accountTimeZone(session.self?.preferences.displayTimezone),
+          })}
         </p>
       </div>
       <div className="settings-row-control">

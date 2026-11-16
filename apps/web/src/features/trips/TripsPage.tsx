@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { isPlainSelfClick } from "../../app/Navigation.js";
 import { useSession } from "../../app/Session.js";
-import { formatDecimal, formatQuantity } from "../../shared/formatting.js";
+import { accountTimeZone, formatDecimal, formatQuantity } from "../../shared/formatting.js";
 import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs.js";
@@ -27,7 +27,9 @@ export function TripsPage() {
   const wide = useWideLayout();
   const [params, setParams] = useSearchParams();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
-  const savedTimezone = session.self?.preferences.displayTimezone;
+  const savedTimezone = session.self
+    ? accountTimeZone(session.self.preferences.displayTimezone)
+    : undefined;
   const timezone = savedTimezone ?? "UTC";
   const submit = !!session.self?.capabilities.includes("trips.submit_own");
   const viewDrafts = submit && params.get("tab") === "drafts";

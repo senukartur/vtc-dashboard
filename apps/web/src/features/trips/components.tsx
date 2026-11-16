@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
-import { formatQuantity, formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatQuantity, formatUtc } from "../../shared/formatting.js";
 import {
   Dialog,
   DialogClose,
@@ -203,7 +203,7 @@ export function TripSummary({ trip, link = true }: { trip: DTO["TripSummary"]; l
   const { t, i18n } = useTranslation("trips"),
     session = useSession(),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    timezone = session.self?.preferences.displayTimezone ?? "UTC";
+    timezone = accountTimeZone(session.self?.preferences.displayTimezone);
   const label = (value: DTO["CatalogLabel"] | null) => (
     <>
       {value?.label ?? t("unknown")}
@@ -285,7 +285,7 @@ export function EffectiveFacts({ facts }: { facts: DTO["EffectiveTripFacts"] | n
   const { t, i18n } = useTranslation("trips"),
     session = useSession(),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    timezone = session.self?.preferences.displayTimezone ?? "UTC";
+    timezone = accountTimeZone(session.self?.preferences.displayTimezone);
   const recorded = (
     <dl className="trip-facts">
       <RecordedTelemetryFields telemetry={facts?.recordedTelemetry} />

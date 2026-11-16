@@ -28,6 +28,8 @@ export const messages = [
   "application.submitted",
   "application.decided",
   "member.access_changed",
+  "trip.accepted",
+  "event.published",
 ] as const;
 export function messageName(item: Notification) {
   return messages.find((name) => item.messageKey === `notifications.${name}`) ?? "unknown";
@@ -182,6 +184,8 @@ const visuals: Record<(typeof messages)[number] | "unknown", Visual> = {
   "application.submitted": { icon: "document", tone: "neutral", kind: "Administration" },
   "application.decided": { icon: "document", tone: "neutral", kind: "Administration" },
   "member.access_changed": { icon: "user", tone: "neutral", kind: "Administration" },
+  "trip.accepted": { icon: "check", tone: "accepted", kind: "Trip" },
+  "event.published": { icon: "calendar", tone: "info", kind: "Event" },
   unknown: { icon: "dot", tone: "neutral", kind: "Other" },
 };
 /** Closed icon, tone and category label per registered message; unknown keys get a neutral dot. */

@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
-import { formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatUtc } from "../../shared/formatting.js";
 import { todayIn } from "../../shared/ui/date-time.js";
 import { DateTimeField } from "../../shared/ui/date-time-field.js";
 import { Button, FieldError, Input, Label } from "../../shared/ui/primitives.js";
@@ -423,7 +423,7 @@ export function EventSelect({
 }) {
   const { t, i18n } = useTranslation("trips"),
     session = useSession(),
-    timezone = session.self?.preferences.displayTimezone ?? "UTC",
+    timezone = accountTimeZone(session.self?.preferences.displayTimezone),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
     [period, setPeriod] = useState("upcoming"),
     [cursor, setCursor] = useState<string | null>(null),

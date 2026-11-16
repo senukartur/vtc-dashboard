@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
-import { formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatUtc } from "../../shared/formatting.js";
 import { Badge, Button, Card, Input, Label } from "../../shared/ui/primitives.js";
 import { SettingsRow } from "../account/SettingsRow.js";
 import { SensitiveValue } from "../admin/ApplicationsPage.js";
@@ -13,7 +13,7 @@ function useTimestamp() {
   const { i18n } = useTranslation();
   const session = useSession();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
-  const timeZone = session.self?.preferences.displayTimezone ?? "UTC";
+  const timeZone = accountTimeZone(session.self?.preferences.displayTimezone);
   return (value: string | null) => formatUtc(value, locale, timeZone);
 }
 
