@@ -25,7 +25,7 @@ OpenAPI marks new operations with `x-contract-stage: VTC-150 Step 1`. They are n
 | `trip.accepted` | `tripAccepted` | trip author only | trip; once per accepting decision, effect key `trip.accepted:<decisionId>` |
 | `event.published` | `newEvent` | active members who can see the event at publication | event; never for drafts, private events or edits, effect key `event.published:<eventId>` |
 
-Lane catch-ups: VTC-140 re-derives `joined_at` with the same rule for reinstatements made after `0032` and before it activates, and writes it on every return. VTC-142 re-copies the review-queue and new-application toggles at activation and removes the null time-zone fence. VTC-144 adds the check-table grants and job before activation.
+Lane catch-ups: VTC-140 re-derives `joined_at` with the same rule in the data-only `0033` for reinstatements made after `0032` and before it activates, and writes it on every return. VTC-142 re-copies the review-queue and new-application toggles at activation and removes the null time-zone fence. VTC-144 adds the check-table grants and job before activation.
 
 ## Stage 3 foundation (VTC-139 Step 1)
 
