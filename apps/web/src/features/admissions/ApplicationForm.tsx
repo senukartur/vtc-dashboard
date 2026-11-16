@@ -3,8 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { refreshWorkspaceSummary } from "../../app/workspace-summary.js";
-import { Button, FieldError, Input, Label } from "../../shared/ui/primitives.js";
-import { applicationPayload, applicationSchema, type ApplicationFields } from "./schema.js";
+import { Button, FieldError, Input, Label, Select } from "../../shared/ui/primitives.js";
+import {
+  applicationPayload,
+  applicationSchema,
+  type ApplicationFields,
+  referralOtherMax,
+  referralSources,
+} from "./schema.js";
 import {
   ApplicationFailure,
   submissionAttempt,
@@ -20,6 +26,7 @@ export function ApplicationForm() {
     register,
     handleSubmit,
     setError,
+    clearErrors,
     watch,
     formState: { errors },
   } = useForm<ApplicationFields>({
@@ -30,6 +37,8 @@ export function ApplicationForm() {
       games: [],
       discord: "",
       introduction: "",
+      referralSource: "",
+      referralOther: "",
     },
   });
   const attempt = useRef<SubmissionAttempt | null>(null);
@@ -83,6 +92,8 @@ export function ApplicationForm() {
   const seconds = Math.max(0, Math.ceil((waitUntil - now) / 1000));
   const failure = mutation.error instanceof ApplicationFailure ? mutation.error.kind : "uncertain";
   const values = watch();
+  // Code points, matching the server's 200-character bound.
+  const referralCount = [...(values.referralOther ?? "")].length;
   const changed =
     attempt.current && attempt.current.serialized !== JSON.stringify(applicationPayload(values));
   async function submit(fields: ApplicationFields) {
@@ -166,6 +177,46 @@ export function ApplicationForm() {
               {errors.introduction ? t("errors.introduction") : undefined}
             </FieldError>
           </div>
+          <div className="field field-wide">
+            <Label htmlFor="application-referralSource">{t("referralSource")}</Label>
+            <Select
+              id="application-referralSource"
+              {...register("referralSource", {
+                onChange: (event: { target: { value: string } }) => {
+                  if (event.target.value !== "other") clearErrors("referralOther");
+                },
+              })}
+            >
+              <option value="">{t("referralNone")}</option>
+              {referralSources.map((source) => (
+                <option key={source} value={source}>
+                  {t(`referralOptions.${source}`)}
+                </option>
+              ))}
+            </Select>
+          </div>
+          {values.referralSource === "other" && (
+            <div className="field field-wide">
+              <Label htmlFor="application-referralOther">{t("referralOther")}</Label>
+              <Input
+                id="application-referralOther"
+                type="text"
+                autoComplete="off"
+                aria-invalid={Boolean(errors.referralOther)}
+                aria-describedby={`referral-count${errors.referralOther ? " referralOther-error" : ""}`}
+                {...register("referralOther")}
+              />
+              <p
+                id="referral-count"
+                className={referralCount > referralOtherMax ? "field-error" : "muted"}
+              >
+                {t("referralCount", { count: referralCount, max: referralOtherMax })}
+              </p>
+              <FieldError id="referralOther-error">
+                {errors.referralOther ? t("errors.referralOther") : undefined}
+              </FieldError>
+            </div>
+          )}
         </fieldset>
         <p className="muted">{t("privacy")}</p>
         {Object.keys(errors).length > 0 && (
