@@ -1,11 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
-import { company } from "@vtc/db/identity-schema";
+import { company, membership } from "@vtc/db/identity-schema";
 import { eq, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { expect, test, afterAll as vitestAfterAll, beforeAll as vitestBeforeAll } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
-import { createAnalytics } from "../../apps/api/src/modules/analytics/service.ts";
+import { addDistances, createAnalytics } from "../../apps/api/src/modules/analytics/service.ts";
 import {
   type Actor,
   createIdentity,
@@ -93,10 +93,13 @@ beforeAll(async () => {
   driver2Cookie = d2.cookie;
 
   // Create Analytics Service & App
-  const analytics = createAnalytics(unit, identity, {
-    enabled: true,
-    cursorKey,
-  });
+  // Fixed clock: all_time ranges end with November 2026 as the current month.
+  const analytics = createAnalytics(
+    unit,
+    identity,
+    { enabled: true, cursorKey },
+    () => new Date("2026-11-16T09:00:00.000Z"),
+  );
 
   app = await createApp({
     checkReadiness: async () => true,
@@ -407,37 +410,139 @@ test("verifies EXPLAIN uses trip_analytics_reporting index", async () => {
   expect(explain[0]?.key).toBe("trip_analytics_reporting");
 });
 
-test("Stage 4 analytics parameters and the breakdown route stay inactive until VTC-143 and VTC-112", async () => {
+// VTC-143: all_time periods, active counts and leaderboard positions on a known dataset in
+// Europe/Berlin. The fixed clock (2026-11-16) makes November 2026 the current month.
+const stage4 = {
+  driver3: { userId: "", cookie: "" },
+  trainee: { userId: "", cookie: "" },
+  formerId: "",
+  tripIds: {} as Record<string, string>,
+};
+// Documentation-range sources keep these reads under the per-source read limit.
+let sourceCounter = 0;
+const nextSource = () => `198.51.100.${(sourceCounter++ % 254) + 1}`;
+const get = (url: string, cookie = driver1Cookie) =>
+  app.inject({ method: "GET", url, headers: { cookie }, remoteAddress: nextSource() });
+const anonymous = (url: string) => app.inject({ method: "GET", url, remoteAddress: nextSource() });
+const data = async (url: string, cookie = driver1Cookie) => {
+  const res = await get(url, cookie);
+  expect(res.statusCode, url).toBe(200);
+  return res.json().data;
+};
+const months = (from: string, toExclusive: string) => {
+  const list: string[] = [];
+  for (
+    let date = new Date(`${from}T00:00:00.000Z`);
+    date.toISOString().slice(0, 10) < toExclusive;
+  ) {
+    list.push(date.toISOString().slice(0, 10));
+    date = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
+  }
+  return list;
+};
+const total = (rows: { acceptedTrips: number; actualDistanceM: string }[]) => ({
+  acceptedTrips: rows.reduce((sum, row) => sum + row.acceptedTrips, 0),
+  actualDistanceM: rows.reduce((sum, row) => addDistances(sum, row.actualDistanceM), "0"),
+});
+type BoardItem = {
+  member: { id: string; formerMember: boolean };
+  acceptedTrips: number;
+  actualDistanceM: string;
+  position: number;
+};
+const ranking = (items: BoardItem[]) =>
+  items.map((item) => [item.member.id, item.position, item.acceptedTrips, item.actualDistanceM]);
+
+test("Stage 4 period parameters are validated and the breakdown route stays inactive until VTC-112", async () => {
   for (const url of [
-    "/api/v1/analytics/company?period=all_time",
-    "/api/v1/analytics/company?period=range&fromDate=2026-10-01&toDateExclusive=2026-10-31",
-    "/api/v1/analytics/leaderboard?period=all_time",
+    "/api/v1/analytics/company?period=all_time&fromDate=2026-10-01",
+    "/api/v1/analytics/company?period=all_time&toDateExclusive=2026-11-01",
+    "/api/v1/analytics/company?period=all_time&granularity=day",
+    "/api/v1/analytics/company",
+    "/api/v1/analytics/company?period=range",
+    "/api/v1/analytics/company?fromDate=2026-10-01",
+    "/api/v1/analytics/company?period=lifetime",
+    "/api/v1/analytics/leaderboard?period=all_time&fromDate=2026-10-01&toDateExclusive=2026-11-01",
+    "/api/v1/analytics/leaderboard",
+    `/api/v1/members/${driver1Actor.userId}/analytics?period=all_time`,
+    `/api/v1/members/${driver1Actor.userId}/analytics?period=range&fromDate=2026-10-20&toDateExclusive=2026-10-22`,
   ]) {
-    const res = await app.inject({ method: "GET", url, headers: { cookie: driver1Cookie } });
+    const res = await get(url);
     expect(res.statusCode, url).toBe(422);
   }
-  const breakdown = await app.inject({
-    method: "GET",
-    url: "/api/v1/analytics/company/breakdown?dimension=route&fromDate=2026-10-01&toDateExclusive=2026-10-31",
-    headers: { cookie: driver1Cookie },
-  });
+  for (const url of [
+    "/api/v1/analytics/company?period=all_time",
+    "/api/v1/analytics/leaderboard?period=all_time",
+  ])
+    expect((await anonymous(url)).statusCode, url).toBe(401);
+  const breakdown = await get(
+    "/api/v1/analytics/company/breakdown?dimension=route&fromDate=2026-10-01&toDateExclusive=2026-10-31",
+  );
   expect(breakdown.statusCode).toBe(404);
-  const company = await app.inject({
-    method: "GET",
-    url: "/api/v1/analytics/company?fromDate=2026-10-20&toDateExclusive=2026-10-22",
-    headers: { cookie: driver1Cookie },
+
+  for (const url of [
+    "/api/v1/analytics/company?fromDate=2026-10-20&toDateExclusive=2026-10-22",
+    "/api/v1/analytics/company?period=range&fromDate=2026-10-20&toDateExclusive=2026-10-22",
+  ]) {
+    const company = await get(url);
+    expect(company.statusCode, url).toBe(200);
+    expect(company.json().data, url).toMatchObject({
+      period: "range",
+      fromDate: "2026-10-20",
+      toDateExclusive: "2026-10-22",
+      acceptedTrips: 3,
+      actualDistanceM: "440000",
+      activeDrivers: 2,
+      activeMembers: 3,
+      byGame: [
+        { game: "ets2", acceptedTrips: 2, actualDistanceM: "360000" },
+        { game: "ats", acceptedTrips: 1, actualDistanceM: "80000" },
+      ],
+      computedAt: "2026-11-16T09:00:00.000Z",
+    });
+  }
+  const ats = await get(
+    "/api/v1/analytics/company?game=ats&fromDate=2026-10-20&toDateExclusive=2026-10-22",
+  );
+  expect(ats.json().data).toMatchObject({
+    activeDrivers: 1,
+    activeMembers: 3,
+    byGame: [{ game: "ats", acceptedTrips: 1, actualDistanceM: "80000" }],
   });
-  expect(company.statusCode).toBe(200);
-  for (const key of ["period", "activeDrivers", "activeMembers", "byGame"])
-    expect(company.json().data, key).not.toHaveProperty(key);
-  const board = await app.inject({
-    method: "GET",
-    url: "/api/v1/analytics/leaderboard?fromDate=2026-10-20&toDateExclusive=2026-10-22",
-    headers: { cookie: driver1Cookie },
-  });
+
+  const board = await get(
+    "/api/v1/analytics/leaderboard?period=range&fromDate=2026-10-20&toDateExclusive=2026-10-22",
+    driver2Cookie,
+  );
   expect(board.statusCode).toBe(200);
-  for (const key of ["rankedMembers", "viewer", "period"])
-    expect(board.json().data, key).not.toHaveProperty(key);
+  expect(board.json().data).toMatchObject({
+    rankedMembers: 2,
+    viewer: { position: 2, acceptedTrips: 1, actualDistanceM: "80000" },
+    period: "range",
+    fromDate: "2026-10-20",
+    toDateExclusive: "2026-10-22",
+    nextCursor: null,
+  });
+  expect(
+    board
+      .json()
+      .data.items.map((item: { member: { id: string }; position: number }) => [
+        item.member.id,
+        item.position,
+      ]),
+  ).toEqual([
+    [driver1Actor.userId, 1],
+    [driver2Actor.userId, 2],
+  ]);
+  // The leaderboard ignores granularity, also for all_time.
+  const allTimeBoard = await get("/api/v1/analytics/leaderboard?period=all_time&granularity=day");
+  expect(allTimeBoard.statusCode).toBe(200);
+  expect(allTimeBoard.json().data).toMatchObject({
+    period: "all_time",
+    fromDate: "2026-10-01",
+    toDateExclusive: "2026-12-01",
+    rankedMembers: 2,
+  });
 });
 
 test("Stage 4 directory and breakdown query shapes can use their trip indexes", async () => {
@@ -484,4 +589,464 @@ test("Stage 4 directory and breakdown query shapes can use their trip indexes", 
       .replace(/0x[0-9a-f]+/g, "<id>");
     console.info(JSON.stringify({ event: "stage4_explain", name, plan: text }));
   }
+});
+
+test("Stage 4 all_time covers an empty company with one zero bucket", async () => {
+  await control.query("DELETE FROM trips WHERE alias_of IS NOT NULL");
+  await control.query("DELETE FROM trips");
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(company)
+      .set({ reportingTimezone: "Europe/Berlin" })
+      .where(eq(company.singleton, 1)),
+  );
+  const driver3 = await registerMember("Driver Three");
+  stage4.driver3 = { userId: driver3.userId, cookie: driver3.cookie };
+  const trainee = await registerMember("Trainee Four", ["trainee"]);
+  stage4.trainee = { userId: trainee.userId, cookie: trainee.cookie };
+  stage4.formerId = (await registerMember("Former Five")).userId;
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(membership)
+      .set({ status: "inactive" })
+      .where(eq(membership.userId, stage4.formerId)),
+  );
+
+  expect(await data("/api/v1/analytics/company?period=all_time")).toEqual({
+    acceptedTrips: 0,
+    actualDistanceM: "0",
+    reportingTimezone: "Europe/Berlin",
+    fromDate: "2026-11-01",
+    toDateExclusive: "2026-12-01",
+    granularity: "month",
+    buckets: [{ date: "2026-11-01", acceptedTrips: 0, actualDistanceM: "0" }],
+    computedAt: "2026-11-16T09:00:00.000Z",
+    projectionVersion: 1,
+    projectionPending: false,
+    period: "all_time",
+    activeDrivers: 0,
+    // Director, three drivers and the trainee; the former member is excluded.
+    activeMembers: 5,
+    byGame: [
+      { game: "ets2", acceptedTrips: 0, actualDistanceM: "0" },
+      { game: "ats", acceptedTrips: 0, actualDistanceM: "0" },
+    ],
+  });
+  expect(
+    (await data("/api/v1/analytics/company?period=all_time&game=ats&granularity=month")).byGame,
+  ).toEqual([{ game: "ats", acceptedTrips: 0, actualDistanceM: "0" }]);
+  expect(await data("/api/v1/analytics/leaderboard?period=all_time")).toEqual({
+    items: [],
+    nextCursor: null,
+    rankedMembers: 0,
+    viewer: null,
+    period: "all_time",
+    fromDate: "2026-11-01",
+    toDateExclusive: "2026-12-01",
+  });
+});
+
+test("Stage 4 all_time aggregates a known dataset from the month of the earliest accepted trip", async () => {
+  const d1 = driver1Actor.userId;
+  const d2 = driver2Actor.userId;
+  const d3 = stage4.driver3.userId;
+  const row = (
+    key: string,
+    ownerId: string,
+    game: "ets2" | "ats",
+    reportingAt: string,
+    actualDistanceM: string | null,
+    decision: "accepted" | "rejected" | "pending_review" = "accepted",
+    aliasOf: string | null = null,
+  ) => {
+    const id = newId();
+    stage4.tripIds[key] = id;
+    return {
+      id,
+      ownerId,
+      game,
+      aliasOf,
+      version: 1,
+      outcome: "delivered" as const,
+      recording: "complete" as const,
+      decision,
+      assessmentPending: decision === "pending_review",
+      correctionPending: false,
+      reviewReasons: [],
+      actualDistanceM,
+      reportingAt,
+      createdAt: reportingAt,
+    };
+  };
+  const accepted = [
+    // 2024-01-01 00:30 in Berlin: the earliest accepted trip.
+    row("d2First", d2, "ets2", "2023-12-31T23:30:00.000Z", "50000"),
+    // 23:30 CEST on 31 March and 00:30 CEST on 1 April 2025.
+    row("d1March", d1, "ets2", "2025-03-31T21:30:00.000Z", "100000.19"),
+    row("d1April", d1, "ets2", "2025-03-31T22:30:00.000Z", "100000.19"),
+    // 00:30 CET on 1 November 2025, after the October DST change.
+    row("d1November", d1, "ets2", "2025-10-31T23:30:00.000Z", "70000.5"),
+    row("d1Ats", d1, "ats", "2026-02-10T12:00:00.000Z", "80000"),
+    row("former", stage4.formerId, "ets2", "2026-05-05T10:00:00.000Z", "40000"),
+    row("d3NoDistance", d3, "ets2", "2026-06-15T10:00:00.000Z", null),
+    row("d2Tie", d2, "ets2", "2026-11-05T10:00:00.000Z", "300000"),
+    row("d3Tie", d3, "ets2", "2026-11-06T10:00:00.000Z", "300000"),
+  ];
+  const ignored = [
+    // The trainee's only trip is rejected, so the trainee is never ranked.
+    row(
+      "rejected",
+      stage4.trainee.userId,
+      "ets2",
+      "2023-05-01T10:00:00.000Z",
+      "999999",
+      "rejected",
+    ),
+    row("pending", d1, "ets2", "2023-06-02T10:00:00.000Z", "999999", "pending_review"),
+  ];
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .insert(trips)
+      .values([...accepted, ...ignored]),
+  );
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .insert(trips)
+      .values(
+        row("alias", d1, "ets2", "2023-04-01T10:00:00.000Z", "999999", "accepted", accepted[0]?.id),
+      ),
+  );
+
+  const allTime = await data("/api/v1/analytics/company?period=all_time");
+  const nonZero: Record<string, [number, string]> = {
+    "2024-01-01": [1, "50000"],
+    "2025-03-01": [1, "100000.1"],
+    "2025-04-01": [1, "100000.1"],
+    "2025-11-01": [1, "70000.5"],
+    "2026-02-01": [1, "80000"],
+    "2026-05-01": [1, "40000"],
+    "2026-06-01": [1, "0"],
+    "2026-11-01": [2, "600000"],
+  };
+  const expectedBuckets = months("2024-01-01", "2026-12-01").map((date) => ({
+    date,
+    acceptedTrips: nonZero[date]?.[0] ?? 0,
+    actualDistanceM: nonZero[date]?.[1] ?? "0",
+  }));
+  expect(expectedBuckets).toHaveLength(35);
+  expect(allTime).toEqual({
+    acceptedTrips: 9,
+    actualDistanceM: "1040000.7",
+    reportingTimezone: "Europe/Berlin",
+    fromDate: "2024-01-01",
+    toDateExclusive: "2026-12-01",
+    granularity: "month",
+    buckets: expectedBuckets,
+    computedAt: "2026-11-16T09:00:00.000Z",
+    projectionVersion: 1,
+    // The pending 2023 trip predates the earliest accepted trip and could still change all_time.
+    projectionPending: true,
+    period: "all_time",
+    activeDrivers: 4,
+    activeMembers: 5,
+    byGame: [
+      { game: "ets2", acceptedTrips: 8, actualDistanceM: "960000.7" },
+      { game: "ats", acceptedTrips: 1, actualDistanceM: "80000" },
+    ],
+  });
+  // A range only sees unfinalized trips inside it; the game filter also applies to all_time.
+  for (const [query, pending] of [
+    ["fromDate=2023-06-01&toDateExclusive=2023-07-01", true],
+    ["fromDate=2024-01-01&toDateExclusive=2025-01-01", false],
+    ["period=all_time&game=ats", false],
+    ["period=all_time&game=ets2", true],
+  ] as const)
+    expect((await data(`/api/v1/analytics/company?${query}`)).projectionPending, query).toBe(
+      pending,
+    );
+  // The covered range exceeds 732 days, which an explicit range may not.
+  expect(
+    (await get("/api/v1/analytics/company?fromDate=2024-01-01&toDateExclusive=2026-12-01"))
+      .statusCode,
+  ).toBe(422);
+
+  // V5: byGame sums exactly to the totals, for range and all_time.
+  const year2026 = await data(
+    "/api/v1/analytics/company?fromDate=2026-01-01&toDateExclusive=2026-12-01&granularity=month",
+  );
+  for (const result of [allTime, year2026]) {
+    const totals = { acceptedTrips: result.acceptedTrips, actualDistanceM: result.actualDistanceM };
+    expect(total(result.byGame)).toEqual(totals);
+    expect(total(result.buckets)).toEqual(totals);
+  }
+  expect(year2026).toMatchObject({ acceptedTrips: 5, actualDistanceM: "720000", activeDrivers: 4 });
+
+  // V6: consecutive yearly ranges add up to all_time, bucket by bucket.
+  const years = [
+    await data(
+      "/api/v1/analytics/company?fromDate=2024-01-01&toDateExclusive=2025-01-01&granularity=month",
+    ),
+    await data(
+      "/api/v1/analytics/company?fromDate=2025-01-01&toDateExclusive=2026-01-01&granularity=month",
+    ),
+    year2026,
+  ];
+  expect(years.flatMap((year) => year.buckets)).toEqual(allTime.buckets);
+  expect(total(years)).toEqual({ acceptedTrips: 9, actualDistanceM: "1040000.7" });
+
+  // The game filter also moves the start to that game's first accepted trip.
+  const ats = await data("/api/v1/analytics/company?period=all_time&game=ats");
+  expect(ats).toMatchObject({
+    fromDate: "2026-02-01",
+    toDateExclusive: "2026-12-01",
+    acceptedTrips: 1,
+    actualDistanceM: "80000",
+    activeDrivers: 1,
+    activeMembers: 5,
+    byGame: [{ game: "ats", acceptedTrips: 1, actualDistanceM: "80000" }],
+  });
+  expect(ats.buckets.map((bucket: { date: string }) => bucket.date)).toEqual(
+    months("2026-02-01", "2026-12-01"),
+  );
+  expect(await data("/api/v1/analytics/company?period=all_time&game=ets2")).toMatchObject({
+    fromDate: "2024-01-01",
+    acceptedTrips: 8,
+    byGame: [{ game: "ets2", acceptedTrips: 8, actualDistanceM: "960000.7" }],
+  });
+
+  // Day buckets start at local midnight on both sides of the 2025 DST changes.
+  expect(
+    (await data("/api/v1/analytics/company?fromDate=2025-03-29&toDateExclusive=2025-04-02"))
+      .buckets,
+  ).toEqual([
+    { date: "2025-03-29", acceptedTrips: 0, actualDistanceM: "0" },
+    { date: "2025-03-30", acceptedTrips: 0, actualDistanceM: "0" },
+    { date: "2025-03-31", acceptedTrips: 1, actualDistanceM: "100000.1" },
+    { date: "2025-04-01", acceptedTrips: 1, actualDistanceM: "100000.1" },
+  ]);
+  const autumn = await data(
+    "/api/v1/analytics/company?fromDate=2025-10-25&toDateExclusive=2025-11-03",
+  );
+  expect(
+    autumn.buckets.filter((bucket: { acceptedTrips: number }) => bucket.acceptedTrips > 0),
+  ).toEqual([{ date: "2025-11-01", acceptedTrips: 1, actualDistanceM: "70000.5" }]);
+  expect(autumn.buckets).toHaveLength(9);
+});
+
+test("Stage 4 leaderboard reports positions, the viewer and rankedMembers equal to activeDrivers", async () => {
+  const d1 = driver1Actor.userId;
+  const d2 = driver2Actor.userId;
+  const d3 = stage4.driver3.userId;
+  const allTime = await data("/api/v1/analytics/leaderboard?period=all_time", driver2Cookie);
+  expect(ranking(allTime.items)).toEqual([
+    [d1, 1, 4, "350000.88"],
+    [d2, 2, 2, "350000"],
+    // Trips without a distance count as trips and add no distance.
+    [d3, 3, 2, "300000"],
+    [stage4.formerId, 4, 1, "40000"],
+  ]);
+  expect(allTime.items[3].member.formerMember).toBe(true);
+  expect(allTime).toMatchObject({
+    nextCursor: null,
+    rankedMembers: 4,
+    viewer: { position: 2, acceptedTrips: 2, actualDistanceM: "350000" },
+    period: "all_time",
+    fromDate: "2024-01-01",
+    toDateExclusive: "2026-12-01",
+  });
+
+  // V1: the viewer's own row is returned also when it is not on the page.
+  const offPage = await data(
+    "/api/v1/analytics/leaderboard?period=all_time&limit=1",
+    stage4.driver3.cookie,
+  );
+  expect(ranking(offPage.items)).toEqual([[d1, 1, 4, "350000.88"]]);
+  expect(offPage.viewer).toEqual({ position: 3, acceptedTrips: 2, actualDistanceM: "300000" });
+  expect(offPage.rankedMembers).toBe(4);
+  expect(offPage.nextCursor).toEqual(expect.any(String));
+
+  // V3: members without accepted trips in the period are not ranked.
+  for (const cookie of [directorCookie, stage4.trainee.cookie]) {
+    const board = await data("/api/v1/analytics/leaderboard?period=all_time&limit=2", cookie);
+    expect(board.viewer).toBeNull();
+    expect(board.rankedMembers).toBe(4);
+  }
+
+  // V2: equal distance and trips are ordered by member ID.
+  const november = await data(
+    "/api/v1/analytics/leaderboard?fromDate=2026-11-01&toDateExclusive=2026-12-01",
+    stage4.driver3.cookie,
+  );
+  const [first, second] = [d2, d3].sort();
+  expect(ranking(november.items)).toEqual([
+    [first, 1, 1, "300000"],
+    [second, 2, 1, "300000"],
+  ]);
+  expect(november.viewer?.position).toBe(first === d3 ? 1 : 2);
+
+  // V4: activeDrivers equals rankedMembers for the same period and game.
+  for (const [company, board] of [
+    ["period=all_time", "period=all_time"],
+    ["period=all_time&game=ats", "period=all_time&game=ats"],
+    ["period=all_time&game=ets2", "period=all_time&game=ets2"],
+    [
+      "fromDate=2026-11-01&toDateExclusive=2026-12-01",
+      "fromDate=2026-11-01&toDateExclusive=2026-12-01",
+    ],
+  ]) {
+    const companyData = await data(`/api/v1/analytics/company?${company}`);
+    const boardData = await data(`/api/v1/analytics/leaderboard?${board}`);
+    expect(companyData.activeDrivers, company).toBe(boardData.rankedMembers);
+    expect([companyData.fromDate, companyData.toDateExclusive], company).toEqual([
+      boardData.fromDate,
+      boardData.toDateExclusive,
+    ]);
+  }
+  // activeDrivers includes the former member with accepted trips in the period.
+  expect((await data("/api/v1/analytics/company?period=all_time")).activeDrivers).toBe(4);
+});
+
+test("Stage 4 all_time leaderboard pages by position and binds the period into the cursor", async () => {
+  const seen: [string, number][] = [];
+  let cursor: string | null = null;
+  let firstCursor = "";
+  do {
+    const url: string = `/api/v1/analytics/leaderboard?period=all_time&limit=1${
+      cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
+    }`;
+    const page = await data(url);
+    expect(page.items).toHaveLength(1);
+    expect(page.rankedMembers).toBe(4);
+    expect(page.viewer.position).toBe(1);
+    seen.push([page.items[0].member.id, page.items[0].position]);
+    cursor = page.nextCursor;
+    if (!firstCursor && cursor) firstCursor = cursor;
+  } while (cursor && seen.length < 10);
+  expect(seen).toEqual([
+    [driver1Actor.userId, 1],
+    [driver2Actor.userId, 2],
+    [stage4.driver3.userId, 3],
+    [stage4.formerId, 4],
+  ]);
+
+  for (const url of [
+    `/api/v1/analytics/leaderboard?fromDate=2026-01-01&toDateExclusive=2026-12-01&limit=1&cursor=${encodeURIComponent(firstCursor)}`,
+    `/api/v1/analytics/leaderboard?period=all_time&game=ets2&limit=1&cursor=${encodeURIComponent(firstCursor)}`,
+  ]) {
+    const res = await get(url);
+    expect(res.statusCode, url).toBe(409);
+    expect(res.json().error.code, url).toBe("VERSION_CONFLICT");
+  }
+});
+
+test("Stage 4 aggregate, earliest-trip and leaderboard queries can use their trip indexes", async () => {
+  await control.query("ANALYZE TABLE trips");
+  // Bounds of the all_time range above: 2024-01-01 and 2026-12-01 in Europe/Berlin.
+  const start = "2023-12-31 23:00:00.000";
+  const end = "2026-11-30 23:00:00.000";
+  const bucketStarts = [Date.UTC(2023, 11, 31, 23), Date.UTC(2024, 0, 31, 23)];
+  // Keep in sync with getCompanyAnalytics, coveredRange and getLeaderboard in service.ts.
+  const accepted =
+    "decision='accepted' AND alias_of IS NULL AND reporting_at >= ? AND reporting_at < ?";
+  const plans: Record<string, { sql: string; values: unknown[]; keys: string[] }> = {
+    vtc143_earliest: {
+      sql: "SELECT reporting_at FROM trips WHERE decision='accepted' AND alias_of IS NULL AND reporting_at IS NOT NULL ORDER BY reporting_at LIMIT 1",
+      values: [],
+      keys: ["trip_analytics_reporting"],
+    },
+    vtc143_earliest_game: {
+      sql: "SELECT reporting_at FROM trips WHERE decision='accepted' AND alias_of IS NULL AND reporting_at IS NOT NULL AND game=? ORDER BY reporting_at LIMIT 1",
+      values: ["ats"],
+      keys: ["trip_analytics_reporting"],
+    },
+    vtc143_buckets: {
+      sql: `SELECT INTERVAL(TIMESTAMPDIFF(MICROSECOND, '1970-01-01 00:00:00', reporting_at) DIV 1000, ?, ?) AS bucket, game, COUNT(*) trips, COALESCE(SUM(TRUNCATE(actual_distance_m, 1)), 0) distance, MAX(GREATEST(version, adjudication_version)) pv FROM trips WHERE ${accepted} GROUP BY bucket, game`,
+      values: [...bucketStarts, start, end],
+      keys: ["trip_analytics_reporting"],
+    },
+    vtc143_active_drivers: {
+      sql: `SELECT COUNT(DISTINCT owner_id) drivers FROM trips WHERE ${accepted}`,
+      values: [start, end],
+      keys: ["trip_analytics_reporting"],
+    },
+    vtc143_leaderboard: {
+      sql: `SELECT owner_id, COUNT(*) trips, COALESCE(SUM(actual_distance_m), 0) distance FROM trips WHERE ${accepted} GROUP BY owner_id ORDER BY COALESCE(SUM(actual_distance_m), 0) DESC, COUNT(*) DESC, owner_id`,
+      values: [start, end],
+      keys: ["trip_analytics_reporting", "trip_owner_accepted_reporting"],
+    },
+  };
+  for (const [name, plan] of Object.entries(plans)) {
+    const [rows] = await control.query<RowDataPacket[]>(`EXPLAIN ${plan.sql}`, plan.values);
+    const tripsRow = rows.find((item) => item.table === "trips");
+    expect(
+      plan.keys.some((key) => String(tripsRow?.possible_keys).includes(key)),
+      name,
+    ).toBe(true);
+    // On this tiny table the game-filtered variant may pick trip_game_page; its plan is logged.
+    if (name === "vtc143_earliest") {
+      expect(tripsRow?.key, name).toBe("trip_analytics_reporting");
+      // Index-ordered read of the accepted prefix: range or ref on decision, never a filesort.
+      expect(["range", "ref"], name).toContain(tripsRow?.type);
+      expect(String(tripsRow?.Extra), name).not.toContain("filesort");
+    }
+    const [tree] = await control.query<RowDataPacket[]>(
+      `EXPLAIN FORMAT=TREE ${plan.sql}`,
+      plan.values,
+    );
+    // Synthetic plan evidence for review; generated IDs are masked before logging.
+    const text = String(tree[0]?.EXPLAIN)
+      .replace(/'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'/g, "'<id>'")
+      .replace(/0x[0-9a-f]+/g, "<id>");
+    console.info(JSON.stringify({ event: "stage4_explain", name, plan: text }));
+  }
+});
+
+test("Stage 4 leaderboard keyset continues after a ranked member leaves between pages", async () => {
+  const base =
+    "/api/v1/analytics/leaderboard?fromDate=2026-01-01&toDateExclusive=2026-12-01&limit=1";
+  const first = await data(base);
+  const second = await data(`${base}&cursor=${encodeURIComponent(first.nextCursor)}`);
+  // 2026: driver 3 (two trips), driver 2 (one trip, same distance), driver 1, former member.
+  expect(ranking([...first.items, ...second.items])).toEqual([
+    [stage4.driver3.userId, 1, 2, "300000"],
+    [driver2Actor.userId, 2, 1, "300000"],
+  ]);
+  // Driver 2's only 2026 trip is rejected after the second page was served.
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(trips)
+      .set({ decision: "rejected" })
+      .where(eq(trips.id, stage4.tripIds.d2Tie ?? "")),
+  );
+  const third = await data(`${base}&cursor=${encodeURIComponent(second.nextCursor)}`);
+  expect(ranking(third.items)).toEqual([[driver1Actor.userId, 2, 1, "80000"]]);
+  expect(third.rankedMembers).toBe(3);
+  const fourth = await data(`${base}&cursor=${encodeURIComponent(third.nextCursor)}`);
+  expect(ranking(fourth.items)).toEqual([[stage4.formerId, 3, 1, "40000"]]);
+  expect(fourth.nextCursor).toBeNull();
+});
+
+test("Stage 4 all_time cursor fails with 409 when an earlier trip moves the covered range", async () => {
+  const base = "/api/v1/analytics/leaderboard?period=all_time&limit=1";
+  const first = await data(base);
+  expect(first.fromDate).toBe("2024-01-01");
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(trips)
+      .set({ decision: "accepted", assessmentPending: false })
+      .where(eq(trips.id, stage4.tripIds.pending ?? "")),
+  );
+  const stale = await get(`${base}&cursor=${encodeURIComponent(first.nextCursor)}`);
+  expect(stale.statusCode).toBe(409);
+  expect(stale.json().error.code).toBe("VERSION_CONFLICT");
+  expect(await data("/api/v1/analytics/company?period=all_time")).toMatchObject({
+    fromDate: "2023-06-01",
+    toDateExclusive: "2026-12-01",
+  });
 });

@@ -14,6 +14,41 @@ export interface LeaderboardPosition {
   trips: number;
 }
 
+const decimalPattern = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?$/;
+
+/** Exact sign of a - b for decimal strings (any scale), without float conversion. */
+export function compareDecimal(a: string, b: string): number {
+  const left = decimalPattern.exec(a);
+  const right = decimalPattern.exec(b);
+  if (!left || !right) throw new Error("INVALID_DECIMAL");
+  const scale = Math.max(left[3]?.length ?? 0, right[3]?.length ?? 0);
+  const scaled = (match: RegExpExecArray) => {
+    const value = BigInt(`${match[2]}${(match[3] ?? "").padEnd(scale, "0")}`);
+    return match[1] ? -value : value;
+  };
+  const diff = scaled(left) - scaled(right);
+  return diff === 0n ? 0 : diff > 0n ? 1 : -1;
+}
+
+/**
+ * Keyset start: index of the first row strictly after `after` under the leaderboard order
+ * (distance desc, trips desc, id asc), or rows.length. A row that changed or disappeared since
+ * the previous page does not restart or repeat the list.
+ */
+export function afterIndex(
+  rows: readonly LeaderboardPosition[],
+  after: LeaderboardPosition,
+): number {
+  const index = rows.findIndex((row) => {
+    const distance = compareDecimal(row.distance, after.distance);
+    if (distance !== 0) return distance < 0;
+    if (row.trips !== after.trips) return row.trips < after.trips;
+    // Same byte order as the binary(36) owner_id tie-breaker in MySQL (ASCII IDs).
+    return row.id > after.id;
+  });
+  return index < 0 ? rows.length : index;
+}
+
 export function pagination(key: string) {
   const sign = (body: string) =>
     createHmac("sha256", Buffer.from(key, "hex"))
@@ -47,6 +82,13 @@ export function pagination(key: string) {
           after: LeaderboardPosition;
         };
         applicationId(payload.after.id);
+        if (
+          typeof payload.after.distance !== "string" ||
+          !decimalPattern.test(payload.after.distance) ||
+          !Number.isSafeInteger(payload.after.trips) ||
+          payload.after.trips < 0
+        )
+          throw new Error();
         if (payload.binding !== binding) throw new Error();
         after = payload.after;
       } catch {

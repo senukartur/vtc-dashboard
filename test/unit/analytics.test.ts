@@ -2,14 +2,23 @@ import { newId, type UnitOfWork } from "@vtc/db";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { registerAnalyticsRoutes } from "../../apps/api/src/modules/analytics/http.ts";
-import { pagination } from "../../apps/api/src/modules/analytics/pagination.ts";
+import {
+  afterIndex,
+  compareDecimal,
+  pagination,
+} from "../../apps/api/src/modules/analytics/pagination.ts";
 import {
   addDistances,
+  allTimeRange,
+  bucketStarts,
+  type CompanyAnalyticsQuery,
   createAnalytics,
   currentReportingMonth,
   decimal,
+  formatDateInTimezone,
   generateBuckets,
   parseTimezoneDate,
+  periodQuery,
   publicGames,
   timezoneOrNull,
   validateAnalyticsConfig,
@@ -376,6 +385,173 @@ describe("Analytics Unit Tests", () => {
       } finally {
         await app.close();
       }
+    });
+  });
+});
+
+describe("Stage 4 analytics periods (VTC-143)", () => {
+  describe("bucketStarts", () => {
+    const zones = ["Europe/Berlin", "America/New_York", "UTC", "Europe/Moscow"];
+    const ranges: [string, string, "day" | "month"][] = [
+      ["2026-03-01", "2026-04-05", "day"],
+      ["2026-10-20", "2026-11-10", "day"],
+      ["2025-01-01", "2027-01-01", "month"],
+    ];
+    for (const timeZone of zones)
+      for (const [from, to, granularity] of ranges)
+        it(`starts every ${granularity} bucket at local midnight in ${timeZone} from ${from}`, () => {
+          const buckets = generateBuckets(from, to, granularity);
+          const starts = bucketStarts(buckets, timeZone);
+          expect(starts).toHaveLength(buckets.length);
+          buckets.forEach((bucket, index) => {
+            const start = starts[index] ?? Number.NaN;
+            expect(formatDateInTimezone(new Date(start), timeZone, granularity)).toBe(bucket.date);
+            expect(formatDateInTimezone(new Date(start - 1), timeZone, granularity)).not.toBe(
+              bucket.date,
+            );
+            if (index > 0) expect(start).toBeGreaterThan(starts[index - 1] ?? Number.NaN);
+          });
+        });
+
+    it("uses the actual offset on both sides of a DST change", () => {
+      const iso = (starts: number[]) => starts.map((ms) => new Date(ms).toISOString());
+      expect(
+        iso(bucketStarts([{ date: "2026-03-29" }, { date: "2026-03-30" }], "Europe/Berlin")),
+      ).toEqual(["2026-03-28T23:00:00.000Z", "2026-03-29T22:00:00.000Z"]);
+      expect(
+        iso(bucketStarts([{ date: "2026-11-01" }, { date: "2026-11-02" }], "America/New_York")),
+      ).toEqual(["2026-11-01T04:00:00.000Z", "2026-11-02T05:00:00.000Z"]);
+    });
+  });
+
+  describe("allTimeRange", () => {
+    const now = new Date("2026-11-16T09:00:00.000Z");
+
+    it("covers only the current month without accepted trips", () => {
+      expect(allTimeRange(null, now, "Europe/Berlin")).toEqual({
+        fromDate: "2026-11-01",
+        toDateExclusive: "2026-12-01",
+      });
+    });
+
+    it("starts at the local month of the earliest trip", () => {
+      // 2023-12-31 23:30 UTC is already 2024-01-01 in Berlin.
+      expect(allTimeRange("2023-12-31T23:30:00.000Z", now, "Europe/Berlin")).toEqual({
+        fromDate: "2024-01-01",
+        toDateExclusive: "2026-12-01",
+      });
+      expect(allTimeRange("2023-12-31T23:30:00.000Z", now, "UTC").fromDate).toBe("2023-12-01");
+    });
+
+    it("clamps a future earliest trip to the current month", () => {
+      expect(allTimeRange("2027-03-01T00:00:00.000Z", now, "Europe/Berlin")).toEqual({
+        fromDate: "2026-11-01",
+        toDateExclusive: "2026-12-01",
+      });
+    });
+
+    it("rolls over to the next month exactly at local midnight", () => {
+      expect(allTimeRange(null, new Date("2026-11-30T22:59:59.999Z"), "Europe/Berlin")).toEqual({
+        fromDate: "2026-11-01",
+        toDateExclusive: "2026-12-01",
+      });
+      expect(allTimeRange(null, new Date("2026-11-30T23:00:00.000Z"), "Europe/Berlin")).toEqual({
+        fromDate: "2026-12-01",
+        toDateExclusive: "2027-01-01",
+      });
+    });
+  });
+
+  describe("periodQuery", () => {
+    const rejected: [string, CompanyAnalyticsQuery, boolean][] = [
+      ["no dates", {}, true],
+      ["only fromDate", { fromDate: "2026-10-01" }, true],
+      ["only toDateExclusive", { toDateExclusive: "2026-10-01" }, false],
+      ["explicit range without dates", { period: "range" }, false],
+      ["all_time with fromDate", { period: "all_time", fromDate: "2026-10-01" }, true],
+      [
+        "all_time with toDateExclusive",
+        { period: "all_time", toDateExclusive: "2026-11-01" },
+        false,
+      ],
+      ["company all_time by day", { period: "all_time", granularity: "day" }, true],
+      ["an unknown period", { period: "lifetime" as "range" }, true],
+      ["a reversed range", { fromDate: "2026-11-01", toDateExclusive: "2026-10-01" }, true],
+      ["a range over 732 days", { fromDate: "2024-01-01", toDateExclusive: "2026-12-01" }, false],
+    ];
+    for (const [name, query, company] of rejected)
+      it(`rejects ${name} with 422`, () => {
+        expect(() => periodQuery(query, { company })).toThrow(
+          expect.objectContaining({ statusCode: 422 }),
+        );
+      });
+
+    it("defaults to range by day and all_time by month", () => {
+      expect(
+        periodQuery({ fromDate: "2026-10-01", toDateExclusive: "2026-11-01" }, { company: true }),
+      ).toEqual({
+        period: "range",
+        game: undefined,
+        granularity: "day",
+        fromDate: "2026-10-01",
+        toDateExclusive: "2026-11-01",
+      });
+      expect(periodQuery({ period: "all_time", game: "ats" }, { company: true })).toEqual({
+        period: "all_time",
+        game: "ats",
+        granularity: "month",
+      });
+      expect(
+        periodQuery({ period: "all_time", granularity: "month" }, { company: true }).granularity,
+      ).toBe("month");
+    });
+
+    it("lets the leaderboard ignore granularity for all_time", () => {
+      expect(periodQuery({ period: "all_time", granularity: "day" }, { company: false })).toEqual({
+        period: "all_time",
+        game: undefined,
+        granularity: "month",
+      });
+    });
+  });
+
+  describe("leaderboard keyset", () => {
+    it("compares decimal strings exactly at any scale", () => {
+      expect(compareDecimal("10", "9.99")).toBe(1);
+      expect(compareDecimal("0.1", "0.10")).toBe(0);
+      expect(compareDecimal("350000", "350000.88")).toBe(-1);
+      expect(compareDecimal("-1", "0")).toBe(-1);
+      expect(compareDecimal("12345678901234567890.1", "12345678901234567890.09")).toBe(1);
+      expect(compareDecimal("0.000000000000000001", "0")).toBe(1);
+      expect(() => compareDecimal("1e5", "0")).toThrow("INVALID_DECIMAL");
+    });
+
+    const ids = Array.from({ length: 5 }, () => newId()).sort();
+    const rows = [
+      { id: ids[0] ?? "", distance: "100.5", trips: 2 },
+      { id: ids[1] ?? "", distance: "100.5", trips: 2 },
+      { id: ids[2] ?? "", distance: "100.5", trips: 1 },
+      // A member whose trips have no distance ranks with zero distance.
+      { id: ids[3] ?? "", distance: "0", trips: 1 },
+      { id: ids[4] ?? "", distance: "0", trips: 1 },
+    ];
+    const row = (index: number) => {
+      const found = rows[index];
+      if (!found) throw new Error("MISSING_ROW");
+      return found;
+    };
+
+    it("continues after the cursor row, breaking ties by member ID", () => {
+      expect(rows.map((_, index) => afterIndex(rows, row(index)))).toEqual([1, 2, 3, 4, 5]);
+    });
+
+    it("does not restart or repeat when the cursor row is gone or has moved", () => {
+      const withoutSecond = rows.filter((item) => item.id !== ids[1]);
+      expect(afterIndex(withoutSecond, row(1))).toBe(1);
+      expect(withoutSecond[1]?.id).toBe(ids[2]);
+      expect(afterIndex(rows, { id: newId(), distance: "1000", trips: 9 })).toBe(0);
+      expect(afterIndex(rows, { id: ids[0] ?? "", distance: "50", trips: 9 })).toBe(3);
+      expect(afterIndex([], row(0))).toBe(0);
     });
   });
 });
