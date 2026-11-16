@@ -2,7 +2,7 @@ import { type ReactNode, type RefObject, useEffect, useRef, useState } from "rea
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatUtc } from "../../shared/formatting.js";
 import { Badge, Button, Card, Input, Label, Table } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import {
@@ -54,7 +54,7 @@ function useDates() {
   const { i18n } = useTranslation("administration"),
     session = useSession();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    timezone = session.self?.preferences.displayTimezone ?? "UTC";
+    timezone = accountTimeZone(session.self?.preferences.displayTimezone);
   return {
     timezone,
     day: (value: string) => formatDay(value, locale, timezone),

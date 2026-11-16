@@ -1,13 +1,9 @@
+import { accountTimeZone } from "../../shared/formatting.js";
+
 const hourMs = 60 * 60 * 1000;
 
 export function displayTimezone(timezone: string | null | undefined): string {
-  if (!timezone) return "UTC";
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: timezone });
-    return timezone;
-  } catch {
-    return "UTC";
-  }
+  return accountTimeZone(timezone);
 }
 
 function wallClock(timezone: string) {

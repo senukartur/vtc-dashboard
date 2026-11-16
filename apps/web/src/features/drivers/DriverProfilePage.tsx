@@ -2,7 +2,7 @@ import { type ReactNode, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import type { Locale } from "../../shared/formatting.js";
+import { accountTimeZone, type Locale } from "../../shared/formatting.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
 import { PERIOD_FALLBACK_TIMEZONE, periodTimeZone } from "../dashboard/model.js";
 import { useReportingTimezoneSource } from "../dashboard/queries.js";
@@ -55,7 +55,7 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
   const locale = (i18n.resolvedLanguage === "en" ? "en" : "ru") as Locale;
   const session = useSession();
   const isSelf = session.self?.member.id === memberId;
-  const displayTimezone = session.self?.preferences.displayTimezone ?? "UTC";
+  const displayTimezone = accountTimeZone(session.self?.preferences.displayTimezone);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [game, setGame] = useState<GameFilter>("all");
   // Fixed for the page lifetime so a midnight rollover never silently changes the window.

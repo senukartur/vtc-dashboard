@@ -5,7 +5,7 @@ import { Badge, Button } from "../../shared/ui/primitives.js";
 import { SettingsRow } from "./SettingsRow.js";
 import type { DTO } from "./transport.js";
 
-export function ProfileSection({ self }: { self: DTO["Self"] }) {
+export function ProfileSection({ self }: { self: DTO["SelfStage4"] }) {
   const { t } = useTranslation("account");
   const roles = rolePrecedence.filter((role) => self.member.roles.includes(role));
   const company = self.capabilities.includes("company.read");

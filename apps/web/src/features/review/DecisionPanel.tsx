@@ -29,6 +29,7 @@ import { ReviewCorrections } from "./ReviewPanel.js";
 import { historyItems, isOwn, queueType, reviewType, selfReviewCode } from "./review-model.js";
 import { SourceComparison } from "./SourceComparison.js";
 import "./review.css";
+import { accountTimeZone } from "../../shared/formatting.js";
 
 /**
  * Decision workspace for one trip: revision diff, evidence, qualification check, history and the
@@ -57,7 +58,7 @@ export function DecisionPanel({
   const { t } = useTranslation("trips"),
     session = useSession(),
     headingId = useId(),
-    timezone = session.self?.preferences.displayTimezone ?? "UTC",
+    timezone = accountTimeZone(session.self?.preferences.displayTimezone),
     legacy = useTripQuery(`/trips/${tripId}/review`, "EnvelopeReview", !staged),
     dispatch = useTripQuery(
       `/trips/${tripId}/review?view=stage3`,

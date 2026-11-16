@@ -17,7 +17,7 @@ import { clearPrivateQueries } from "./session-cache.js";
 
 type Session = {
   state: "checking" | "authenticated" | "anonymous" | "unavailable";
-  self: DTO["Self"] | null;
+  self: DTO["SelfStage4"] | null;
   eventsStage2Enabled: boolean;
   eventsDraftsEnabled: boolean;
   etag: string | null;

@@ -132,7 +132,7 @@ test(
     const [ledger] = await control.query<RowDataPacket[]>(
       "SELECT version, hash, state FROM _vtc_migrations ORDER BY version",
     );
-    expect(await runMigrations(settings)).toBe(3);
+    expect(await runMigrations(settings)).toBe(4);
     expect(await runMigrations(settings)).toBe(0);
     const [upgraded] = await control.query<RowDataPacket[]>(
       "SELECT CAST(id AS CHAR) id, CAST(user_id AS CHAR) userId, game, level, assigned_at, CAST(level_id AS CHAR) levelId FROM qualification_initial_assignments ORDER BY id",
