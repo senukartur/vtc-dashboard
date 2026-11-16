@@ -18,7 +18,7 @@ import type { DTO } from "./transport.js";
 import type { QueryView } from "./view-model.js";
 import "./dashboard.css";
 
-type AnalyticsData = DTO["Analytics"];
+type AnalyticsData = DTO["AnalyticsStage4Company"];
 type LeaderboardData = DTO["ListLeaderboardEntry"];
 type ProgressData = DTO["Progress"];
 

@@ -65,7 +65,7 @@ export function useCompanyAnalytics(params: {
     staleTime: 30000,
     queryFn: async ({ signal }) => {
       try {
-        return (await dashboardRead(path, "EnvelopeAnalytics", signal)).data.data;
+        return (await dashboardRead(path, "AnalyticsStage4CompanyEnvelope", signal)).data.data;
       } catch (error) {
         if (error instanceof AccountFailure && !signal.aborted) {
           if (error.kind === "unauthorized") await session.confirmSessionLoss(signal);
