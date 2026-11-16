@@ -72,7 +72,7 @@ export type DirectoryCurrentLevels = (
   userIds: readonly string[],
 ) => Promise<Map<string, DirectoryGameLevels>>;
 
-// One page of the directory plus its lookahead row.
+// At most one directory page (100 IDs; the lookahead row is never looked up). 101 leaves headroom.
 const CURRENT_LEVEL_BATCH = 101;
 
 export function createDirectoryCurrentLevels(unit: UnitOfWork): DirectoryCurrentLevels {

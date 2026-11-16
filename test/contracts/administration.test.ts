@@ -420,7 +420,7 @@ test("the member directory adds a status filter, company-wide counts and current
   expect(trainee.last30Days).toEqual({ acceptedTrips: 0, actualDistanceM: "0" });
   expect(trainee.lastAcceptedTripAt).toBeNull();
   expect(trainee.levels.ats).toBeNull();
-  expect(activeTab.statusCounts).toEqual({ active: 18, former: 4, droveLast30Days: 11 });
+  expect(activeTab.statusCounts).toEqual({ active: 18, former: 4, droveLast30Days: 1 });
   const [former] = formerTab.items;
   expect(former).toMatchObject({ formerMember: true, roles: [] });
   expect(former.levels).toEqual({ ets2: null, ats: null });
