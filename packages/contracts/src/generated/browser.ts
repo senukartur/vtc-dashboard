@@ -3029,7 +3029,7 @@ export interface components {
         /** @description Company analytics with optional Stage 4 aggregates. Once VTC-143 activates them each is always returned; absence means not available, never zero. */
         AnalyticsStage4Company: {
             acceptedTrips: number;
-            /** @description Distinct members with at least one accepted canonical trip in the period. */
+            /** @description Distinct members with at least one accepted canonical trip in the period, including former members. Equals the leaderboard rankedMembers for the same period and filters, so it can exceed activeMembers. */
             activeDrivers?: number;
             /** @description Active memberships of any role at computedAt. */
             activeMembers?: number;

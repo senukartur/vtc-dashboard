@@ -4,6 +4,7 @@ import { type Actor, type Identity, identityError } from "../identity/service.js
 import type {
   AnalyticsQuery,
   AnalyticsService,
+  BreakdownQuery,
   CompanyAnalyticsQuery,
   LeaderboardQuery,
 } from "./service.js";
@@ -48,6 +49,24 @@ const leaderboardQuery = {
   additionalProperties: false,
 };
 
+// No granularity; limit is checked against the dimension by breakdownOptions().
+const breakdownQuery = {
+  type: "object",
+  properties: {
+    dimension: { type: "string", enum: ["route", "cargo", "source"] },
+    game: analyticsQuery.properties.game,
+    fromDate: analyticsQuery.properties.fromDate,
+    toDateExclusive: analyticsQuery.properties.toDateExclusive,
+    period: companyQuery.properties.period,
+    locale: { type: "string", enum: ["en", "ru"] },
+    limit: { type: "integer", minimum: 1, maximum: 10 },
+  },
+  required: ["dimension"],
+  additionalProperties: false,
+};
+
+const breakdownPath = "/api/v1/analytics/company/breakdown";
+
 const publicStatsPath = "/api/v1/public/company-stats";
 
 const emptyQuery = { type: "object", properties: {}, additionalProperties: false };
@@ -78,6 +97,7 @@ export async function registerAnalyticsRoutes(
 
   const owned = (p: string) =>
     p === "/api/v1/analytics/company" ||
+    p === breakdownPath ||
     p === "/api/v1/analytics/leaderboard" ||
     /^\/api\/v1\/members\/[^/]+\/analytics$/.test(p);
 
@@ -120,6 +140,17 @@ export async function registerAnalyticsRoutes(
       },
     },
     async (r) => envelope(await service.getCompanyAnalytics(await actor(r), r.query), r),
+  );
+
+  app.get<{ Querystring: BreakdownQuery }>(
+    breakdownPath,
+    {
+      schema: {
+        querystring: breakdownQuery,
+        response: { 200: ref("AnalyticsStage4BreakdownEnvelope") },
+      },
+    },
+    async (r) => envelope(await service.getCompanyAnalyticsBreakdown(await actor(r), r.query), r),
   );
 
   app.get<{ Params: { memberId: string }; Querystring: AnalyticsQuery }>(

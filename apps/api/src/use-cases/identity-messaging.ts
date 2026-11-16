@@ -372,7 +372,9 @@ export function composeIdentity(
     );
   const externalIdentities = externalEnabled ? createExternalIdentities(unit, identity) : undefined;
   const analytics =
-    analyticsConfig && trips ? createAnalytics(unit, identity, analyticsConfig) : undefined;
+    analyticsConfig && trips
+      ? createAnalytics(unit, identity, analyticsConfig, undefined, catalogs ? { catalogs } : {})
+      : undefined;
   const tripWorkspace = trips ? createTripWorkspace(unit) : undefined;
   const tripActivity = trips ? createTripActivity(unit) : undefined;
   const acceptanceWorkspace =
