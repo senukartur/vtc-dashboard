@@ -32,7 +32,10 @@ export function createDirectoryLevelFilter(unit: UnitOfWork): DirectoryLevelFilt
     } catch {
       throw identityError(422);
     }
-    // Lock order follows company -> members -> qualification rows, like the level reads.
+    // listMembers locks the company FOR UPDATE and checks the actor, then this level row is read
+    // FOR SHARE before the directory statement shares the member rows. Every path takes the
+    // exclusive company lock first, which keeps this order deadlock-safe; a replacement (VTC-157)
+    // must keep its reads behind that lock.
     const [level] = await unit
       .client(tx)
       .select({ id: qualificationLevels.id })
