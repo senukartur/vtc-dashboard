@@ -59,7 +59,7 @@ describe("checkView", () => {
     expect(part(found({ bans: { any: false, count: 2 } }), "bans")?.count).toBe(2);
     expect(part(found({ bans: { any: true, count: 0 } }), "banned")).toBeDefined();
     expect(part(found({ bans: { any: false, count: 0 } }), "noBans")).toBeDefined();
-    expect(part(found({ bans: null }), "bansUnavailable")).toBeDefined();
+    expect(part(found({ bans: null }), "bansHidden")).toBeDefined();
   });
   test("VTC: not in one, name and tag, either alone, or membership without either", () => {
     const vtc = (value: TruckersmpCheck["vtc"]) =>

@@ -37,7 +37,7 @@ function vtcPart(vtc: TruckersmpCheck["vtc"]): CheckPart | null {
   return label ? { key: "vtc", text: label } : { key: "inVtc" };
 }
 function bansPart(bans: TruckersmpCheck["bans"]): CheckPart {
-  if (!bans) return { key: "bansUnavailable" };
+  if (!bans) return { key: "bansHidden" };
   if (bans.count > 0) return { key: "bans", count: bans.count };
   return { key: bans.any ? "banned" : "noBans" };
 }

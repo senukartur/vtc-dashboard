@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { formatUtc } from "../../shared/formatting.js";
@@ -79,11 +79,20 @@ export function TruckersmpFact({
   const { t } = useTranslation("applicationChecks"),
     session = useSession(),
     poll = useCheckPoll(id),
-    [step, setStep] = useState(0);
+    [step, setStep] = useState(0),
+    stateLine = useRef<HTMLParagraphElement>(null),
+    alert = useRef<HTMLParagraphElement>(null),
+    focusState = useRef(false);
   const shown = newerCheck(check, updatedAt, poll.query.data, poll.query.dataUpdatedAt),
     view = checkView(shown),
     running = shown?.state === "checking",
     { isFetching, isError, refetch } = poll.query;
+  // Every newly running check, from a recheck or a detail re-read, starts the 5-second ramp again.
+  const [wasRunning, setWasRunning] = useState(running);
+  if (running !== wasRunning) {
+    setWasRunning(running);
+    if (running) setStep(0);
+  }
   useEffect(() => {
     if (!running || isFetching || isError) return;
     const timer = setTimeout(() => {
@@ -95,6 +104,19 @@ export function TruckersmpFact({
   const canRecheck =
     view.recheck !== "hidden" && !!session.self?.capabilities.includes("applications.manage");
   const failure = command.failure && recheckFeedback(command.failure.kind);
+  // The accepted recheck hides its focused button: focus the running state, which also has it read.
+  useEffect(() => {
+    if (!focusState.current || !running) return;
+    focusState.current = false;
+    stateLine.current?.focus();
+  });
+  // A 403 or 409 re-reads the detail and remounts this row without its focused button; keep the
+  // keyboard position on the explanation instead of the document body.
+  useEffect(() => {
+    if (!command.failure) return;
+    const active = document.activeElement;
+    if (!active || active === document.body) alert.current?.focus();
+  }, [command.failure]);
   async function recheck() {
     const result = await command.run(
       `/admin/applications/${id}/truckersmp-checks`,
@@ -105,14 +127,19 @@ export function TruckersmpFact({
       false,
     );
     if (!result) return;
-    setStep(0);
+    focusState.current = result.data.state === "checking";
     poll.seed(result.data);
   }
   return (
     <div className="applications-wide applications-check">
       <dt>{t("truckersmp")}</dt>
       <dd>
-        <p className="applications-check-state" role={view.live ? "status" : undefined}>
+        <p
+          ref={stateLine}
+          className="applications-check-state"
+          role={view.live ? "status" : undefined}
+          tabIndex={-1}
+        >
           <Parts parts={view.parts} />
         </p>
         {view.previous && (
@@ -141,9 +168,13 @@ export function TruckersmpFact({
         )}
         {failure &&
           (failure === "limited" && command.seconds > 0 ? (
-            <p role="alert">{t("errors.wait", { seconds: command.seconds })}</p>
+            <p ref={alert} role="alert" tabIndex={-1}>
+              {t("errors.wait", { seconds: command.seconds })}
+            </p>
           ) : (
-            <p role="alert">{t(`errors.${failure}`)}</p>
+            <p ref={alert} role="alert" tabIndex={-1}>
+              {t(`errors.${failure}`)}
+            </p>
           ))}
       </dd>
     </div>

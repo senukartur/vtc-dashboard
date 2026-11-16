@@ -146,7 +146,8 @@ test(
       [checks.found({ bans: { any: true, count: 3 } }), "en", "3 bans"],
       [checks.found({ bans: { any: true, count: 1 } }), "en", "1 ban"],
       [checks.found({ bans: { any: true, count: 0 } }), "en", "banned"],
-      [checks.found({ bans: null }), "en", "bans unavailable (staff account)"],
+      [checks.found({ bans: null }), "en", "bans hidden (TruckersMP staff account)"],
+      [checks.found({ bans: null }), "ru", "баны скрыты (сотрудник TruckersMP)"],
       [
         checks.found({ vtc: { inVtc: false, id: null, name: null, tag: null } }),
         "en",
@@ -229,6 +230,31 @@ test(
 );
 
 test(
+  "C2 a newly running check restarts the poll ramp at five seconds",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const { state } = await open(page, { check: checks.checking(), clock: true });
+    state.reads.length = 0;
+    const polls = () => admissionsReads(state.reads).length;
+    await page.clock.fastForward(5000);
+    await expect.poll(polls).toBe(1);
+    await expect(fact(page).getByRole("status")).toHaveText("checking…");
+    // The second read comes 10 seconds later and finds the result.
+    state.checks.set(ids.submitted, checks.notFound());
+    await page.clock.fastForward(10_000);
+    await expect(line(page)).toContainText("player not found");
+    expect(polls()).toBe(2);
+    // A new check polls after 5 seconds again, not after the next 20-second step.
+    await button(page, "Check again").click();
+    await expect(fact(page).getByRole("status")).toHaveText("checking…");
+    state.checks.set(ids.submitted, checks.found());
+    await page.clock.fastForward(5000);
+    await expect(line(page)).toContainText(`player found · ${player.name}`);
+    expect(polls()).toBe(3);
+  },
+);
+
+test(
   "C3 Check again sends a bodyless keyed POST, shows Starting… and then the later result",
   browserCase(["@functional"]),
   async ({ page }) => {
@@ -242,6 +268,8 @@ test(
     await expect(button(page, "Starting…")).toBeDisabled();
     release();
     await expect(fact(page).getByRole("status")).toHaveText("checking…");
+    // The focused button is gone; focus moves to the running state so it is announced.
+    await expect(line(page)).toBeFocused();
     await expect(fact(page).locator("p.muted")).toContainText("previous result: player found");
     await expect(fact(page).getByRole("button")).toHaveCount(0);
     expect(rechecks.commands).toHaveLength(1);
@@ -311,6 +339,7 @@ test(
     const before = me;
     await button(page, "Check again").click();
     await expect(fact(page).getByRole("alert")).toHaveText("You don't have access to this check.");
+    await expect(fact(page).getByRole("alert")).toBeFocused();
     await expect.poll(() => me).toBeGreaterThan(before);
 
     await page.unrouteAll({ behavior: "ignoreErrors" });
@@ -320,6 +349,8 @@ test(
     await button(page, "Check again").click();
     await expect(fact(page).getByRole("alert")).toHaveText("This Steam link can't be checked.");
     await expect.poll(() => detailReads(refused.state.reads)).toBeGreaterThan(reads);
+    // The re-read remounts the row without the clicked button; focus stays on the explanation.
+    await expect(fact(page).getByRole("alert")).toBeFocused();
     await expect(page.getByRole("heading", { level: 2, name: names.submitted })).toBeVisible();
   },
 );
