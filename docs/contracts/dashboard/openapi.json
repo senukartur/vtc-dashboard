@@ -1324,6 +1324,19 @@
             }
           },
           {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Membership status: active or former members. Omitted lists both. Filters before pagination and combines with the other filters; bound into the signed cursor.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "former"
+              ]
+            }
+          },
+          {
             "name": "ets2Level",
             "in": "query",
             "required": false,
@@ -1375,6 +1388,7 @@
           "parameters": [
             "search",
             "role",
+            "status",
             "ets2Level",
             "atsLevel",
             "sort",
@@ -1382,12 +1396,14 @@
           ],
           "fields": [
             "MemberStage4DirectoryList.windowEndsAt",
+            "MemberStage4DirectoryList.statusCounts",
             "MemberStage4DirectoryEntry.last30Days",
-            "MemberStage4DirectoryEntry.lastAcceptedTripAt"
+            "MemberStage4DirectoryEntry.lastAcceptedTripAt",
+            "MemberStage4DirectoryEntry.levels"
           ],
-          "description": "Stage 4 directory: optional nickname search, role and per-game level filters, sort and order, and 30-day accepted totals with the last accepted trip time per row. Filters apply before paging. Omitting sort keeps the existing ascending member ID order."
+          "description": "Stage 4 directory: optional nickname search, role and per-game level filters, sort and order, and 30-day accepted totals with the last accepted trip time per row. Filters apply before paging. Omitting sort keeps the existing ascending member ID order. VTC-150 follow-up: optional status filter, company-wide statusCounts on every page and each row's current level per game."
         },
-        "description": "Company member directory. Filters and the optional nickname search apply before paging. Omitted sort keeps ascending member ID order; each sort is a stable keyset on (sort value, member ID). Signed cursors bind the actor, session, access epoch, normalized filters, sort, order and windowEndsAt; mismatches return 409 VERSION_CONFLICT. last30Days counts accepted canonical trips whose reportingAt lies in [windowEndsAt - 30 days, windowEndsAt], including zeros."
+        "description": "Company member directory. Filters and the optional nickname search apply before paging. Omitted sort keeps ascending member ID order; each sort is a stable keyset on (sort value, member ID). Signed cursors bind the actor, session, access epoch, normalized filters including status, sort, order and windowEndsAt; mismatches return 409 VERSION_CONFLICT. last30Days counts accepted canonical trips whose reportingAt lies in [windowEndsAt - 30 days, windowEndsAt], including zeros. statusCounts are company-wide totals that ignore every filter and are read in the page's transaction. With Qualifications each row's levels holds its current level per game, null without a current assignment, for a former member and for a level no longer on the active ladder; levels is absent without Qualifications."
       }
     },
     "/api/v1/members/{memberId}": {
@@ -31619,6 +31635,10 @@
               }
             ],
             "description": "reportingAt of the member's latest accepted canonical trip; null when none."
+          },
+          "levels": {
+            "$ref": "#/components/schemas/MemberStage4DirectoryLevels",
+            "description": "Current level per game; absent when qualifications are unavailable."
           }
         },
         "required": [
@@ -31654,6 +31674,9 @@
           "windowEndsAt": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "End of the 30-day window used by every row of this page and bound into the cursor."
+          },
+          "statusCounts": {
+            "$ref": "#/components/schemas/MemberStage4DirectoryCounts"
           }
         },
         "required": [
@@ -31661,6 +31684,93 @@
           "nextCursor"
         ],
         "additionalProperties": false
+      },
+      "MemberStage4DirectoryLevel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "position"
+        ],
+        "additionalProperties": false,
+        "description": "A current level as listQualificationLevels returns it to the reader: same ID, name and 1-based position."
+      },
+      "MemberStage4DirectoryLevels": {
+        "type": "object",
+        "properties": {
+          "ets2": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemberStage4DirectoryLevel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ats": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemberStage4DirectoryLevel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ets2",
+          "ats"
+        ],
+        "additionalProperties": false,
+        "description": "The member's current level per game. A game is null when the member has no current assignment in it, for every former member, and when the assigned level is no longer on the active ladder."
+      },
+      "MemberStage4DirectoryCounts": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Active members of the company; ignores the search, role, level and status filters."
+          },
+          "former": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Former members of the company; ignores the search, role, level and status filters."
+          },
+          "droveLast30Days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Active members with at least one accepted canonical trip whose reportingAt lies in [windowEndsAt - 30 days, windowEndsAt], the rule of last30Days; ignores the filters. Absent, never zero, when accepted-trip facts are unavailable."
+          }
+        },
+        "required": [
+          "active",
+          "former"
+        ],
+        "additionalProperties": false,
+        "description": "Company-wide member totals returned on every page and read in the page's transaction."
       },
       "MemberStage4DirectoryListEnvelope": {
         "type": "object",

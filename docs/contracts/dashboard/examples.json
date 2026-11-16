@@ -11005,6 +11005,170 @@
       }
     },
     {
+      "id": "listMembers:stage-4-active-tab",
+      "operationId": "listMembers",
+      "status": 200,
+      "query": {
+        "status": "active",
+        "sort": "trips30d",
+        "limit": 2
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41500000-0000-4000-8000-000000000010",
+              "nickname": "Fictional Busy Driver",
+              "formerMember": false,
+              "roles": [
+                "driver"
+              ],
+              "last30Days": {
+                "acceptedTrips": 9,
+                "actualDistanceM": "3150000.5"
+              },
+              "lastAcceptedTripAt": "2026-11-13T09:30:00.000Z",
+              "levels": {
+                "ets2": {
+                  "id": "41500000-0000-4000-8000-000000000042",
+                  "name": "Fictional Driver II",
+                  "position": 2
+                },
+                "ats": {
+                  "id": "41500000-0000-4000-8000-000000000043",
+                  "name": "Fictional Driver I",
+                  "position": 1
+                }
+              }
+            },
+            {
+              "id": "41500000-0000-4000-8000-000000000011",
+              "nickname": "Fictional New Trainee",
+              "formerMember": false,
+              "roles": [
+                "trainee"
+              ],
+              "last30Days": {
+                "acceptedTrips": 0,
+                "actualDistanceM": "0"
+              },
+              "lastAcceptedTripAt": null,
+              "levels": {
+                "ets2": {
+                  "id": "41500000-0000-4000-8000-000000000044",
+                  "name": "Fictional Trainee",
+                  "position": 1
+                },
+                "ats": null
+              }
+            }
+          ],
+          "nextCursor": "signed-stage-4-directory-cursor",
+          "windowEndsAt": "2026-11-14T12:00:00.000Z",
+          "statusCounts": {
+            "active": 18,
+            "former": 4,
+            "droveLast30Days": 11
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "listMembers:stage-4-former-tab",
+      "operationId": "listMembers",
+      "status": 200,
+      "query": {
+        "status": "former",
+        "sort": "lastTrip"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41500000-0000-4000-8000-000000000012",
+              "nickname": "Fictional Former Driver",
+              "formerMember": true,
+              "roles": [],
+              "last30Days": {
+                "acceptedTrips": 1,
+                "actualDistanceM": "420000"
+              },
+              "lastAcceptedTripAt": "2026-11-02T16:45:00.000Z",
+              "levels": {
+                "ets2": null,
+                "ats": null
+              }
+            }
+          ],
+          "nextCursor": null,
+          "windowEndsAt": "2026-11-14T12:00:00.000Z",
+          "statusCounts": {
+            "active": 18,
+            "former": 4,
+            "droveLast30Days": 11
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "listMembers:stage-4-without-trips",
+      "operationId": "listMembers",
+      "status": 200,
+      "query": {
+        "status": "active",
+        "limit": 2
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41500000-0000-4000-8000-000000000013",
+              "nickname": "Fictional Steady Driver",
+              "formerMember": false,
+              "roles": [
+                "driver",
+                "dispatcher"
+              ],
+              "levels": {
+                "ets2": {
+                  "id": "41500000-0000-4000-8000-000000000042",
+                  "name": "Fictional Driver II",
+                  "position": 2
+                },
+                "ats": null
+              }
+            },
+            {
+              "id": "41500000-0000-4000-8000-000000000014",
+              "nickname": "Fictional Unassigned Driver",
+              "formerMember": false,
+              "roles": [
+                "driver"
+              ],
+              "levels": {
+                "ets2": null,
+                "ats": null
+              }
+            }
+          ],
+          "nextCursor": "signed-stage-4-directory-cursor",
+          "statusCounts": {
+            "active": 18,
+            "former": 4
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
       "id": "getMember:stage-4-returned-member",
       "operationId": "getMember",
       "status": 200,
