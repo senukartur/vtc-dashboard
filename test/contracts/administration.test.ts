@@ -401,11 +401,87 @@ test("the member directory returns 30-day totals with zero rows and a bounded wi
     "#/components/parameters/Cursor",
     "search",
     "role",
+    "status",
     "ets2Level",
     "atsLevel",
     "sort",
     "order",
   ]);
+});
+
+test("the member directory adds a status filter, company-wide counts and current levels", () => {
+  const list = valid("MemberStage4DirectoryList");
+  const activeTab = stageFixture("listMembers:stage-4-active-tab").response.data;
+  const formerTab = stageFixture("listMembers:stage-4-former-tab").response.data;
+  const withoutTrips = stageFixture("listMembers:stage-4-without-trips").response.data;
+  for (const data of [activeTab, formerTab, withoutTrips]) expect(list(data)).toBe(true);
+  const [driver, trainee] = activeTab.items;
+  // A zero-activity row and a row with one game unassigned.
+  expect(trainee.last30Days).toEqual({ acceptedTrips: 0, actualDistanceM: "0" });
+  expect(trainee.lastAcceptedTripAt).toBeNull();
+  expect(trainee.levels.ats).toBeNull();
+  expect(activeTab.statusCounts).toEqual({ active: 18, former: 4, droveLast30Days: 11 });
+  const [former] = formerTab.items;
+  expect(former).toMatchObject({ formerMember: true, roles: [] });
+  expect(former.levels).toEqual({ ets2: null, ats: null });
+  expect(former.last30Days).toBeDefined();
+  expect(Object.keys(withoutTrips).sort()).toEqual(["items", "nextCursor", "statusCounts"]);
+  expect(Object.keys(withoutTrips.statusCounts).sort()).toEqual(["active", "former"]);
+  for (const item of withoutTrips.items) {
+    expect(item).not.toHaveProperty("last30Days");
+    expect(item).not.toHaveProperty("lastAcceptedTripAt");
+  }
+  // Existing callers without levels or counts keep validating.
+  const { levels: _levels, ...withoutLevels } = driver;
+  const { statusCounts: _counts, ...withoutCounts } = activeTab;
+  expect(list({ ...withoutCounts, items: [withoutLevels] })).toBe(true);
+
+  const level = driver.levels.ets2;
+  const { position: _position, ...withoutPosition } = level;
+  for (const levels of [
+    { ets2: level },
+    { ets2: withoutPosition, ats: null },
+    { ets2: { ...level, position: 0 }, ats: null },
+    { ets2: { ...level, position: 26 }, ats: null },
+    { ets2: { ...level, position: 1.5 }, ats: null },
+    { ets2: { ...level, terminal: true }, ats: null },
+    { ets2: { ...level, id: "not-a-level" }, ats: null },
+    { ets2: { ...level, name: "" }, ats: null },
+    { ets2: null, ats: null, inCompany: true },
+  ])
+    expect(list({ ...activeTab, items: [{ ...driver, levels }] }), JSON.stringify(levels)).toBe(
+      false,
+    );
+  expect(list({ ...activeTab, items: [{ ...driver, levels: null }] })).toBe(false);
+  for (const statusCounts of [
+    { active: 18 },
+    { former: 4 },
+    { active: -1, former: 4 },
+    { active: 18, former: 4, droveLast30Days: -1 },
+    { active: 18, former: 4, droveLast30Days: "11" },
+    { active: 1.5, former: 4 },
+    { active: 18, former: 4, inCompany: 22 },
+  ])
+    expect(list({ ...activeTab, statusCounts }), JSON.stringify(statusCounts)).toBe(false);
+
+  const listMembers = stage4Operations.find((item) => item.operationId === "listMembers") as {
+    parameters: { name?: string; schema?: { type?: string; enum?: string[] } }[];
+    "x-stage-4-changes": { parameters: string[]; fields: string[] };
+  };
+  const status = listMembers.parameters.find((parameter) => parameter.name === "status");
+  expect(status?.schema).toEqual({ type: "string", enum: ["active", "former"] });
+  expect(listMembers["x-stage-4-changes"].parameters).toContain("status");
+  expect(listMembers["x-stage-4-changes"].fields).toEqual(
+    expect.arrayContaining([
+      "MemberStage4DirectoryList.statusCounts",
+      "MemberStage4DirectoryEntry.levels",
+    ]),
+  );
+  // Both additions stay optional for existing callers.
+  const schemas = stage4Spec.components.schemas;
+  expect(schemas.MemberStage4DirectoryList?.required).toEqual(["items", "nextCursor"]);
+  expect(schemas.MemberStage4DirectoryEntry?.required).not.toContain("levels");
+  expect(schemas.MemberStage4DirectoryCounts?.required).toEqual(["active", "former"]);
 });
 
 test("member profiles add the latest join and last accepted trip", () => {
