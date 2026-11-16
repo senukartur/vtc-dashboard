@@ -23,7 +23,7 @@ export function DriverFilter({
   const pages = useCursorPages(`/members:${i18n.resolvedLanguage}`);
   const query = useTripQuery(
     `/members?${queryString({ limit: pageSize, cursor: pages.cursor })}`,
-    "EnvelopeListMemberSummary",
+    "MemberStage4DirectoryListEnvelope",
     open,
     false,
     true,

@@ -34,7 +34,7 @@ export function useMembersList(
     staleTime: 30000,
     queryFn: async ({ signal }) => {
       try {
-        return (await driversRead(path, "EnvelopeListMemberSummary", signal)).data.data;
+        return (await driversRead(path, "MemberStage4DirectoryListEnvelope", signal)).data.data;
       } catch (error) {
         if (error instanceof AccountFailure && !signal.aborted) {
           if (error.kind === "unauthorized") await session.confirmSessionLoss(signal);
