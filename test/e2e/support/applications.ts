@@ -63,6 +63,24 @@ function decision(outcome: "approve" | "reject", reason: string | null): S["Appl
     deliveryId: null,
   };
 }
+/** The API's check for an application without a check row. */
+function notChecked(steamProfileUrl: string): S["ApplicationStage4TruckersmpCheck"] {
+  return {
+    state: "not_checked",
+    notCheckedReason: steamProfileUrl.startsWith("https://steamcommunity.com/id/")
+      ? "steam_vanity_url"
+      : "not_requested",
+    found: null,
+    playerId: null,
+    displayName: null,
+    profileUrl: null,
+    bans: null,
+    vtc: null,
+    checkedAt: null,
+    lastAttemptAt: null,
+    failure: null,
+  };
+}
 export type Command = {
   method: string;
   path: string;
@@ -147,6 +165,8 @@ export async function mockApplications(page: Page, options: ApplicationsOptions 
     commandOutcomes: [] as (number | "abort")[],
     commands: [] as Command[],
     reads: [] as string[],
+    /** TruckersMP checks by application ID; the detail derives not_checked for the rest. */
+    checks: new Map<string, S["ApplicationStage4TruckersmpCheck"]>(),
   };
   const etag = (prefix: string, version: number) => ({ ETag: `"${prefix}-${version}"` });
   const find = (id: string) => state.apps.find((app) => app.id === id);
@@ -196,7 +216,14 @@ export async function mockApplications(page: Page, options: ApplicationsOptions 
             status: state.detailStatus,
             json: { error: { code: "PRIVATE_SENTINEL" } },
           });
-        return route.fulfill({ json: envelope(app), headers: etag("app", app.version) });
+        // Only the detail carries the check, as the API does; lists and history omit it.
+        return route.fulfill({
+          json: envelope({
+            ...app,
+            truckersmpCheck: state.checks.get(app.id) ?? notChecked(app.fields.steamProfileUrl),
+          }),
+          headers: etag("app", app.version),
+        });
       }
       if (method === "GET" && detail[2] === "/history") {
         const prior = application(ids.prior, app.fields.nickname, "rejected", {
