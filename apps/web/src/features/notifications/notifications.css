@@ -279,11 +279,6 @@
   gap: 12px;
   align-items: start;
 }
-.notifications-preference-form fieldset {
-  border: 0;
-  padding: 0;
-  margin: 0;
-}
 .notifications-header {
   grid-area: header;
   display: flex;
@@ -501,22 +496,163 @@
   color: var(--secondary);
   font-size: var(--font-small);
 }
-.notifications-reload {
+.notifications-preferences-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   justify-self: start;
+  min-height: var(--target-min);
+  font-size: var(--font-small);
+  font-weight: 600;
 }
-.notifications-preference-form {
+
+/* Notification switches in the account Preferences section. */
+.notification-preferences-card {
   display: grid;
+  min-width: 0;
+}
+.notification-preferences-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 12px 14px 0;
+}
+.notification-preferences-header h2 {
+  flex: 1 1 auto;
+  margin: 0;
+  /* Same accent as a card heading that is the card's direct child. */
+  border-left: 3px solid var(--focus);
+  padding-left: 10px;
+}
+.notification-preferences-note,
+.notification-preferences-hint {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.notification-preferences-hint {
+  margin: 2px 14px 0;
+}
+.notification-preferences-card > .notification-preferences-note,
+.notification-preferences-card > .notification-failure,
+.notification-preferences-actions,
+.notification-preferences-state {
+  margin: 8px 14px 0;
+}
+.notification-preferences-actions,
+.notification-preferences-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
-.notification-preference {
+.notification-preferences-forbidden {
+  flex-basis: 100%;
+}
+/* One live region with a stable line height, so loading and saving never shift the rows. */
+.notification-preferences-status {
+  min-height: 1.45em;
+  margin: 4px 14px 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.45;
+}
+.notification-switches {
+  display: grid;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.notification-switch-row {
   display: flex;
   align-items: center;
-  min-height: var(--target-min);
-  gap: 10px;
+  gap: 12px;
+  min-height: 40px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+}
+.notification-switch-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.notification-switch-text label {
+  cursor: pointer;
+}
+.notification-switch-audience {
+  color: var(--muted);
   font-size: var(--font-small);
 }
-.notifications-aside .notifications-preference-form > .button {
-  justify-self: start;
+/* The transparent native checkbox covers the whole target; the track beside it is drawn. */
+.notification-switch {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 24px;
+}
+.notification-switch input[type="checkbox"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.notification-switch-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--border-strong);
+  pointer-events: none;
+  transition: background-color 0.15s ease;
+}
+.notification-switch-track::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--secondary);
+  content: "";
+  transition: transform 0.15s ease;
+}
+.notification-switch input:checked + .notification-switch-track {
+  background: var(--accent);
+}
+.notification-switch input:checked + .notification-switch-track::after {
+  background: #fff;
+  transform: translateX(14px);
+}
+.notification-switch input:focus-visible + .notification-switch-track {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.notification-switch input[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+.notification-switch input[aria-disabled="true"] + .notification-switch-track {
+  opacity: 0.55;
+}
+@media (pointer: coarse) {
+  .notification-switch {
+    width: 48px;
+    height: 40px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notification-switch-track,
+  .notification-switch-track::after {
+    transition: none;
+  }
 }
 @media (min-width: 1051px) {
   .notifications-page {

@@ -261,6 +261,24 @@
 .account-settings .settings-row .field-error {
   flex-basis: 100%;
 }
+/* Display timezone: the select grows beside Save; the live preview sits on its own line. */
+.account-settings .settings-timezone-form .select {
+  flex: 1 1 220px;
+  width: auto;
+  max-width: 340px;
+}
+.account-settings .settings-timezone-now {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 600px) {
+  .account-settings .settings-timezone-form .select {
+    max-width: none;
+  }
+}
 
 /* Disclosed row content; collapsed panels stay mounted so their state survives. */
 .account-settings .settings-panel {
