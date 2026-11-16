@@ -130,31 +130,34 @@ function RankedItems({
 
   return (
     <>
-      <ol className="dashboard-breakdown-list">
-        {view.rows.map((row) => (
-          <li key={row.key} className="dashboard-breakdown-row">
-            <div className="dashboard-breakdown-line">
-              {view.chips && <span className="dashboard-game">{row.game.toUpperCase()}</span>}
-              <span className="dashboard-breakdown-label">
-                {row.labels.map(({ role, label }) => (
-                  <Fragment key={role}>
-                    {role === "destination" && " → "}
-                    {label.label}
-                    <CatalogNativeName value={label} />
-                  </Fragment>
-                ))}
-                {row.fallback && (
-                  <small className="dashboard-fallback"> · {t("catalogs:fallback")}</small>
-                )}
+      {/* Only unrecognized trips (a total above zero without ranked items): no empty list. */}
+      {view.rows.length > 0 && (
+        <ol className="dashboard-breakdown-list">
+          {view.rows.map((row) => (
+            <li key={row.key} className="dashboard-breakdown-row">
+              <div className="dashboard-breakdown-line">
+                {view.chips && <span className="dashboard-game">{row.game.toUpperCase()}</span>}
+                <span className="dashboard-breakdown-label">
+                  {row.labels.map(({ role, label }) => (
+                    <Fragment key={role}>
+                      {role === "destination" && " → "}
+                      {label.label}
+                      <CatalogNativeName value={label} />
+                    </Fragment>
+                  ))}
+                  {row.fallback && (
+                    <small className="dashboard-fallback"> · {t("catalogs:fallback")}</small>
+                  )}
+                </span>
+                <span className="dashboard-breakdown-count">{trips(row.acceptedTrips)}</span>
+              </div>
+              <span className="dashboard-breakdown-bar" aria-hidden="true">
+                <span style={{ width: `${row.barPercent}%` }} />
               </span>
-              <span className="dashboard-breakdown-count">{trips(row.acceptedTrips)}</span>
-            </div>
-            <span className="dashboard-breakdown-bar" aria-hidden="true">
-              <span style={{ width: `${row.barPercent}%` }} />
-            </span>
-          </li>
-        ))}
-      </ol>
+            </li>
+          ))}
+        </ol>
+      )}
       {extra.length > 0 && (
         <ul className="dashboard-breakdown-extra">
           {extra.map((row) => (

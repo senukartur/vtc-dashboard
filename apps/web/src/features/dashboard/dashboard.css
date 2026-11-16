@@ -1,5 +1,8 @@
-/* Compact overview dashboard. Scoped to the page and built from shared tokens, plus the two
-   categorical source hues (VTC-148), validated against --surface with the dataviz palette check. */
+/* Compact overview dashboard. Scoped to the page and built from shared tokens, plus the source
+   split hues (VTC-148). Telemetry and manual are the two categorical hues, validated against
+   --surface with the dataviz palette check (about 4.8:1 and 4.5:1). Undetermined is an
+   intentional neutral for "Source not recognized", not a third category: it fails only the
+   check's chroma floor, by design, and its legend row always carries the text name. */
 .dashboard-page {
   --dashboard-source-telemetry: #3987e5;
   --dashboard-source-manual: #d95926;
@@ -587,7 +590,8 @@
   min-width: 3.2em;
   text-align: right;
 }
-/* Decorative single-series bar: one hue, square at the baseline, rounded data end. */
+/* Decorative single-series bar: one hue, square at the baseline, rounded data end. --chart is
+   below 3:1 on --surface (about 2.2:1); the exact count is printed beside every bar. */
 .dashboard-page .dashboard-breakdown-bar {
   display: block;
   height: 6px;
@@ -603,6 +607,11 @@
   padding-top: 6px;
   border-top: 1px solid var(--border);
   color: var(--muted);
+}
+/* Only unrecognized trips: no ranked list above, so no separator either. */
+.dashboard-page .dashboard-card-head + .dashboard-breakdown-extra {
+  padding-top: 0;
+  border-top: 0;
 }
 /* Thin segmented bar: one whole, 2px surface gaps, rounded ends; a zero part draws nothing. */
 .dashboard-page .dashboard-source-bar {
@@ -630,6 +639,7 @@
   background: var(--dashboard-source-manual);
 }
 .dashboard-page .dashboard-source-undetermined {
+  /* Neutral grey: an unrecognized share, named in its legend row. */
   background: var(--dashboard-source-undetermined);
 }
 
