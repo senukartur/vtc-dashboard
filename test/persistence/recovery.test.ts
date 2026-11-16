@@ -17,6 +17,7 @@ import {
   fixtureRoot,
   guardedSettings,
   hasCode,
+  joinedAtCatchUpPriorFolder,
   manualDraftDiscardPriorFolder,
   manualPriorFolder,
   manualReferencePriorFolder,
@@ -133,7 +134,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 33);
+      assert.equal(await runMigrations(settings), 34);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -190,7 +191,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 33);
+      assert.equal(await runMigrations(settings), 34);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -373,7 +374,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 33);
+      assert.equal(await runMigrations(guardedSettings()), 34);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_adr_requires_cargo','trip_trailer_shape')",
@@ -468,7 +469,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 33);
+        assert.equal(await runMigrations(settings), 34);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -526,7 +527,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 33);
+      assert.equal(await runMigrations(guardedSettings()), 34);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -581,7 +582,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 33);
+      assert.equal(await runMigrations(guardedSettings()), 34);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -635,7 +636,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 33);
+      assert.equal(await runMigrations(guardedSettings()), 34);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -718,7 +719,7 @@ await recoveryTest(
       // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
       // This is not a live backup/restore procedure and never stamps or replays the partial schema.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 33);
+      assert.equal(await runMigrations(settings), 34);
       assert.equal(await runMigrations(settings), 0);
       const [columns] = await connection.query<RowDataPacket[]>(
         "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
@@ -1245,7 +1246,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 33);
+      assert.equal(history.length, 34);
       assert.ok(history.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -2566,12 +2567,12 @@ await recoveryTest(
     try {
       // Reconstruct the known empty synthetic baseline used by the sticky-failure case.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 33);
+      assert.equal(await runMigrations(settings), 34);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(recovered.length, 33);
+      assert.equal(recovered.length, 34);
       assert.ok(recovered.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -2816,12 +2817,13 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 32);
       await seedPrefix();
       const prefix = await history();
-      assert.equal(await runMigrations(settings), 1);
+      // 0032 and the data-only 0033 catch-up, which repeats the same joined_at derivation.
+      assert.equal(await runMigrations(settings), 2);
       assert.equal(await runMigrations(settings), 0);
       const applied = await history();
-      assert.equal(applied.length, 33);
-      assert.deepEqual(applied.slice(0, -1), prefix);
-      assert.equal(applied.at(-1)?.state, "applied");
+      assert.equal(applied.length, 34);
+      assert.deepEqual(applied.slice(0, -2), prefix);
+      assert.ok(applied.slice(-2).every((row) => row.state === "applied"));
       assert.deepEqual(await joined(), expectedJoined);
       assert.deepEqual(await toggles(), expectedToggles);
 
@@ -2963,6 +2965,138 @@ await recoveryTest(
           columns,
         );
       }
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "0033 re-derives joined_at for returns that old code recorded after 0032",
+  async () => {
+    const connection = await testConnection();
+    const settings = guardedSettings();
+    let folder: string | undefined;
+    const id = (n: number) => `e1400000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    const director = id(1),
+      returned = id(2),
+      legacy = id(3),
+      departed = id(4),
+      newcomer = id(5),
+      joined = id(6);
+    const t1 = "2026-01-02 00:00:00.123",
+      t2 = "2026-02-03 00:00:00.456",
+      t3 = "2026-03-04 00:00:00.789",
+      t4 = "2026-04-05 00:00:00.012";
+    const read = (sql: string, values: unknown[] = []) =>
+      connection.query<RowDataPacket[]>(sql, values).then(([rows]) => rows);
+    const joinedAt = async () =>
+      (
+        await read(
+          "SELECT CAST(user_id AS CHAR) id,CAST(joined_at AS CHAR) joinedAt FROM identity_memberships ORDER BY user_id",
+        )
+      ).map((row) => ({ id: row.id, joinedAt: row.joinedAt }));
+    const member = async (userId: string, status: "active" | "inactive", joined?: string) => {
+      await connection.execute(
+        "INSERT INTO identity_users (id,name,email,created_at,updated_at) VALUES (?,'Fictional member',?,?,?)",
+        [userId, `catch-up-${userId.slice(-2)}@example.invalid`, t1, t1],
+      );
+      // Code before VTC-140 relied on the column default, the database clock at insert time.
+      await connection.execute(
+        joined
+          ? "INSERT INTO identity_memberships (user_id,status,joined_at) VALUES (?,?,?)"
+          : "INSERT INTO identity_memberships (user_id,status) VALUES (?,?)",
+        joined ? [userId, status, joined] : [userId, status],
+      );
+    };
+    const membershipAudit = (
+      n: number,
+      subject: string,
+      at: string,
+      details: { before: string; after: string } | null,
+    ) =>
+      connection.execute(
+        "INSERT INTO audit_entries (id,actor_kind,actor_id,operation,subject_kind,subject_id,occurred_at,reason,details) VALUES (?,'user',?,'membership.changed','user',?,?,'operator_request',?)",
+        [
+          id(n),
+          director,
+          subject,
+          at,
+          details &&
+            JSON.stringify({
+              before: { status: details.before, role: "driver" },
+              after: { status: details.after, role: "driver" },
+            }),
+        ],
+      );
+    try {
+      await reset(connection);
+      folder = await joinedAtCatchUpPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 33);
+      for (const userId of [director, returned, legacy, departed, newcomer])
+        await member(userId, userId === departed ? "inactive" : "active");
+      // A member registered and derived before the catch-up keeps the same value.
+      await member(joined, "active", t1);
+      // Old administer code: deactivation then reinstatement changed only status, roles, the
+      // qualification assignment and the audit trail; joined_at kept the registration value.
+      await membershipAudit(20, returned, t2, { before: "active", after: "inactive" });
+      await connection.execute(
+        "INSERT INTO qualification_assignments (id,user_id,game,level_id,assigned_at,purpose,reason) VALUES (?,?,'ets2','02800000-0000-4000-8000-000000000001',?,'reinstatement','Fictional return')",
+        [id(21), returned, t3],
+      );
+      await membershipAudit(22, returned, t3, { before: "inactive", after: "active" });
+      // A legacy return proven by an assignment and a nearby audited change without details.
+      await connection.execute(
+        "INSERT INTO qualification_assignments (id,user_id,game,level_id,assigned_at,purpose,reason) VALUES (?,?,'ets2','02800000-0000-4000-8000-000000000001',?,'reinstatement','Fictional return')",
+        [id(23), legacy, t4],
+      );
+      await membershipAudit(24, legacy, "2026-04-05 00:00:00.512", null);
+      // A deactivation alone is not a return.
+      await membershipAudit(25, departed, t4, { before: "active", after: "inactive" });
+      const stale = await joinedAt();
+      assert.ok(
+        stale
+          .filter((row) => row.id !== joined)
+          .every((row) => row.joinedAt !== null && row.joinedAt > t4),
+        "old inserts carry the database clock",
+      );
+      const prefix = await read("SELECT version,hash,state FROM _vtc_migrations ORDER BY version");
+
+      assert.equal(await runMigrations(settings), 1);
+      assert.equal(await runMigrations(settings), 0);
+      const applied = await read("SELECT version,hash,state FROM _vtc_migrations ORDER BY version");
+      assert.equal(applied.length, 34);
+      assert.deepEqual(applied.slice(0, -1), prefix);
+      assert.equal(applied.at(-1)?.state, "applied");
+      const expected = [
+        { id: director, joinedAt: t1 },
+        { id: returned, joinedAt: t3 },
+        { id: legacy, joinedAt: t4 },
+        { id: departed, joinedAt: t1 },
+        { id: newcomer, joinedAt: t1 },
+        { id: joined, joinedAt: t1 },
+      ];
+      assert.deepEqual(await joinedAt(), expected);
+
+      // 0033 is data only and replaying its statement changes nothing.
+      const sql = await readFile(join(migrationFolder, "0033_joined_at_catch_up.sql"), "utf8");
+      assert.doesNotMatch(sql, /\b(ALTER|CREATE|DROP|RENAME|TRUNCATE|GRANT)\b/i);
+      assert.deepEqual(
+        sql
+          .split("--> statement-breakpoint")
+          .map((statement) => statement.trim())
+          .filter(Boolean).length,
+        1,
+      );
+      await connection.query(sql);
+      assert.deepEqual(await joinedAt(), expected);
+      // It repeats the exact 0032 derivation.
+      const stage4 = await readFile(join(migrationFolder, "0032_bizarre_iron_patriot.sql"), "utf8");
+      const start = sql.indexOf("UPDATE `identity_memberships`");
+      assert.ok(start > 0);
+      assert.ok(stage4.includes(sql.slice(start).trim()));
     } finally {
       await connection.end();
       if (folder) await rm(folder, { recursive: true });
