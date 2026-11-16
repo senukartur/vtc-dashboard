@@ -34,3 +34,31 @@ test("every generated contract schema converts with the web's zod JSON Schema re
     .sort();
   expect(failing).toEqual(knownUnsupported);
 });
+
+test("the web reader parses the member directory status, counts and level fixtures", () => {
+  const { cases } = JSON.parse(
+    readFileSync(new URL("../../docs/contracts/dashboard/examples.json", import.meta.url), "utf8"),
+  ) as { cases: { id: string; response: unknown }[] };
+  const envelope = schema("MemberStage4DirectoryListEnvelope");
+  for (const id of [
+    "listMembers:stage-4-active-tab",
+    "listMembers:stage-4-former-tab",
+    "listMembers:stage-4-without-trips",
+  ]) {
+    const fixture = cases.find((item) => item.id === id);
+    expect(fixture, id).toBeDefined();
+    const parsed = envelope.safeParse(fixture?.response);
+    expect(parsed.success, id).toBe(true);
+    expect(parsed.data, id).toEqual(fixture?.response);
+  }
+  const active = cases.find((item) => item.id === "listMembers:stage-4-active-tab")?.response as {
+    data: { items: { levels: object }[] };
+  };
+  const [row] = active.data.items;
+  expect(
+    envelope.safeParse({
+      ...active,
+      data: { ...active.data, items: [{ ...row, levels: { ets2: null } }] },
+    }).success,
+  ).toBe(false);
+});
