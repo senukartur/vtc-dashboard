@@ -23,7 +23,8 @@ function check(
   history: Historical,
   event: ConfirmedEventContext | null,
 ): TripCheck | null {
-  return history.status === "resolved" && !event ? checkTrip(history.limits, e) : null;
+  const exempt = !!event && (event.attendanceStatus ?? "confirmed") === "confirmed";
+  return history.status === "resolved" && !exempt ? checkTrip(history.limits, e) : null;
 }
 // Knowledge and qualification gates of a non-open trip; callers handle open trips first.
 function examine(
