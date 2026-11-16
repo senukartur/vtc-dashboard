@@ -10,7 +10,7 @@ import {
   listOfKind,
 } from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
-import { formatQuantity, formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatQuantity, formatUtc } from "../../shared/formatting.js";
 import {
   Dialog,
   DialogClose,
@@ -158,7 +158,7 @@ export function TripFacts({
   const { t } = useTranslation("trips"),
     locale = useLocale(),
     session = useSession(),
-    timezone = session.self?.preferences.displayTimezone ?? "UTC";
+    timezone = accountTimeZone(session.self?.preferences.displayTimezone);
   if (!facts)
     return (
       <ReviewSection title={t("tripFacts")}>

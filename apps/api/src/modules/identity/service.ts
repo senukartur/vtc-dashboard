@@ -57,8 +57,7 @@ import {
 } from "./permissions.js";
 import { SUCCESSION_WINDOW_MS, successionWindow } from "./succession-limits.js";
 
-// Type-only: the nullable column is typed by the Stage 4 superset. The route still serializes
-// EnvelopeSelf, and no writer stores a null zone until VTC-142 activates it.
+// A null display time zone means "as on the device" (VTC-142).
 type Self = components["schemas"]["SelfStage4"];
 type Member = typeof membership.$inferSelect;
 type IdentityAuditDetails = {
@@ -1125,10 +1124,7 @@ export function createIdentity(
       expectedVersion: number,
       input: { locale?: "en" | "ru"; displayTimezone?: string | null },
     ) {
-      // Stage 4 compatibility fence: a null zone ("as on the device") stays rejected until
-      // VTC-142 activates it, so the nullable column is never written by this route.
-      if (input.displayTimezone === null) throw identityError(422);
-      if (input.displayTimezone) {
+      if (typeof input.displayTimezone === "string") {
         try {
           new Intl.DateTimeFormat("en", { timeZone: input.displayTimezone });
         } catch {
@@ -1152,7 +1148,9 @@ export function createIdentity(
                 .where(eq(membership.userId, actor.userId));
               return {
                 locale: input.locale ?? row.locale,
-                displayTimezone: input.displayTimezone ?? row.displayTimezone,
+                // An explicit null is stored and returned; an omitted zone keeps the saved one.
+                displayTimezone:
+                  input.displayTimezone !== undefined ? input.displayTimezone : row.displayTimezone,
                 version: row.version + 1,
               };
             },

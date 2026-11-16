@@ -1292,33 +1292,56 @@ test("login keeps omitted and false sessions at 24 hours and true sessions at a 
   }
 });
 
-test("a null display time zone stays rejected without a write until VTC-142", async () => {
+test("a null display time zone means as on the device and round-trips through the service", async () => {
+  type Saved = { locale: "en" | "ru"; displayTimezone: string | null; version: number };
   const login = await signIn((await addMember()).email);
+  const save = (key: string, version: number, input: Partial<Omit<Saved, "version">>) =>
+    safe(identity.preferences(login.actor, key, version, input)) as Promise<Saved>;
   const before = await safe(identity.current(login.actor));
   expect(before.data.preferences.displayTimezone).toBe("UTC");
-  await expect(
-    safe(identity.preferences(login.actor, newId(), before.version, { displayTimezone: null })),
-  ).rejects.toMatchObject({ statusCode: 422 });
-  await expect(
-    safe(
-      identity.preferences(login.actor, newId(), before.version, {
-        locale: "en",
-        displayTimezone: null,
-      }),
-    ),
-  ).rejects.toMatchObject({ statusCode: 422 });
-  const after = await safe(identity.current(login.actor));
-  expect(after.version).toBe(before.version);
-  expect(after.data.preferences).toEqual(before.data.preferences);
-  const [rows] = await control.execute<RowDataPacket[]>(
-    "SELECT display_timezone zone,joined_at IS NOT NULL joined FROM identity_memberships WHERE user_id=?",
-    [login.actor.userId],
-  );
-  expect(rows.map((row) => [row.zone, Number(row.joined)])).toEqual([["UTC", 1]]);
+  const zone = async () => {
+    const [rows] = await control.execute<RowDataPacket[]>(
+      "SELECT display_timezone zone FROM identity_memberships WHERE user_id=?",
+      [login.actor.userId],
+    );
+    return rows.map((row) => row.zone);
+  };
+  const key = newId();
+  const cleared = await save(key, before.version, { displayTimezone: null });
+  expect(cleared).toEqual({
+    locale: before.data.preferences.locale,
+    displayTimezone: null,
+    version: before.version + 1,
+  });
+  expect(await zone()).toEqual([null]);
+  // A replay returns the saved null result without another write.
+  expect(await save(key, before.version, { displayTimezone: null })).toEqual(cleared);
+  const current = await safe(identity.current(login.actor));
+  expect(current.version).toBe(cleared.version);
+  expect(current.data.preferences.displayTimezone).toBeNull();
+  // A language-only change keeps the device zone.
+  const language = await save(newId(), current.version, { locale: "en" });
+  expect(language).toEqual({ locale: "en", displayTimezone: null, version: current.version + 1 });
+  expect(await zone()).toEqual([null]);
+  for (const displayTimezone of ["Mars/Base", ""])
+    await expect(
+      save(newId(), language.version, { displayTimezone }),
+      displayTimezone,
+    ).rejects.toMatchObject({ statusCode: 422 });
+  const restored = await save(newId(), language.version, {
+    displayTimezone: "Europe/Warsaw",
+  });
+  expect(restored).toEqual({
+    locale: "en",
+    displayTimezone: "Europe/Warsaw",
+    version: language.version + 1,
+  });
+  expect(await zone()).toEqual(["Europe/Warsaw"]);
 });
 
-test("a null display time zone is rejected over HTTP after session, CSRF and version checks", async () => {
-  const login = await signIn((await addMember()).email);
+test("a null display time zone round-trips over HTTP after session and CSRF checks", async () => {
+  const member = await addMember();
+  const login = await signIn(member.email);
   const before = await safe(identity.current(login.actor));
   const app = await createApp({ checkReadiness: async () => true, identity });
   const receipts = async () => {
@@ -1344,22 +1367,40 @@ test("a null display time zone is rejected over HTTP after session, CSRF and ver
         payload,
       });
     const stored = await receipts();
-    // The input schema admits null, so CSRF and the version precondition answer before the fence.
     expect((await patch({ "x-csrf-token": "invalid" }, { displayTimezone: null })).statusCode).toBe(
       403,
     );
-    for (const payload of [{ displayTimezone: null }, { locale: "en", displayTimezone: null }]) {
-      const response = await patch({}, payload);
-      expect(response.statusCode, JSON.stringify(payload)).toBe(422);
+    for (const displayTimezone of ["Mars/Base", ""]) {
+      const response = await patch({}, { displayTimezone });
+      expect(response.statusCode, displayTimezone).toBe(422);
       expect(response.json().error.code).toBe("INVALID_PAYLOAD");
     }
     expect(await receipts()).toBe(stored);
+    const saved = await patch({}, { displayTimezone: null });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.headers.etag).toBe(`"v${before.version + 1}"`);
+    expect(saved.json().data).toEqual({
+      locale: before.data.preferences.locale,
+      displayTimezone: null,
+    });
+    const me = await app.inject({ url: "/api/v1/me", headers: { cookie } });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().data.preferences.displayTimezone).toBeNull();
+    // A fresh login returns the same self payload with the device zone.
+    const bound2 = await app.inject({ url: "/api/v1/auth/csrf" });
+    const fresh = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      headers: {
+        origin: config.origin,
+        cookie: cookies(bound2.cookies.map((entry) => `${entry.name}=${entry.value}`)),
+        "x-csrf-token": bound2.json().data.token as string,
+      },
+      payload: { email: member.email, password },
+    });
+    expect(fresh.statusCode).toBe(200);
+    expect(fresh.json().data.preferences.displayTimezone).toBeNull();
   } finally {
     await app.close();
   }
-  const after = await safe(identity.current(login.actor));
-  expect([after.version, after.data.preferences]).toEqual([
-    before.version,
-    before.data.preferences,
-  ]);
 });

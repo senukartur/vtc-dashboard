@@ -19,6 +19,7 @@ import {
   notificationAccountPath,
   preferenceNames,
 } from "../../apps/web/src/features/notifications/model.ts";
+import { notificationTranslations } from "../../apps/web/src/features/notifications/translations.ts";
 import {
   notificationCommand,
   notificationRead,
@@ -105,10 +106,27 @@ for (const status of [503, 429])
     expect(calls[2]).toBe("/api/v1/notifications?limit=50");
   });
 test("registered messages have closed mappings; unknown wire keys never become translation paths", () => {
-  for (const message of messages)
+  expect(messages).toEqual(expect.arrayContaining(["trip.accepted", "event.published"]));
+  expect(
+    notificationVisual(notificationFixture({ messageKey: "notifications.trip.accepted" })),
+  ).toEqual({
+    icon: "check",
+    tone: "accepted",
+    kind: "Trip",
+  });
+  expect(
+    notificationVisual(notificationFixture({ messageKey: "notifications.event.published" })),
+  ).toEqual({ icon: "calendar", tone: "info", kind: "Event" });
+  for (const message of messages) {
     expect(messageName(notificationFixture({ messageKey: `notifications.${message}` }))).toBe(
       message,
     );
+    for (const locale of ["en", "ru"] as const)
+      expect(
+        (notificationTranslations[locale].messages as Record<string, string>)[message],
+        `${locale}:${message}`,
+      ).toMatch(/\S/);
+  }
   expect(
     messageName(notificationFixture({ messageKey: "<script>PRIVATE_SENTINEL</script>" })),
   ).toBe("unknown");

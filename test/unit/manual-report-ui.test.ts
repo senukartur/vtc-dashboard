@@ -130,7 +130,9 @@ describe("manual report requirements", () => {
 describe("manual report reference controls", () => {
   test("account timezone converts wall time to UTC and unknown zones fall back to UTC", () => {
     expect(displayTimezone("Unknown/Fictional")).toBe("UTC");
-    expect(displayTimezone(null)).toBe("UTC");
+    expect(displayTimezone(undefined)).toBe("UTC");
+    // A null saved zone means "as on the device".
+    expect(displayTimezone(null)).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
     expect(referenceInstant("2025-01-12T10:15", "Asia/Kathmandu")).toBe("2025-01-12T04:30:00.000Z");
     expect(referenceLocalValue("2025-01-12T04:30:00.037Z", "Asia/Kathmandu")).toBe(
       "2025-01-12T10:15",

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
-import { formatQuantity, formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { useCursorPages } from "../../shared/paging.js";
 import { DataTable } from "../../shared/ui/DataTable.js";
 import { Pager } from "../../shared/ui/pager.js";
@@ -62,7 +62,7 @@ export function usePromotionDisplay() {
   const { t, i18n } = useTranslation("promotions");
   const { self } = useSession();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
-  const timezone = self?.preferences.displayTimezone ?? "UTC";
+  const timezone = accountTimeZone(self?.preferences.displayTimezone);
   const number = new Intl.NumberFormat(locale);
   return {
     trips: (actual: number, required: number | null, showThreshold = true) =>

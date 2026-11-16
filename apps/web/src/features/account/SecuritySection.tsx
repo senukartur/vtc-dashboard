@@ -3,7 +3,7 @@ import { type RefObject, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatUtc } from "../../shared/formatting.js";
 import { Badge, Button } from "../../shared/ui/primitives.js";
 import { type AccountField, codeValid, emailValid, Form, newPasswordValid } from "./Form.js";
 import { SettingsRow } from "./SettingsRow.js";
@@ -392,7 +392,7 @@ function EmailRow({
                   date: formatUtc(
                     current.expiresAt,
                     i18n.resolvedLanguage === "en" ? "en" : "ru",
-                    session.self?.preferences.displayTimezone ?? "UTC",
+                    accountTimeZone(session.self?.preferences.displayTimezone),
                   ),
                 })}
               </p>
@@ -471,7 +471,7 @@ function SessionRow() {
   );
 }
 
-export function SecuritySection({ self }: { self: DTO["Self"] }) {
+export function SecuritySection({ self }: { self: DTO["SelfStage4"] }) {
   const { t } = useTranslation("account");
   const verified = self.emailVerified;
   const [justVerified, setJustVerified] = useState(false);

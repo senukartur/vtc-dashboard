@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { formatUtc } from "../../shared/formatting.js";
+import { accountTimeZone, formatUtc } from "../../shared/formatting.js";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../../shared/ui/dialog.js";
 import { Badge, Button, Card, Label, Table } from "../../shared/ui/primitives.js";
 import { ReferralFact, TruckersmpFact } from "./ApplicationChecks.js";
@@ -87,7 +87,7 @@ function useDates() {
   const { i18n } = useTranslation("administration"),
     session = useSession();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    timezone = session.self?.preferences.displayTimezone ?? "UTC";
+    timezone = accountTimeZone(session.self?.preferences.displayTimezone);
   return {
     timezone,
     format: (value: string | null | undefined) => formatUtc(value ?? null, locale, timezone),
