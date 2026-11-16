@@ -162,13 +162,19 @@ test(
 );
 
 test(
-  "R3 Other with blank text sends only the source",
+  "R3 Other with blank text sends only the source, even past the limit",
   browserCase(["@functional"]),
   async ({ page }) => {
     const payloads = await capture(page);
     await page.goto("/en");
     await fill(page);
     await source(page).selectOption("other");
+    // Blank text is dropped rather than rejected, so it is never marked over the limit.
+    await other(page).fill(" ".repeat(201));
+    await expect(other(page)).toHaveAccessibleDescription("201 of 200 characters");
+    await expect(page.locator("#referral-count")).not.toHaveClass(/field-error/);
+    await other(page).fill("\ufeff".repeat(201));
+    await expect(page.locator("#referral-count")).not.toHaveClass(/field-error/);
     await other(page).fill("   ");
     await submit(page);
     await expect(page.getByRole("status")).toContainText(text.en.sent);

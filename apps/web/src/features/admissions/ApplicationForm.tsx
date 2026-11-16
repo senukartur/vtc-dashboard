@@ -8,6 +8,7 @@ import {
   applicationPayload,
   applicationSchema,
   type ApplicationFields,
+  referralBlank,
   referralOtherMax,
   referralSources,
 } from "./schema.js";
@@ -92,8 +93,10 @@ export function ApplicationForm() {
   const seconds = Math.max(0, Math.ceil((waitUntil - now) / 1000));
   const failure = mutation.error instanceof ApplicationFailure ? mutation.error.kind : "uncertain";
   const values = watch();
-  // Code points, matching the server's 200-character bound.
-  const referralCount = [...(values.referralOther ?? "")].length;
+  // Code points, matching the server's 200-character bound. Blank text is dropped, not rejected,
+  // so only text that would be sent is marked over the limit.
+  const referralCount = [...(values.referralOther ?? "")].length,
+    referralOver = referralCount > referralOtherMax && !referralBlank(values.referralOther ?? "");
   const changed =
     attempt.current && attempt.current.serialized !== JSON.stringify(applicationPayload(values));
   async function submit(fields: ApplicationFields) {
@@ -206,10 +209,7 @@ export function ApplicationForm() {
                 aria-describedby={`referral-count${errors.referralOther ? " referralOther-error" : ""}`}
                 {...register("referralOther")}
               />
-              <p
-                id="referral-count"
-                className={referralCount > referralOtherMax ? "field-error" : "muted"}
-              >
+              <p id="referral-count" className={referralOver ? "field-error" : "muted"}>
                 {t("referralCount", { count: referralCount, max: referralOtherMax })}
               </p>
               <FieldError id="referralOther-error">

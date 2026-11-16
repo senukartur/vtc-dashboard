@@ -139,7 +139,17 @@ describe("referral source answer", () => {
       }
   });
   test("other without text, or with only blank text, sends just the source", () => {
-    for (const referralOther of ["", "   ", "\n\t", "\u3000", "\ufeff", "\u0085", "\u00a0\u2028"]) {
+    for (const referralOther of [
+      "",
+      "   ",
+      "\n\t",
+      "\u3000",
+      "\ufeff",
+      "\u0085",
+      "\u00a0\u2028",
+      " ".repeat(201),
+      "\ufeff".repeat(201),
+    ]) {
       const parsed = applicationSchema.safeParse(other(referralOther));
       expect(parsed.success).toBe(true);
       const payload = applicationPayload(parsed.data ?? fields);
