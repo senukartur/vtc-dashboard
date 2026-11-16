@@ -683,6 +683,15 @@ class WindowTests(unittest.TestCase):
             for unrelated in ['reconciliation_commands', 'reconciliation_history', 'reconciliations']:
                 self.assertNotIn(unrelated, profile)
 
+    def test_admissions_truckers_check_profile_matches_the_activation_baseline_without_delete(self):
+        manifest = json.loads(pathlib.Path(__file__).with_name('notifications-acceptance-grants.json').read_text())
+        baseline = json.loads(pathlib.Path(__file__).with_name('activation-grants.json').read_text())
+        self.assertEqual(manifest['runtime']['admissions_truckers_checks'], ['INSERT', 'SELECT', 'UPDATE'])
+        self.assertEqual(manifest['jobs']['admissions_truckers_checks'], ['SELECT', 'UPDATE'])
+        for role in ['runtime', 'jobs']:
+            self.assertEqual(sorted(manifest[role]['admissions_truckers_checks']),
+                             sorted(baseline[role]['admissions_truckers_checks']))
+
     def test_column_grant_renderer_quotes_identifiers_and_rejects_sql_fragments(self):
         self.assertEqual(n.grant_privileges(o, ['INSERT', 'SELECT', 'UPDATE(trip_id,cursor)']),
                          'INSERT,SELECT,UPDATE(`trip_id`,`cursor`)')

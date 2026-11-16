@@ -46,7 +46,7 @@ Callback responses use no-store/no-referrer and a restrictive no-assets CSP; suc
 
 ## TruckersMP cache
 
-The only lookup is `GET https://api.truckersmp.com/v2/player/{verifiedSteamId}`. Its response includes VTC membership; no second membership request, ban/history/Discord/billing storage or disciplinary inference is made. `response.steamID` must be an exact matching string; numeric `steamID64` is ignored. Successful player absence is accepted only for the provider's documented explicit no-player body. Other malformed/error results remain failures. A player outside a VTC has `inVtc:false` with null VTC IDs/names/member reference, rather than fabricated zero identifiers.
+The only lookup is `GET https://api.truckersmp.com/v2/player/{verifiedSteamId}`. Its response includes VTC membership; no second membership request, ban/history/Discord/billing storage or disciplinary inference is made. `response.steamID` must be an exact matching string; numeric `steamID64` is ignored. Successful player absence is accepted only for the provider's documented explicit no-player body. Other malformed/error results remain failures. A player outside a VTC has `inVtc:false` with null VTC IDs/names/member reference, rather than fabricated zero identifiers. The VTC-144 [applicant check](admissions.md#stage-4-referral-and-truckersmp-check) reuses this exact bounded request through the additive `truckersApplicantProvider`, which also reduces `bansCount`/`banned` to `{any,count}` (null for a staff account's null count); member lookups, this cache and their single request per refresh are unchanged.
 
 | Cache state | Meaning |
 | --- | --- |
