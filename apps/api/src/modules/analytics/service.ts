@@ -2,11 +2,13 @@ import type { components } from "@vtc/contracts";
 import { applicationId, type TxContext, type UnitOfWork } from "@vtc/db";
 import { company, membership } from "@vtc/db/identity-schema";
 import { trips } from "@vtc/db/trips-schema";
-import { and, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
-import { pagination } from "./pagination.js";
+import { afterIndex, type LeaderboardPosition, pagination } from "./pagination.js";
 
 type Analytics = components["schemas"]["Analytics"];
+type CompanyAnalytics = components["schemas"]["AnalyticsStage4Company"];
+type GameTotals = components["schemas"]["AnalyticsStage4GameTotals"];
 type LeaderboardEntry = components["schemas"]["LeaderboardEntry"];
 type ListLeaderboardEntry = components["schemas"]["ListLeaderboardEntry"];
 export type CompanyStatsPublic = components["schemas"]["CompanyStatsPublic"];
@@ -25,9 +27,38 @@ export interface AnalyticsQuery {
   granularity?: "day" | "month" | undefined;
 }
 
-export interface LeaderboardQuery extends AnalyticsQuery {
+export type Period = "range" | "all_time";
+
+/** Company and leaderboard query: fromDate/toDateExclusive are required for range and absent for all_time. */
+export interface CompanyAnalyticsQuery {
+  game?: "ets2" | "ats" | undefined;
+  fromDate?: string | undefined;
+  toDateExclusive?: string | undefined;
+  granularity?: "day" | "month" | undefined;
+  period?: Period | undefined;
+}
+
+export interface LeaderboardQuery extends CompanyAnalyticsQuery {
   limit?: number | undefined;
   cursor?: string | undefined;
+}
+
+export type PeriodQuery =
+  | {
+      period: "range";
+      game: "ets2" | "ats" | undefined;
+      granularity: "day" | "month";
+      fromDate: string;
+      toDateExclusive: string;
+    }
+  | { period: "all_time"; game: "ets2" | "ats" | undefined; granularity: "month" };
+
+export interface CoveredRange {
+  period: Period;
+  fromDate: string;
+  toDateExclusive: string;
+  startIso: string;
+  endIso: string;
 }
 
 export function validateAnalyticsConfig(config: AnalyticsConfig): void {
@@ -75,6 +106,26 @@ export function addDistances(a: string, b: string): string {
   return frac === 0n ? whole.toString() : `${whole}.${frac}`;
 }
 
+// One formatter per IANA zone; the set of valid zone names is small and fixed.
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
+function zoneFormatter(timeZone: string): Intl.DateTimeFormat {
+  let formatter = zoneFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    zoneFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
 export function parseTimezoneDate(dateStr: string, timeZone: string): Date {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
   if (!match) {
@@ -97,16 +148,7 @@ export function parseTimezoneDate(dateStr: string, timeZone: string): Date {
   }
 
   let utc = Date.UTC(year, month - 1, day, 0, 0, 0);
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
+  const formatter = zoneFormatter(timeZone);
 
   for (let i = 0; i < 3; i++) {
     const formattedParts = formatter.formatToParts(new Date(utc));
@@ -276,6 +318,76 @@ export function generateBuckets(
   return buckets;
 }
 
+/** UTC epoch milliseconds of each bucket's local start (strictly increasing, DST-aware). */
+export function bucketStarts(buckets: readonly { date: string }[], timeZone: string): number[] {
+  return buckets.map((bucket) => parseTimezoneDate(bucket.date, timeZone).getTime());
+}
+
+/** Explicit range: ISO calendar dates, from < to, at most 732 days. */
+export function validateDateRange(fromDate: string, toDateExclusive: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDateExclusive)) {
+    throw identityError(422);
+  }
+  if (fromDate >= toDateExclusive) {
+    throw identityError(422);
+  }
+  const [sy = 2026, sm = 1, sd = 1] = fromDate.split("-").map(Number);
+  const [ey = 2026, em = 1, ed = 1] = toDateExclusive.split("-").map(Number);
+  const days = (Date.UTC(ey, em - 1, ed) - Date.UTC(sy, sm - 1, sd)) / (1000 * 60 * 60 * 24);
+  if (days > 732) {
+    throw identityError(422);
+  }
+}
+
+/**
+ * Normalizes the company/leaderboard period parameters before any database work.
+ * range (default) needs both dates; all_time forbids them, uses month granularity and,
+ * for company analytics, rejects granularity=day. The leaderboard ignores granularity.
+ */
+export function periodQuery(
+  query: CompanyAnalyticsQuery,
+  options: { company: boolean },
+): PeriodQuery {
+  const period = query.period ?? "range";
+  if (period === "all_time") {
+    if (query.fromDate !== undefined || query.toDateExclusive !== undefined) {
+      throw identityError(422);
+    }
+    if (options.company && query.granularity === "day") throw identityError(422);
+    return { period, game: query.game, granularity: "month" };
+  }
+  if (period !== "range" || query.fromDate === undefined || query.toDateExclusive === undefined) {
+    throw identityError(422);
+  }
+  validateDateRange(query.fromDate, query.toDateExclusive);
+  return {
+    period,
+    game: query.game,
+    granularity: query.granularity ?? "day",
+    fromDate: query.fromDate,
+    toDateExclusive: query.toDateExclusive,
+  };
+}
+
+/**
+ * Month-aligned all_time range in the reporting zone: from the month of the earliest accepted
+ * trip (or the current month without one) to the first day after the current month.
+ */
+export function allTimeRange(
+  earliestIso: string | null,
+  now: Date,
+  timeZone: string,
+): { fromDate: string; toDateExclusive: string } {
+  const current = currentReportingMonth(now, timeZone);
+  const first = earliestIso
+    ? formatDateInTimezone(new Date(earliestIso), timeZone, "month")
+    : current.fromDate;
+  return {
+    fromDate: first < current.fromDate ? first : current.fromDate,
+    toDateExclusive: current.toDateExclusive,
+  };
+}
+
 export function createAnalytics(
   uow: UnitOfWork,
   identity: Identity,
@@ -292,64 +404,103 @@ export function createAnalytics(
     return tz;
   }
 
-  function validateDateRange(query: AnalyticsQuery) {
-    if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(query.fromDate) ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(query.toDateExclusive)
-    ) {
-      throw identityError(422);
+  /** Accepted unique canonical trips in the covered range (the company and leaderboard predicate). */
+  function acceptedIn(range: CoveredRange, game: "ets2" | "ats" | undefined): SQL[] {
+    const conditions = [
+      eq(trips.decision, "accepted"),
+      isNull(trips.aliasOf),
+      gte(trips.reportingAt, range.startIso),
+      lt(trips.reportingAt, range.endIso),
+    ];
+    if (game) conditions.push(eq(trips.game, game));
+    return conditions;
+  }
+
+  /** The range actually covered: the requested dates, or the month-aligned all_time range. */
+  async function coveredRange(
+    tx: TxContext,
+    timeZone: string,
+    query: PeriodQuery,
+    instant: Date,
+  ): Promise<CoveredRange> {
+    let dates: { fromDate: string; toDateExclusive: string };
+    if (query.period === "range") {
+      dates = query;
+    } else {
+      // Earliest accepted trip: ordered range read on trip_analytics_reporting, not MIN().
+      // Keep in sync with the EXPLAIN mirror in test/integration/analytics.test.ts.
+      const conditions = [
+        eq(trips.decision, "accepted"),
+        isNull(trips.aliasOf),
+        isNotNull(trips.reportingAt),
+      ];
+      if (query.game) conditions.push(eq(trips.game, query.game));
+      const [first] = await uow
+        .client(tx)
+        .select({ reportingAt: trips.reportingAt })
+        .from(trips)
+        .where(and(...conditions))
+        .orderBy(trips.reportingAt)
+        .limit(1);
+      dates = allTimeRange(first?.reportingAt ?? null, instant, timeZone);
     }
-    if (query.fromDate >= query.toDateExclusive) {
-      throw identityError(422);
-    }
-    const startParts = query.fromDate.split("-").map(Number);
-    const endParts = query.toDateExclusive.split("-").map(Number);
-    const sy = startParts[0] ?? 2026;
-    const sm = startParts[1] ?? 1;
-    const sd = startParts[2] ?? 1;
-    const ey = endParts[0] ?? 2026;
-    const em = endParts[1] ?? 1;
-    const ed = endParts[2] ?? 1;
-    const sDate = Date.UTC(sy, sm - 1, sd);
-    const eDate = Date.UTC(ey, em - 1, ed);
-    const days = (eDate - sDate) / (1000 * 60 * 60 * 24);
-    if (days > 732) {
-      throw identityError(422);
-    }
+    return {
+      period: query.period,
+      fromDate: dates.fromDate,
+      toDateExclusive: dates.toDateExclusive,
+      startIso: parseTimezoneDate(dates.fromDate, timeZone).toISOString(),
+      endIso: parseTimezoneDate(dates.toDateExclusive, timeZone).toISOString(),
+    };
   }
 
   return {
-    async getCompanyAnalytics(actor: Actor, query: AnalyticsQuery): Promise<Analytics> {
-      validateDateRange(query);
+    async getCompanyAnalytics(
+      actor: Actor,
+      query: CompanyAnalyticsQuery,
+    ): Promise<CompanyAnalytics> {
+      const q = periodQuery(query, { company: true });
+      const instant = now();
       return uow.run(async (tx) => {
         await identity.authorizeInTransaction(tx, actor, "company.read");
         const timeZone = await resolveTimezone(tx);
-        const startIso = parseTimezoneDate(query.fromDate, timeZone).toISOString();
-        const endIso = parseTimezoneDate(query.toDateExclusive, timeZone).toISOString();
-        const granularity = query.granularity ?? "day";
+        const range = await coveredRange(tx, timeZone, q, instant);
+        const granularity = q.granularity;
+        const buckets = generateBuckets(range.fromDate, range.toDateExclusive, granularity);
+        const starts = bucketStarts(buckets, timeZone);
+        const accepted = and(...acceptedIn(range, q.game));
+        const db = uow.client(tx);
 
-        const conditions = [
-          isNull(trips.aliasOf),
-          eq(trips.decision, "accepted"),
-          gte(trips.reportingAt, startIso),
-          lt(trips.reportingAt, endIso),
-        ];
-        if (query.game) {
-          conditions.push(eq(trips.game, query.game));
-        }
-
-        const acceptedRows = await uow
-          .client(tx)
+        // One grouped statement: INTERVAL() maps reporting_at (epoch ms) to its 1-based local
+        // bucket; TRUNCATE(d, 1) is the per-trip tenth truncation of addDistances(). Nothing is
+        // loaded per trip. Keep in sync with the EXPLAIN mirror in test/integration/analytics.test.ts.
+        const bucketIndex = sql<
+          number | string
+        >`interval(timestampdiff(microsecond, '1970-01-01 00:00:00', ${trips.reportingAt}) div 1000, ${sql.join(
+          starts.map((start) => sql`${start}`),
+          sql`, `,
+        )})`;
+        const rows = await db
           .select({
-            id: trips.id,
-            reportingAt: trips.reportingAt,
-            actualDistanceM: trips.actualDistanceM,
-            version: trips.version,
-            adjudicationVersion: trips.adjudicationVersion,
+            bucket: bucketIndex.as("bucket"),
+            game: trips.game,
+            acceptedTrips: sql<number | string>`count(*)`,
+            actualDistanceM: sql<string>`coalesce(sum(truncate(${trips.actualDistanceM}, 1)), 0)`,
+            version: sql<
+              number | string
+            >`max(greatest(${trips.version}, ${trips.adjudicationVersion}))`,
           })
           .from(trips)
-          .where(and(...conditions));
+          .where(accepted)
+          .groupBy(sql`bucket`, trips.game);
 
+        // Same predicate as the aggregate, so activeDrivers equals the leaderboard rankedMembers.
+        const [drivers] = await db
+          .select({ count: sql<number | string>`count(distinct ${trips.ownerId})` })
+          .from(trips)
+          .where(accepted);
+
+        // all_time also sees unfinalized trips older than the earliest accepted one: accepting
+        // them would change the totals and fromDate, so the probe has no lower bound there.
         const pendingConditions = [
           isNull(trips.aliasOf),
           or(
@@ -357,72 +508,69 @@ export function createAnalytics(
             eq(trips.correctionPending, true),
             eq(trips.decision, "pending_review"),
           ),
-          gte(trips.reportingAt, startIso),
-          lt(trips.reportingAt, endIso),
+          ...(range.period === "all_time" ? [] : [gte(trips.reportingAt, range.startIso)]),
+          lt(trips.reportingAt, range.endIso),
         ];
-        if (query.game) {
-          pendingConditions.push(eq(trips.game, query.game));
+        if (q.game) {
+          pendingConditions.push(eq(trips.game, q.game));
         }
-
-        const pendingRows = await uow
-          .client(tx)
+        const pendingRows = await db
           .select({ id: trips.id })
           .from(trips)
           .where(and(...pendingConditions))
           .limit(1);
 
-        const projectionPending = pendingRows.length > 0;
+        const activeMembers = await identity.activeMemberCountInTransaction(tx);
+
+        const games: GameTotals[] = (q.game ? [q.game] : (["ets2", "ats"] as const)).map(
+          (game) => ({ game, acceptedTrips: 0, actualDistanceM: "0" }),
+        );
+        let acceptedTrips = 0;
+        let actualDistanceM = "0";
         let projectionVersion = 1;
-        let totalDistance = "0";
-
-        const buckets = generateBuckets(query.fromDate, query.toDateExclusive, granularity);
-        const bucketMap = new Map(buckets.map((b) => [b.date, b]));
-
-        for (const row of acceptedRows) {
-          if (row.adjudicationVersion > projectionVersion) {
-            projectionVersion = row.adjudicationVersion;
+        for (const row of rows) {
+          const count = Number(row.acceptedTrips);
+          const distance = decimal(row.actualDistanceM);
+          const index = Math.min(Math.max(0, Number(row.bucket) - 1), buckets.length - 1);
+          const bucket = buckets[index];
+          if (bucket) {
+            bucket.acceptedTrips += count;
+            bucket.actualDistanceM = addDistances(bucket.actualDistanceM, distance);
           }
-          if (row.version > projectionVersion) {
-            projectionVersion = row.version;
+          const totals = games.find((item) => item.game === row.game);
+          if (totals) {
+            totals.acceptedTrips += count;
+            totals.actualDistanceM = addDistances(totals.actualDistanceM, distance);
           }
-          const rowDistance = decimal(row.actualDistanceM);
-          totalDistance = addDistances(totalDistance, rowDistance);
-
-          if (row.reportingAt) {
-            const bucketKey = formatDateInTimezone(
-              new Date(row.reportingAt),
-              timeZone,
-              granularity,
-            );
-            const b = bucketMap.get(bucketKey);
-            if (b) {
-              b.acceptedTrips += 1;
-              b.actualDistanceM = addDistances(b.actualDistanceM, rowDistance);
-            }
-          }
+          acceptedTrips += count;
+          actualDistanceM = addDistances(actualDistanceM, distance);
+          projectionVersion = Math.max(projectionVersion, Number(row.version));
         }
 
         return {
-          acceptedTrips: acceptedRows.length,
-          actualDistanceM: totalDistance,
+          acceptedTrips,
+          actualDistanceM,
           reportingTimezone: timeZone,
-          fromDate: query.fromDate,
-          toDateExclusive: query.toDateExclusive,
+          fromDate: range.fromDate,
+          toDateExclusive: range.toDateExclusive,
           granularity,
           buckets,
-          computedAt: new Date().toISOString(),
+          computedAt: instant.toISOString(),
           projectionVersion,
-          projectionPending,
+          projectionPending: pendingRows.length > 0,
+          period: range.period,
+          activeDrivers: Number(drivers?.count ?? 0),
+          activeMembers,
+          byGame: games,
         };
       });
     },
-
     async getMemberAnalytics(
       actor: Actor,
       memberId: string,
       query: AnalyticsQuery,
     ): Promise<Analytics> {
-      validateDateRange(query);
+      validateDateRange(query.fromDate, query.toDateExclusive);
       const parsedMemberId = applicationId(memberId);
 
       return uow.run(async (tx) => {
@@ -594,78 +742,77 @@ export function createAnalytics(
     },
 
     async getLeaderboard(actor: Actor, query: LeaderboardQuery): Promise<ListLeaderboardEntry> {
-      validateDateRange(query);
+      const q = periodQuery(query, { company: false });
+      const instant = now();
       return uow.run(async (tx) => {
         await identity.authorizeInTransaction(tx, actor, "company.read");
         const timeZone = await resolveTimezone(tx);
-        const startIso = parseTimezoneDate(query.fromDate, timeZone).toISOString();
-        const endIso = parseTimezoneDate(query.toDateExclusive, timeZone).toISOString();
+        const range = await coveredRange(tx, timeZone, q, instant);
 
-        const conditions = [
-          isNull(trips.aliasOf),
-          eq(trips.decision, "accepted"),
-          gte(trips.reportingAt, startIso),
-          lt(trips.reportingAt, endIso),
-        ];
-        if (query.game) {
-          conditions.push(eq(trips.game, query.game));
-        }
-
+        // Order: exact distance desc (no distance counts as 0), accepted trips desc, member ID.
+        // Keep in sync with the EXPLAIN mirror in test/integration/analytics.test.ts.
+        const distance = sql<string>`coalesce(sum(${trips.actualDistanceM}), 0)`;
+        const count = sql<number | string>`count(*)`;
         const grouped = await uow
           .client(tx)
-          .select({
-            ownerId: trips.ownerId,
-            acceptedTrips: sql<number>`count(*)`,
-            actualDistanceM: sql<string>`coalesce(sum(${trips.actualDistanceM}), 0)`,
-          })
+          .select({ ownerId: trips.ownerId, acceptedTrips: count, actualDistanceM: distance })
           .from(trips)
-          .where(and(...conditions))
+          .where(and(...acceptedIn(range, q.game)))
           .groupBy(trips.ownerId)
-          .orderBy(sql`sum(${trips.actualDistanceM}) desc`, sql`count(*) desc`, trips.ownerId);
+          .orderBy(sql`${distance} desc`, sql`${count} desc`, trips.ownerId);
 
-        const formattedRows: Array<{
-          ownerId: string;
-          acceptedTrips: number;
-          actualDistanceM: string;
-        }> = grouped.map(
-          (row: { ownerId: string; acceptedTrips: number; actualDistanceM: string }) => ({
-            ownerId: row.ownerId,
-            acceptedTrips: Number(row.acceptedTrips),
-            actualDistanceM: decimal(row.actualDistanceM),
-          }),
-        );
+        const ranked: LeaderboardPosition[] = grouped.map((row) => ({
+          id: row.ownerId,
+          trips: Number(row.acceptedTrips),
+          distance: decimal(row.actualDistanceM),
+        }));
 
-        const scope = [query.game ?? null, query.fromDate, query.toDateExclusive, timeZone];
+        // The cursor binds the period and the covered range, so an all_time cursor fails with
+        // 409 once the month rolls over or an earlier trip changes the range.
+        const scope = [
+          q.game ?? null,
+          range.period,
+          range.fromDate,
+          range.toDateExclusive,
+          timeZone,
+        ];
         const pager = page(actor, scope, { limit: query.limit, cursor: query.cursor });
-
-        let startingIndex = 0;
-        if (pager.after) {
-          const idx = formattedRows.findIndex(
-            (r: { ownerId: string }) => r.ownerId === pager.after?.id,
-          );
-          if (idx >= 0) {
-            startingIndex = idx + 1;
-          }
-        }
-
-        const pageSlice = formattedRows.slice(startingIndex, startingIndex + pager.limit + 1);
-        const memberIds = pageSlice.map((r: { ownerId: string }) => r.ownerId);
-        const memberSummaries = await identity.memberSummariesInTransaction(tx, memberIds);
-
-        const entries: LeaderboardEntry[] = pageSlice.map(
-          (r: { ownerId: string; acceptedTrips: number; actualDistanceM: string }) => ({
-            member: memberSummaries.get(r.ownerId) ?? {
-              id: r.ownerId,
-              nickname: "Former Member",
-              formerMember: true,
-              roles: [],
-            },
-            acceptedTrips: r.acceptedTrips,
-            actualDistanceM: r.actualDistanceM,
-          }),
+        const start = pager.after ? afterIndex(ranked, pager.after) : 0;
+        // One extra row tells finish() whether a next page exists; it is never returned.
+        const slice = ranked.slice(start, start + pager.limit + 1);
+        const memberSummaries = await identity.memberSummariesInTransaction(
+          tx,
+          slice.slice(0, pager.limit).map((row) => row.id),
         );
 
-        return pager.finish(entries);
+        const entries: LeaderboardEntry[] = slice.map((row, index) => ({
+          member: memberSummaries.get(row.id) ?? {
+            id: row.id,
+            nickname: "Former Member",
+            formerMember: true,
+            roles: [],
+          },
+          acceptedTrips: row.trips,
+          actualDistanceM: row.distance,
+          position: start + index + 1,
+        }));
+
+        const viewerIndex = ranked.findIndex((row) => row.id === actor.userId);
+        const viewer = ranked[viewerIndex];
+        return {
+          ...pager.finish(entries),
+          rankedMembers: ranked.length,
+          viewer: viewer
+            ? {
+                position: viewerIndex + 1,
+                acceptedTrips: viewer.trips,
+                actualDistanceM: viewer.distance,
+              }
+            : null,
+          period: range.period,
+          fromDate: range.fromDate,
+          toDateExclusive: range.toDateExclusive,
+        };
       });
     },
   };
