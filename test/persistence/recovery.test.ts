@@ -2821,8 +2821,12 @@ await recoveryTest(
       assert.equal(await runMigrations(settings), 0);
       const applied = await history();
       assert.equal(applied.length, 34);
-      assert.deepEqual(applied.slice(0, -1), prefix);
-      assert.equal(applied.at(-1)?.state, "applied");
+      // 0032 and then the 0033 toggle re-copy follow the unchanged 0031 prefix.
+      assert.deepEqual(applied.slice(0, -2), prefix);
+      assert.deepEqual(
+        applied.slice(-2).map((row) => row.state),
+        ["applied", "applied"],
+      );
       assert.deepEqual(await joined(), expectedJoined);
       assert.deepEqual(await toggles(), expectedToggles);
 
