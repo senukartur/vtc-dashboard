@@ -10933,6 +10933,1472 @@
         "targetLevelId": "41000000-0000-4000-8000-000000000002",
         "observedDriverCount": 3
       }
+    },
+    {
+      "id": "listMembers:stage-4-sorted-filtered",
+      "operationId": "listMembers",
+      "status": 200,
+      "query": {
+        "search": "fictional",
+        "role": "driver",
+        "sort": "distance30d",
+        "order": "desc",
+        "limit": 2
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41500000-0000-4000-8000-000000000001",
+              "nickname": "Fictional Stage Four Driver",
+              "formerMember": false,
+              "roles": [
+                "driver"
+              ],
+              "last30Days": {
+                "acceptedTrips": 12,
+                "actualDistanceM": "4210000.25"
+              },
+              "lastAcceptedTripAt": "2026-11-10T18:00:00.000Z"
+            },
+            {
+              "id": "41500000-0000-4000-8000-000000000002",
+              "nickname": "Fictional Quiet Driver",
+              "formerMember": false,
+              "roles": [
+                "driver"
+              ],
+              "last30Days": {
+                "acceptedTrips": 0,
+                "actualDistanceM": "0"
+              },
+              "lastAcceptedTripAt": null
+            }
+          ],
+          "nextCursor": "signed-stage-4-directory-cursor",
+          "windowEndsAt": "2026-11-14T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "listMembers:stage-4-empty-level-filter",
+      "operationId": "listMembers",
+      "status": 200,
+      "query": {
+        "ets2Level": "41500000-0000-4000-8000-000000000040",
+        "atsLevel": "41500000-0000-4000-8000-000000000041",
+        "sort": "lastTrip",
+        "order": "asc"
+      },
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null,
+          "windowEndsAt": "2026-11-14T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getMember:stage-4-returned-member",
+      "operationId": "getMember",
+      "status": 200,
+      "response": {
+        "data": {
+          "member": {
+            "id": "41500000-0000-4000-8000-000000000001",
+            "nickname": "Fictional Stage Four Driver",
+            "formerMember": false,
+            "roles": [
+              "driver"
+            ]
+          },
+          "qualifications": [],
+          "lifetimeTotals": {
+            "acceptedTrips": 40,
+            "actualDistanceM": "12000000"
+          },
+          "memberSince": "2026-09-01T08:00:00.000Z",
+          "lastAcceptedTripAt": "2026-11-10T18:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getMember:stage-4-no-accepted-trip",
+      "operationId": "getMember",
+      "status": 200,
+      "response": {
+        "data": {
+          "member": {
+            "id": "41500000-0000-4000-8000-000000000002",
+            "nickname": "Fictional Quiet Driver",
+            "formerMember": false,
+            "roles": [
+              "trainee"
+            ]
+          },
+          "qualifications": [],
+          "lifetimeTotals": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          },
+          "memberSince": "2026-11-01T08:00:00.000Z",
+          "lastAcceptedTripAt": null
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "listInvitations:stage-4-active",
+      "operationId": "listInvitations",
+      "status": 200,
+      "query": {
+        "state": "active",
+        "limit": 1
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "invitation": {
+                "id": "41500000-0000-4000-8000-000000000600",
+                "version": 2,
+                "applicationId": "41500000-0000-4000-8000-000000000500",
+                "expiresAt": "2026-11-20T12:00:00.000Z",
+                "state": "active",
+                "emailDelivery": "accepted",
+                "deliveryId": "41500000-0000-4000-8000-000000000601"
+              },
+              "applicant": {
+                "nickname": "Fictional Applicant",
+                "email": "applicant@example.invalid"
+              }
+            }
+          ],
+          "nextCursor": "signed-stage-4-invitation-cursor",
+          "total": 2
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "listInvitations:stage-4-expired-empty",
+      "operationId": "listInvitations",
+      "status": 200,
+      "query": {
+        "state": "expired"
+      },
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null,
+          "total": 0
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getTrip:stage-4-private-telemetry",
+      "operationId": "getTrip",
+      "status": 200,
+      "response": {
+        "data": {
+          "view": "private",
+          "summary": {
+            "view": "summary",
+            "id": "41500000-0000-4000-8000-000000000300",
+            "version": 3,
+            "owner": {
+              "id": "41500000-0000-4000-8000-000000000001",
+              "nickname": "Fictional Stage Four Driver",
+              "formerMember": false,
+              "roles": [
+                "driver"
+              ]
+            },
+            "game": "ets2",
+            "outcome": "delivered",
+            "decision": "accepted",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": "812400.5",
+            "reportingAt": "2026-11-10T18:00:00.000Z",
+            "sourceKinds": [
+              "ets2telemetry",
+              "manual"
+            ]
+          },
+          "manualRevision": null,
+          "evidence": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": [],
+          "effectiveFacts": {
+            "factRevisionId": "41500000-0000-4000-8000-000000000310",
+            "provider": "ets2telemetry",
+            "actualStartAt": "2026-11-10T10:00:00.000Z",
+            "actualCompletedAt": "2026-11-10T18:00:00.000Z",
+            "actualDistanceM": "812400.5",
+            "plannedDistanceM": "800000",
+            "cargoMassKg": "19000",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "trailers": [],
+            "trailersComplete": true,
+            "wholeTripDistanceSupported": true,
+            "ruleContextComplete": true,
+            "cargoDamagePercent": 37.5,
+            "originCompany": {
+              "state": "resolved",
+              "companyId": "41500000-0000-4000-8000-000000000320",
+              "depotId": "41500000-0000-4000-8000-000000000321",
+              "name": "Fictional Logistics",
+              "code": "fict_logistics",
+              "hidden": false,
+              "logo": {
+                "version": "4150a0b1c2d3e4f5",
+                "byteLength": 2048
+              }
+            },
+            "destinationCompany": {
+              "state": "resolved",
+              "companyId": "41500000-0000-4000-8000-000000000322",
+              "depotId": "41500000-0000-4000-8000-000000000323",
+              "name": "Fictional Port Services",
+              "code": "fict_port",
+              "hidden": true,
+              "logo": null
+            }
+          },
+          "sources": [
+            {
+              "kind": "ets2telemetry",
+              "receivedAt": "2026-11-10T18:00:05.000Z",
+              "actualDistanceM": "812400.5",
+              "state": "delivered",
+              "effective": true
+            },
+            {
+              "kind": "manual",
+              "receivedAt": "2026-11-10T19:00:00.000Z",
+              "actualDistanceM": "810000",
+              "state": "delivered",
+              "effective": false
+            }
+          ],
+          "qualificationCheck": {
+            "status": "resolved",
+            "reasonCode": null,
+            "rules": [
+              {
+                "ruleType": "max_mass",
+                "outcome": "pass",
+                "bypassedByEvent": false,
+                "limitMassKg": "20000",
+                "observedMassKg": "19000"
+              },
+              {
+                "ruleType": "allowed_trailer_types",
+                "outcome": "fail",
+                "bypassedByEvent": false,
+                "allowedTrailerTypes": [
+                  {
+                    "entityId": "41500000-0000-4000-8000-000000000330",
+                    "label": "Fictional Curtainsider",
+                    "requestedLocale": "en",
+                    "renderedLocale": "en",
+                    "englishFallback": false,
+                    "hidden": false
+                  }
+                ],
+                "allowedTrailerTypeCount": 1,
+                "offendingTrailerTypes": [
+                  {
+                    "entityId": "41500000-0000-4000-8000-000000000331",
+                    "label": "Fictional Tanker",
+                    "requestedLocale": "en",
+                    "renderedLocale": "en",
+                    "englishFallback": false,
+                    "hidden": true
+                  }
+                ]
+              },
+              {
+                "ruleType": "allowed_adr_categories",
+                "outcome": "unknown",
+                "bypassedByEvent": true,
+                "allowedAdrClasses": [
+                  "2",
+                  "3"
+                ],
+                "observedAdrClass": null
+              }
+            ]
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getTrip:stage-4-private-manual-unresolved",
+      "operationId": "getTrip",
+      "status": 200,
+      "response": {
+        "data": {
+          "view": "private",
+          "summary": {
+            "view": "summary",
+            "id": "41500000-0000-4000-8000-000000000300",
+            "version": 3,
+            "owner": {
+              "id": "41500000-0000-4000-8000-000000000001",
+              "nickname": "Fictional Stage Four Driver",
+              "formerMember": false,
+              "roles": [
+                "driver"
+              ]
+            },
+            "game": "ets2",
+            "outcome": "delivered",
+            "decision": "pending_review",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": "500000",
+            "reportingAt": "2026-11-10T18:00:00.000Z",
+            "sourceKinds": [
+              "manual"
+            ]
+          },
+          "manualRevision": null,
+          "evidence": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": [
+            "manual_report"
+          ],
+          "effectiveFacts": {
+            "factRevisionId": "41500000-0000-4000-8000-000000000310",
+            "provider": "manual",
+            "actualStartAt": "2026-11-10T10:00:00.000Z",
+            "actualCompletedAt": "2026-11-10T18:00:00.000Z",
+            "actualDistanceM": "500000",
+            "plannedDistanceM": null,
+            "cargoMassKg": null,
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "trailers": [],
+            "trailersComplete": true,
+            "wholeTripDistanceSupported": true,
+            "ruleContextComplete": false,
+            "cargoDamagePercent": null,
+            "originCompany": {
+              "state": "unresolved",
+              "code": "fict_unknown_depot"
+            },
+            "destinationCompany": {
+              "state": "unresolved",
+              "code": null
+            }
+          },
+          "sources": [
+            {
+              "kind": "manual",
+              "receivedAt": "2026-11-11T09:00:00.000Z",
+              "actualDistanceM": null,
+              "state": "delivered",
+              "effective": true
+            }
+          ],
+          "qualificationCheck": {
+            "status": "unresolved",
+            "reasonCode": "historical_assignment_missing",
+            "rules": []
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getNotificationPreferences:stage-4-reviewer",
+      "operationId": "getNotificationPreferences",
+      "status": 200,
+      "response": {
+        "data": {
+          "tripStarted": true,
+          "tripFinished": false,
+          "tripRejected": true,
+          "eventChanges": true,
+          "eventReminders": false,
+          "qualificationChanges": true,
+          "reviewQueue": true,
+          "newApplications": false,
+          "tripAccepted": true,
+          "newEvent": true
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getNotificationPreferences:stage-4-member",
+      "operationId": "getNotificationPreferences",
+      "status": 200,
+      "response": {
+        "data": {
+          "tripStarted": true,
+          "tripFinished": false,
+          "tripRejected": true,
+          "eventChanges": true,
+          "eventReminders": false,
+          "qualificationChanges": true,
+          "tripAccepted": false,
+          "newEvent": true
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "setNotificationPreferences:stage-4-member",
+      "operationId": "setNotificationPreferences",
+      "status": 200,
+      "request": {
+        "tripStarted": true,
+        "tripFinished": false,
+        "tripRejected": true,
+        "eventChanges": true,
+        "eventReminders": false,
+        "qualificationChanges": true,
+        "tripAccepted": false,
+        "newEvent": false
+      },
+      "response": {
+        "data": {
+          "tripStarted": true,
+          "tripFinished": false,
+          "tripRejected": true,
+          "eventChanges": true,
+          "eventReminders": false,
+          "qualificationChanges": true,
+          "tripAccepted": false,
+          "newEvent": false
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getMe:stage-4-device-timezone",
+      "operationId": "getMe",
+      "status": 200,
+      "response": {
+        "data": {
+          "member": {
+            "id": "41500000-0000-4000-8000-000000000001",
+            "nickname": "Fictional Stage Four Driver",
+            "formerMember": false,
+            "roles": [
+              "driver"
+            ]
+          },
+          "email": "driver@example.invalid",
+          "emailVerified": true,
+          "capabilities": [
+            "company.read",
+            "trips.submit_own",
+            "trips.read_own_private",
+            "events.respond"
+          ],
+          "preferences": {
+            "locale": "ru",
+            "displayTimezone": null
+          },
+          "steamVerified": true,
+          "identityEpoch": 1,
+          "missingSetup": []
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "login:stage-4-device-timezone",
+      "operationId": "login",
+      "status": 200,
+      "response": {
+        "data": {
+          "member": {
+            "id": "41500000-0000-4000-8000-000000000001",
+            "nickname": "Fictional Stage Four Driver",
+            "formerMember": false,
+            "roles": [
+              "driver"
+            ]
+          },
+          "email": "driver@example.invalid",
+          "emailVerified": true,
+          "capabilities": [
+            "company.read",
+            "trips.submit_own",
+            "trips.read_own_private",
+            "events.respond"
+          ],
+          "preferences": {
+            "locale": "ru",
+            "displayTimezone": null
+          },
+          "steamVerified": true,
+          "identityEpoch": 1,
+          "missingSetup": []
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      },
+      "request": {
+        "email": "driver@example.invalid",
+        "password": "NONFUNCTIONAL_EXAMPLE_ONLY"
+      }
+    },
+    {
+      "id": "updatePreferences:stage-4-device-timezone",
+      "operationId": "updatePreferences",
+      "status": 200,
+      "request": {
+        "displayTimezone": null
+      },
+      "response": {
+        "data": {
+          "locale": "ru",
+          "displayTimezone": null
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "pollNotifications:stage-4-new-kinds",
+      "operationId": "pollNotifications",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41500000-0000-4000-8000-000000000700",
+              "category": "trip.accepted",
+              "messageKey": "notifications.trip.accepted",
+              "display": {
+                "actorNickname": null,
+                "game": "ets2",
+                "eventTitle": null
+              },
+              "target": {
+                "kind": "trip",
+                "id": "41500000-0000-4000-8000-000000000300"
+              },
+              "occurredAt": "2026-11-10T19:30:00.000Z",
+              "readAt": null,
+              "liveToastEligible": true
+            },
+            {
+              "id": "41500000-0000-4000-8000-000000000701",
+              "category": "event.published",
+              "messageKey": "notifications.event.published",
+              "display": {
+                "actorNickname": null,
+                "game": "ats",
+                "eventTitle": "Fictional Convoy"
+              },
+              "target": {
+                "kind": "event",
+                "id": "41500000-0000-4000-8000-000000000800"
+              },
+              "occurredAt": "2026-11-11T10:00:00.000Z",
+              "readAt": null,
+              "liveToastEligible": true
+            }
+          ],
+          "nextCursor": "signed-stage-4-checkpoint",
+          "hasMore": false,
+          "unreadCount": 2,
+          "serverTime": "2026-11-11T10:00:01.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getCompanyAnalytics:stage-4-range",
+      "operationId": "getCompanyAnalytics",
+      "status": 200,
+      "query": {
+        "fromDate": "2026-10-01",
+        "toDateExclusive": "2026-11-01",
+        "granularity": "month"
+      },
+      "response": {
+        "data": {
+          "acceptedTrips": 30,
+          "actualDistanceM": "9000000.5",
+          "reportingTimezone": "Europe/Berlin",
+          "fromDate": "2026-10-01",
+          "toDateExclusive": "2026-11-01",
+          "granularity": "month",
+          "buckets": [
+            {
+              "date": "2026-10-01",
+              "acceptedTrips": 30,
+              "actualDistanceM": "9000000.5"
+            }
+          ],
+          "computedAt": "2026-11-14T12:00:00.000Z",
+          "projectionVersion": 7,
+          "projectionPending": false,
+          "period": "range",
+          "activeDrivers": 4,
+          "activeMembers": 9,
+          "byGame": [
+            {
+              "game": "ets2",
+              "acceptedTrips": 30,
+              "actualDistanceM": "9000000.5"
+            },
+            {
+              "game": "ats",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getCompanyAnalytics:stage-4-all-time",
+      "operationId": "getCompanyAnalytics",
+      "status": 200,
+      "query": {
+        "period": "all_time",
+        "game": "ats"
+      },
+      "response": {
+        "data": {
+          "acceptedTrips": 3,
+          "actualDistanceM": "2400000",
+          "reportingTimezone": "Europe/Berlin",
+          "fromDate": "2026-08-01",
+          "toDateExclusive": "2026-12-01",
+          "granularity": "month",
+          "buckets": [
+            {
+              "date": "2026-08-01",
+              "acceptedTrips": 2,
+              "actualDistanceM": "1600000"
+            },
+            {
+              "date": "2026-09-01",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            },
+            {
+              "date": "2026-10-01",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            },
+            {
+              "date": "2026-11-01",
+              "acceptedTrips": 1,
+              "actualDistanceM": "800000"
+            }
+          ],
+          "computedAt": "2026-11-14T12:00:00.000Z",
+          "projectionVersion": 7,
+          "projectionPending": false,
+          "period": "all_time",
+          "activeDrivers": 1,
+          "activeMembers": 9,
+          "byGame": [
+            {
+              "game": "ats",
+              "acceptedTrips": 3,
+              "actualDistanceM": "2400000"
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getCompanyAnalytics:stage-4-all-time-empty",
+      "operationId": "getCompanyAnalytics",
+      "status": 200,
+      "query": {
+        "period": "all_time"
+      },
+      "response": {
+        "data": {
+          "acceptedTrips": 0,
+          "actualDistanceM": "0",
+          "reportingTimezone": "Europe/Berlin",
+          "fromDate": "2026-11-01",
+          "toDateExclusive": "2026-12-01",
+          "granularity": "month",
+          "buckets": [
+            {
+              "date": "2026-11-01",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            }
+          ],
+          "computedAt": "2026-11-14T12:00:00.000Z",
+          "projectionVersion": 7,
+          "projectionPending": false,
+          "period": "all_time",
+          "activeDrivers": 0,
+          "activeMembers": 1,
+          "byGame": [
+            {
+              "game": "ets2",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            },
+            {
+              "game": "ats",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getLeaderboard:stage-4-viewer-off-page",
+      "operationId": "getLeaderboard",
+      "status": 200,
+      "query": {
+        "fromDate": "2026-10-01",
+        "toDateExclusive": "2026-11-01",
+        "limit": 1
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "member": {
+                "id": "41500000-0000-4000-8000-000000000001",
+                "nickname": "Fictional Stage Four Driver",
+                "formerMember": false,
+                "roles": [
+                  "driver"
+                ]
+              },
+              "acceptedTrips": 12,
+              "actualDistanceM": "4210000.25",
+              "position": 1
+            }
+          ],
+          "nextCursor": "signed-stage-4-leaderboard-cursor",
+          "rankedMembers": 4,
+          "viewer": {
+            "position": 3,
+            "acceptedTrips": 2,
+            "actualDistanceM": "300000"
+          },
+          "period": "range",
+          "fromDate": "2026-10-01",
+          "toDateExclusive": "2026-11-01"
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getLeaderboard:stage-4-unranked",
+      "operationId": "getLeaderboard",
+      "status": 200,
+      "query": {
+        "fromDate": "2026-10-01",
+        "toDateExclusive": "2026-11-01"
+      },
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null,
+          "rankedMembers": 0,
+          "viewer": null,
+          "period": "range",
+          "fromDate": "2026-10-01",
+          "toDateExclusive": "2026-11-01"
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getLeaderboard:stage-4-all-time",
+      "operationId": "getLeaderboard",
+      "status": 200,
+      "query": {
+        "period": "all_time"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "member": {
+                "id": "41500000-0000-4000-8000-000000000001",
+                "nickname": "Fictional Stage Four Driver",
+                "formerMember": false,
+                "roles": [
+                  "driver"
+                ]
+              },
+              "acceptedTrips": 40,
+              "actualDistanceM": "12000000",
+              "position": 1
+            }
+          ],
+          "nextCursor": null,
+          "rankedMembers": 1,
+          "viewer": {
+            "position": 1,
+            "acceptedTrips": 40,
+            "actualDistanceM": "12000000"
+          },
+          "period": "all_time",
+          "fromDate": "2023-01-01",
+          "toDateExclusive": "2026-12-01"
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getCompanyAnalyticsBreakdown:stage-4-route",
+      "operationId": "getCompanyAnalyticsBreakdown",
+      "status": 200,
+      "query": {
+        "dimension": "route",
+        "fromDate": "2026-10-01",
+        "toDateExclusive": "2026-11-01",
+        "locale": "en",
+        "limit": 2
+      },
+      "response": {
+        "data": {
+          "dimension": "route",
+          "period": "range",
+          "fromDate": "2026-10-01",
+          "toDateExclusive": "2026-11-01",
+          "reportingTimezone": "Europe/Berlin",
+          "game": null,
+          "computedAt": "2026-11-14T12:00:00.000Z",
+          "projectionVersion": 7,
+          "projectionPending": false,
+          "limit": 2,
+          "totals": {
+            "acceptedTrips": 30,
+            "actualDistanceM": "9000000.5"
+          },
+          "items": [
+            {
+              "game": "ets2",
+              "origin": {
+                "entityId": "41500000-0000-4000-8000-000000000900",
+                "label": "Fictional Harbor",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "destination": {
+                "entityId": "41500000-0000-4000-8000-000000000901",
+                "label": "Fictional Valley",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "acceptedTrips": 10,
+              "actualDistanceM": "3000000"
+            },
+            {
+              "game": "ets2",
+              "origin": {
+                "entityId": "41500000-0000-4000-8000-000000000901",
+                "label": "Fictional Valley",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "destination": {
+                "entityId": "41500000-0000-4000-8000-000000000902",
+                "label": "Fictional Ridge",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": true
+              },
+              "acceptedTrips": 10,
+              "actualDistanceM": "2500000"
+            }
+          ],
+          "remainder": {
+            "acceptedTrips": 7,
+            "actualDistanceM": "2500000.5"
+          },
+          "undetermined": {
+            "acceptedTrips": 3,
+            "actualDistanceM": "1000000"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getCompanyAnalyticsBreakdown:stage-4-reverse-route",
+      "operationId": "getCompanyAnalyticsBreakdown",
+      "status": 200,
+      "query": {
+        "dimension": "route",
+        "fromDate": "2026-10-01",
+        "toDateExclusive": "2026-11-01",
+        "game": "ets2"
+      },
+      "response": {
+        "data": {
+          "dimension": "route",
+          "period": "range",
+          "fromDate": "2026-10-01",
+          "toDateExclusive": "2026-11-01",
+          "reportingTimezone": "Europe/Berlin",
+          "game": "ets2",
+          "computedAt": "2026-11-14T12:00:00.000Z",
+          "projectionVersion": 7,
+          "projectionPending": false,
+          "limit": 5,
+          "totals": {
+            "acceptedTrips": 3,
+            "actualDistanceM": "900000"
+          },
+          "items": [
+            {
+              "game": "ets2",
+              "origin": {
+                "entityId": "41500000-0000-4000-8000-000000000900",
+                "label": "Fictional Harbor",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "destination": {
+                "entityId": "41500000-0000-4000-8000-000000000901",
+                "label": "Fictional Valley",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "acceptedTrips": 2,
+              "actualDistanceM": "600000"
+            },
+            {
+              "game": "ets2",
+              "origin": {
+                "entityId": "41500000-0000-4000-8000-000000000901",
+                "label": "Fictional Valley",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "destination": {
+                "entityId": "41500000-0000-4000-8000-000000000900",
+                "label": "Fictional Harbor",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "acceptedTrips": 1,
+              "actualDistanceM": "300000"
+            }
+          ],
+          "remainder": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          },
+          "undetermined": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getCompanyAnalyticsBreakdown:stage-4-cargo",
+      "operationId": "getCompanyAnalyticsBreakdown",
+      "status": 200,
+      "query": {
+        "dimension": "cargo",
+        "fromDate": "2026-10-01",
+        "toDateExclusive": "2026-11-01",
+        "locale": "ru"
+      },
+      "response": {
+        "data": {
+          "dimension": "cargo",
+          "period": "range",
+          "fromDate": "2026-10-01",
+          "toDateExclusive": "2026-11-01",
+          "reportingTimezone": "Europe/Berlin",
+          "game": null,
+          "computedAt": "2026-11-14T12:00:00.000Z",
+          "projectionVersion": 7,
+          "projectionPending": false,
+          "limit": 5,
+          "totals": {
+            "acceptedTrips": 30,
+            "actualDistanceM": "9000000.5"
+          },
+          "items": [
+            {
+              "game": "ets2",
+              "cargo": {
+                "entityId": "41500000-0000-4000-8000-000000000910",
+                "label": "Fictional Cargo",
+                "requestedLocale": "ru",
+                "renderedLocale": "en",
+                "englishFallback": true,
+                "hidden": false
+              },
+              "acceptedTrips": 20,
+              "actualDistanceM": "6000000"
+            }
+          ],
+          "remainder": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          },
+          "undetermined": {
+            "acceptedTrips": 10,
+            "actualDistanceM": "3000000.5"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getCompanyAnalyticsBreakdown:stage-4-source",
+      "operationId": "getCompanyAnalyticsBreakdown",
+      "status": 200,
+      "query": {
+        "dimension": "source",
+        "period": "all_time"
+      },
+      "response": {
+        "data": {
+          "dimension": "source",
+          "period": "all_time",
+          "fromDate": "2023-01-01",
+          "toDateExclusive": "2026-12-01",
+          "reportingTimezone": "Europe/Berlin",
+          "game": null,
+          "computedAt": "2026-11-14T12:00:00.000Z",
+          "projectionVersion": 7,
+          "projectionPending": false,
+          "totals": {
+            "acceptedTrips": 30,
+            "actualDistanceM": "9000000.5"
+          },
+          "items": [
+            {
+              "source": "ets2telemetry",
+              "acceptedTrips": 30,
+              "actualDistanceM": "9000000.5"
+            },
+            {
+              "source": "manual",
+              "acceptedTrips": 0,
+              "actualDistanceM": "0"
+            }
+          ],
+          "remainder": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          },
+          "undetermined": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getCompanyAnalyticsBreakdown:stage-4-empty",
+      "operationId": "getCompanyAnalyticsBreakdown",
+      "status": 200,
+      "query": {
+        "dimension": "route",
+        "fromDate": "2026-11-01",
+        "toDateExclusive": "2026-11-02"
+      },
+      "response": {
+        "data": {
+          "dimension": "route",
+          "period": "range",
+          "fromDate": "2026-11-01",
+          "toDateExclusive": "2026-11-02",
+          "reportingTimezone": "Europe/Berlin",
+          "game": null,
+          "computedAt": "2026-11-14T12:00:00.000Z",
+          "projectionVersion": 7,
+          "projectionPending": false,
+          "limit": 5,
+          "totals": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          },
+          "items": [],
+          "remainder": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          },
+          "undetermined": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "submitApplication:stage-4-referral-other",
+      "operationId": "submitApplication",
+      "status": 201,
+      "request": {
+        "nickname": "Fictional Applicant",
+        "email": "applicant@example.invalid",
+        "steamProfileUrl": "https://steamcommunity.com/profiles/76561190000000001",
+        "games": [
+          "ets2"
+        ],
+        "referralSource": "other",
+        "referralOther": "A fictional convoy poster"
+      },
+      "response": {
+        "data": {
+          "id": "41500000-0000-4000-8000-000000000500",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getApplication:stage-4-check-completed",
+      "operationId": "getApplication",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41500000-0000-4000-8000-000000000500",
+          "version": 1,
+          "status": "submitted",
+          "submittedAt": "2026-11-12T08:59:00.000Z",
+          "fields": {
+            "nickname": "Fictional Applicant",
+            "email": "applicant@example.invalid",
+            "steamProfileUrl": "https://steamcommunity.com/profiles/76561190000000001",
+            "games": [
+              "ets2"
+            ],
+            "discord": null,
+            "introduction": null,
+            "referralSource": "discord"
+          },
+          "decisionReason": null,
+          "invitationId": null,
+          "decision": null,
+          "truckersmpCheck": {
+            "state": "completed",
+            "notCheckedReason": null,
+            "found": true,
+            "playerId": "900000000000001",
+            "displayName": "Fictional Applicant TMP",
+            "profileUrl": "https://truckersmp.com/user/900000000000001",
+            "bans": {
+              "any": false,
+              "count": 0
+            },
+            "vtc": {
+              "inVtc": true,
+              "id": "900000000001",
+              "name": "Fictional Other VTC",
+              "tag": "FOV"
+            },
+            "checkedAt": "2026-11-12T09:00:00.000Z",
+            "lastAttemptAt": "2026-11-12T09:00:00.000Z",
+            "failure": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getApplication:stage-4-check-vanity",
+      "operationId": "getApplication",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41500000-0000-4000-8000-000000000500",
+          "version": 1,
+          "status": "submitted",
+          "submittedAt": "2026-11-12T08:59:00.000Z",
+          "fields": {
+            "nickname": "Fictional Applicant",
+            "email": "applicant@example.invalid",
+            "steamProfileUrl": "https://steamcommunity.com/id/fictional-applicant",
+            "games": [
+              "ets2"
+            ],
+            "discord": null,
+            "introduction": null,
+            "referralSource": "other",
+            "referralOther": "A fictional convoy poster"
+          },
+          "decisionReason": null,
+          "invitationId": null,
+          "decision": null,
+          "truckersmpCheck": {
+            "state": "not_checked",
+            "notCheckedReason": "steam_vanity_url",
+            "found": null,
+            "playerId": null,
+            "displayName": null,
+            "profileUrl": null,
+            "bans": null,
+            "vtc": null,
+            "checkedAt": null,
+            "lastAttemptAt": null,
+            "failure": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getApplication:stage-4-check-checking",
+      "operationId": "getApplication",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41500000-0000-4000-8000-000000000500",
+          "version": 1,
+          "status": "submitted",
+          "submittedAt": "2026-11-12T08:59:00.000Z",
+          "fields": {
+            "nickname": "Fictional Applicant",
+            "email": "applicant@example.invalid",
+            "steamProfileUrl": "https://steamcommunity.com/profiles/76561190000000001",
+            "games": [
+              "ets2"
+            ],
+            "discord": null,
+            "introduction": null
+          },
+          "decisionReason": null,
+          "invitationId": null,
+          "decision": null,
+          "truckersmpCheck": {
+            "state": "checking",
+            "notCheckedReason": null,
+            "found": null,
+            "playerId": null,
+            "displayName": null,
+            "profileUrl": null,
+            "bans": null,
+            "vtc": null,
+            "checkedAt": null,
+            "lastAttemptAt": null,
+            "failure": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getApplication:stage-4-check-failed",
+      "operationId": "getApplication",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41500000-0000-4000-8000-000000000500",
+          "version": 1,
+          "status": "submitted",
+          "submittedAt": "2026-11-12T08:59:00.000Z",
+          "fields": {
+            "nickname": "Fictional Applicant",
+            "email": "applicant@example.invalid",
+            "steamProfileUrl": "https://steamcommunity.com/profiles/76561190000000001",
+            "games": [
+              "ets2"
+            ],
+            "discord": null,
+            "introduction": null
+          },
+          "decisionReason": null,
+          "invitationId": null,
+          "decision": null,
+          "truckersmpCheck": {
+            "state": "failed",
+            "notCheckedReason": null,
+            "found": null,
+            "playerId": null,
+            "displayName": null,
+            "profileUrl": null,
+            "bans": null,
+            "vtc": null,
+            "checkedAt": null,
+            "lastAttemptAt": "2026-11-12T09:05:00.000Z",
+            "failure": "rate_limited"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "getApplication:stage-4-not-found-no-vtc",
+      "operationId": "getApplication",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41500000-0000-4000-8000-000000000500",
+          "version": 1,
+          "status": "submitted",
+          "submittedAt": "2026-11-12T08:59:00.000Z",
+          "fields": {
+            "nickname": "Fictional Applicant",
+            "email": "applicant@example.invalid",
+            "steamProfileUrl": "https://steamcommunity.com/profiles/76561190000000001",
+            "games": [
+              "ets2"
+            ],
+            "discord": null,
+            "introduction": null
+          },
+          "decisionReason": null,
+          "invitationId": null,
+          "decision": null,
+          "truckersmpCheck": {
+            "state": "completed",
+            "notCheckedReason": null,
+            "found": false,
+            "playerId": null,
+            "displayName": null,
+            "profileUrl": null,
+            "bans": null,
+            "vtc": null,
+            "checkedAt": "2026-11-12T09:00:00.000Z",
+            "lastAttemptAt": "2026-11-12T09:00:00.000Z",
+            "failure": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "recheckApplicationTruckersmp:stage-4-accepted",
+      "operationId": "recheckApplicationTruckersmp",
+      "status": 202,
+      "response": {
+        "data": {
+          "state": "checking",
+          "notCheckedReason": null,
+          "found": true,
+          "playerId": "900000000000001",
+          "displayName": "Fictional Applicant TMP",
+          "profileUrl": "https://truckersmp.com/user/900000000000001",
+          "bans": {
+            "any": true,
+            "count": 2
+          },
+          "vtc": {
+            "inVtc": false,
+            "id": null,
+            "name": null,
+            "tag": null
+          },
+          "checkedAt": "2026-11-12T09:00:00.000Z",
+          "lastAttemptAt": "2026-11-14T12:00:00.000Z",
+          "failure": null
+        },
+        "meta": {
+          "requestId": "synthetic-stage-4"
+        }
+      }
     }
   ]
 }

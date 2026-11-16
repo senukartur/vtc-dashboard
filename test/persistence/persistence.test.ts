@@ -75,9 +75,10 @@ import {
   telemetryPriorFolder,
   testConnection,
   tripsPriorFolder,
+  withPrefixMembershipJoinedAt,
 } from "./support.ts";
 
-const currentMigrationCount = 32;
+const currentMigrationCount = 33;
 
 const values = mysqlTable("synthetic_values", {
   id: idColumn("id").primaryKey(),
@@ -205,10 +206,10 @@ async function serializedFreshMigrations(
     })),
   );
   const expectedTables = Object.keys(
-    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0031_snapshot.json"), "utf8"))
+    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0032_snapshot.json"), "utf8"))
       .tables,
   ).sort();
-  assert.equal(expectedTables.length, 105);
+  assert.equal(expectedTables.length, 106);
   const gate = await journalAckGate("finalize", currentMigrationCount);
   const lock = migrationLockName(settings.database);
   const history = async () => {
@@ -821,14 +822,16 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const password = "Fictional-event-upgrade-passphrase-42",
           directorId = newId();
         const credential = await identity.prepareCredential(password);
-        await unit.run((tx) =>
-          identity.insertWithCredential(tx, {
-            userId: directorId,
-            email: "event-upgrade@example.invalid",
-            name: "Fictional Event Upgrade Director",
-            roles: ["driver"],
-            ...credential,
-          }),
+        await withPrefixMembershipJoinedAt(connection, () =>
+          unit.run((tx) =>
+            identity.insertWithCredential(tx, {
+              userId: directorId,
+              email: "event-upgrade@example.invalid",
+              name: "Fictional Event Upgrade Director",
+              roles: ["driver"],
+              ...credential,
+            }),
+          ),
         );
         // The published company fixture omits reporting_timezone, introduced after this prefix.
         // Authenticate with the current Identity only after the forward migrations.
@@ -1232,14 +1235,16 @@ publishedUpgrade(
       const directorId = newId(),
         password = "Fictional-material-upgrade-passphrase-42",
         credential = await identity.prepareCredential(password);
-      await unit.run((tx) =>
-        identity.insertWithCredential(tx, {
-          userId: directorId,
-          email: "material-upgrade@example.invalid",
-          name: "Fictional Material Upgrade Director",
-          roles: ["driver"],
-          ...credential,
-        }),
+      await withPrefixMembershipJoinedAt(connection, () =>
+        unit.run((tx) =>
+          identity.insertWithCredential(tx, {
+            userId: directorId,
+            email: "material-upgrade@example.invalid",
+            name: "Fictional Material Upgrade Director",
+            roles: ["driver"],
+            ...credential,
+          }),
+        ),
       );
       await connection.execute(
         "INSERT INTO identity_company(singleton,id,director_user_id,version) VALUES(1,?,?,1)",

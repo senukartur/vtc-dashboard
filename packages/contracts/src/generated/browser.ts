@@ -71,6 +71,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/applications/{applicationId}/truckersmp-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recheck the applicant on TruckersMP
+         * @description Bodyless command. Requires current applications.manage, exact Origin, session-bound CSRF and a UUID Idempotency-Key; no If-Match. Starts a new check generation and returns 202 with state checking; while a check is already running the current check is returned unchanged. A Steam /id/ vanity link returns 409 STATE_CONFLICT. A missing provider adapter returns 503. An identical retry rechecks current authority and returns the recorded result.
+         */
+        post: operations["recheckApplicationTruckersmp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/audit": {
         parameters: {
             query?: never;
@@ -465,6 +485,26 @@ export interface paths {
          * @description Save an incomplete draft under the draft ETag.
          */
         patch: operations["updateEventDraft"];
+        trace?: never;
+    };
+    "/api/v1/admin/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List current invitations
+         * @description Current invitation generation per approved application. active: unused, active state and expiresAt after now (the invited counter definition), ordered by expiresAt ascending then ID. expired: unused, active state and expiresAt at or before now, ordered by expiresAt descending then ID. total counts the selected state before paging. Signed cursors bind the actor, session, access epoch and state; mismatches return 409 VERSION_CONFLICT. Never returns the link, token, secret hash or ciphertext.
+         */
+        get: operations["listInvitations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/admin/invitations/{invitationId}": {
@@ -1104,8 +1144,31 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** getCompanyAnalytics */
+        /**
+         * getCompanyAnalytics
+         * @description period=all_time uses month granularity in the company reporting time zone. fromDate is the first day of the month of the earliest accepted unique trip that matches the filters, and toDateExclusive is the first day of the month after the current month. Without such a trip fromDate is the first day of the current month. granularity=day returns 422 with it. Buckets are zero-filled for every month of the covered range, so a company without accepted trips returns one zero bucket. activeDrivers counts distinct members with at least one accepted trip in the period; activeMembers counts active memberships of any role at computedAt; byGame lists ets2 then ats with zeros, or only the filtered game.
+         */
         get: operations["getCompanyAnalytics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analytics/company/breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Company analytics breakdown
+         * @description Same access, setup errors and filters as getCompanyAnalytics over accepted unique canonical trips in the company reporting time zone. route groups by canonical origin and destination city IDs; A to B and B to A are separate routes. cargo groups by canonical cargo ID. Rows with an unresolved city or cargo are excluded from items and counted in undetermined. Items rank by accepted trips descending, then actual distance descending, then IDs; trips beyond limit are counted in remainder. source splits by the provider of the effective fact (derived facts use their source message) and always returns ets2telemetry and manual; limit is rejected with 422 for source. Labels use locale or the saved locale and keep hidden catalog entries with hidden true. period=all_time covers the same month-aligned range as getCompanyAnalytics: fromDate is the first day of the month of the earliest accepted unique trip that matches the filters, and toDateExclusive is the first day of the month after the current month. Without such a trip fromDate is the first day of the current month.
+         */
+        get: operations["getCompanyAnalyticsBreakdown"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1121,7 +1184,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** getLeaderboard */
+        /**
+         * getLeaderboard
+         * @description Order and ties are unchanged: actual distance descending, accepted trips descending, then member ID. position is the 1-based ordinal under that order. The signed cursor also binds period. period=all_time covers the same month-aligned range as getCompanyAnalytics, without buckets: fromDate is the first day of the month of the earliest accepted unique trip that matches the filters, and toDateExclusive is the first day of the month after the current month. Without such a trip fromDate is the first day of the current month.
+         */
         get: operations["getLeaderboard"];
         put?: never;
         post?: never;
@@ -2149,7 +2215,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** listMembers */
+        /**
+         * listMembers
+         * @description Company member directory. Filters and the optional nickname search apply before paging. Omitted sort keeps ascending member ID order; each sort is a stable keyset on (sort value, member ID). Signed cursors bind the actor, session, access epoch, normalized filters, sort, order and windowEndsAt; mismatches return 409 VERSION_CONFLICT. last30Days counts accepted canonical trips whose reportingAt lies in [windowEndsAt - 30 days, windowEndsAt], including zeros.
+         */
         get: operations["listMembers"];
         put?: never;
         post?: never;
@@ -2925,6 +2994,141 @@ export interface components {
             /** Format: date */
             toDateExclusive: string;
         };
+        /** @description Top routes, top cargo or the source split of accepted unique canonical trips. Invariant: the sum of items plus remainder plus undetermined equals totals, and totals equal getCompanyAnalytics for the same filters. */
+        AnalyticsStage4Breakdown: components["schemas"]["AnalyticsStage4RouteBreakdown"] | components["schemas"]["AnalyticsStage4CargoBreakdown"] | components["schemas"]["AnalyticsStage4SourceBreakdown"];
+        AnalyticsStage4BreakdownEnvelope: {
+            data: components["schemas"]["AnalyticsStage4Breakdown"];
+            meta: components["schemas"]["Meta"];
+        };
+        AnalyticsStage4CargoBreakdown: {
+            computedAt: components["schemas"]["Timestamp"];
+            /** @constant */
+            dimension: "cargo";
+            /** Format: date */
+            fromDate: string;
+            game: components["schemas"]["Game"] | null;
+            items: components["schemas"]["AnalyticsStage4CargoItem"][];
+            limit: number;
+            /** @enum {string} */
+            period: "range" | "all_time";
+            projectionPending: boolean;
+            projectionVersion: number;
+            remainder: components["schemas"]["AnalyticsStage4Totals"];
+            reportingTimezone: string;
+            /** Format: date */
+            toDateExclusive: string;
+            totals: components["schemas"]["AnalyticsStage4Totals"];
+            undetermined: components["schemas"]["AnalyticsStage4Totals"];
+        };
+        AnalyticsStage4CargoItem: {
+            acceptedTrips: number;
+            actualDistanceM: components["schemas"]["Decimal"];
+            cargo: components["schemas"]["CatalogLabel"];
+            game: components["schemas"]["Game"];
+        };
+        /** @description Company analytics with optional Stage 4 aggregates. Once VTC-143 activates them each is always returned; absence means not available, never zero. */
+        AnalyticsStage4Company: {
+            acceptedTrips: number;
+            /** @description Distinct members with at least one accepted canonical trip in the period. */
+            activeDrivers?: number;
+            /** @description Active memberships of any role at computedAt. */
+            activeMembers?: number;
+            actualDistanceM: string;
+            buckets: {
+                acceptedTrips: number;
+                actualDistanceM: string;
+                /** Format: date */
+                date: string;
+            }[];
+            /** @description ets2 then ats including zeros; only the filtered game when game is set. */
+            byGame?: components["schemas"]["AnalyticsStage4GameTotals"][];
+            /** Format: date-time */
+            computedAt: string;
+            /** Format: date */
+            fromDate: string;
+            /** @enum {string} */
+            granularity: "day" | "month";
+            /** @enum {string} */
+            period?: "range" | "all_time";
+            projectionPending: boolean;
+            projectionVersion: number;
+            reportingTimezone: string;
+            /** Format: date */
+            toDateExclusive: string;
+        };
+        AnalyticsStage4CompanyEnvelope: {
+            data: components["schemas"]["AnalyticsStage4Company"];
+            meta: components["schemas"]["Meta"];
+        };
+        AnalyticsStage4GameTotals: {
+            acceptedTrips: number;
+            actualDistanceM: components["schemas"]["Decimal"];
+            game: components["schemas"]["Game"];
+        };
+        /** @description The viewer's own ranked row, returned also when it is not on this page. */
+        AnalyticsStage4LeaderboardViewer: {
+            acceptedTrips: number;
+            actualDistanceM: components["schemas"]["Decimal"];
+            position: number;
+        };
+        AnalyticsStage4RouteBreakdown: {
+            computedAt: components["schemas"]["Timestamp"];
+            /** @constant */
+            dimension: "route";
+            /** Format: date */
+            fromDate: string;
+            game: components["schemas"]["Game"] | null;
+            items: components["schemas"]["AnalyticsStage4RouteItem"][];
+            limit: number;
+            /** @enum {string} */
+            period: "range" | "all_time";
+            projectionPending: boolean;
+            projectionVersion: number;
+            remainder: components["schemas"]["AnalyticsStage4Totals"];
+            reportingTimezone: string;
+            /** Format: date */
+            toDateExclusive: string;
+            totals: components["schemas"]["AnalyticsStage4Totals"];
+            undetermined: components["schemas"]["AnalyticsStage4Totals"];
+        };
+        AnalyticsStage4RouteItem: {
+            acceptedTrips: number;
+            actualDistanceM: components["schemas"]["Decimal"];
+            destination: components["schemas"]["CatalogLabel"];
+            game: components["schemas"]["Game"];
+            origin: components["schemas"]["CatalogLabel"];
+        };
+        AnalyticsStage4SourceBreakdown: {
+            computedAt: components["schemas"]["Timestamp"];
+            /** @constant */
+            dimension: "source";
+            /** Format: date */
+            fromDate: string;
+            game: components["schemas"]["Game"] | null;
+            /** @description ets2telemetry then manual, including zeros. */
+            items: components["schemas"]["AnalyticsStage4SourceItem"][];
+            /** @enum {string} */
+            period: "range" | "all_time";
+            projectionPending: boolean;
+            projectionVersion: number;
+            remainder: components["schemas"]["AnalyticsStage4Totals"];
+            reportingTimezone: string;
+            /** Format: date */
+            toDateExclusive: string;
+            totals: components["schemas"]["AnalyticsStage4Totals"];
+            undetermined: components["schemas"]["AnalyticsStage4Totals"];
+        };
+        AnalyticsStage4SourceItem: {
+            acceptedTrips: number;
+            actualDistanceM: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            source: "ets2telemetry" | "manual";
+        };
+        /** @description Accepted unique canonical trips and their exact actual distance in metres. Zero is a computed zero; an unavailable value is an absent property, never zero. */
+        AnalyticsStage4Totals: {
+            acceptedTrips: number;
+            actualDistanceM: components["schemas"]["Decimal"];
+        };
         Application: {
             decision: components["schemas"]["ApplicationDecision"] | null;
             decisionReason: string | null;
@@ -2936,6 +3140,7 @@ export interface components {
             status: "submitted" | "approved" | "rejected";
             /** Format: date-time */
             submittedAt: string;
+            truckersmpCheck?: components["schemas"]["ApplicationStage4TruckersmpCheck"];
             version: number;
         };
         ApplicationDecision: {
@@ -2966,8 +3171,42 @@ export interface components {
             games: ("ets2" | "ats")[];
             introduction?: string | null;
             nickname: string;
+            /** @description Free text, only with referralSource other. Without referralSource or with any other source the request returns 422. */
+            referralOther?: string;
+            /**
+             * @description Optional answer to how the applicant found the company.
+             * @enum {string}
+             */
+            referralSource?: "truckersmp" | "discord" | "friend_or_member" | "youtube_or_twitch" | "other";
             /** Format: uri */
             steamProfileUrl: string;
+        };
+        /** @description The applicant's TruckersMP check, visible only with applications.manage. not_checked covers Steam /id/ vanity links. Successful absence (found false), no VTC and provider failure stay distinct. Never contains the raw provider payload. */
+        ApplicationStage4TruckersmpCheck: {
+            bans: {
+                any: boolean;
+                count: number;
+            } | null;
+            checkedAt: components["schemas"]["Timestamp"] | null;
+            displayName: string | null;
+            failure: ("transport" | "timeout" | "rate_limited" | "unavailable" | "invalid_response") | null;
+            found: boolean | null;
+            lastAttemptAt: components["schemas"]["Timestamp"] | null;
+            notCheckedReason: ("steam_vanity_url" | "not_requested") | null;
+            playerId: string | null;
+            profileUrl: string | null;
+            /** @enum {string} */
+            state: "checking" | "completed" | "not_checked" | "failed";
+            vtc: {
+                id: string | null;
+                inVtc: boolean;
+                name: string | null;
+                tag: string | null;
+            } | null;
+        };
+        ApplicationStage4TruckersmpCheckEnvelope: {
+            data: components["schemas"]["ApplicationStage4TruckersmpCheck"];
+            meta: components["schemas"]["Meta"];
         };
         Assignment: {
             /** Format: date-time */
@@ -3749,11 +3988,15 @@ export interface components {
             actualDistanceM: components["schemas"]["Decimal"] | null;
             actualStartAt: string | null;
             cargo: components["schemas"]["EffectiveCatalogPin"] | null;
+            /** @description Cargo damage percentage of the effective fact. Null when unknown. */
+            cargoDamagePercent?: number | null;
             cargoMassKg: components["schemas"]["Decimal"] | null;
             destination: components["schemas"]["EffectiveCatalogPin"] | null;
+            destinationCompany?: components["schemas"]["TripStage4CompanyRef"] | null;
             /** Format: uuid */
             factRevisionId: string;
             origin: components["schemas"]["EffectiveCatalogPin"] | null;
+            originCompany?: components["schemas"]["TripStage4CompanyRef"] | null;
             plannedDistanceM: components["schemas"]["Decimal"] | null;
             /** @enum {string} */
             provider: "manual" | "ets2telemetry";
@@ -4659,10 +4902,32 @@ export interface components {
             /** Format: uri */
             link: string;
         };
+        InvitationStage4Applicant: {
+            /** Format: email */
+            email: string;
+            nickname: string;
+        };
+        InvitationStage4List: {
+            items: components["schemas"]["InvitationStage4ListItem"][];
+            nextCursor: string | null;
+            /** @description Matching current generations before paging. */
+            total: number;
+        };
+        InvitationStage4ListEnvelope: {
+            data: components["schemas"]["InvitationStage4List"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** @description The current invitation generation of one approved application and its applicant. Never contains the link, token, secret hash or ciphertext. */
+        InvitationStage4ListItem: {
+            applicant: components["schemas"]["InvitationStage4Applicant"];
+            invitation: components["schemas"]["Invitation"];
+        };
         LeaderboardEntry: {
             acceptedTrips: number;
             actualDistanceM: string;
             member: components["schemas"]["MemberSummary"];
+            /** @description 1-based ordinal under the leaderboard order. */
+            position?: number;
         };
         LeadershipChallengeInput: {
             /** Format: uuid */
@@ -4711,8 +4976,24 @@ export interface components {
             nextCursor: string | null;
         };
         ListLeaderboardEntry: {
+            /**
+             * Format: date
+             * @description Actually covered range start.
+             */
+            fromDate?: string;
             items: components["schemas"]["LeaderboardEntry"][];
             nextCursor: string | null;
+            /** @enum {string} */
+            period?: "range" | "all_time";
+            /** @description Members ranked in this period. */
+            rankedMembers?: number;
+            /**
+             * Format: date
+             * @description Actually covered range end (exclusive).
+             */
+            toDateExclusive?: string;
+            /** @description Null when the viewer is not ranked. */
+            viewer?: components["schemas"]["AnalyticsStage4LeaderboardViewer"] | null;
         };
         ListManualCorrectionRequest: {
             items: components["schemas"]["ManualCorrectionRequest"][];
@@ -5134,15 +5415,41 @@ export interface components {
             version: number;
         };
         MemberProfile: {
+            /** @description reportingAt of the member's latest accepted canonical trip; null when none. */
+            lastAcceptedTripAt?: components["schemas"]["Timestamp"] | null;
             /** @description All-game lifetime accepted canonical trip count and exact actual distance in metres for this visible member profile. */
             lifetimeTotals?: components["schemas"]["LifetimeTripTotals"];
             member: components["schemas"]["MemberSummary"];
+            /** @description Latest join or return to the company. After a reinstatement this is the return time; the first join stays in membership history. */
+            memberSince?: components["schemas"]["Timestamp"];
             qualifications: components["schemas"]["Assignment"][];
         };
         MembershipInput: {
             /** @enum {string} */
             membership: "trainee" | "driver";
             reason: string;
+        };
+        /** @description MemberSummary plus optional Stage 4 directory facts. Once VTC-140 activates them every row carries both. */
+        MemberStage4DirectoryEntry: {
+            formerMember: boolean;
+            /** Format: uuid */
+            id: string;
+            /** @description Accepted canonical trips and actual distance with reportingAt in the 30-day window ending at the list windowEndsAt. Zero rows are included. */
+            last30Days?: components["schemas"]["AnalyticsStage4Totals"];
+            /** @description reportingAt of the member's latest accepted canonical trip; null when none. */
+            lastAcceptedTripAt?: components["schemas"]["Timestamp"] | null;
+            nickname: string;
+            roles: ("trainee" | "driver" | "dispatcher" | "deputy_director" | "director")[];
+        };
+        MemberStage4DirectoryList: {
+            items: components["schemas"]["MemberStage4DirectoryEntry"][];
+            nextCursor: string | null;
+            /** @description End of the 30-day window used by every row of this page and bound into the cursor. */
+            windowEndsAt?: components["schemas"]["Timestamp"];
+        };
+        MemberStage4DirectoryListEnvelope: {
+            data: components["schemas"]["MemberStage4DirectoryList"];
+            meta: components["schemas"]["Meta"];
         };
         MemberSummary: {
             formerMember: boolean;
@@ -5208,14 +5515,28 @@ export interface components {
             serverTime: string;
             unreadCount: number;
         };
+        /** @description The six existing toggles are always present. Stage 4 toggles appear only when the viewer can use them; a write must send exactly the keys the read returned, otherwise 422. */
         NotificationPreferences: {
             eventChanges: boolean;
             eventReminders: boolean;
+            /** @description New admission applications; returned only with applications.manage. */
+            newApplications?: boolean;
+            /** @description A new event visible to the viewer was published. */
+            newEvent?: boolean;
             qualificationChanges: boolean;
+            /** @description Review queue items; returned only with trips.review. */
+            reviewQueue?: boolean;
+            /** @description The viewer's own trip was accepted. */
+            tripAccepted?: boolean;
             tripFinished: boolean;
             tripRejected: boolean;
             tripStarted: boolean;
         };
+        /**
+         * @description Known notification categories; messageKey is notifications.<category>. Notification.category stays a free string so clients ignore unknown values.
+         * @enum {string}
+         */
+        NotificationStage4Category: "trip.started" | "trip.finished" | "trip.cancelled" | "trip.rejected" | "trip.review_required" | "trip.correction_requested" | "event.start_changed" | "event.route_changed" | "event.cancelled" | "event.reminder" | "qualification.assigned" | "qualification.promoted" | "promotion.eligible" | "promotion.review_required" | "application.submitted" | "application.decided" | "member.access_changed" | "trip.accepted" | "event.published";
         OptionalEvent: components["schemas"]["EventPublic"] | null;
         OwnTripStatusSummary: {
             activeTrips: number;
@@ -5268,9 +5589,21 @@ export interface components {
             locale: "en" | "ru";
         };
         PreferencesInput: {
-            displayTimezone?: string;
+            /** @description IANA time zone for displayed times. Null means as on the device; server-generated texts use the company reporting time zone. */
+            displayTimezone?: string | null;
             /** @enum {string} */
             locale?: "en" | "ru";
+        };
+        /** @description Preferences whose displayTimezone can be null. Until VTC-142 activates it the server never stores or returns null. */
+        PreferencesStage4: {
+            /** @description IANA time zone for displayed times. Null means as on the device; server-generated texts use the company reporting time zone. */
+            displayTimezone: string | null;
+            /** @enum {string} */
+            locale: "en" | "ru";
+        };
+        PreferencesStage4Envelope: {
+            data: components["schemas"]["PreferencesStage4"];
+            meta: components["schemas"]["Meta"];
         };
         Progress: {
             acceptedTrips: number;
@@ -5797,6 +6130,22 @@ export interface components {
             preferences: components["schemas"]["Preferences"];
             steamVerified: boolean;
         };
+        /** @description Self with the Stage 4 nullable display time zone. */
+        SelfStage4: {
+            capabilities: string[];
+            /** Format: email */
+            email: string;
+            emailVerified: boolean;
+            identityEpoch: number;
+            member: components["schemas"]["MemberSummary"];
+            missingSetup: string[];
+            preferences: components["schemas"]["PreferencesStage4"];
+            steamVerified: boolean;
+        };
+        SelfStage4Envelope: {
+            data: components["schemas"]["SelfStage4"];
+            meta: components["schemas"]["Meta"];
+        };
         SourceCapabilities: {
             admissions: boolean;
             externalIdentities: boolean;
@@ -5877,7 +6226,10 @@ export interface components {
             evidence: components["schemas"]["Evidence"][];
             manualRevision: components["schemas"]["ManualRevisionRead"] | null;
             pendingProposalId: string | null;
+            qualificationCheck?: components["schemas"]["TripStage4QualificationCheck"] | null;
             reviewReasonCodes: string[];
+            /** @description At most one telemetry source (the selected telemetry fact revision) followed by at most one manual source (the current revision); each can be absent. */
+            sources?: components["schemas"]["TripStage4Source"][];
             summary: components["schemas"]["TripSummary"];
             /** @constant */
             view: "private";
@@ -6159,6 +6511,72 @@ export interface components {
             state: "waiting";
             trip: components["schemas"]["TripStage3ReviewQueueTrip"];
         };
+        /** @description Origin or destination company of the effective fact. Unresolved keeps the raw provider code when one was reported. */
+        TripStage4CompanyRef: {
+            code: string;
+            companyId: components["schemas"]["Id"];
+            depotId: components["schemas"]["Id"];
+            hidden: boolean;
+            logo: components["schemas"]["CatalogLogo"] | null;
+            name: string;
+            /** @constant */
+            state: "resolved";
+        } | {
+            code: string | null;
+            /** @constant */
+            state: "unresolved";
+        };
+        /** @description Author-safe qualification check of the effective fact. Unresolved history has a reason code and no rules. Acceptance, decision authority and blocked reasons are reviewer-only. */
+        TripStage4QualificationCheck: {
+            reasonCode: string | null;
+            rules: components["schemas"]["TripStage4RuleCheck"][];
+            /** @enum {string} */
+            status: "resolved" | "unresolved";
+        };
+        /** @description One historical rule applied to the effective fact with its configured value. Unknown observed values are null, never zero. */
+        TripStage4RuleCheck: {
+            bypassedByEvent: boolean;
+            limitMassKg: components["schemas"]["Decimal"];
+            observedMassKg: components["schemas"]["Decimal"] | null;
+            /** @enum {string} */
+            outcome: "pass" | "fail" | "unknown";
+            /** @constant */
+            ruleType: "max_mass";
+        } | {
+            /** @description Full number of configured trailer types. */
+            allowedTrailerTypeCount: number;
+            /** @description Configured trailer types in the viewer locale, truncated at 100. */
+            allowedTrailerTypes: components["schemas"]["CatalogLabel"][];
+            bypassedByEvent: boolean;
+            offendingTrailerTypes: components["schemas"]["CatalogLabel"][];
+            /** @enum {string} */
+            outcome: "pass" | "fail" | "unknown";
+            /** @constant */
+            ruleType: "allowed_trailer_types";
+        } | {
+            allowedAdrClasses: ("1" | "2" | "3" | "4" | "6" | "8")[];
+            bypassedByEvent: boolean;
+            observedAdrClass: ("1" | "2" | "3" | "4" | "6" | "8") | null;
+            /** @enum {string} */
+            outcome: "pass" | "fail" | "unknown";
+            /** @constant */
+            ruleType: "allowed_adr_categories";
+        };
+        /** @description One author-safe source of the trip. Reconciliation candidates, dismissals, confidence and reasons are reviewer-only and never appear here. */
+        TripStage4Source: {
+            actualDistanceM: components["schemas"]["Decimal"] | null;
+            /** @description True when this source's fact is the trip's current fact or the base of the derived current fact. */
+            effective: boolean;
+            /** @enum {string} */
+            kind: "ets2telemetry" | "manual";
+            /** @description Receipt of the selected telemetry source message, or submission of the current manual revision. */
+            receivedAt: components["schemas"]["Timestamp"];
+            /**
+             * @description Persisted outcome of this source's fact.
+             * @enum {string}
+             */
+            state: "open" | "delivered" | "cancelled" | "none";
+        };
         TripSummary: {
             actualDistanceM: string | null;
             cargo: components["schemas"]["CatalogLabel"] | null;
@@ -6439,6 +6857,33 @@ export interface operations {
                 };
             };
             default: components["responses"]["Error"];
+        };
+    };
+    recheckApplicationTruckersmp: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                applicationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recheck the applicant on TruckersMP */
+            202: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationStage4TruckersmpCheckEnvelope"];
+                };
+            };
+            default: components["responses"]["PrivateNoStoreError"];
         };
     };
     listAudit: {
@@ -7350,6 +7795,34 @@ export interface operations {
             429: components["responses"]["Error"];
             503: components["responses"]["Error"];
             default: components["responses"]["Error"];
+        };
+    };
+    listInvitations: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+                /** @description Defaults to active. */
+                state?: "active" | "expired";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List current invitations */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationStage4ListEnvelope"];
+                };
+            };
+            default: components["responses"]["PrivateNoStoreError"];
         };
     };
     getInvitation: {
@@ -8435,11 +8908,15 @@ export interface operations {
     };
     getCompanyAnalytics: {
         parameters: {
-            query: {
-                fromDate: string;
+            query?: {
+                /** @description Required unless period=all_time; must be absent with it. */
+                fromDate?: string;
                 game?: "ets2" | "ats";
                 granularity?: "day" | "month";
-                toDateExclusive: string;
+                /** @description range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the month-aligned covered range described on the operation. */
+                period?: "range" | "all_time";
+                /** @description Required unless period=all_time; must be absent with it. */
+                toDateExclusive?: string;
             };
             header?: never;
             path?: never;
@@ -8453,7 +8930,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeAnalytics"];
+                    "application/json": components["schemas"]["AnalyticsStage4CompanyEnvelope"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCompanyAnalyticsBreakdown: {
+        parameters: {
+            query: {
+                dimension: "route" | "cargo" | "source";
+                /** @description Required unless period=all_time; must be absent with it. */
+                fromDate?: string;
+                game?: "ets2" | "ats";
+                /** @description Top items for route and cargo; defaults to 5. Rejected with 422 for source. */
+                limit?: number;
+                /** @description Label language; defaults to the viewer's saved locale. */
+                locale?: "en" | "ru";
+                /** @description range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the month-aligned covered range described on the operation. */
+                period?: "range" | "all_time";
+                /** @description Required unless period=all_time; must be absent with it. */
+                toDateExclusive?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Company analytics breakdown */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsStage4BreakdownEnvelope"];
                 };
             };
             default: components["responses"]["Error"];
@@ -8461,13 +8972,17 @@ export interface operations {
     };
     getLeaderboard: {
         parameters: {
-            query: {
+            query?: {
                 cursor?: components["parameters"]["Cursor"];
-                fromDate: string;
+                /** @description Required unless period=all_time; must be absent with it. */
+                fromDate?: string;
                 game?: "ets2" | "ats";
                 granularity?: "day" | "month";
                 limit?: components["parameters"]["Limit"];
-                toDateExclusive: string;
+                /** @description range (default) uses fromDate and toDateExclusive. all_time covers every accepted trip without the 732-day limit; fromDate and toDateExclusive must then be absent and the response returns the month-aligned covered range described on the operation. */
+                period?: "range" | "all_time";
+                /** @description Required unless period=all_time; must be absent with it. */
+                toDateExclusive?: string;
             };
             header?: never;
             path?: never;
@@ -8527,7 +9042,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeSelf"];
+                    "application/json": components["schemas"]["SelfStage4Envelope"];
                 };
             };
             default: components["responses"]["Error"];
@@ -9405,7 +9920,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeSelf"];
+                    "application/json": components["schemas"]["SelfStage4Envelope"];
                 };
             };
             default: components["responses"]["Error"];
@@ -9956,7 +10471,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopePreferences"];
+                    "application/json": components["schemas"]["PreferencesStage4Envelope"];
                 };
             };
             default: components["responses"]["Error"];
@@ -10276,8 +10791,20 @@ export interface operations {
     listMembers: {
         parameters: {
             query?: {
+                /** @description Current ATS qualification level ID, one of the levels listQualificationLevels returns to this reader for ats; any other ID returns 422. */
+                atsLevel?: components["schemas"]["Id"];
                 cursor?: components["parameters"]["Cursor"];
+                /** @description Current ETS2 qualification level ID, one of the levels listQualificationLevels returns to this reader for ets2; any other ID returns 422. */
+                ets2Level?: components["schemas"]["Id"];
                 limit?: components["parameters"]["Limit"];
+                /** @description Defaults to asc for nickname and desc for the other sorts. Members without an accepted trip sort last for lastTrip in either order. */
+                order?: "asc" | "desc";
+                /** @description Current role. Director matches only the serving director pointer. Filters before pagination; bound into the signed cursor. */
+                role?: "trainee" | "driver" | "dispatcher" | "deputy_director" | "director";
+                /** @description Case-insensitive nickname substring; surrounding whitespace is ignored and a blank term is rejected. Same rules as listAdminMembers. Filters before pagination; bound into the signed cursor. */
+                search?: string;
+                /** @description nickname, 30-day accepted distance, 30-day accepted trips or last accepted trip time. Ties break by member ID. Omitted keeps ascending member ID order. */
+                sort?: "nickname" | "distance30d" | "trips30d" | "lastTrip";
             };
             header?: never;
             path?: never;
@@ -10291,7 +10818,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeListMemberSummary"];
+                    "application/json": components["schemas"]["MemberStage4DirectoryListEnvelope"];
                 };
             };
             default: components["responses"]["Error"];

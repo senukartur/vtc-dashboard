@@ -18,9 +18,11 @@ interface WireOperation {
   responses: Record<string, Content | { $ref: string }>;
   requestBody?: Content;
 }
-type Operation = WireOperation & { operationId: string; "x-contract-stage"?: string } & Partial<
-    Record<OperationExtension, WireOperation>
-  >;
+type Operation = WireOperation & {
+  operationId: string;
+  "x-contract-stage"?: string;
+  "x-stage-4-changes"?: object;
+} & Partial<Record<OperationExtension, WireOperation>>;
 interface Fixture {
   id: string;
   operationId: string;
@@ -74,7 +76,9 @@ test("the runtime schema engine accepts every reviewed structural browser fixtur
     if (
       "query" in fixture &&
       (fixture.operationExtension === "x-stage-3-operation" ||
-        activeOperation?.["x-contract-stage"] === "VTC-139 Step 1")
+        activeOperation?.["x-contract-stage"] === "VTC-139 Step 1" ||
+        activeOperation?.["x-contract-stage"] === "VTC-150 Step 1" ||
+        activeOperation?.["x-stage-4-changes"] !== undefined)
     ) {
       const query = (operation.parameters ?? []).flatMap((parameter) => {
         const resolved =

@@ -1,5 +1,9 @@
+import { sql } from "drizzle-orm";
 import {
+  boolean,
+  check,
   customType,
+  datetime,
   foreignKey,
   index,
   int,
@@ -20,6 +24,18 @@ const email = (name: string) =>
   customType<{ data: string; driverData: string }>({
     dataType: () => "varchar(254) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
   })(name);
+const instant = (name: string) => datetime(name, { mode: "date", fsp: 3 });
+const steamId = (name: string) =>
+  customType<{ data: string; driverData: string }>({
+    dataType: () => "varchar(17) CHARACTER SET ascii COLLATE ascii_bin",
+  })(name);
+export const referralSources = [
+  "truckersmp",
+  "discord",
+  "friend_or_member",
+  "youtube_or_twitch",
+  "other",
+] as const;
 export const applications = mysqlTable(
   "admissions_applications",
   {
@@ -39,11 +55,72 @@ export const applications = mysqlTable(
     discord: varchar("discord", { length: 256 }),
     introduction: text("introduction"),
     invitationId: idColumn("invitation_id"),
+    // Stage 4 (VTC-144): optional referral answer; free text only with "other".
+    referralSource: mysqlEnum("referral_source", referralSources),
+    referralOther: varchar("referral_other", { length: 200 }),
   },
   (t) => [
     uniqueIndex("admissions_one_open_email").on(t.openEmail),
     index("admissions_submitted_page").on(t.submittedAt, t.id),
     index("admissions_email_history").on(t.emailKey, t.submittedAt, t.id),
+    check(
+      "admissions_referral_other_requires_other",
+      sql`${t.referralOther} IS NULL OR ${t.referralSource} <=> 'other'`,
+    ),
+    check(
+      "admissions_referral_other_nonblank",
+      sql`${t.referralOther} IS NULL OR REGEXP_LIKE(${t.referralOther}, '[^[:space:]]')`,
+    ),
+  ],
+);
+// Stage 4 (VTC-144): the applicant's TruckersMP check, private to applications.manage.
+// One row per application; deleted with the application. Provider payload stays in profile.
+export const truckersChecks = mysqlTable(
+  "admissions_truckers_checks",
+  {
+    applicationId: idColumn("application_id").primaryKey(),
+    generation: int("generation", { unsigned: true }).notNull().default(1),
+    state: mysqlEnum("state", ["checking", "completed", "not_checked", "failed"]).notNull(),
+    steamId: steamId("steam_id"),
+    leaseId: idColumn("lease_id"),
+    leaseUntil: instant("lease_until"),
+    found: boolean("found"),
+    profile: json("profile").$type<Record<string, unknown>>(),
+    requestedAt: instant("requested_at").notNull(),
+    checkedAt: instant("checked_at"),
+    lastAttemptAt: instant("last_attempt_at"),
+    failure: mysqlEnum("failure", [
+      "transport",
+      "timeout",
+      "rate_limited",
+      "unavailable",
+      "invalid_response",
+    ]),
+  },
+  (t) => [
+    foreignKey({
+      name: "admissions_truckers_check_application_fk",
+      columns: [t.applicationId],
+      foreignColumns: [applications.id],
+    }).onDelete("cascade"),
+    index("admissions_truckers_check_lease").on(t.leaseUntil),
+    check("admissions_truckers_check_generation", sql`${t.generation} > 0`),
+    check(
+      "admissions_truckers_check_steam",
+      sql`(${t.state} = 'not_checked') = (${t.steamId} IS NULL)`,
+    ),
+    check(
+      "admissions_truckers_check_failure",
+      sql`${t.state} <> 'failed' OR ${t.failure} IS NOT NULL`,
+    ),
+    check(
+      "admissions_truckers_check_completed",
+      sql`${t.state} <> 'completed' OR (${t.found} IS NOT NULL AND ${t.checkedAt} IS NOT NULL)`,
+    ),
+    check(
+      "admissions_truckers_check_lease_pair",
+      sql`(${t.leaseId} IS NULL) = (${t.leaseUntil} IS NULL)`,
+    ),
   ],
 );
 export const decisions = mysqlTable(

@@ -15,6 +15,7 @@ import {
   reset,
   SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
+  withPrefixMembershipJoinedAt,
 } from "../persistence/support.ts";
 
 const settings = guardedSettings();
@@ -51,22 +52,24 @@ test(
     );
     const email = "fictional-ladder-upgrade@example.invalid";
     const password = "Fictional ladder upgrade passphrase 42";
-    await identity.bootstrap({ email, name: "Fictional Ladder Upgrade Director", password });
-    const signed = await identity.login(email, password);
-    const cookie = signed.cookies.map((row) => row.split(";", 1)[0]).join("; ");
-    const director = await identity.authenticate(new Headers({ cookie }));
     const evidenceOnlyUser = newId(),
       rollbackUser = newId();
-    const credential = await identity.prepareCredential(password);
-    await unit.run(async (tx) => {
-      for (const userId of [evidenceOnlyUser, rollbackUser])
-        await identity.insertWithCredential(tx, {
-          userId,
-          email: `${userId}@example.invalid`,
-          name: "Fictional Upgrade Driver",
-          ...credential,
-          roles: ["driver"],
-        });
+    const director = await withPrefixMembershipJoinedAt(control, async () => {
+      await identity.bootstrap({ email, name: "Fictional Ladder Upgrade Director", password });
+      const signed = await identity.login(email, password);
+      const cookie = signed.cookies.map((row) => row.split(";", 1)[0]).join("; ");
+      const credential = await identity.prepareCredential(password);
+      await unit.run(async (tx) => {
+        for (const userId of [evidenceOnlyUser, rollbackUser])
+          await identity.insertWithCredential(tx, {
+            userId,
+            email: `${userId}@example.invalid`,
+            name: "Fictional Upgrade Driver",
+            ...credential,
+            roles: ["driver"],
+          });
+      });
+      return identity.authenticate(new Headers({ cookie }));
     });
     await control.execute("UPDATE identity_memberships SET status='inactive' WHERE user_id=?", [
       evidenceOnlyUser,
@@ -129,7 +132,7 @@ test(
     const [ledger] = await control.query<RowDataPacket[]>(
       "SELECT version, hash, state FROM _vtc_migrations ORDER BY version",
     );
-    expect(await runMigrations(settings)).toBe(1);
+    expect(await runMigrations(settings)).toBe(2);
     expect(await runMigrations(settings)).toBe(0);
     const [upgraded] = await control.query<RowDataPacket[]>(
       "SELECT CAST(id AS CHAR) id, CAST(user_id AS CHAR) userId, game, level, assigned_at, CAST(level_id AS CHAR) levelId FROM qualification_initial_assignments ORDER BY id",

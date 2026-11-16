@@ -357,3 +357,38 @@ test("composed profiles and own trip status expose exact accepted lifetime total
     await enabled.close();
   }
 });
+
+test("Stage 4 directory parameters stay rejected and rows keep the existing shape until VTC-140", async () => {
+  for (const query of [
+    "search=Driver",
+    "role=driver",
+    `ets2Level=${driver1Id}`,
+    `atsLevel=${driver1Id}`,
+    "sort=distance30d",
+    "order=desc",
+  ]) {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/members?${query}`,
+      headers: { cookie: driver1Cookie },
+    });
+    expect(res.statusCode, query).toBe(422);
+  }
+  const list = await app.inject({
+    method: "GET",
+    url: "/api/v1/members",
+    headers: { cookie: driver1Cookie },
+  });
+  expect(list.statusCode).toBe(200);
+  expect(Object.keys(list.json().data).sort()).toEqual(["items", "nextCursor"]);
+  for (const item of list.json().data.items)
+    expect(Object.keys(item).sort()).toEqual(["formerMember", "id", "nickname", "roles"]);
+  const profile = await app.inject({
+    method: "GET",
+    url: `/api/v1/members/${driver1Id}`,
+    headers: { cookie: driver1Cookie },
+  });
+  expect(profile.statusCode).toBe(200);
+  expect(profile.json().data).not.toHaveProperty("memberSince");
+  expect(profile.json().data).not.toHaveProperty("lastAcceptedTripAt");
+});

@@ -15,7 +15,13 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { decimalColumn, idColumn, opaqueColumn, utcColumn } from "../../core/values.js";
-import { adrClasses, catalogCargoes, catalogCities, catalogTrailers } from "../catalogs/index.js";
+import {
+  adrClasses,
+  catalogCargoes,
+  catalogCities,
+  catalogCompanyCities,
+  catalogTrailers,
+} from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
 import { qualificationAssignments, qualificationRules } from "../qualifications/index.js";
 
@@ -75,6 +81,14 @@ export const trips = mysqlTable(
     index("trip_owner_reporting").on(t.ownerId, t.reportingAt, t.id),
     index("trip_game_page").on(t.game, t.decision, t.createdAt, t.id),
     index("trip_analytics_reporting").on(t.decision, t.reportingAt, t.game, t.ownerId),
+    // Stage 4 member directory (VTC-140): 30-day totals and last accepted trip per owner.
+    index("trip_owner_accepted_reporting").on(
+      t.ownerId,
+      t.decision,
+      t.aliasOf,
+      t.reportingAt,
+      t.actualDistanceM,
+    ),
     index("trip_review_queue").on(t.reviewHold, t.aliasOf, t.createdAt, t.id),
     index("trip_review_queued_at").on(t.reviewHold, t.aliasOf, t.queuedAt, t.id),
     check("trip_version_positive", sql`${t.version} > 0`),
@@ -186,6 +200,11 @@ export const tripFacts = mysqlTable(
     endVerified: boolean("end_verified").notNull(),
     originCityId: idColumn("origin_city_id"),
     destinationCityId: idColumn("destination_city_id"),
+    // Stage 4 (VTC-141): resolved depot and raw provider company code; older facts stay null.
+    originDepotId: idColumn("origin_depot_id"),
+    destinationDepotId: idColumn("destination_depot_id"),
+    originCompanyCode: opaqueColumn("origin_company_code", { length: 128 }),
+    destinationCompanyCode: opaqueColumn("destination_company_code", { length: 128 }),
     cargoId: idColumn("cargo_id"),
     adrClass: mysqlEnum("adr_class", adrClasses),
     cargoMassKg: decimalColumn("cargo_mass_kg"),
@@ -221,6 +240,16 @@ export const tripFacts = mysqlTable(
       name: "trip_fact_destination_city_fk",
       columns: [t.destinationCityId],
       foreignColumns: [catalogCities.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "trip_fact_origin_depot_fk",
+      columns: [t.originDepotId],
+      foreignColumns: [catalogCompanyCities.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "trip_fact_destination_depot_fk",
+      columns: [t.destinationDepotId],
+      foreignColumns: [catalogCompanyCities.id],
     }).onDelete("restrict"),
     foreignKey({
       name: "trip_fact_cargo_fk",

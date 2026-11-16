@@ -204,3 +204,27 @@ OpenAPI stages the following operations and shared-path extensions. A shared pat
 | `GET /api/v1/admin/qualification-members?view=stage3` | `listQualificationMembers` | `qualifications.manage` | VTC-134 |
 | `GET /api/v1/me/workspace-summary?view=stage3` | `getMyWorkspaceSummary` | `company.read` with source-specific capabilities | VTC-134 |
 | `GET /api/v1/admin/audit?view=stage3` | `listAudit` | `members.manage` | VTC-135 |
+
+## Stage 4 dashboard (VTC-150 Step 1)
+
+New operations are staged in OpenAPI and stay unmounted until their feature lane activates them. Existing operations list their additions in `x-stage-4-changes`. [Staged contract semantics](README.md#stage-4-foundation-vtc-150-step-1).
+
+| Method and route | Operation ID | Capability | Feature owner |
+| --- | --- | --- | --- |
+| `GET /api/v1/members?search&role&ets2Level&atsLevel&sort&order` | `listMembers` | `company.read` | VTC-140 |
+| `GET /api/v1/members/{memberId}` | `getMember` | `company.read` | VTC-140 |
+| `GET /api/v1/admin/invitations?state=active\|expired` | `listInvitations` | `applications.manage` | VTC-140 |
+| `GET /api/v1/trips/{tripId}` | `getTrip` | `company.read`, private view for the author | VTC-141 |
+| `GET /api/v1/me/notification-preferences` | `getNotificationPreferences` | `session`, Stage 4 toggles by capability | VTC-142 |
+| `PUT /api/v1/me/notification-preferences` | `setNotificationPreferences` | `session` | VTC-142 |
+| `POST /api/v1/auth/login` | `login` | `public` | VTC-142 |
+| `GET /api/v1/me` | `getMe` | `session` | VTC-142 |
+| `PATCH /api/v1/me/preferences` | `updatePreferences` | `session` | VTC-142 |
+| `GET /api/v1/notifications` | `pollNotifications` | `session` | VTC-142 |
+| `GET /api/v1/notifications/history` | `listNotificationHistory` | `session` | VTC-142 |
+| `GET /api/v1/analytics/company?period=all_time` | `getCompanyAnalytics` | `company.read` | VTC-143 |
+| `GET /api/v1/analytics/leaderboard?period=all_time` | `getLeaderboard` | `company.read` | VTC-143 |
+| `GET /api/v1/analytics/company/breakdown?dimension=route\|cargo\|source` | `getCompanyAnalyticsBreakdown` | `company.read` | VTC-112 |
+| `POST /api/v1/public/applications` | `submitApplication` | `public` | VTC-144 |
+| `GET /api/v1/admin/applications/{applicationId}` | `getApplication` | `applications.manage` | VTC-144 |
+| `POST /api/v1/admin/applications/{applicationId}/truckersmp-checks` | `recheckApplicationTruckersmp` | `applications.manage` | VTC-144 |
