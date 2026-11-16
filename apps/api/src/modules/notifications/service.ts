@@ -225,14 +225,9 @@ export function createNotifications(
       or(inArray(notifications.access, access), eq(notifications.ownerId, a.userId)),
     );
   }
-  async function once(
-    tx: TxContext,
-    a: Actor,
-    route: Route,
-    key: string,
-    value: unknown,
-    command: () => Promise<Result>,
-  ) {
+  // Read-only lookup of this recipient's saved receipt for a command key. `replay` holds the
+  // stored result only when the saved fingerprint matches this exact request.
+  async function receipt(tx: TxContext, a: Actor, route: Route, key: string, value: unknown) {
     applicationId(key);
     const fingerprint = createHmac("sha256", Buffer.from(config.cursorKey, "hex"))
       .update("notifications/command/v1\0")
@@ -249,11 +244,23 @@ export function createNotifications(
         ),
       )
       .for("share");
-    if (saved) {
-      if (!timingSafeEqual(saved.fingerprint, fingerprint))
-        throw identityError(409, "IDEMPOTENCY_CONFLICT");
-      return saved.result;
-    }
+    return {
+      fingerprint,
+      saved: !!saved,
+      replay: saved && timingSafeEqual(saved.fingerprint, fingerprint) ? saved.result : null,
+    };
+  }
+  async function once(
+    tx: TxContext,
+    a: Actor,
+    route: Route,
+    key: string,
+    value: unknown,
+    command: () => Promise<Result>,
+  ) {
+    const { fingerprint, saved, replay } = await receipt(tx, a, route, key, value);
+    if (replay) return replay;
+    if (saved) throw identityError(409, "IDEMPOTENCY_CONFLICT");
     const result = await command();
     await c(tx)
       .insert(notificationCommands)
@@ -1007,16 +1014,29 @@ export function createNotifications(
       return run(async (tx) => {
         const current = await authorize(tx, a);
         // A write carries exactly the keys the current read returns. Omitted capability toggles
-        // keep their stored values; a stale key set is rejected before any receipt or version.
+        // keep their stored values; a stale key set is rejected before any receipt or version,
+        // unless it exactly retries a saved command: that replays its receipt as once() would.
         const keys = preferenceKeys(current.capabilities);
-        let written: Partial<Record<Preference, boolean>>;
+        let shaped: Partial<Record<Preference, boolean>> | null = null;
         try {
           const input = closed(value, keys);
-          if (keys.some((p) => typeof input[p] !== "boolean")) throw new Error();
-          written = Object.fromEntries(keys.map((p) => [p, input[p] as boolean]));
-        } catch {
-          throw identityError(422);
+          if (keys.every((p) => typeof input[p] === "boolean"))
+            shaped = Object.fromEntries(keys.map((p) => [p, input[p] as boolean]));
+        } catch {}
+        if (!shaped) {
+          try {
+            applicationId(key);
+          } catch {
+            throw identityError(422);
+          }
+          const { replay } = await receipt(tx, a, "preferences", key, [expected, value]);
+          if (!replay?.preferences) throw identityError(422);
+          return {
+            data: replay.preferences as S["NotificationPreferences"],
+            version: replay.version,
+          };
         }
+        const written = shaped;
         const s = await state(tx, a.userId);
         const result = await once(tx, a, "preferences", key, [expected, value], async () => {
           if (s.version !== expected) throw identityError(412, "VERSION_CONFLICT");

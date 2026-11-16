@@ -2800,6 +2800,81 @@ test("Stage 4 toggles are validated over HTTP before a change or receipt", async
   }
 });
 
+test("an exact retry after losing trips.review replays its saved receipt; a fresh stale write is 422", async () => {
+  const app = await createApp({
+    identity,
+    notifications: service,
+    checkReadiness: async () => true,
+  });
+  try {
+    const person = await member(["driver", "dispatcher"]);
+    const put = async (
+      cookie: string,
+      actor: Actor,
+      key: string,
+      etag: string,
+      payload: Record<string, unknown>,
+    ) => {
+      const issued = csrfProtection(identityConfig).issue({}, actor);
+      return app.inject({
+        method: "PUT",
+        url: "/api/v1/me/notification-preferences",
+        headers: {
+          cookie: `${cookie}; ${issued.cookie.split(";", 1)[0]}`,
+          origin,
+          "x-csrf-token": issued.token,
+          "if-match": etag,
+          "idempotency-key": key,
+        },
+        payload,
+      });
+    };
+    const receipts = async () => {
+      const [rows] = await control.execute<RowDataPacket[]>(
+        "SELECT COUNT(*) n FROM notification_commands WHERE recipient_id=?",
+        [person.actor.userId],
+      );
+      return Number(rows[0]?.n);
+    };
+    const read = await app.inject({
+      url: "/api/v1/me/notification-preferences",
+      headers: { cookie: person.cookie },
+    });
+    const etag = String(read.headers.etag),
+      body = { ...read.json().data, reviewQueue: false },
+      key = newId();
+    const saved = await put(person.cookie, person.actor, key, etag, body);
+    expect(saved.statusCode).toBe(200);
+    const after = await recipientState(person.actor.userId);
+    expect(await receipts()).toBe(1);
+
+    await changeRoles(person.actor, ["driver"]);
+    const login = await identity.login(person.email, password),
+      cookie = login.cookies.map((c) => c.split(";", 1)[0]).join("; "),
+      driver = await identity.authenticate(new Headers({ cookie }));
+    // The same key and body replay the original receipt instead of failing the key-set check.
+    const retried = await put(cookie, driver, key, etag, body);
+    expect(retried.statusCode).toBe(200);
+    expect(retried.headers.etag).toBe(saved.headers.etag);
+    expect(retried.json().data).toEqual(saved.json().data);
+    expect(await recipientState(person.actor.userId)).toEqual(after);
+    expect(await receipts()).toBe(1);
+    // A fresh key, or the same key with another body, still meets the key-set check first.
+    for (const [attempt, payload] of [
+      [newId(), body],
+      [key, { ...body, tripStarted: false }],
+    ] as const) {
+      const response = await put(cookie, driver, attempt, String(saved.headers.etag), payload);
+      expect(response.statusCode, attempt).toBe(422);
+      expect(response.json().error.code).toBe("INVALID_PAYLOAD");
+    }
+    expect(await recipientState(person.actor.userId)).toEqual(after);
+    expect(await receipts()).toBe(1);
+  } finally {
+    await app.close();
+  }
+});
+
 test("a role change between read and write gives 401 in session and 422 after sign-in; hidden values persist", async () => {
   const person = await member(["driver", "dispatcher"]);
   const stale = await changePreferences(person.actor, { reviewQueue: false });
