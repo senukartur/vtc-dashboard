@@ -441,6 +441,46 @@ def core():
         runtime_admissions_limits = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});try{await c.beginTransaction();await c.query('INSERT INTO admissions_limits(bucket,`window`,count) VALUES ?',[Array.from({length:256},(_,i)=>['staff_read:rehearsal'+i,0,1])]);const [deleted]=await c.execute('DELETE FROM admissions_limits WHERE bucket LIKE ? AND `window`<? LIMIT 100',['staff_read:rehearsal%',1]);const [remaining]=await c.query('SELECT COUNT(*) n FROM admissions_limits WHERE bucket LIKE ?',['staff_read:rehearsal%']);if(deleted.affectedRows!==100||Number(remaining[0].n)!==156)throw Error('ADMISSIONS_RUNTIME_LIMIT_CLEANUP_FAILED');}finally{await c.rollback();await c.end();}"""
         compose(['exec', '-T', 'app', 'node', '--input-type=module', '-e', runtime_admissions_limits], revision=revision)
         print('Admissions restricted runtime: rate-row insert/read and bounded100-row deletion passed with rollback', flush=True)
+        # VTC-144: runtime creates/restarts TruckersMP checks; the worker only locks and updates them.
+        truckers_probe = """
+            import { createRequire } from 'node:module';
+            const mysql = createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');
+            const { MYSQL_HOST: host, MYSQL_USER: user, MYSQL_PASSWORD: password } = process.env;
+            const c = await mysql.createConnection({ host, user, password, database: 'vtc' });
+            async function denied(statement, values = []) {
+              try { await c.query(statement, values); }
+              catch (error) {
+                if ([1044, 1142, 1143, 1227].includes(error.errno)) return;
+                throw Error('ADMISSIONS_TRUCKERS_GRANT_PROBE_UNEXPECTED_ERROR');
+              }
+              throw Error('ADMISSIONS_TRUCKERS_GRANT_PROBE_UNEXPECTED_PERMISSION');
+            }
+            const id = '41500000-0000-4000-8000-000000001440';
+            try {
+              await c.beginTransaction();
+              if (user === 'vtc_runtime') {
+                await c.query("INSERT INTO admissions_applications (id, submitted_at, nickname, email, email_key, steam_profile_url, games) VALUES (?, UTC_TIMESTAMP(3), 'Fictional Rehearsal', 'rehearsal@example.invalid', 'rehearsal@example.invalid', 'https://steamcommunity.com/profiles/76561190000000001', JSON_ARRAY('ets2'))", [id]);
+                await c.query("INSERT INTO admissions_truckers_checks (application_id, generation, state, steam_id, lease_id, lease_until, requested_at) VALUES (?, 1, 'checking', '76561190000000001', ?, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))", [id, id]);
+                const [rows] = await c.query('SELECT state FROM admissions_truckers_checks WHERE application_id = ? FOR UPDATE', [id]);
+                if (rows.length !== 1) throw Error('ADMISSIONS_TRUCKERS_GRANT_PROBE_ROW_MISSING');
+                await c.query("UPDATE admissions_truckers_checks SET state = 'failed', failure = 'timeout', lease_id = NULL, lease_until = NULL WHERE application_id = ?", [id]);
+              } else if (user === 'vtc_jobs') {
+                await c.query('SELECT generation, state, steam_id, lease_id, lease_until FROM admissions_truckers_checks WHERE FALSE FOR UPDATE');
+                await c.query("UPDATE admissions_truckers_checks SET state = 'completed' WHERE FALSE");
+                await denied("INSERT INTO admissions_truckers_checks (application_id, generation, state, requested_at) SELECT id, 1, 'not_checked', UTC_TIMESTAMP(3) FROM admissions_applications WHERE FALSE");
+              } else {
+                throw Error('ADMISSIONS_TRUCKERS_GRANT_PROBE_WRONG_ACCOUNT');
+              }
+              await denied('DELETE FROM admissions_truckers_checks WHERE application_id = ?', [id]);
+            } finally {
+              await c.rollback();
+              await c.end();
+            }
+        """
+        command = ['node', '--input-type=module', '-e', truckers_probe]
+        compose(['exec', '-T', 'app', *command], revision=revision)
+        compose(['run', '--rm', '--no-deps', 'jobs', *command], revision=revision)
+        print('Admissions TruckersMP check grants: PASS (runtime insert/lock/update, jobs lock/update, no DELETE or jobs INSERT, rolled back)', flush=True)
         # Exercise the exact route supplement with each restricted account on the owned database.
         stage_grants = json.loads((base / ops.activation.STAGE_PROFILE).read_text())['grants']
         route_grants = {

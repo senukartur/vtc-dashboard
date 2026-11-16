@@ -767,6 +767,13 @@ export function createManualReports(
       ownerUserId: actor.userId,
       connection: { state: "unknown" as const, referenceId: null },
       canonical: { tripId, expectedVersion: state.version },
+      // Validated above; the source payload, its hash and adapter version stay unchanged.
+      ...(references && {
+        manualCompanies: {
+          originCompanyId: references.originCompanyId,
+          destinationCompanyId: references.destinationCompanyId,
+        },
+      }),
     };
     const stored = existing?.currentRevisionId
       ? await ports.trips.supersedeManualInTransaction(

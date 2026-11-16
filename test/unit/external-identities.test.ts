@@ -7,12 +7,14 @@ import {
   authorizationUrl,
   parseAssertion,
   parseTruckers,
+  parseTruckersBans,
   providerDeadlineMs,
   ProviderFailure,
   returnUrl,
   steamEndpoint,
   steamId,
   steamProvider,
+  truckersApplicantProvider,
   truckersProvider,
 } from "../../apps/api/src/modules/external-identities/providers.ts";
 
@@ -207,4 +209,64 @@ test("TruckersMP rejects mismatches, unsafe numeric IDs, missing fields and unsp
     null,
   ])
     expect(() => parseTruckers(value, sid)).toThrow(ProviderFailure);
+});
+test("applicant ban summary keeps counts, the any-ban flag and unknown staff counts distinct", () => {
+  const withBans = (fields: Record<string, unknown>) => {
+    const value = player();
+    return { ...value, response: { ...value.response, ...fields } };
+  };
+  expect(parseTruckersBans(withBans({}))).toBeNull();
+  expect(parseTruckersBans(withBans({ bansCount: null, banned: false }))).toBeNull();
+  expect(parseTruckersBans(withBans({ bansCount: 0, banned: false }))).toEqual({
+    any: false,
+    count: 0,
+  });
+  expect(parseTruckersBans(withBans({ bansCount: 0, banned: true }))).toEqual({
+    any: true,
+    count: 0,
+  });
+  expect(parseTruckersBans(withBans({ bansCount: 2 }))).toEqual({ any: true, count: 2 });
+  for (const fields of [
+    { bansCount: -1 },
+    { bansCount: 1.5 },
+    { bansCount: "2" },
+    { bansCount: Number.MAX_SAFE_INTEGER + 1 },
+    { bansCount: 0, banned: "false" },
+    { bansCount: 0, banned: null },
+  ])
+    expect(() => parseTruckersBans(withBans(fields)), JSON.stringify(fields)).toThrow(
+      ProviderFailure,
+    );
+});
+test("applicant lookup makes one bounded request and adds only the ban summary", async () => {
+  const transport = vi.fn<typeof fetch>(async (url, init) => {
+    expect(url).toBe(`https://api.truckersmp.com/v2/player/${sid}`);
+    expect(init?.redirect).toBe("error");
+    return Response.json({ ...player(), response: { ...player().response, bansCount: 2 } });
+  });
+  const found = await truckersApplicantProvider(transport).lookup(sid);
+  expect(transport).toHaveBeenCalledTimes(1);
+  expect(found).toEqual({
+    ...parseTruckers(player(), sid),
+    bans: { any: true, count: 2 },
+  });
+  expect(JSON.stringify(found).includes("ignored")).toBe(false);
+  expect(
+    await truckersApplicantProvider(async () =>
+      Response.json({ error: true, descriptor: "Unable to find player with that ID." }),
+    ).lookup(sid),
+  ).toEqual({ found: false, profile: null, bans: null });
+  for (const [transport, category] of [
+    [async () => new Response("x".repeat(65537)), "invalid_response"],
+    [async () => new Response(null, { status: 429 }), "rate_limited"],
+    [async () => new Response("{", { status: 200 }), "invalid_response"],
+  ] as const)
+    await expect(truckersApplicantProvider(transport).lookup(sid)).rejects.toMatchObject({
+      category,
+    });
+  vi.useFakeTimers();
+  const pending = truckersApplicantProvider(() => new Promise(() => {})).lookup(sid);
+  const rejected = expect(pending).rejects.toMatchObject({ category: "timeout" });
+  await vi.advanceTimersByTimeAsync(providerDeadlineMs);
+  await rejected;
 });

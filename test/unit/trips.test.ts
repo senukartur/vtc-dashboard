@@ -432,6 +432,143 @@ test("telemetry normalization resolves exact codes, ignores the game build and k
     reasonCode: "catalog_unavailable",
   });
 });
+test("telemetry recognizes a company depot only by its code in the resolved trip city", async () => {
+  const north = newId(),
+    depot = newId();
+  const depots: unknown[] = [];
+  const catalogs: CatalogPort = {
+    async resolveInTransaction(_tx, p) {
+      return p.kind === "city" && p.code === "fixture_north"
+        ? { status: "resolved", id: north, adrClass: null }
+        : { status: "unknown", reasonCode: "unknown_source_id" };
+    },
+    async selectionsInTransaction() {
+      return new Map();
+    },
+    async depotInTransaction(_tx, p) {
+      depots.push(p);
+      return p.cityId === north && p.companyCode === "fixture_depot_a"
+        ? { id: depot, companyCode: "fixture_depot_a" }
+        : null;
+    },
+  };
+  const known = await telemetryAdapter.normalize(input(), { ...context(), catalogs });
+  // The destination city is unknown, so its company code is kept without a lookup.
+  expect(known.companies).toEqual({
+    origin: { depotId: depot, code: "fixture_depot_a" },
+    destination: { depotId: null, code: "fixture_depot_b" },
+  });
+  expect(depots).toEqual([{ game: "ets2", cityId: north, companyCode: "fixture_depot_a" }]);
+  const unknownCode = input();
+  unknownCode.snapshot.job.origin.companyId = { available: true, value: "fixture_unknown_co" };
+  expect(
+    (await telemetryAdapter.normalize(unknownCode, { ...context(), catalogs })).companies?.origin,
+  ).toEqual({ depotId: null, code: "fixture_unknown_co" });
+  const missing = input();
+  missing.snapshot.job.origin.companyId = { available: false, reason: "not-observed" };
+  missing.snapshot.job.destination.companyId = { available: true, value: "" };
+  expect((await telemetryAdapter.normalize(missing, { ...context(), catalogs })).companies).toEqual(
+    {
+      origin: { depotId: null, code: null },
+      destination: { depotId: null, code: null },
+    },
+  );
+  const { depotInTransaction: _absent, ...withoutDepots } = catalogs;
+  expect(
+    (await telemetryAdapter.normalize(input(), { ...context(), catalogs: withoutDepots })).companies
+      ?.origin,
+  ).toEqual({ depotId: null, code: "fixture_depot_a" });
+  expect((await telemetryAdapter.normalize(input(), context())).companies).toEqual({
+    origin: { depotId: null, code: "fixture_depot_a" },
+    destination: { depotId: null, code: "fixture_depot_b" },
+  });
+});
+test("manual adapter pins coordinator-selected company depots and rejects a missing depot", async () => {
+  const north = newId(),
+    south = newId(),
+    cargo = newId(),
+    trailer = newId(),
+    company = newId(),
+    depot = newId();
+  const kinds = new Map<string, "city" | "cargo" | "trailer">([
+    [north, "city"],
+    [south, "city"],
+    [cargo, "cargo"],
+    [trailer, "trailer"],
+  ]);
+  const resolved = (entityId: string) => ({ status: "resolved" as const, entityId });
+  const p = {
+    format: 2 as const,
+    reportId: newId(),
+    revisionId: newId(),
+    revision: 1,
+    fields: {
+      game: "ets2" as const,
+      origin: resolved(north),
+      destination: resolved(south),
+      cargo: resolved(cargo),
+      trailerType: resolved(trailer),
+      cargoMassKg: "1",
+      actualDistanceM: "1",
+      evidenceIds: [newId()],
+      eventId: null,
+      comment: null,
+    },
+  };
+  const catalogs: CatalogPort = {
+    async resolveInTransaction() {
+      return { status: "unknown", reasonCode: "unused" };
+    },
+    async selectionsInTransaction(_tx, selections) {
+      return new Map(
+        selections.map(({ id }) => [
+          id,
+          {
+            id,
+            game: "ets2" as const,
+            kind: kinds.get(id) ?? "city",
+            hidden: false,
+            adrClass: null,
+          },
+        ]),
+      );
+    },
+    async depotInTransaction(_tx, q) {
+      return q.cityId === north && q.companyId === company
+        ? { id: depot, companyCode: "fixture_vtc141_co" }
+        : null;
+    },
+  };
+  const without = await manualAdapter.normalize(p, { ...context(), catalogs });
+  expect(without.companies).toEqual({
+    origin: { depotId: null, code: null },
+    destination: { depotId: null, code: null },
+  });
+  const selected = await manualAdapter.normalize(p, {
+    ...context(),
+    catalogs,
+    manualCompanies: { originCompanyId: company, destinationCompanyId: null },
+  });
+  expect(selected.companies).toEqual({
+    origin: { depotId: depot, code: "fixture_vtc141_co" },
+    destination: { depotId: null, code: null },
+  });
+  await expect(
+    manualAdapter.normalize(p, {
+      ...context(),
+      catalogs,
+      manualCompanies: { originCompanyId: null, destinationCompanyId: company },
+    }),
+  ).rejects.toThrow("INVALID_MANUAL_SELECTION");
+  const { depotInTransaction: _absent, ...withoutDepots } = catalogs;
+  await expect(
+    manualAdapter.normalize(p, {
+      ...context(),
+      catalogs: withoutDepots,
+      manualCompanies: { originCompanyId: company, destinationCompanyId: null },
+    }),
+  ).rejects.toThrow("INVALID_MANUAL_SELECTION");
+});
 test("manual adapter validates selected rows and never supplies source times or acceptance", async () => {
   const reportId = newId(),
     revisionId = newId(),

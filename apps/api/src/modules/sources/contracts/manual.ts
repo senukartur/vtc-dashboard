@@ -5,6 +5,7 @@ import { closed, positive } from "../../../platform/outbox/events.js";
 import { decimal } from "./canonical.js";
 import type {
   AdrClass,
+  CompanyFact,
   Fact,
   NormalizedTripEvidence,
   TripEntity,
@@ -93,6 +94,27 @@ export const manualAdapter: TripSourceAdapter = {
       destination = await selected("city", "destinationId", source.fields.destination),
       cargo = await selected("cargo", "cargoId", source.fields.cargo),
       trailer = await selected("trailer", "trailerTypeId", source.fields.trailerType);
+    // The coordinator validated a visible depot; the adapter pins that depot and its code.
+    async function company(
+      companyId: string | null | undefined,
+      city: Fact<TripEntity>,
+    ): Promise<CompanyFact> {
+      if (companyId == null) return { depotId: null, code: null };
+      const depot =
+        city.status === "known"
+          ? await context.catalogs?.depotInTransaction?.(context.tx, {
+              game: p.game,
+              cityId: city.value.entityId,
+              companyId: applicationId(companyId),
+            })
+          : null;
+      if (!depot) throw new Error("INVALID_MANUAL_SELECTION");
+      return { depotId: depot.id, code: depot.companyCode };
+    }
+    const companies = {
+      origin: await company(context.manualCompanies?.originCompanyId, origin),
+      destination: await company(context.manualCompanies?.destinationCompanyId, destination),
+    };
     const adrCategory: Fact<AdrClass> =
       cargo.status !== "known"
         ? unknown("cargo_adr_unknown")
@@ -132,6 +154,7 @@ export const manualAdapter: TripSourceAdapter = {
       adrCategory,
       ruleContextComplete: false,
       reasonCodes: ["manual_review_required", "manual_times_unknown"],
+      companies,
     };
     return result;
   },

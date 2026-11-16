@@ -177,6 +177,9 @@ The owner approved the following field set for the public membership application
 | Games played | Required: ETS2, ATS, or both. |
 | Discord | Optional. |
 | Short introduction | Optional. |
+| How the applicant found the company | Optional: TruckersMP, Discord, a friend or member, YouTube or Twitch, or other. Free text (up to 200 characters) only with "other". |
+
+Applications submitted before the referral question have no answer. For a Steam `/profiles/` link the dashboard automatically checks the applicant on TruckersMP by Steam ID: whether a player exists, the ban count and current VTC membership. `/id/` (custom URL) links are not checked. The check, the referral answer and a manual recheck are visible only to staff who manage applications.
 
 Application review is the director's or deputy's responsibility. The required email is retained even when an invitation is delivered manually through another channel.
 

@@ -364,7 +364,7 @@
             "ApplicationInput.referralSource",
             "ApplicationInput.referralOther"
           ],
-          "description": "Accepts optional referralSource and referralOther. Until VTC-144 activates them the route rejects them with 422 INVALID_PAYLOAD."
+          "description": "Accepts optional referralSource and referralOther."
         }
       }
     },
@@ -8812,7 +8812,7 @@
             "AnalyticsStage4Company.activeMembers",
             "AnalyticsStage4Company.byGame"
           ],
-          "description": "Adds period=all_time and activeDrivers, activeMembers and byGame totals. Until VTC-143 activates them the route rejects period with 422."
+          "description": "Adds period=all_time and activeDrivers, activeMembers and byGame totals."
         },
         "description": "period=all_time uses month granularity in the company reporting time zone. fromDate is the first day of the month of the earliest accepted unique trip that matches the filters, and toDateExclusive is the first day of the month after the current month. Without such a trip fromDate is the first day of the current month. granularity=day returns 422 with it. Buckets are zero-filled for every month of the covered range, so a company without accepted trips returns one zero bucket. activeDrivers counts distinct members with at least one accepted trip in the period; activeMembers counts active memberships of any role at computedAt; byGame lists ets2 then ats with zeros, or only the filtered game."
       }
@@ -9021,7 +9021,7 @@
             "ListLeaderboardEntry.toDateExclusive",
             "LeaderboardEntry.position"
           ],
-          "description": "Adds period=all_time, the viewer's position and rankedMembers, also when the viewer is off-page. Until VTC-143 activates them the route rejects period with 422."
+          "description": "Adds period=all_time, the viewer's position and rankedMembers, also when the viewer is off-page."
         },
         "description": "Order and ties are unchanged: actual distance descending, accepted trips descending, then member ID. position is the 1-based ordinal under that order. The signed cursor also binds period. period=all_time covers the same month-aligned range as getCompanyAnalytics, without buckets: fromDate is the first day of the month of the earliest accepted unique trip that matches the filters, and toDateExclusive is the first day of the month after the current month. Without such a trip fromDate is the first day of the current month."
       }
@@ -32335,7 +32335,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Distinct members with at least one accepted canonical trip in the period."
+            "description": "Distinct members with at least one accepted canonical trip in the period, including former members. Equals the leaderboard rankedMembers for the same period and filters, so it can exceed activeMembers."
           },
           "activeMembers": {
             "type": "integer",
