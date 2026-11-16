@@ -347,7 +347,7 @@ async function publishedPrefixFolder(
   if (count === 32 && entries[31]?.tag !== "0031_odd_stellaris")
     throw new Error("PUBLISHED_STAGE_4_PREFIX_REQUIRED");
   if (count === 33 && entries[32]?.tag !== "0032_bizarre_iron_patriot")
-    throw new Error("PUBLISHED_NOTIFICATION_TOGGLE_RECOPY_PREFIX_REQUIRED");
+    throw new Error("PUBLISHED_JOINED_AT_CATCH_UP_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -495,6 +495,10 @@ export async function stage4PriorFolder(): Promise<string> {
 
 /** Every published migration through 0032, before the VTC-142 toggle re-copy. */
 export async function notificationToggleRecopyPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(33);
+}
+
+export async function joinedAtCatchUpPriorFolder(): Promise<string> {
   return publishedPrefixFolder(33);
 }
 

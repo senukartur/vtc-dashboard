@@ -29,6 +29,17 @@ import {
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import { int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import {
+  activitySort,
+  DIRECTORY_WINDOW_MS,
+  type DirectoryKeys,
+  type DirectorySort,
+  directoryActivityAliases,
+  directoryAfter,
+  directoryOrder,
+  directoryOrderBy,
+  directoryPosition,
+} from "./directory.js";
+import {
   engine,
   type IdentityConfig,
   prepareCredential,
@@ -106,6 +117,23 @@ export interface IdentityPorts {
     tx: TxContext,
     userId: string,
   ) => Promise<components["schemas"]["LifetimeTripTotals"]>;
+  // Accepted-trip directory facts (VTC-140); absent when Trips is not configured.
+  memberActivity?: {
+    acceptedTrips(ownerRef: SQLWrapper, fromInclusive: string, throughInclusive: string): SQL;
+    acceptedDistance(ownerRef: SQLWrapper, fromInclusive: string, throughInclusive: string): SQL;
+    lastAcceptedAt(ownerRef: SQLWrapper): SQL<string | null>;
+    totals(
+      count: number | string,
+      sum: number | string,
+    ): components["schemas"]["AnalyticsStage4Totals"];
+  };
+  // The single swappable directory level lookup; 422 for a level the reader cannot select.
+  memberLevelFilter?: (
+    tx: TxContext,
+    game: "ets2" | "ats",
+    levelId: string,
+    ownerRef: SQLWrapper,
+  ) => Promise<SQL>;
   qualificationsLifecycle?: {
     close(tx: TxContext, userId: string, endedAt: string): Promise<void>;
     reinstate?(
@@ -411,6 +439,7 @@ export function createIdentity(
     id: string,
     current: Company,
     change: AccessAuditChange = { operation: "membership.changed" },
+    occurredAt: string = now().toISOString(),
   ) {
     if (!ports.accessEvents) throw identityError(503);
     const [member] = await client(tx).select().from(membership).where(eq(membership.userId, id));
@@ -422,7 +451,7 @@ export function createIdentity(
       subjectKind: "user",
       subjectId: id,
       companyId: current.id,
-      occurredAt: now().toISOString(),
+      occurredAt,
       reason: actorId ? "operator_request" : "initial_setup",
     });
     await ports.accessEvents.append(tx, {
@@ -858,6 +887,8 @@ export function createIdentity(
         !input.passwordHash
       )
         throw identityError(422);
+      // One instant for registration and the first join (memberSince) under any clock.
+      const created = now();
       await client(tx)
         .insert(user)
         .values({
@@ -865,8 +896,8 @@ export function createIdentity(
           email: normalizedEmail(input.email),
           name: input.name,
           emailVerified: false,
-          createdAt: now(),
-          updatedAt: now(),
+          createdAt: created,
+          updatedAt: created,
         });
       await client(tx).insert(account).values({
         id: newId(),
@@ -874,10 +905,12 @@ export function createIdentity(
         accountId: input.userId,
         providerId: "credential",
         password: input.passwordHash,
-        createdAt: now(),
-        updatedAt: now(),
+        createdAt: created,
+        updatedAt: created,
       });
-      await client(tx).insert(membership).values({ userId: input.userId, status: "active" });
+      await client(tx)
+        .insert(membership)
+        .values({ userId: input.userId, status: "active", joinedAt: created.toISOString() });
       await replaceRoles(tx, input.userId, input.roles);
     },
     async bootstrap(input: {
@@ -1499,9 +1532,11 @@ export function createIdentity(
                 input.kind === "deactivate" ? [] : (input.roles ?? []),
               );
               const status = input.kind === "deactivate" ? "inactive" : "active";
+              // A return moves memberSince to the reinstatement instant, which is also the
+              // assignment and audit time; the first join stays in membership history.
               await client(tx)
                 .update(membership)
-                .set({ status })
+                .set(input.kind === "reinstate" ? { status, joinedAt: instant } : { status })
                 .where(eq(membership.userId, targetId));
               await changed(
                 tx,
@@ -1523,6 +1558,7 @@ export function createIdentity(
                         after: membershipSnapshot(status, assigned),
                       },
                     },
+                instant,
               );
               return { id: targetId, version: target.version + 1 };
             },
@@ -2166,16 +2202,160 @@ export function createIdentity(
     },
     async listMembers(
       actor: Actor,
-      options: { limit?: number; cursor?: string } = {},
-    ): Promise<components["schemas"]["ListMemberSummary"]> {
+      options: {
+        limit?: number | undefined;
+        cursor?: string | undefined;
+        search?: string | undefined;
+        role?: Role | undefined;
+        ets2Level?: string | undefined;
+        atsLevel?: string | undefined;
+        sort?: DirectorySort | undefined;
+        order?: "asc" | "desc" | undefined;
+      } = {},
+    ): Promise<components["schemas"]["MemberStage4DirectoryList"]> {
       requireCapability(actor, "company.read");
+      const order = directoryOrder(options.sort, options.order);
+      const { sort } = options;
+      const activity = ports.memberActivity;
+      // Activity facts are unavailable without Trips: their fields are absent, never zero.
+      if (activitySort(sort) && !activity) throw identityError(422);
+      const search = options.search === undefined ? undefined : options.search.trim();
+      if (search !== undefined && (!search || search.length > 128)) throw identityError(422);
+      const levels = (
+        [
+          ["ets2", options.ets2Level],
+          ["ats", options.atsLevel],
+        ] as const
+      ).filter((entry): entry is readonly ["ets2" | "ats", string] => entry[1] !== undefined);
+      if (levels.length && !ports.memberLevelFilter) throw identityError(422);
       return run(async (tx: TxContext) => {
         const current = await lockCompany(tx);
         await checkActor(tx, actor, current);
-        const page = pagination(config.secret);
-        const paging = page(actor, ["members"], options);
-        const rows = await queryQualificationMembers(tx, paging.after, paging.limit);
-        return paging.finish(rows, (row) => row.id);
+        const paging = pagination(config.secret)(
+          actor,
+          [
+            "members",
+            "directory",
+            search ?? null,
+            options.role ?? null,
+            options.ets2Level ?? null,
+            options.atsLevel ?? null,
+            sort ?? null,
+            order ?? null,
+          ],
+          options,
+          { sort, windowed: !!activity },
+        );
+        const windowEndsAt = activity ? (paging.windowEndsAt ?? now().toISOString()) : null;
+        const keys: DirectoryKeys = { id: user.id, nickname: user.name };
+        if (activity && windowEndsAt) {
+          const from = new Date(Date.parse(windowEndsAt) - DIRECTORY_WINDOW_MS).toISOString();
+          keys.trips = activity.acceptedTrips(user.id, from, windowEndsAt);
+          keys.distance = activity.acceptedDistance(user.id, from, windowEndsAt);
+          keys.last = activity.lastAcceptedAt(user.id);
+        }
+        const levelPredicates: SQL[] = [];
+        for (const [game, levelId] of levels) {
+          if (!ports.memberLevelFilter) throw identityError(422);
+          levelPredicates.push(await ports.memberLevelFilter(tx, game, levelId, user.id));
+        }
+        const rows = await client(tx)
+          .select({
+            id: user.id,
+            nickname: user.name,
+            status: membership.status,
+            ...(keys.trips && keys.distance && keys.last
+              ? {
+                  trips: keys.trips.as(directoryActivityAliases.trips),
+                  distance: keys.distance.as(directoryActivityAliases.distance),
+                  last: keys.last.as(directoryActivityAliases.last),
+                }
+              : {}),
+          })
+          .from(user)
+          .innerJoin(membership, eq(membership.userId, user.id))
+          .where(
+            and(
+              administrationMemberPredicate(current.directorUserId, {
+                role: options.role,
+                search,
+              }),
+              ...levelPredicates,
+              paging.after ? directoryAfter(sort, order, keys, paging.after) : undefined,
+            ),
+          )
+          // ORDER BY names the select-list aliases so each subquery runs once per row.
+          .orderBy(
+            ...directoryOrderBy(
+              sort,
+              order,
+              keys.trips && keys.distance && keys.last
+                ? {
+                    ...keys,
+                    trips: sql`${sql.identifier(directoryActivityAliases.trips)}`,
+                    distance: sql`${sql.identifier(directoryActivityAliases.distance)}`,
+                    last: sql`${sql.identifier(directoryActivityAliases.last)}`,
+                  }
+                : keys,
+            ),
+          )
+          .limit(paging.limit + 1)
+          .for("share");
+        // Roles of the bounded batch, including the lookahead row, in one read.
+        const assigned = rows.length
+          ? await client(tx)
+              .select({ userId: roles.userId, role: roles.role })
+              .from(roles)
+              .where(
+                inArray(
+                  roles.userId,
+                  rows.map((row) => row.id),
+                ),
+              )
+              .for("share")
+          : [];
+        const entries = rows.map((row) => {
+          const facts =
+            activity && "trips" in row
+              ? {
+                  totals: activity.totals(row.trips as number | string, row.distance as string),
+                  last: (row.last as string | null) ?? null,
+                }
+              : undefined;
+          return {
+            position: directoryPosition(sort, {
+              id: row.id,
+              nickname: row.nickname,
+              ...(facts
+                ? {
+                    trips: facts.totals.acceptedTrips,
+                    distance: facts.totals.actualDistanceM,
+                    last: facts.last,
+                  }
+                : {}),
+            }),
+            item: {
+              id: row.id,
+              nickname: row.nickname,
+              formerMember: row.status !== "active",
+              roles: [
+                ...assigned.filter((r) => r.userId === row.id).map((r) => r.role),
+                ...(current.directorUserId === row.id ? ["director" as const] : []),
+              ],
+              ...(facts ? { last30Days: facts.totals, lastAcceptedTripAt: facts.last } : {}),
+            },
+          };
+        });
+        const { items, nextCursor } = paging.finish(
+          entries,
+          (entry) => entry.position,
+          windowEndsAt,
+        );
+        return {
+          items: items.map((entry) => entry.item),
+          nextCursor,
+          ...(windowEndsAt ? { windowEndsAt } : {}),
+        };
       });
     },
     async getMember(
@@ -2187,8 +2367,15 @@ export function createIdentity(
         const current = await lockCompany(tx);
         await checkActor(tx, actor, current);
         const validMemberId = applicationId(memberId);
+        const activity = ports.memberActivity;
         const [memberRow] = await client(tx)
-          .select({ id: user.id, nickname: user.name, status: membership.status })
+          .select({
+            id: user.id,
+            nickname: user.name,
+            status: membership.status,
+            joinedAt: membership.joinedAt,
+            ...(activity ? { last: activity.lastAcceptedAt(user.id) } : {}),
+          })
           .from(user)
           .innerJoin(membership, eq(membership.userId, user.id))
           .where(eq(user.id, validMemberId))
@@ -2212,7 +2399,15 @@ export function createIdentity(
           ? await ports.qualificationsLifecycle.currentAssignments(tx, memberRow.id)
           : [];
         const lifetimeTotals = await ports.tripLifetimeTotals?.(tx, memberRow.id);
-        return { member, qualifications, ...(lifetimeTotals && { lifetimeTotals }) };
+        return {
+          member,
+          qualifications,
+          ...(lifetimeTotals && { lifetimeTotals }),
+          memberSince: memberRow.joinedAt,
+          ...(activity && "last" in memberRow
+            ? { lastAcceptedTripAt: (memberRow.last as string | null) ?? null }
+            : {}),
+        };
       });
     },
   };

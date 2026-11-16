@@ -1,8 +1,16 @@
 import type { UnitOfWork } from "@vtc/db";
+import {
+  createInvitationList,
+  type InvitationList,
+} from "../modules/admissions/invitation-list.js";
 import type { AdmissionsConfig } from "../modules/admissions/security.js";
 import { type Admissions, createAdmissions } from "../modules/admissions/service.js";
 import { truckersCheckKind } from "../modules/admissions/truckers-checks.js";
-import { type AnalyticsConfig, createAnalytics } from "../modules/analytics/index.js";
+import {
+  type AnalyticsConfig,
+  createAnalytics,
+  createMemberDirectoryActivity,
+} from "../modules/analytics/index.js";
 import type { CatalogConfig } from "../modules/catalogs/config.js";
 import { createCatalogs } from "../modules/catalogs/service.js";
 import { createEventMedia, type EventMediaConfig } from "../modules/events/media.js";
@@ -32,6 +40,7 @@ import {
   invalidateEventNotifications,
   type NotificationsConfig,
 } from "../modules/notifications/service.js";
+import { createDirectoryLevelFilter } from "../modules/qualifications/directory-level-filter.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
 import {
   createQualifications,
@@ -133,8 +142,10 @@ export function composeIdentity(
             if (!trips) throw new Error("TRIPS_COMPOSITION_INCOMPLETE");
             return trips.lifetimeTotalsInTransaction(tx, id);
           },
+          memberActivity: createMemberDirectoryActivity(),
         }
       : {}),
+    ...(qualificationsConfig ? { memberLevelFilter: createDirectoryLevelFilter(unit) } : {}),
     qualificationsLifecycle,
     ...(telemetryConfig
       ? { invalidateTelemetryCredentials: (tx, id) => invalidateTelemetryCredentials(unit, tx, id) }
@@ -158,6 +169,12 @@ export function composeIdentity(
           }
         : {}),
     });
+  const invitationList: InvitationList | undefined = admissionsConfig
+    ? createInvitationList(unit, admissionsConfig, {
+        identity,
+        ...(messaging ? { mailStatus: messaging.admissionsStatus } : {}),
+      })
+    : undefined;
   const catalogs = catalogConfig ? createCatalogs(unit, catalogConfig, { identity }) : undefined;
   let manualReports: ManualReports | undefined;
   const trips = tripsConfig
@@ -439,5 +456,6 @@ export function composeIdentity(
     ...(catalogs ? { catalogs } : {}),
     ...(messaging ? { messaging } : {}),
     ...(admissions ? { admissions } : {}),
+    ...(invitationList ? { invitationList } : {}),
   };
 }

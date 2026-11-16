@@ -5429,7 +5429,7 @@ export interface components {
             membership: "trainee" | "driver";
             reason: string;
         };
-        /** @description MemberSummary plus optional Stage 4 directory facts. Once VTC-140 activates them every row carries both. */
+        /** @description MemberSummary plus the Stage 4 directory facts. Every row carries both when accepted-trip facts are available; both are absent, never zero, when they are not. */
         MemberStage4DirectoryEntry: {
             formerMember: boolean;
             /** Format: uuid */

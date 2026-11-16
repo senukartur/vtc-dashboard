@@ -340,7 +340,23 @@ export async function registerIdentityRoutes(
       );
     },
   );
-  app.get<{ Querystring: { limit?: number; cursor?: string } }>(
+  const levelId = {
+    type: "string",
+    format: "uuid",
+    pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+  };
+  app.get<{
+    Querystring: {
+      limit?: number;
+      cursor?: string;
+      search?: string;
+      role?: "trainee" | "driver" | "dispatcher" | "deputy_director" | "director";
+      ets2Level?: string;
+      atsLevel?: string;
+      sort?: "nickname" | "distance30d" | "trips30d" | "lastTrip";
+      order?: "asc" | "desc";
+    };
+  }>(
     "/api/v1/members",
     {
       schema: {
@@ -349,10 +365,19 @@ export async function registerIdentityRoutes(
           properties: {
             limit: { type: "integer", minimum: 1, maximum: 100 },
             cursor: { type: "string", minLength: 1, maxLength: 2048 },
+            search: { type: "string", minLength: 1, maxLength: 128 },
+            role: {
+              type: "string",
+              enum: ["trainee", "driver", "dispatcher", "deputy_director", "director"],
+            },
+            ets2Level: levelId,
+            atsLevel: levelId,
+            sort: { type: "string", enum: ["nickname", "distance30d", "trips30d", "lastTrip"] },
+            order: { type: "string", enum: ["asc", "desc"] },
           },
           additionalProperties: false,
         },
-        response: { 200: ref("EnvelopeListMemberSummary") },
+        response: { 200: ref("MemberStage4DirectoryListEnvelope") },
       },
     },
     async (request) => {
