@@ -134,6 +134,12 @@ export interface IdentityPorts {
     levelId: string,
     ownerRef: SQLWrapper,
   ) => Promise<SQL>;
+  // Current level per game for a bounded batch of active member IDs, read without locks after the
+  // directory rows (VTC-150); absent when Qualifications is not configured.
+  memberCurrentLevels?: (
+    tx: TxContext,
+    userIds: readonly string[],
+  ) => Promise<Map<string, components["schemas"]["MemberStage4DirectoryLevels"]>>;
   qualificationsLifecycle?: {
     close(tx: TxContext, userId: string, endedAt: string): Promise<void>;
     reinstate?(
@@ -200,6 +206,12 @@ function nicknamePredicate(search?: string) {
   // Same LIKE escaping as catalog search; the name column's collation is case-insensitive.
   const escaped = term.replace(/[\\%_]/g, (value) => `\\${value}`);
   return sql`${user.name} LIKE ${`%${escaped}%`}`;
+}
+
+function directoryCount(value: string | number): number {
+  const count = Number(value);
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error("DIRECTORY_COUNT_INVALID");
+  return count;
 }
 
 function administrationMemberPredicate(
@@ -2207,6 +2219,7 @@ export function createIdentity(
         cursor?: string | undefined;
         search?: string | undefined;
         role?: Role | undefined;
+        status?: "active" | "former" | undefined;
         ets2Level?: string | undefined;
         atsLevel?: string | undefined;
         sort?: DirectorySort | undefined;
@@ -2221,6 +2234,9 @@ export function createIdentity(
       if (activitySort(sort) && !activity) throw identityError(422);
       const search = options.search === undefined ? undefined : options.search.trim();
       if (search !== undefined && (!search || search.length > 128)) throw identityError(422);
+      const { status } = options;
+      if (status !== undefined && status !== "active" && status !== "former")
+        throw identityError(422);
       const levels = (
         [
           ["ets2", options.ets2Level],
@@ -2242,14 +2258,18 @@ export function createIdentity(
             options.atsLevel ?? null,
             sort ?? null,
             order ?? null,
+            // Appended only when present, so a cursor minted without status keeps its binding.
+            ...(status ? [status] : []),
           ],
           options,
           { sort, windowed: !!activity },
         );
         const windowEndsAt = activity ? (paging.windowEndsAt ?? now().toISOString()) : null;
+        const from = windowEndsAt
+          ? new Date(Date.parse(windowEndsAt) - DIRECTORY_WINDOW_MS).toISOString()
+          : null;
         const keys: DirectoryKeys = { id: user.id, nickname: user.name };
-        if (activity && windowEndsAt) {
-          const from = new Date(Date.parse(windowEndsAt) - DIRECTORY_WINDOW_MS).toISOString();
+        if (activity && windowEndsAt && from) {
           keys.trips = activity.acceptedTrips(user.id, from, windowEndsAt);
           keys.distance = activity.acceptedDistance(user.id, from, windowEndsAt);
           keys.last = activity.lastAcceptedAt(user.id);
@@ -2280,6 +2300,9 @@ export function createIdentity(
                 role: options.role,
                 search,
               }),
+              status
+                ? eq(membership.status, status === "active" ? "active" : "inactive")
+                : undefined,
               ...levelPredicates,
               paging.after ? directoryAfter(sort, order, keys, paging.after) : undefined,
             ),
@@ -2314,6 +2337,42 @@ export function createIdentity(
               )
               .for("share")
           : [];
+        // Plain reads below take no locks and add no lock edges: current levels of the page's
+        // active members (former members always show null), then the company-wide counts.
+        const currentLevels = ports.memberCurrentLevels;
+        const activeIds = rows
+          .slice(0, paging.limit)
+          .filter((row) => row.status === "active")
+          .map((row) => row.id);
+        const levelsById =
+          currentLevels && activeIds.length
+            ? await currentLevels(tx, activeIds)
+            : new Map<string, components["schemas"]["MemberStage4DirectoryLevels"]>();
+        const levelsOf = (row: { id: string; status: string }) =>
+          (row.status === "active" ? levelsById.get(row.id) : undefined) ?? {
+            ets2: null,
+            ats: null,
+          };
+        const [counted] = await client(tx)
+          .select({
+            active: sql<string>`COUNT(CASE WHEN ${membership.status} = 'active' THEN 1 END)`,
+            former: sql<string>`COUNT(CASE WHEN ${membership.status} = 'inactive' THEN 1 END)`,
+            ...(activity && windowEndsAt && from
+              ? {
+                  drove: sql<string>`COUNT(CASE WHEN ${membership.status} = 'active' AND ${activity.acceptedTrips(user.id, from, windowEndsAt)} > 0 THEN 1 END)`,
+                }
+              : {}),
+          })
+          .from(user)
+          .innerJoin(membership, eq(membership.userId, user.id));
+        if (!counted) throw new Error("DIRECTORY_COUNTS_MISSING");
+        const statusCounts = {
+          active: directoryCount(counted.active),
+          former: directoryCount(counted.former),
+          ...("drove" in counted
+            ? { droveLast30Days: directoryCount(counted.drove as string | number) }
+            : {}),
+        };
         const entries = rows.map((row) => {
           const facts =
             activity && "trips" in row
@@ -2343,6 +2402,7 @@ export function createIdentity(
                 ...(current.directorUserId === row.id ? ["director" as const] : []),
               ],
               ...(facts ? { last30Days: facts.totals, lastAcceptedTripAt: facts.last } : {}),
+              ...(currentLevels ? { levels: levelsOf(row) } : {}),
             },
           };
         });
@@ -2355,6 +2415,7 @@ export function createIdentity(
           items: items.map((entry) => entry.item),
           nextCursor,
           ...(windowEndsAt ? { windowEndsAt } : {}),
+          statusCounts,
         };
       });
     },
