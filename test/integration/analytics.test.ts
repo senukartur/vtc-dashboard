@@ -1,11 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
+import { catalogCargoes, catalogCities } from "@vtc/db/catalogs-schema";
 import { company, membership } from "@vtc/db/identity-schema";
 import { eq, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { expect, test, afterAll as vitestAfterAll, beforeAll as vitestBeforeAll } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { addDistances, createAnalytics } from "../../apps/api/src/modules/analytics/service.ts";
+import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import {
   type Actor,
   createIdentity,
@@ -94,11 +96,14 @@ beforeAll(async () => {
 
   // Create Analytics Service & App
   // Fixed clock: all_time ranges end with November 2026 as the current month.
+  // The catalogs facade labels breakdown routes and cargo (VTC-112).
+  const catalogs = createCatalogs(unit, { cursorKey }, { identity });
   const analytics = createAnalytics(
     unit,
     identity,
     { enabled: true, cursorKey },
     () => new Date("2026-11-16T09:00:00.000Z"),
+    { catalogs },
   );
 
   app = await createApp({
@@ -114,24 +119,27 @@ afterAll(async () => {
   await control?.end();
 });
 
-test("returns 409 SETUP_REQUIRED when company timezone is unconfigured", async () => {
-  const res = await app.inject({
-    method: "GET",
-    url: "/api/v1/analytics/company?fromDate=2026-10-01&toDateExclusive=2026-10-31",
-    headers: { cookie: directorCookie },
-  });
+const setupUrls = [
+  "/api/v1/analytics/company?fromDate=2026-10-01&toDateExclusive=2026-10-31",
+  "/api/v1/analytics/company/breakdown?dimension=route&fromDate=2026-10-01&toDateExclusive=2026-10-31",
+  "/api/v1/analytics/company/breakdown?dimension=source&period=all_time",
+];
 
-  expect(res.statusCode).toBe(409);
-  const json = res.json();
-  expect(json.error.code).toBe("SETUP_REQUIRED");
+test("returns 409 SETUP_REQUIRED when company timezone is unconfigured", async () => {
+  for (const url of setupUrls) {
+    const res = await app.inject({ method: "GET", url, headers: { cookie: directorCookie } });
+
+    expect(res.statusCode, url).toBe(409);
+    const json = res.json();
+    expect(json.error.code, url).toBe("SETUP_REQUIRED");
+  }
 });
 
 test("returns 401 when unauthenticated", async () => {
-  const res = await app.inject({
-    method: "GET",
-    url: "/api/v1/analytics/company?fromDate=2026-10-01&toDateExclusive=2026-10-31",
-  });
-  expect(res.statusCode).toBe(401);
+  for (const url of setupUrls) {
+    const res = await app.inject({ method: "GET", url });
+    expect(res.statusCode, url).toBe(401);
+  }
 });
 
 test("processes small known dataset with cross-midnight, aliases, rejected and pending trips", async () => {
@@ -453,7 +461,7 @@ type BoardItem = {
 const ranking = (items: BoardItem[]) =>
   items.map((item) => [item.member.id, item.position, item.acceptedTrips, item.actualDistanceM]);
 
-test("Stage 4 period parameters are validated and the breakdown route stays inactive until VTC-112", async () => {
+test("Stage 4 period parameters are validated", async () => {
   for (const url of [
     "/api/v1/analytics/company?period=all_time&fromDate=2026-10-01",
     "/api/v1/analytics/company?period=all_time&toDateExclusive=2026-11-01",
@@ -475,10 +483,6 @@ test("Stage 4 period parameters are validated and the breakdown route stays inac
     "/api/v1/analytics/leaderboard?period=all_time",
   ])
     expect((await anonymous(url)).statusCode, url).toBe(401);
-  const breakdown = await get(
-    "/api/v1/analytics/company/breakdown?dimension=route&fromDate=2026-10-01&toDateExclusive=2026-10-31",
-  );
-  expect(breakdown.statusCode).toBe(404);
 
   for (const url of [
     "/api/v1/analytics/company?fromDate=2026-10-20&toDateExclusive=2026-10-22",
@@ -1049,4 +1053,635 @@ test("Stage 4 all_time cursor fails with 409 when an earlier trip moves the cove
     fromDate: "2023-06-01",
     toDateExclusive: "2026-12-01",
   });
+});
+
+// VTC-112: company breakdown on a known dataset in Europe/Berlin. The fixed clock (2026-11-16)
+// makes November 2026 the current month. Every catalog row and trip below is fictional.
+type BreakdownTotals = { acceptedTrips: number; actualDistanceM: string };
+type BreakdownLabel = { entityId: string; label: string; hidden: boolean };
+type BreakdownItem = BreakdownTotals & {
+  game?: string;
+  origin?: BreakdownLabel;
+  destination?: BreakdownLabel;
+  cargo?: BreakdownLabel;
+  source?: string;
+};
+type BreakdownBody = {
+  items: BreakdownItem[];
+  totals: BreakdownTotals;
+  undetermined: BreakdownTotals;
+  remainder: BreakdownTotals;
+  limit?: number;
+};
+const vtc112 = { city: {} as Record<string, string>, cargo: {} as Record<string, string> };
+const october = "fromDate=2026-10-01&toDateExclusive=2026-11-01";
+const november = "fromDate=2026-11-01&toDateExclusive=2026-12-01";
+const breakdownUrl = (query: string) => `/api/v1/analytics/company/breakdown?${query}`;
+const breakdown = (query: string): Promise<BreakdownBody> => data(breakdownUrl(query));
+const none = { acceptedTrips: 0, actualDistanceM: "0" };
+const keyOf = (ids: Record<string, string>, id: string | undefined) =>
+  Object.entries(ids).find(([, value]) => value === id)?.[0];
+// Items as catalog keys: "A>B" for a route, the cargo key or the source.
+const shape = (body: BreakdownBody) =>
+  body.items.map((item) => [
+    item.source ??
+      (item.cargo
+        ? keyOf(vtc112.cargo, item.cargo.entityId)
+        : `${keyOf(vtc112.city, item.origin?.entityId)}>${keyOf(vtc112.city, item.destination?.entityId)}`),
+    item.acceptedTrips,
+    item.actualDistanceM,
+  ]);
+
+test("VTC-112 breakdown totals equal company analytics for every period and dimension", async () => {
+  await control.query("DELETE FROM trips WHERE alias_of IS NOT NULL");
+  await control.query("DELETE FROM trips");
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(company)
+      .set({ reportingTimezone: "Europe/Berlin" })
+      .where(eq(company.singleton, 1)),
+  );
+
+  // Charlie is hidden and has no Russian name; Bravo has an in-game name; Yankee is hidden.
+  const cities = [
+    ["A", "ets2", "Alpha", "Альфа", null, false],
+    ["B", "ets2", "Bravo", "Браво", "Brávo", false],
+    ["C", "ets2", "Charlie", null, null, true],
+    ["F", "ets2", "Foxtrot", "Фокстрот", null, false],
+    ["D", "ats", "Delta", "Дельта", null, false],
+    ["E", "ats", "Echo", "Эхо", null, false],
+  ] as const;
+  const cargoes = [
+    ["X", "ets2", "Xray", "Икс-рей", false],
+    ["Y", "ets2", "Yankee", "Янки", true],
+    ["W", "ets2", "Whiskey", "Виски", false],
+    ["Z", "ats", "Zulu", "Зулу", false],
+  ] as const;
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    for (const [key, game, nameEn, nameRu, nameNative, hidden] of cities) {
+      const id = newId();
+      vtc112.city[key] = id;
+      const code = Buffer.from(`vtc112-city-${key}`);
+      await db.insert(catalogCities).values({ id, game, code, nameEn, nameRu, nameNative, hidden });
+    }
+    for (const [key, game, nameEn, nameRu, hidden] of cargoes) {
+      const id = newId();
+      vtc112.cargo[key] = id;
+      const code = Buffer.from(`vtc112-cargo-${key}`);
+      await db.insert(catalogCargoes).values({ id, game, code, nameEn, nameRu, hidden });
+    }
+  });
+
+  type Fact = { origin: string | null; destination: string | null; cargo: string | null };
+  type Spec = {
+    key: string;
+    at: string;
+    distance: string | null;
+    fact?: Fact;
+    game?: "ets2" | "ats";
+    decision?: "accepted" | "rejected" | "pending_review";
+    alias?: string;
+    source?: "ets2telemetry" | "manual";
+    // A staff resolution whose derived fact becomes current; the provider stays the source's.
+    derived?: Fact;
+    // A trip whose fact is current here, as when reconciliation selects the other source.
+    current?: string;
+    adjudication?: number;
+  };
+  const f = (origin: string | null, destination: string | null, cargo: string | null) => ({
+    origin,
+    destination,
+    cargo,
+  });
+  const manual = "manual" as const;
+  const specs: Spec[] = [
+    // October 2026.
+    {
+      key: "telemetryAB",
+      at: "2026-10-10T12:00:00.000Z",
+      distance: "100000.19",
+      fact: f("A", "B", "X"),
+    },
+    {
+      key: "manualAB",
+      at: "2026-10-11T12:00:00.000Z",
+      distance: "50000",
+      fact: f("A", "B", "X"),
+      source: manual,
+    },
+    {
+      key: "telemetryBA",
+      at: "2026-10-12T12:00:00.000Z",
+      distance: "80000",
+      fact: f("B", "A", "X"),
+      adjudication: 4,
+    },
+    // The duplicate and the rejected trip are not counted.
+    {
+      key: "duplicateAB",
+      at: "2026-10-10T12:30:00.000Z",
+      distance: "999999",
+      fact: f("A", "B", "X"),
+      alias: "telemetryAB",
+    },
+    {
+      key: "rejectedAB",
+      at: "2026-10-13T12:00:00.000Z",
+      distance: "999999",
+      fact: f("A", "B", "X"),
+      decision: "rejected",
+    },
+    {
+      key: "correctedManual",
+      at: "2026-10-15T12:00:00.000Z",
+      distance: "60000",
+      fact: f("A", "B", "X"),
+      source: manual,
+      derived: f("B", "C", "Y"),
+    },
+    {
+      key: "reconciledTelemetry",
+      at: "2026-10-20T12:00:00.000Z",
+      distance: "70000",
+      fact: f("C", "A", "X"),
+    },
+    {
+      key: "reconciledTelemetryReport",
+      at: "2026-10-20T12:00:00.000Z",
+      distance: "70000",
+      fact: f("C", "A", "X"),
+      source: manual,
+      alias: "reconciledTelemetry",
+    },
+    {
+      key: "reconciledManual",
+      at: "2026-10-21T12:00:00.000Z",
+      distance: "40000",
+      fact: f("B", "A", "W"),
+      current: "reconciledManualReport",
+    },
+    {
+      key: "reconciledManualReport",
+      at: "2026-10-21T12:00:00.000Z",
+      distance: "40000",
+      fact: f("A", "B", "X"),
+      source: manual,
+      alias: "reconciledManual",
+    },
+    // 00:30 on 1 November in Berlin.
+    {
+      key: "crossMidnight",
+      at: "2026-10-31T23:30:00.000Z",
+      distance: "30000",
+      fact: f("A", "B", "X"),
+    },
+    // November 2026.
+    {
+      key: "pendingAB",
+      at: "2026-11-03T12:00:00.000Z",
+      distance: "999999",
+      fact: f("A", "B", "X"),
+      decision: "pending_review",
+    },
+    {
+      key: "unresolvedOrigin",
+      at: "2026-11-02T12:00:00.000Z",
+      distance: "20000",
+      fact: f(null, "B", "X"),
+    },
+    {
+      key: "unresolvedCargo",
+      at: "2026-11-04T12:00:00.000Z",
+      distance: "10000.5",
+      fact: f("A", "B", null),
+    },
+    { key: "noFact", at: "2026-11-05T12:00:00.000Z", distance: "5000" },
+    {
+      key: "atsTelemetry",
+      at: "2026-11-06T12:00:00.000Z",
+      distance: "90000",
+      fact: f("D", "E", "Z"),
+      game: "ats",
+    },
+    {
+      key: "atsManual",
+      at: "2026-11-07T12:00:00.000Z",
+      distance: null,
+      fact: f("D", "E", "Z"),
+      game: "ats",
+      source: manual,
+    },
+    // Equal trips and distance: ordered by origin ID, then destination ID.
+    { key: "tieAC", at: "2026-11-08T12:00:00.000Z", distance: "25000", fact: f("A", "C", "W") },
+    { key: "tieAF", at: "2026-11-09T12:00:00.000Z", distance: "25000", fact: f("A", "F", "W") },
+    { key: "tieBF", at: "2026-11-10T12:00:00.000Z", distance: "25000", fact: f("B", "F", "W") },
+    // June 2025: only in all_time.
+    { key: "earlier", at: "2025-06-01T12:00:00.000Z", distance: "12345.6", fact: f("A", "B", "X") },
+  ];
+  const tripIds = Object.fromEntries(specs.map((spec) => [spec.key, newId()]));
+  const tripId = (key: string) => {
+    const id = tripIds[key];
+    if (!id) throw new Error(`VTC112_TRIP_MISSING:${key}`);
+    return id;
+  };
+  const owner = (spec: Spec) => (spec.game === "ats" ? driver2Actor.userId : driver1Actor.userId);
+  const tripRow = (spec: Spec) => ({
+    id: tripId(spec.key),
+    ownerId: owner(spec),
+    game: spec.game ?? "ets2",
+    aliasOf: spec.alias ? tripId(spec.alias) : null,
+    version: 1,
+    adjudicationVersion: spec.adjudication ?? 0,
+    outcome: "delivered" as const,
+    recording: "complete" as const,
+    decision: spec.decision ?? "accepted",
+    assessmentPending: spec.decision === "pending_review",
+    correctionPending: false,
+    reviewReasons: [],
+    actualDistanceM: spec.distance,
+    reportingAt: spec.at,
+    createdAt: spec.at,
+  });
+  for (const aliases of [false, true])
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .insert(trips)
+        .values(specs.filter((spec) => !!spec.alias === aliases).map(tripRow)),
+    );
+
+  const stamp = (iso: string) => iso.replace("T", " ").replace("Z", "");
+  const city = (key: string | null) => (key ? (vtc112.city[key] ?? null) : null);
+  const cargo = (key: string | null) => (key ? (vtc112.cargo[key] ?? null) : null);
+  const insertFact = (
+    id: string,
+    spec: Spec,
+    fact: Fact,
+    message: string,
+    derived?: { base: string; resolution: string },
+  ) =>
+    control.execute(
+      "INSERT INTO trip_facts (id,kind,message_id,base_fact_id,resolution_revision_id,derived_source_message_id,canonical_trip_id,adapter_version,outcome,recording,start_basis,start_verified,end_basis,end_verified,origin_city_id,destination_city_id,cargo_id,actual_distance_m,whole_trip_distance_supported,trailers_complete,trailer_count,rule_context_complete,reasons,evidence) VALUES (?,?,?,?,?,?,?,1,'delivered','complete','unknown',0,'unknown',0,?,?,?,?,1,1,0,1,JSON_ARRAY(),JSON_OBJECT())",
+      [
+        id,
+        derived ? "derived" : "source",
+        derived ? null : message,
+        derived?.base ?? null,
+        derived?.resolution ?? null,
+        derived ? message : null,
+        tripId(spec.key),
+        city(fact.origin),
+        city(fact.destination),
+        cargo(fact.cargo),
+        spec.distance,
+      ],
+    );
+  const currentFacts: Record<string, string> = {};
+  for (const spec of specs) {
+    if (!spec.fact) continue;
+    const provider = spec.source ?? "ets2telemetry";
+    const [sourceTrip, message, sourceFact] = [newId(), newId(), newId()];
+    await control.execute(
+      "INSERT INTO source_trips (id,provider,game,session_key,trip_key,owner_id,canonical_trip_id,latest_revision,connection_context,created_at) VALUES (?,?,?,?,?,?,?,'1',JSON_OBJECT(),?)",
+      [
+        sourceTrip,
+        provider,
+        spec.game ?? "ets2",
+        Buffer.from(newId()),
+        Buffer.from(newId()),
+        owner(spec),
+        tripId(spec.key),
+        stamp(spec.at),
+      ],
+    );
+    await control.execute(
+      "INSERT INTO source_messages (id,source_trip_id,provider,event_key,revision,sha256,received_at,delivery_mode) VALUES (?,?,?,?,'1',?,?,?)",
+      [
+        message,
+        sourceTrip,
+        provider,
+        Buffer.from(newId()),
+        randomBytes(32),
+        stamp(spec.at),
+        provider === manual ? "manual" : "live",
+      ],
+    );
+    await insertFact(sourceFact, spec, spec.fact, message);
+    currentFacts[spec.key] = sourceFact;
+    if (spec.derived) {
+      const [resolution, derivedFact] = [newId(), newId()];
+      await control.execute(
+        "INSERT INTO trip_resolutions (id,trip_id,base_fact_id,author_id,changes,evidence_ids,reason,created_at) VALUES (?,?,?,?,JSON_OBJECT(),JSON_ARRAY(),'Fictional correction',?)",
+        [resolution, tripId(spec.key), sourceFact, driver2Actor.userId, stamp(spec.at)],
+      );
+      await insertFact(derivedFact, spec, spec.derived, message, { base: sourceFact, resolution });
+      currentFacts[spec.key] = derivedFact;
+    }
+  }
+  for (const spec of specs) {
+    const current = currentFacts[spec.current ?? spec.key];
+    if (current)
+      await control.execute("UPDATE trips SET current_fact_id=? WHERE id=?", [
+        current,
+        tripId(spec.key),
+      ]);
+  }
+
+  // Range, version, pending and totals equal getCompanyAnalytics; the parts add up exactly.
+  for (const period of [
+    october,
+    november,
+    "fromDate=2026-01-01&toDateExclusive=2027-01-01",
+    "period=all_time",
+    "period=all_time&game=ats",
+    "period=all_time&game=ets2",
+    "game=ets2&fromDate=2026-01-01&toDateExclusive=2027-01-01",
+  ]) {
+    const companyData = await data(`/api/v1/analytics/company?${period}`);
+    for (const query of [
+      "dimension=route",
+      "dimension=route&limit=1",
+      "dimension=route&limit=10",
+      "dimension=cargo",
+      "dimension=cargo&limit=1",
+      "dimension=cargo&limit=10",
+      "dimension=source",
+    ]) {
+      const name = `${query}&${period}`;
+      const body = await breakdown(name);
+      expect(body, name).toMatchObject({
+        period: companyData.period,
+        fromDate: companyData.fromDate,
+        toDateExclusive: companyData.toDateExclusive,
+        reportingTimezone: "Europe/Berlin",
+        game: new URLSearchParams(period).get("game"),
+        computedAt: companyData.computedAt,
+        projectionVersion: companyData.projectionVersion,
+        projectionPending: companyData.projectionPending,
+        totals: {
+          acceptedTrips: companyData.acceptedTrips,
+          actualDistanceM: companyData.actualDistanceM,
+        },
+      });
+      expect(total([...body.items, body.remainder, body.undetermined]), name).toEqual(body.totals);
+      const limit = new URLSearchParams(query).get("limit");
+      if (query === "dimension=source") {
+        expect(body, name).not.toHaveProperty("limit");
+        expect(body.remainder, name).toEqual(none);
+      } else {
+        expect(body.limit, name).toBe(limit ? Number(limit) : 5);
+        expect(body.items.length, name).toBeLessThanOrEqual(body.limit ?? 0);
+      }
+    }
+  }
+}, 60_000);
+
+test("VTC-112 breakdown ranks routes and cargo and splits sources by the effective fact", async () => {
+  const city = (key: string) => vtc112.city[key] ?? "";
+  const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const ties = [
+    ["A", "C"],
+    ["A", "F"],
+    ["B", "F"],
+  ]
+    .sort(
+      ([o1 = "", d1 = ""], [o2 = "", d2 = ""]) =>
+        compare(city(o1), city(o2)) || compare(city(d1), city(d2)),
+    )
+    .map(([origin, destination]) => [`${origin}>${destination}`, 1, "25000"]);
+
+  // Directed routes; corrected and reconciled trips count under their effective facts.
+  const octoberRoutes = await breakdown(`dimension=route&${october}`);
+  expect(shape(octoberRoutes)).toEqual([
+    ["A>B", 3, "190000.1"],
+    ["B>A", 1, "80000"],
+    ["C>A", 1, "70000"],
+    ["B>C", 1, "60000"],
+  ]);
+  expect(octoberRoutes).toMatchObject({
+    dimension: "route",
+    period: "range",
+    limit: 5,
+    totals: { acceptedTrips: 6, actualDistanceM: "400000.1" },
+    undetermined: none,
+    remainder: none,
+    projectionVersion: 4,
+    projectionPending: false,
+  });
+  const top1 = await breakdown(`dimension=route&limit=1&${october}`);
+  expect(shape(top1)).toEqual([["A>B", 3, "190000.1"]]);
+  expect(top1.remainder).toEqual({ acceptedTrips: 3, actualDistanceM: "210000" });
+
+  // The cross-midnight trip and the unresolved ones belong to November.
+  const novemberRoutes = await breakdown(`dimension=route&${november}`);
+  expect(shape(novemberRoutes)).toEqual([["D>E", 2, "90000"], ["A>B", 2, "40000.5"], ...ties]);
+  expect(novemberRoutes.items.map((item) => item.game)).toEqual([
+    "ats",
+    "ets2",
+    "ets2",
+    "ets2",
+    "ets2",
+  ]);
+  expect(novemberRoutes).toMatchObject({
+    totals: { acceptedTrips: 9, actualDistanceM: "230000.5" },
+    undetermined: { acceptedTrips: 2, actualDistanceM: "25000" },
+    remainder: none,
+    projectionPending: true,
+  });
+  expect((await breakdown(`dimension=route&limit=2&${november}`)).remainder).toEqual({
+    acceptedTrips: 3,
+    actualDistanceM: "75000",
+  });
+
+  // The default limit shows five of eight routes; limit=10 shows them all.
+  const allTimeHead = [
+    ["A>B", 6, "242346.2"],
+    ["D>E", 2, "90000"],
+    ["B>A", 1, "80000"],
+    ["C>A", 1, "70000"],
+    ["B>C", 1, "60000"],
+  ];
+  const allTimeRoutes = await breakdown("dimension=route&period=all_time");
+  expect(shape(allTimeRoutes)).toEqual(allTimeHead);
+  expect(allTimeRoutes).toMatchObject({
+    period: "all_time",
+    fromDate: "2025-06-01",
+    toDateExclusive: "2026-12-01",
+    totals: { acceptedTrips: 16, actualDistanceM: "642346.2" },
+    undetermined: { acceptedTrips: 2, actualDistanceM: "25000" },
+    remainder: { acceptedTrips: 3, actualDistanceM: "75000" },
+  });
+  const allRoutes = await breakdown("dimension=route&period=all_time&limit=10");
+  expect(shape(allRoutes)).toEqual([...allTimeHead, ...ties]);
+  expect(allRoutes.remainder).toEqual(none);
+  expect(shape(await breakdown("dimension=route&period=all_time&game=ats"))).toEqual([
+    ["D>E", 2, "90000"],
+  ]);
+
+  expect(shape(await breakdown(`dimension=cargo&${october}`))).toEqual([
+    ["X", 5, "340000.1"],
+    ["Y", 1, "60000"],
+  ]);
+  const novemberCargo = await breakdown(`dimension=cargo&${november}`);
+  expect(shape(novemberCargo)).toEqual([
+    ["W", 3, "75000"],
+    ["Z", 2, "90000"],
+    ["X", 2, "50000"],
+  ]);
+  expect(novemberCargo.items.map((item) => item.game)).toEqual(["ets2", "ats", "ets2"]);
+  expect(novemberCargo.undetermined).toEqual({ acceptedTrips: 2, actualDistanceM: "15000.5" });
+
+  // The source split; a trip without a current fact is undetermined.
+  const octoberSource = await breakdown(`dimension=source&${october}`);
+  expect(shape(octoberSource)).toEqual([
+    ["ets2telemetry", 3, "250000.1"],
+    ["manual", 3, "150000"],
+  ]);
+  expect(octoberSource.undetermined).toEqual(none);
+  const novemberSource = await breakdown(`dimension=source&${november}`);
+  expect(shape(novemberSource)).toEqual([
+    ["ets2telemetry", 7, "225000.5"],
+    ["manual", 1, "0"],
+  ]);
+  expect(novemberSource.undetermined).toEqual({ acceptedTrips: 1, actualDistanceM: "5000" });
+  for (const [query, split] of [
+    ["game=ats&fromDate=2026-11-06&toDateExclusive=2026-11-07", ["1", "90000", "0", "0"]],
+    ["fromDate=2026-11-01&toDateExclusive=2026-11-02", ["1", "30000", "0", "0"]],
+    ["fromDate=2026-10-31&toDateExclusive=2026-11-01", ["0", "0", "0", "0"]],
+  ] as const)
+    expect(shape(await breakdown(`dimension=source&${query}`)), query).toEqual([
+      ["ets2telemetry", Number(split[0]), split[1]],
+      ["manual", Number(split[2]), split[3]],
+    ]);
+});
+
+test("VTC-112 breakdown labels follow the requested or saved locale", async () => {
+  const label = (
+    key: string,
+    text: string,
+    locale: "en" | "ru",
+    rendered: "en" | "ru",
+    extra: Record<string, unknown> = {},
+  ) => ({
+    entityId: vtc112.city[key] ?? vtc112.cargo[key],
+    label: text,
+    requestedLocale: locale,
+    renderedLocale: rendered,
+    englishFallback: locale !== rendered,
+    hidden: false,
+    ...extra,
+  });
+  // The saved locale (ru by default) or locale; English fallback, hidden rows, in-game names.
+  const routes = await breakdown(`dimension=route&${october}`);
+  expect(routes.items[0]?.origin).toEqual(label("A", "Альфа", "ru", "ru"));
+  expect(routes.items[0]?.destination).toEqual(
+    label("B", "Браво", "ru", "ru", { nameNative: "Brávo" }),
+  );
+  expect(routes.items[3]?.destination).toEqual(label("C", "Charlie", "ru", "en", { hidden: true }));
+  expect((await breakdown(`dimension=cargo&${october}`)).items[1]?.cargo).toEqual(
+    label("Y", "Янки", "ru", "ru", { hidden: true }),
+  );
+  const english = await breakdown(`dimension=route&locale=en&${october}`);
+  expect(english.items[0]?.origin).toEqual(label("A", "Alpha", "en", "en"));
+  expect(english.items[3]?.destination).toEqual(
+    label("C", "Charlie", "en", "en", { hidden: true }),
+  );
+
+  const setLocale = (locale: "en" | "ru") =>
+    unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(membership)
+        .set({ locale })
+        .where(eq(membership.userId, driver2Actor.userId)),
+    );
+  await setLocale("en");
+  try {
+    const saved: BreakdownBody = await data(
+      breakdownUrl(`dimension=cargo&${october}`),
+      driver2Cookie,
+    );
+    expect(saved.items[0]?.cargo).toEqual(label("X", "Xray", "en", "en"));
+    const requested: BreakdownBody = await data(
+      breakdownUrl(`dimension=cargo&locale=ru&${october}`),
+      driver2Cookie,
+    );
+    expect(requested.items[0]?.cargo).toEqual(label("X", "Икс-рей", "ru", "ru"));
+  } finally {
+    await setLocale("ru");
+  }
+});
+
+test("VTC-112 breakdown validates its query and needs the catalogs facade for labels", async () => {
+  for (const query of [
+    "dimension=source&limit=5&period=all_time",
+    "dimension=route&period=all_time&fromDate=2026-10-01",
+    "dimension=cargo&period=range",
+    "dimension=route",
+    "dimension=route&fromDate=2024-01-01&toDateExclusive=2026-12-01",
+    "dimension=route&fromDate=2026-11-01&toDateExclusive=2026-10-01",
+    "dimension=cargo&period=all_time&limit=11",
+  ])
+    expect((await get(breakdownUrl(query))).statusCode, query).toBe(422);
+  expect((await anonymous(breakdownUrl("dimension=source&period=all_time"))).statusCode).toBe(401);
+
+  // Without the catalogs facade route and cargo are unavailable; the source split still works.
+  const bare = createAnalytics(
+    unit,
+    identity,
+    { enabled: true, cursorKey },
+    () => new Date("2026-11-16T09:00:00.000Z"),
+  );
+  for (const dimension of ["route", "cargo"] as const)
+    await expect(
+      bare.getCompanyAnalyticsBreakdown(driver1Actor, { dimension, period: "all_time" }),
+    ).rejects.toMatchObject({ statusCode: 503 });
+  expect(
+    await bare.getCompanyAnalyticsBreakdown(driver1Actor, {
+      dimension: "source",
+      fromDate: "2026-10-01",
+      toDateExclusive: "2026-11-01",
+    }),
+  ).toEqual(await breakdown(`dimension=source&${october}`));
+});
+
+test("VTC-112 breakdown statements use trip_analytics_reporting and primary-key joins", async () => {
+  await control.query("ANALYZE TABLE trips, trip_facts, source_messages");
+  // Keep in sync with readKnownSplit, readTopRoutes, readTopCargo and readSources in breakdown.ts.
+  const accepted =
+    "t.decision='accepted' AND t.alias_of IS NULL AND t.reporting_at >= ? AND t.reporting_at < ?";
+  const count = "COUNT(*)";
+  const distance = "COALESCE(SUM(TRUNCATE(t.actual_distance_m, 1)), 0)";
+  const version = "MAX(GREATEST(t.version, t.adjudication_version))";
+  const fact = "trip_facts f ON f.id = t.current_fact_id";
+  const statements: Record<string, string> = {
+    route_split: `SELECT (f.origin_city_id IS NOT NULL AND f.destination_city_id IS NOT NULL) AS known, ${count} trips, ${distance} distance, ${version} pv FROM trips t LEFT JOIN ${fact} WHERE ${accepted} GROUP BY known`,
+    route_top: `SELECT t.game, f.origin_city_id, f.destination_city_id, ${count} trips, ${distance} distance FROM trips t JOIN ${fact} WHERE ${accepted} AND f.origin_city_id IS NOT NULL AND f.destination_city_id IS NOT NULL GROUP BY t.game, f.origin_city_id, f.destination_city_id ORDER BY ${count} DESC, ${distance} DESC, f.origin_city_id, f.destination_city_id, t.game LIMIT 5`,
+    cargo_split: `SELECT (f.cargo_id IS NOT NULL) AS known, ${count} trips, ${distance} distance, ${version} pv FROM trips t LEFT JOIN ${fact} WHERE ${accepted} GROUP BY known`,
+    cargo_top: `SELECT t.game, f.cargo_id, ${count} trips, ${distance} distance FROM trips t JOIN ${fact} WHERE ${accepted} AND f.cargo_id IS NOT NULL GROUP BY t.game, f.cargo_id ORDER BY ${count} DESC, ${distance} DESC, f.cargo_id, t.game LIMIT 5`,
+    source: `SELECT m.provider, ${count} trips, ${distance} distance, ${version} pv FROM trips t LEFT JOIN ${fact} LEFT JOIN source_messages m ON m.id = COALESCE(f.message_id, f.derived_source_message_id) WHERE ${accepted} GROUP BY m.provider`,
+  };
+  // Bounds of the year 2026 and of the all_time range above in Europe/Berlin.
+  const ranges: Record<string, string[]> = {
+    year: ["2025-12-31 23:00:00.000", "2026-12-31 23:00:00.000"],
+    all_time: ["2025-05-31 22:00:00.000", "2026-11-30 23:00:00.000"],
+  };
+  for (const [range, bounds] of Object.entries(ranges))
+    for (const [statement, sql] of Object.entries(statements)) {
+      const name = `vtc112_${statement}_${range}`;
+      const [rows] = await control.query<RowDataPacket[]>(`EXPLAIN ${sql}`, bounds);
+      const keys = (table: string) =>
+        String(rows.find((row) => row.table === table)?.possible_keys);
+      expect(keys("t"), name).toContain("trip_analytics_reporting");
+      expect(keys("f"), name).toContain("PRIMARY");
+      if (statement === "source") expect(keys("m"), name).toContain("PRIMARY");
+      const [tree] = await control.query<RowDataPacket[]>(`EXPLAIN FORMAT=TREE ${sql}`, bounds);
+      // Synthetic plan evidence for review; generated IDs are masked before logging.
+      const text = String(tree[0]?.EXPLAIN)
+        .replace(/'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'/g, "'<id>'")
+        .replace(/0x[0-9a-f]+/g, "<id>");
+      console.info(JSON.stringify({ event: "stage4_explain", name, plan: text }));
+    }
 });

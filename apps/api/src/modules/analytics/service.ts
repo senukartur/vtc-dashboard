@@ -3,8 +3,28 @@ import { applicationId, type TxContext, type UnitOfWork } from "@vtc/db";
 import { company, membership } from "@vtc/db/identity-schema";
 import { trips } from "@vtc/db/trips-schema";
 import { and, eq, gte, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
+import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
+import {
+  type Breakdown,
+  type BreakdownQuery,
+  breakdownOptions,
+  cargoItems,
+  cargoRefs,
+  foldSources,
+  foldTotals,
+  readKnownSplit,
+  readSources,
+  readTopCargo,
+  readTopRoutes,
+  routeItems,
+  routeRefs,
+} from "./breakdown.js";
+import { addDistances, decimal } from "./distance.js";
 import { afterIndex, type LeaderboardPosition, pagination } from "./pagination.js";
+
+export { addDistances, decimal, subtractDistances } from "./distance.js";
+export type { BreakdownQuery } from "./breakdown.js";
 
 type Analytics = components["schemas"]["Analytics"];
 type CompanyAnalytics = components["schemas"]["AnalyticsStage4Company"];
@@ -13,6 +33,11 @@ type LeaderboardEntry = components["schemas"]["LeaderboardEntry"];
 type ListLeaderboardEntry = components["schemas"]["ListLeaderboardEntry"];
 export type CompanyStatsPublic = components["schemas"]["CompanyStatsPublic"];
 type PublicGame = "ets2" | "ats";
+
+/** Optional module ports; route and cargo labels need the catalogs facade. */
+export interface AnalyticsPorts {
+  catalogs?: Pick<Catalogs, "labelsInTransaction"> | undefined;
+}
 
 export interface AnalyticsConfig {
   enabled?: boolean | undefined;
@@ -82,28 +107,6 @@ export function validateAnalyticsConfig(config: AnalyticsConfig): void {
       throw new Error("INVALID_ANALYTICS_REPORTING_TIMEZONE");
     }
   }
-}
-
-export function decimal(value: string | number | null | undefined): string {
-  if (value === null || value === undefined || value === 0 || value === "0") return "0";
-  const str = typeof value === "number" ? value.toFixed(1) : String(value);
-  const clean = str.replace(/\.0+$/, "").replace(/(\.\d*?[1-9])0+$/, "$1");
-  return clean === "" || clean === "-0" ? "0" : clean;
-}
-
-export function addDistances(a: string, b: string): string {
-  const parseScaled = (s: string) => {
-    const clean = decimal(s);
-    if (clean === "0") return 0n;
-    const [whole = "0", frac = ""] = clean.split(".");
-    const fracPadded = `${frac}0`.slice(0, 1);
-    return BigInt(whole) * 10n + BigInt(fracPadded);
-  };
-  const sum = parseScaled(a) + parseScaled(b);
-  if (sum === 0n) return "0";
-  const whole = sum / 10n;
-  const frac = sum % 10n;
-  return frac === 0n ? whole.toString() : `${whole}.${frac}`;
 }
 
 // One formatter per IANA zone; the set of valid zone names is small and fixed.
@@ -393,6 +396,7 @@ export function createAnalytics(
   identity: Identity,
   config: AnalyticsConfig,
   now: () => Date = () => new Date(),
+  ports: AnalyticsPorts = {},
 ) {
   validateAnalyticsConfig(config);
   const page = pagination(config.cursorKey);
@@ -453,6 +457,36 @@ export function createAnalytics(
     };
   }
 
+  /** Whether an unfinalized trip could still change the accepted totals of the covered range. */
+  async function projectionPending(
+    tx: TxContext,
+    range: CoveredRange,
+    game: "ets2" | "ats" | undefined,
+  ): Promise<boolean> {
+    // all_time also sees unfinalized trips older than the earliest accepted one: accepting
+    // them would change the totals and fromDate, so the probe has no lower bound there.
+    const pendingConditions = [
+      isNull(trips.aliasOf),
+      or(
+        eq(trips.assessmentPending, true),
+        eq(trips.correctionPending, true),
+        eq(trips.decision, "pending_review"),
+      ),
+      ...(range.period === "all_time" ? [] : [gte(trips.reportingAt, range.startIso)]),
+      lt(trips.reportingAt, range.endIso),
+    ];
+    if (game) {
+      pendingConditions.push(eq(trips.game, game));
+    }
+    const pendingRows = await uow
+      .client(tx)
+      .select({ id: trips.id })
+      .from(trips)
+      .where(and(...pendingConditions))
+      .limit(1);
+    return pendingRows.length > 0;
+  }
+
   return {
     async getCompanyAnalytics(
       actor: Actor,
@@ -499,26 +533,7 @@ export function createAnalytics(
           .from(trips)
           .where(accepted);
 
-        // all_time also sees unfinalized trips older than the earliest accepted one: accepting
-        // them would change the totals and fromDate, so the probe has no lower bound there.
-        const pendingConditions = [
-          isNull(trips.aliasOf),
-          or(
-            eq(trips.assessmentPending, true),
-            eq(trips.correctionPending, true),
-            eq(trips.decision, "pending_review"),
-          ),
-          ...(range.period === "all_time" ? [] : [gte(trips.reportingAt, range.startIso)]),
-          lt(trips.reportingAt, range.endIso),
-        ];
-        if (q.game) {
-          pendingConditions.push(eq(trips.game, q.game));
-        }
-        const pendingRows = await db
-          .select({ id: trips.id })
-          .from(trips)
-          .where(and(...pendingConditions))
-          .limit(1);
+        const pending = await projectionPending(tx, range, q.game);
 
         const activeMembers = await identity.activeMemberCountInTransaction(tx);
 
@@ -557,7 +572,7 @@ export function createAnalytics(
           buckets,
           computedAt: instant.toISOString(),
           projectionVersion,
-          projectionPending: pendingRows.length > 0,
+          projectionPending: pending,
           period: range.period,
           activeDrivers: Number(drivers?.count ?? 0),
           activeMembers,
@@ -565,6 +580,64 @@ export function createAnalytics(
         };
       });
     },
+
+    /**
+     * Top routes, top cargo or the source split (VTC-112) over the accepted predicate and
+     * covered range of getCompanyAnalytics, so the totals equal its acceptedTrips and distance.
+     */
+    async getCompanyAnalyticsBreakdown(actor: Actor, query: BreakdownQuery): Promise<Breakdown> {
+      const options = breakdownOptions(query);
+      const q = periodQuery(query, { company: true });
+      const instant = now();
+      return uow.run(async (tx) => {
+        const authority = await identity.authorizeInTransaction(tx, actor, "company.read");
+        const locale = query.locale ?? authority.locale;
+        const timeZone = await resolveTimezone(tx);
+        const range = await coveredRange(tx, timeZone, q, instant);
+        const accepted = and(...acceptedIn(range, q.game));
+        const db = uow.client(tx);
+        const pending = await projectionPending(tx, range, q.game);
+        const base = {
+          period: range.period,
+          fromDate: range.fromDate,
+          toDateExclusive: range.toDateExclusive,
+          reportingTimezone: timeZone,
+          game: q.game ?? null,
+          computedAt: instant.toISOString(),
+          projectionPending: pending,
+        };
+
+        if (options.dimension === "source") {
+          const { items, ...folded } = foldSources(await readSources(db, accepted));
+          return { dimension: "source", ...base, ...folded, items };
+        }
+        // Route and cargo items need catalog labels; without the catalogs module they are unavailable.
+        const catalogs = ports.catalogs;
+        if (!catalogs) throw identityError(503);
+        const split = await readKnownSplit(db, options.dimension, accepted);
+        if (options.dimension === "route") {
+          const top = await readTopRoutes(db, accepted, options.limit);
+          const labels = await catalogs.labelsInTransaction(tx, routeRefs(top), locale);
+          return {
+            dimension: "route",
+            ...base,
+            limit: options.limit,
+            ...foldTotals(split, top),
+            items: routeItems(top, labels),
+          };
+        }
+        const top = await readTopCargo(db, accepted, options.limit);
+        const labels = await catalogs.labelsInTransaction(tx, cargoRefs(top), locale);
+        return {
+          dimension: "cargo",
+          ...base,
+          limit: options.limit,
+          ...foldTotals(split, top),
+          items: cargoItems(top, labels),
+        };
+      });
+    },
+
     async getMemberAnalytics(
       actor: Actor,
       memberId: string,
