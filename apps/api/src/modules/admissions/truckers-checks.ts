@@ -180,7 +180,8 @@ export function createTruckersChecks(unit: UnitOfWork, port: TruckersPort, now: 
         return row.steamId;
       });
       if (!steamId) return null;
-      signal.throwIfAborted();
+      // An abort before the provider call keeps the job retryable, like one after it.
+      if (signal.aborted) throw new RetryableJobError();
       // The read-only provider request runs outside every transaction and lock.
       let outcome: Prepared;
       try {

@@ -13,8 +13,10 @@ import {
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import {
   checkDto,
+  createTruckersChecks,
   steamIdFromProfileUrl,
 } from "../../apps/api/src/modules/admissions/truckers-checks.ts";
+import { RetryableJobError } from "../../apps/api/src/platform/jobs/queue.ts";
 
 const config = { key: randomBytes(32).toString("base64url"), origin: "http://127.0.0.1:4173" };
 const input = () => ({
@@ -381,4 +383,35 @@ test("the check projection derives not_checked, hides transient failures and fai
   expect(
     checkDto({ ...completed, state: "failed", failure: "invalid_response" }, profilesUrl, now),
   ).toMatchObject({ state: "failed", found: true, failure: "invalid_response" });
+});
+test("an abort after the committed check preparation and before the provider call stays retryable", async () => {
+  const controller = new AbortController();
+  let lookups = 0;
+  // The fake unit stands in for the committed prepare transaction: it returns the leased
+  // Steam ID, and the pass deadline fires in the window before the provider request.
+  const unit: UnitOfWork = {
+    run: async () => {
+      controller.abort();
+      return "76561190000000001" as never;
+    },
+    client: () => {
+      throw new Error("SYNTHETIC_UNREACHABLE");
+    },
+    close: async () => {},
+  };
+  const { handler } = createTruckersChecks(
+    unit,
+    {
+      lookup: async () => {
+        lookups++;
+        return { found: false, profile: null, bans: null };
+      },
+    },
+    () => new Date("2026-11-12T09:00:00.000Z"),
+  );
+  const reference = { applicationId: newId(), generation: 1, attempt: 1, token: newId() };
+  await expect(handler.prepare?.(reference, {} as never, controller.signal)).rejects.toBeInstanceOf(
+    RetryableJobError,
+  );
+  expect(lookups).toBe(0);
 });
