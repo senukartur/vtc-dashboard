@@ -2293,8 +2293,8 @@ test("same-event writers keep combined material anchors atomic and cancellation 
   });
   await drain();
   const final = (await service.poll(owner)).items.filter((r) => r.target?.id === id);
+  // The cancellation ends the publication toast inside its live window; only it stays live.
   expect(final.filter((r) => r.liveToastEligible).map((r) => r.category)).toEqual([
-    "event.published",
     "event.cancelled",
   ]);
   expect(final).toHaveLength(4);
@@ -2832,6 +2832,41 @@ test("a role change between read and write gives 401 in session and 422 after si
   });
 });
 
+test("a wrong preference key set is rejected with 422 before the version and idempotency checks", async () => {
+  const driver = (await member(["driver"])).actor;
+  const receipts = async () => {
+    const [rows] = await control.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM notification_commands WHERE recipient_id=?",
+      [driver.userId],
+    );
+    return Number(rows[0]?.n);
+  };
+  const read = await service.getPreferences(driver);
+  const extra = { ...read.data, reviewQueue: true } as S["NotificationPreferences"];
+  // A stale version would be 412; the key set is checked first and leaves no receipt.
+  await expect(
+    service.setPreferences(driver, newId(), read.version + 7, extra),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  expect(await receipts()).toBe(0);
+  const key = newId();
+  const saved = await service.setPreferences(driver, key, read.version, {
+    ...read.data,
+    tripStarted: false,
+  });
+  expect(await receipts()).toBe(1);
+  // Reusing that key with a different body would be 409; a wrong key set is 422 instead.
+  await expect(service.setPreferences(driver, key, read.version, extra)).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  await expect(
+    service.setPreferences(driver, key, saved.version, {
+      tripStarted: false,
+    } as S["NotificationPreferences"]),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  expect(await receipts()).toBe(1);
+  expect((await service.getPreferences(driver)).version).toBe(saved.version);
+});
+
 test("review queue and trip rejection toggles gate reviewers and authors independently", async () => {
   const reviewer = await member(["dispatcher"]),
     rejected = await receive(payload("completed")),
@@ -3098,6 +3133,29 @@ test("a published event notifies every active member once; drafts, edits and rep
       (r) => r.target?.id === muted.data.event.id,
     ),
   ).toBe(false);
+});
+
+test("a delivered publication toast stops being live once its event has started", async () => {
+  const soon = await events.create(
+    director,
+    newId(),
+    eventInput({ startsAt: new Date(instant + 60000).toISOString() }),
+  );
+  const id = soon.data.event.id;
+  await drain();
+  const item = async () =>
+    (await service.poll(observer)).items.find(
+      (r) => r.category === "event.published" && r.target?.id === id,
+    );
+  expect((await item())?.liveToastEligible).toBe(true);
+  // Still inside the 120 s live window, but the start has passed.
+  instant += 61000;
+  expect(await item()).toMatchObject({ readAt: null, liveToastEligible: false });
+  expect(
+    (await service.history(observer, { limit: 100 })).items.filter(
+      (r) => r.category === "event.published" && r.target?.id === id,
+    ),
+  ).toHaveLength(1);
 });
 
 test("a published event cancelled or started before delivery is skipped for good", async () => {

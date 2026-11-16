@@ -2218,7 +2218,16 @@ export function createEvents(
       // This is the existing HTTP page bound, not a new event or company policy.
       if (requests.length > 100) throw new Error("NOTIFICATION_PROJECTION_BOUND_EXCEEDED");
       if (!requests.length)
-        return new Map<string, { title: string; game: "ets2" | "ats"; effective: boolean }>();
+        return new Map<
+          string,
+          {
+            title: string;
+            game: "ets2" | "ats";
+            effective: boolean;
+            status: "scheduled" | "cancelled";
+            startsAt: string;
+          }
+        >();
       const current = alias(eventRevisions, "notification_current_definition");
       const rows = await c(tx)
         .select({
@@ -2265,6 +2274,9 @@ export function createEvents(
                   { status: row.status, version: row.currentVersion },
                   materialState(row.material, row.currentVersion),
                 ),
+                // The current definition, so a projection can tell a cancelled or started event.
+                status: row.status,
+                startsAt: row.startsAt,
               },
             ] as const,
           ];

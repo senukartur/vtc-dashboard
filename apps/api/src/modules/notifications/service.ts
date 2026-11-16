@@ -270,7 +270,12 @@ export function createNotifications(
       tx,
       rows
         .filter((row) =>
-          ["event.start_changed", "event.route_changed", "event.cancelled"].includes(row.category),
+          [
+            "event.start_changed",
+            "event.route_changed",
+            "event.cancelled",
+            "event.published",
+          ].includes(row.category),
         )
         .map((row) => ({
           eventId: row.subjectId,
@@ -321,7 +326,10 @@ export function createNotifications(
       }
       const trip = r.subjectKind === "trip" ? targets.get(r.subjectId) : null;
       const targetId = r.subjectKind === "trip" ? trip?.target : r.subjectId;
-      const eventChange = eventChanges.get(`${r.subjectId}:${r.subjectVersion}:${r.category}`);
+      const projected = eventChanges.get(`${r.subjectId}:${r.subjectVersion}:${r.category}`);
+      // A new-event row keeps the title it was published with; only its liveness reads the event.
+      const published = r.category === "event.published" ? projected : undefined;
+      const eventChange = published ? undefined : projected;
       const materialEvent = [
         "event.start_changed",
         "event.route_changed",
@@ -359,6 +367,11 @@ export function createNotifications(
               currentDecisions.get(trip.canonicalId)?.outcome !== "accepted" ||
               r.effectKey.toString() !==
                 `trip.accepted:${currentDecisions.get(trip.canonicalId)?.id}`)
+          ) &&
+          // A new-event toast is live only while the event is still scheduled and not started.
+          !(
+            r.category === "event.published" &&
+            (published?.status !== "scheduled" || Date.parse(published.startsAt) <= now().getTime())
           ) &&
           !history &&
           r.readAt === null &&
