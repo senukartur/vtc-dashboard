@@ -13,7 +13,7 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { formatUtc, type Locale } from "../../shared/formatting.js";
-import { Button, Card, Label } from "../../shared/ui/primitives.js";
+import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
 import { EventFailureView, KeepFocusButton } from "../events/components.js";
 import { responseInput } from "../events/model.js";
 import { useEventCommand, useEventQuery } from "../events/queries.js";
@@ -81,6 +81,28 @@ export function useBlockRetry(query: {
   };
 }
 
+type Decision = DTO["TripSummary"]["decision"];
+// Decorative symbols beside the decision text (as in the trip list), so status never relies on
+// colour alone.
+const decisionSymbol: Record<Decision, string | null> = {
+  unassessed: null,
+  pending_review: "●",
+  accepted: "✓",
+  rejected: "✕",
+};
+
+function DecisionBadge({ decision }: { decision: Decision }) {
+  const { t } = useTranslation("trips");
+  const symbol = decisionSymbol[decision];
+  return (
+    <Badge size="xs" className="dashboard-decision" data-decision={decision}>
+      {symbol && <span aria-hidden="true">{symbol} </span>}
+      {t(decision)}
+    </Badge>
+  );
+}
+
+/** The viewer's own latest trips with their game and company decision (My overview). */
 export function RecentTripsWidget({
   query,
   locale,
@@ -105,7 +127,6 @@ export function RecentTripsWidget({
             const row = recentTripRow(trip, locale, displayTimezone);
             return (
               <li key={row.id} className="dashboard-trip">
-                <span className="dashboard-game">{row.game.toUpperCase()}</span>
                 <div className="dashboard-trip-text">
                   <Link to={`/account/trips/${row.id}`} className="dashboard-trip-route">
                     <span>
@@ -118,7 +139,7 @@ export function RecentTripsWidget({
                     </span>
                   </Link>
                   <span className="dashboard-trip-meta">
-                    {row.driver} · <span className="dashboard-nowrap">{row.distance}</span> ·{" "}
+                    <span className="dashboard-nowrap">{row.distance}</span> ·{" "}
                     {trip.reportingAt ? (
                       <time dateTime={trip.reportingAt}>{row.countedAt}</time>
                     ) : (
@@ -129,6 +150,10 @@ export function RecentTripsWidget({
                     )}
                   </span>
                 </div>
+                <span className="dashboard-trip-tags">
+                  <span className="dashboard-game">{row.game.toUpperCase()}</span>
+                  <DecisionBadge decision={row.decision} />
+                </span>
               </li>
             );
           })}
@@ -174,7 +199,7 @@ export function RecentTripsWidget({
         <h2 id={headingId} ref={heading} tabIndex={-1}>
           {t("recentTrips.title")}
         </h2>
-        <Link to="/account/trips?scope=company" className="dashboard-head-link">
+        <Link to="/account/trips" className="dashboard-head-link">
           {t("recentTrips.allTrips")}
         </Link>
       </div>
