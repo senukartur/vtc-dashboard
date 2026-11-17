@@ -26,6 +26,7 @@ export const browserFiles = {
   "test/e2e/trips.spec.ts": "trips",
   "test/e2e/trips-real.spec.ts": "trips-real",
   "test/e2e/trips-list.spec.ts": "trips-list",
+  "test/e2e/trip-page.spec.ts": "trip-page",
   "test/e2e/manual-report-layout.spec.ts": "manual-report-layout",
   "test/e2e/manual-report-reference.spec.ts": "manual-report-reference",
   "test/e2e/manual-report-date-time.spec.ts": "manual-report-date-time",
