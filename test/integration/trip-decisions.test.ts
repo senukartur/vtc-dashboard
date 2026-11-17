@@ -3830,6 +3830,57 @@ test("editing a cargo ADR class leaves the stored snapshot and decision unchange
   }
 });
 
+test("editing the level's limits after a decision leaves the trip's checked rules, limits and outcomes unchanged", async () => {
+  const time = instant;
+  instant = Date.parse("2029-09-01T12:00:00.000Z");
+  try {
+    await configureFirstLevel({
+      massMaxKg: "20000",
+      distanceMaxM: "100000000",
+      trailers: { mode: "selected", typeIds: [ids.get("fixture_flatbed") as string] },
+      adr: { mode: "selected", classes: ["2"] },
+    });
+    instant += 3600000;
+    const who = await member();
+    const r = await report(who, manual, {
+      cargoMassKg: "19000",
+      cargo: "fixture_gas",
+      trailerType: "fixture_flatbed",
+    });
+    expect((await decide(r.tripId)).data).toMatchObject({ outcome: "accepted" });
+    const views = async () => {
+      const detail = await tripsService.detail(who, r.tripId);
+      if (detail.view !== "private") throw Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
+      return {
+        author: detail.qualificationCheck,
+        reviewer: (await service.review(dispatcher, r.tripId)).data.qualificationCheck,
+      };
+    };
+    const decided = await views();
+    expect(decided.author).toMatchObject({ status: "checked", basis: "decision", outcome: "pass" });
+    expect(decided.author?.rules.map((rule) => [rule.rule, rule.result])).toEqual([
+      ["cargo_mass", "pass"],
+      ["distance", "pass"],
+      ["trailer_types", "pass"],
+      ["adr", "pass"],
+      ["hard_mode", "pass"],
+    ]);
+    expect(decided.author?.rules[0]).toMatchObject({ maxKg: "20000", observedKg: "19000" });
+    expect(decided.reviewer).toEqual(decided.author);
+    // Tighter mass, distance, trailer and ADR limits would fail every one of these rules now.
+    await configureFirstLevel({
+      massMaxKg: "10000",
+      distanceMaxM: "1000",
+      trailers: { mode: "selected", typeIds: [ids.get("fixture_box") as string] },
+      adr: { mode: "forbidden", classes: [] },
+    });
+    expect(await views()).toEqual(decided);
+  } finally {
+    await configureFirstLevel({ massMaxKg: "20000" });
+    instant = time;
+  }
+});
+
 function returnedTripFixture() {
   return createTripDecisionWorkspace(unit, {
     rejectedGroupMembers: createTripWorkspace(unit).rejectedGroupMembers,
