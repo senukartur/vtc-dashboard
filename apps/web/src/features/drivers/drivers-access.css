@@ -1,0 +1,243 @@
+/* Drivers directory access panel (VTC-160): a right-hand drawer over the list on desktop and a
+   bottom sheet on phones and tablets. The panel and its confirmations are portaled to the body,
+   so the classes are not scoped under the page. */
+.dialog-content.drivers-access {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  transform: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(400px, 100%);
+  height: 100dvh;
+  max-height: none;
+  padding: 16px;
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  box-shadow: -16px 0 40px #00000066;
+  overflow-wrap: break-word;
+  overscroll-behavior: contain;
+}
+.drivers-access h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.drivers-access h3 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+.drivers-access p {
+  margin: 0;
+}
+.drivers-access h2:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.drivers-access-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.drivers-access-avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--focus);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+.drivers-access-name {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+/* Beats the shared `.dialog-content p` size. */
+.dialog-content .drivers-access-sub,
+.dialog-content .drivers-access-muted {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.drivers-access-close {
+  flex: none;
+  min-width: var(--target-min);
+  font-size: 1.125rem;
+}
+.drivers-access-section {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.drivers-access-group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.drivers-access-label {
+  padding: 0;
+  margin-bottom: 2px;
+  color: var(--secondary);
+  font-size: var(--font-small);
+}
+.drivers-access-choice {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.drivers-access-checks {
+  display: grid;
+  gap: 8px;
+}
+.drivers-access-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+.drivers-access-check input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--focus);
+}
+.drivers-access-check > span {
+  display: grid;
+  gap: 1px;
+  line-height: 1.35;
+}
+.drivers-access-group:disabled .drivers-access-check {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.drivers-access-unsaved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--pending);
+  font-size: var(--font-small);
+}
+.drivers-access-warning {
+  color: var(--secondary);
+  font-size: var(--font-small);
+}
+.drivers-access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+.drivers-access-leave {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.drivers-access-danger:not(:disabled) {
+  color: var(--destructive);
+}
+.drivers-access-field {
+  display: grid;
+  gap: 4px;
+}
+.drivers-access-field select,
+.drivers-access-field textarea {
+  width: 100%;
+}
+.drivers-access-field textarea {
+  min-height: 0;
+  padding-block: 6px;
+  resize: vertical;
+}
+.drivers-access-feedback,
+.drivers-access-notice,
+.drivers-access-protected {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-active);
+  font-size: var(--font-small);
+}
+.drivers-access-protected-title {
+  font-weight: 650;
+}
+.drivers-access-retry[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: var(--muted);
+  background: var(--surface-active);
+  border-color: var(--border-strong);
+}
+.drivers-access-settings {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  margin-top: auto;
+  font-size: var(--font-small);
+}
+
+/* Confirmations opened from the panel. */
+.dialog-content:has(.drivers-access-dialog) {
+  overflow-wrap: break-word;
+}
+.drivers-access-dialog {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.drivers-access-points {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  list-style: disc;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+/* Phones and tablets: a full-width sheet from the bottom that scrolls inside itself. */
+@media (max-width: 800px) {
+  .dialog-content.drivers-access {
+    top: auto;
+    left: 0;
+    width: 100%;
+    height: auto;
+    max-height: min(92dvh, calc(100dvh - 24px));
+    padding: 16px max(16px, env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
+    border-width: 1px 0 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    box-shadow: 0 -16px 40px #00000066;
+  }
+}
+
+@media (pointer: coarse) {
+  .drivers-access-check {
+    min-height: var(--target-min);
+    align-items: center;
+  }
+  .drivers-access-check input {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+  }
+}

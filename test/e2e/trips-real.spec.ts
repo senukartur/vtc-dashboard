@@ -1550,12 +1550,11 @@ test(
         });
         expectOnlyAcceptedCompanyTrip(recent.data, completed.tripId, fixture.userId);
         const history = visitor.getByRole("region", { name: "Accepted trips", exact: true });
-        // VTC-145 moved the lifetime totals from the trips card to the first statistics item.
-        await expect(
-          visitor
-            .getByRole("region", { name: /^Driver statistics/ })
-            .locator(".driver-kpi-all > dd"),
-        ).toHaveText("123.4 kmTrips: 1 · all games");
+        // VTC-160: lifetime totals are the Total and Trips tiles, with the rounded average trip.
+        const statistics = visitor.getByRole("region", { name: /^Driver statistics/ });
+        await expect(statistics.locator('[data-kpi="total"] > dd')).toHaveText("123.4 km");
+        await expect(statistics.locator('[data-kpi="trips"] > dd')).toHaveText("1");
+        await expect(statistics.locator('[data-kpi="average"] > dd')).toHaveText("123 km");
         await expect(history.getByRole("row")).toHaveCount(2);
         expect(profileTripReads).toBe(1);
         visitor.off("request", trackProfileTrips);

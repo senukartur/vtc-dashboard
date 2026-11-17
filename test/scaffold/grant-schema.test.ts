@@ -17,6 +17,22 @@ const harnessTables: Record<string, string> = {
 type Matrix = Record<string, Record<string, string[]>>;
 const json = async (url: URL) => JSON.parse(await readFile(url, "utf8"));
 
+/** Per-role supplements activation adds for an operator setting (EVENT_MEDIA_ROOT, Dispatch). */
+const roleSupplements = ["eventMediaGrants", "dispatchStage3Grants"] as const;
+
+function stageMatrices(stage: Record<string, unknown>): Matrix {
+  const result: Matrix = {
+    ...(stage.grants as Matrix),
+    eventsDraftsGrants: stage.eventsDraftsGrants as Record<string, string[]>,
+  };
+  for (const name of roleSupplements) {
+    const supplement = stage[name] as Matrix | undefined;
+    assert.ok(supplement && Object.keys(supplement).length, `${name} missing`);
+    for (const [role, tables] of Object.entries(supplement)) result[`${name} ${role}`] = tables;
+  }
+  return result;
+}
+
 async function latestSchema() {
   const journal = (await json(new URL("_journal.json", migrations))) as {
     entries: { idx: number }[];
@@ -44,10 +60,7 @@ async function grantMatrices() {
   const result: { label: string; file: string; tables: Record<string, string[]> }[] = [];
   for (const file of files.sort()) {
     const value = await json(new URL(file, deploy));
-    const matrices: Matrix =
-      file === "stage-features.json"
-        ? { ...value.grants, eventsDraftsGrants: value.eventsDraftsGrants }
-        : value;
+    const matrices: Matrix = file === "stage-features.json" ? stageMatrices(value) : value;
     for (const [role, tables] of Object.entries(matrices))
       result.push({ label: `${file} ${role}`, file, tables });
   }
@@ -101,6 +114,46 @@ test("the Stage supplement repeats no base grant", async () => {
   assert.deepEqual(repeats, []);
   // The level change history needs it on every host, not only with the supplement.
   assert.ok(base.runtime?.audit_entries?.includes("SELECT"));
+});
+
+test("the media and Dispatch supplements repeat nothing they are added to", async () => {
+  // activation.py refuses a repeat inside the supplement; this also covers the base matrix.
+  const base = (await json(new URL("activation-grants.json", deploy))) as Matrix;
+  const stage = await json(new URL("stage-features.json", deploy));
+  const repeats: string[] = [];
+  for (const name of roleSupplements)
+    for (const [role, tables] of Object.entries(stage[name] as Matrix))
+      for (const [table, permissions] of Object.entries(tables)) {
+        const existing = [
+          ...(base[role]?.[table] ?? []),
+          ...(stage.grants[role]?.[table] ?? []),
+          ...(role === "runtime" ? (stage.eventsDraftsGrants[table] ?? []) : []),
+          ...roleSupplements
+            .filter((other) => other !== name)
+            .flatMap((other) => stage[other][role]?.[table] ?? []),
+        ];
+        for (const permission of permissions)
+          if (existing.includes(permission)) repeats.push(`${name} ${role} ${table} ${permission}`);
+      }
+  assert.deepEqual(repeats, []);
+});
+
+test("the Dispatch Stage 3 tables are granted only by their supplement", async () => {
+  const stage = await json(new URL("stage-features.json", deploy));
+  const dispatch = new Set(
+    Object.values(stage.dispatchStage3Grants as Matrix).flatMap((tables) => Object.keys(tables)),
+  );
+  assert.deepEqual([...dispatch].sort(), [
+    "reconciliation_candidate_dismissals",
+    "trip_review_reasons",
+  ]);
+  for (const { label, tables } of await grantMatrices())
+    if (!label.startsWith("stage-features.json dispatchStage3Grants "))
+      assert.deepEqual(
+        Object.keys(tables).filter((table) => dispatch.has(table)),
+        [],
+        label,
+      );
 });
 
 test("the grant check reports dropped tables and columns", () => {

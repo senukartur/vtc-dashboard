@@ -47,6 +47,44 @@
     "event_metadata": ["SELECT", "INSERT", "UPDATE(published_event_id)"],
     "event_workflow_commands": ["SELECT", "INSERT"]
   },
+  "eventMediaGrants": {
+    "runtime": {
+      "event_metadata": ["UPDATE(media_version)"],
+      "event_media": [
+        "SELECT",
+        "INSERT",
+        "UPDATE(byte_length,caption,content_type,deleted_at,fingerprint,generation,height,is_cover,lease_token,lease_until,next_check_at,position,sha256,state,updated_at,width)"
+      ],
+      "event_media_generations": ["SELECT", "INSERT", "UPDATE(next_check_at,updated_at)"]
+    },
+    "jobs": {
+      "event_drafts": ["SELECT(event_id,discarded_at)"],
+      "event_metadata": ["SELECT", "UPDATE(media_version)"],
+      "event_media": [
+        "SELECT",
+        "UPDATE(deleted_at,is_cover,lease_token,lease_until,next_check_at,position,state,updated_at)"
+      ],
+      "event_media_generations": [
+        "SELECT",
+        "INSERT",
+        "UPDATE(delete_attempt,deletion_job_id,lease_until,next_check_at,state,updated_at)"
+      ]
+    }
+  },
+  "dispatchStage3Grants": {
+    "runtime": {
+      "trip_review_reasons": ["SELECT", "INSERT", "DELETE"],
+      "reconciliation_candidate_dismissals": [
+        "SELECT",
+        "INSERT",
+        "UPDATE(dismissed_by,dismissed_at,reason,version,undone_by,undone_at)"
+      ]
+    },
+    "jobs": {
+      "trip_review_reasons": ["SELECT", "INSERT", "DELETE"],
+      "reconciliation_candidate_dismissals": ["SELECT"]
+    }
+  },
   "grants": {
     "runtime": {
       "external_steam_accounts": ["UPDATE(created_at)"],

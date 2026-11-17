@@ -14,6 +14,32 @@ import activation
 import operations as ops
 import update_controls
 
+# Key names only, as the development host's shared file held them on 2026-11-17.
+LIVE_HOST_KEYS = frozenset('''
+ANALYTICS_CURSOR_KEY ANALYTICS_ENABLED ANALYTICS_REPORTING_TIMEZONE CATALOGS_CURSOR_KEY CATALOGS_ENABLED
+DISPATCH_REVIEW_STAGE3_ENABLED EVENTS_CURSOR_KEY EVENTS_DRAFTS_ENABLED EVENTS_ENABLED EVENTS_ROUTE_ENABLED
+EVENT_MEDIA_ROOT EXTERNAL_IDENTITIES_ENABLED IDENTITY_ENABLED IDENTITY_ORIGIN IDENTITY_SECRET MAIL_API_KEY
+MAIL_ENCRYPTION_KEY MAIL_MODE MAIL_SENDER MAIL_TRACKING_DISABLED MANUAL_EVIDENCE_ROOT MANUAL_MAX_FILES_PER_REPORT
+MANUAL_MAX_FILE_BYTES MANUAL_MAX_PIXELS MANUAL_ORPHAN_GRACE_MS MANUAL_POLICY_REVISION MANUAL_REPORTS_ENABLED
+MANUAL_REPORTS_KEY MANUAL_UPLOAD_TIMEOUT_MS NOTIFICATIONS_CURSOR_KEY NOTIFICATIONS_ENABLED QUALIFICATIONS_CURSOR_KEY
+QUALIFICATIONS_ENABLED QUALIFICATION_LADDER_EDITS_ENABLED RECONCILIATION_ENABLED RECONCILIATION_KEY
+TELEMETRY_CURSOR_KEY TELEMETRY_ENABLED TELEMETRY_GLOBAL_PER_MINUTE TELEMETRY_IP_PER_MINUTE TRIPS_CURSOR_KEY
+TRIPS_ENABLED TRIP_DECISIONS_ENABLED TRIP_DECISIONS_KEY
+'''.split())
+
+
+def live_host_values():
+    """Fictional values for the live key set; only the key names come from the host."""
+    profile = json.loads(pathlib.Path(__file__).with_name(activation.STAGE_PROFILE).read_text())
+    values = {}
+    for number, key in enumerate(sorted(LIVE_HOST_KEYS)):
+        values[key] = ('true' if key.endswith(('_ENABLED', '_DISABLED')) else
+                       profile['settings'].get(key) or f'{number:02x}' * 32)
+    values.update(IDENTITY_ORIGIN='https://dashboard.example.invalid', MAIL_MODE='resend',
+                  MAIL_SENDER='dispatch@example.invalid', EVENT_MEDIA_ROOT='/app/private-event-media',
+                  DISPATCH_REVIEW_STAGE3_ENABLED='true')
+    return values
+
 
 class ActivationTests(unittest.TestCase):
     def setUp(self):
@@ -342,6 +368,15 @@ class ActivationTests(unittest.TestCase):
                              set(activation.SHARED_KEYS))
         self.assertFalse(activation.RETIRED_SETTINGS & set(profile['settings']))
         self.assertLessEqual(activation.RETIRED_SETTINGS, set(activation.SHARED_KEYS))
+        # The operator sets these two; prepare-stage neither writes nor retires them.
+        operator = {activation.DISPATCH_STAGE3_FLAG, activation.EVENT_MEDIA_SETTING}
+        self.assertLessEqual(operator, set(activation.SHARED_KEYS))
+        self.assertFalse(operator & {*profile['flags'], *profile['settings'], *profile['generatedKeys'],
+                                     *activation.STAGE_FLAGS, *activation.RETIRED_SETTINGS})
+        self.assertEqual({key for key in profile if key.endswith('Grants')},
+                         {'eventsDraftsGrants', 'eventMediaGrants', 'dispatchStage3Grants'})
+        compose = pathlib.Path(__file__).with_name('compose.yaml').read_text()
+        self.assertEqual(compose.count(f'event-media:{activation.EVENT_MEDIA_ROOT}'), 2)
 
     def test_module_grants_install_only_for_a_configuration_that_enables_modules(self):
         self.stage_profile()
@@ -415,6 +450,127 @@ class ActivationTests(unittest.TestCase):
         path = self.base / 'private/flags.env'
         path.write_text('TRIPS_ENABLED=true\nEVENTS_ENABLED=false\nDIFFERENT=TRIPS_ENABLED=true\n')
         self.assertEqual(activation.module_flags(path), {'TRIPS_ENABLED': 'true'})
+        path.write_text('DISPATCH_REVIEW_STAGE3_ENABLED=false\nEVENT_MEDIA_ROOT=\n')
+        self.assertEqual(activation.module_flags(path), {})
+        # Even a value validate refuses still counts as configured media for an export.
+        path.write_text('DISPATCH_REVIEW_STAGE3_ENABLED=true\nEVENT_MEDIA_ROOT=/elsewhere\n')
+        self.assertEqual(activation.module_flags(path), {activation.DISPATCH_STAGE3_FLAG: 'true',
+                                                         activation.EVENT_MEDIA_SETTING: '/elsewhere'})
+
+    def write_private(self, path, values):
+        path.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
+        path.chmod(0o600)
+
+    def validation_mocks(self, stack):
+        """Everything validate asks Docker and MySQL, answered for a clean migration history."""
+        for role in ['runtime', 'jobs']:
+            self.write_private(self.base / f'private/{role}.env', {
+                'MYSQL_HOST': 'db', 'MYSQL_PORT': '3306', 'MYSQL_DATABASE': 'vtc',
+                'MYSQL_USER': f'vtc_{role}', 'MYSQL_PASSWORD': 'f' * 64})
+        history = [['1700000000000', 'c' * 64, 'applied']]
+        ingress = stack.enter_context(patch.object(activation, 'ingress'))
+        stack.enter_context(patch.object(ops, 'validate_image'))
+        run = stack.enter_context(patch.object(ops, 'run', side_effect=lambda *_a, **_k: (
+            json.dumps(history).encode() if run.call_count == 1 else b'')))
+        stack.enter_context(patch.object(ops, 'compose', return_value='\t'.join(history[0]).encode() + b'\n'))
+        return ingress, run
+
+    def test_validate_accepts_the_live_host_key_set_with_media_and_dispatch(self):
+        profile = self.stage_profile()
+        path = self.base / 'private/identity-mail.env'
+        values = live_host_values()
+        self.assertEqual(set(values), LIVE_HOST_KEYS)
+        self.write_private(path, values)
+        with ExitStack() as stack:
+            ingress, run = self.validation_mocks(stack)
+            activation.validate(ops, self.revision, self.image, path)
+        ingress.assert_called_once()
+        # The packaged migration list, then readConfig for each role with this exact file.
+        self.assertEqual(run.call_count, 3)
+        for call in run.call_args_list[1:]:
+            self.assertIn(str(path), call.args[0])
+        flags = activation.module_flags(path)
+        self.assertEqual(flags[activation.EVENT_MEDIA_SETTING], '/app/private-event-media')
+        self.assertEqual(flags[activation.DISPATCH_STAGE3_FLAG], 'true')
+        rows = activation.privilege_rows(activation.matrix(ops, flags))
+        for key in ['eventMediaGrants', 'dispatchStage3Grants']:
+            self.assertLessEqual(activation.privilege_rows(profile[key]), rows)
+        activation.check_privileges(ops, [list(row) for row in rows], complete=True, values=flags)
+        # prepare-stage keeps both operator settings and drops only the retired ones.
+        candidate = self.base / 'private/activation-input.env'
+        candidate.chmod(0o600)
+        activation.prepare_stage(ops)
+        prepared = activation.private_values(ops, candidate, activation.SHARED_KEYS)
+        self.assertEqual(set(prepared), LIVE_HOST_KEYS - activation.RETIRED_SETTINGS)
+        self.assertEqual({key: prepared[key] for key in [activation.EVENT_MEDIA_SETTING, activation.DISPATCH_STAGE3_FLAG]},
+                         {activation.EVENT_MEDIA_SETTING: '/app/private-event-media', activation.DISPATCH_STAGE3_FLAG: 'true'})
+        with ExitStack() as stack:
+            self.validation_mocks(stack)
+            activation.validate(ops, self.revision, self.image, candidate)
+
+    def test_validate_refuses_media_and_dispatch_settings_before_any_check_runs(self):
+        self.stage_profile()
+        path = self.base / 'private/identity-mail.env'
+        for change, code in [
+                ({'EVENT_MEDIA_ROOT': '/app/private-evidence'}, 'EVENT_MEDIA_PROFILE_REQUIRED'),
+                ({'EVENT_MEDIA_ROOT': '/app/private-event-media/'}, 'EVENT_MEDIA_PROFILE_REQUIRED'),
+                ({'EVENTS_DRAFTS_ENABLED': 'false'}, 'EVENT_MEDIA_PROFILE_REQUIRED'),
+                ({'EVENTS_ROUTE_ENABLED': None}, 'EVENT_MEDIA_PROFILE_REQUIRED'),
+                ({'DISPATCH_REVIEW_STAGE3_ENABLED': 'yes'}, 'STAGE_3_PROFILE_REQUIRED'),
+                ({'TRIP_DECISIONS_ENABLED': 'false'}, 'STAGE_3_PROFILE_REQUIRED'),
+                ({'UNREVIEWED_SETTING': '1'}, 'CONFIGURATION_INVALID')]:
+            with self.subTest(change=change):
+                values = {**live_host_values(), **change}
+                values = {key: value for key, value in values.items() if value is not None}
+                self.write_private(path, values)
+                with ExitStack() as stack:
+                    ingress, run = self.validation_mocks(stack)
+                    with self.assertRaisesRegex(RuntimeError, f'^{code}$'):
+                        activation.validate(ops, self.revision, self.image, path)
+                ingress.assert_not_called()
+                run.assert_not_called()
+        # Dispatch may stay off without trip decisions, and media may be absent altogether.
+        values = live_host_values()
+        values.pop('EVENT_MEDIA_ROOT')
+        values.update(DISPATCH_REVIEW_STAGE3_ENABLED='false', TRIP_DECISIONS_ENABLED='false')
+        self.write_private(path, values)
+        with ExitStack() as stack:
+            self.validation_mocks(stack)
+            activation.validate(ops, self.revision, self.image, path)
+
+    def test_media_and_dispatch_grants_install_only_for_their_settings(self):
+        profile = self.stage_profile()
+        base = {'TRIPS_ENABLED': 'true', 'TRIP_DECISIONS_ENABLED': 'true', 'EVENTS_ROUTE_ENABLED': 'true',
+                activation.EVENTS_DRAFTS_FLAG: 'true'}
+        media = {**base, activation.EVENT_MEDIA_SETTING: activation.EVENT_MEDIA_ROOT}
+        dispatch = {**base, activation.DISPATCH_STAGE3_FLAG: 'true'}
+        rows = lambda values: activation.privilege_rows(activation.matrix(ops, values))
+        self.assertEqual(rows(media) - rows(base), activation.privilege_rows(profile['eventMediaGrants']))
+        self.assertEqual(rows(dispatch) - rows(base), activation.privilege_rows(profile['dispatchStage3Grants']))
+        self.assertEqual(rows({**base, activation.DISPATCH_STAGE3_FLAG: 'false'}), rows(base))
+        statement = activation.grant_sql(ops, values={**media, **dispatch})
+        self.assertIn("GRANT SELECT,INSERT,DELETE ON vtc.trip_review_reasons TO 'vtc_jobs'@'%';", statement)
+        self.assertIn("GRANT SELECT,INSERT,UPDATE(`published_event_id`),UPDATE(`media_version`) ON vtc.event_metadata "
+                      "TO 'vtc_runtime'@'%';", statement)
+        self.assertIn("GRANT SELECT(`event_id`,`discarded_at`) ON vtc.event_drafts TO 'vtc_jobs'@'%';", statement)
+        self.assertNotIn('trip_review_reasons', activation.grant_sql(ops, values=media))
+        self.assertNotIn('event_media', activation.grant_sql(ops, values=dispatch))
+        # Apply records what it installed, so a rollback to a file without them keeps the readback valid.
+        installed = [list(row) for row in sorted(rows({**media, **dispatch}))]
+        with patch.object(activation, 'privileges', side_effect=[[], installed]), patch.object(ops, 'compose'):
+            activation.grants(ops, self.revision, {**media, **dispatch})
+        activation.check_privileges(ops, installed, complete=True, values=base)
+        # A profile without the supplement, or one that repeats a grant, fails before any statement.
+        for key, code, flags in [('eventMediaGrants', 'EVENT_MEDIA_PROFILE_REQUIRED', media),
+                                 ('dispatchStage3Grants', 'STAGE_3_PROFILE_REQUIRED', dispatch)]:
+            for broken in [None, {'jobs': {'trips': ['SELECT']}}, {'operator': {'trips': ['SELECT']}}]:
+                with self.subTest(key=key, broken=broken):
+                    changed = {name: value for name, value in profile.items() if name != key}
+                    if broken is not None:
+                        changed[key] = broken
+                    (self.base / activation.STAGE_PROFILE).write_text(json.dumps(changed))
+                    with self.assertRaisesRegex(RuntimeError, f'^{code}$'):
+                        activation.grant_sql(ops, values=flags)
 
     def test_prepare_stage_keeps_live_values_and_never_regenerates_keys(self):
         self.stage_profile()
