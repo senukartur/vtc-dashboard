@@ -2,16 +2,20 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
+import { InfoTip } from "../../shared/ui/info-tip.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
 import { AccountFailure } from "../account/transport.js";
 import { NotificationFailure, useOnline } from "./components.js";
 import { useNotificationCommand, useNotifications } from "./controller.js";
 import {
   type DTO,
-  type PreferenceName,
-  preferenceAudience,
-  preferenceLabel,
-  visiblePreferences,
+  type GroupState,
+  groupDetails,
+  groupState,
+  groupWrite,
+  type PreferenceGroupId,
+  preferenceGroups,
+  visibleGroups,
 } from "./model.js";
 import { notificationRead } from "./transport.js";
 
@@ -19,8 +23,9 @@ type Preferences = DTO["NotificationPreferences"];
 const retryable = ["uncertain", "unavailable", "limited"];
 
 /**
- * Notification switches for the account Preferences section. Rows follow exactly the keys the
- * server returned; each switch saves at once with the full returned key set and the latest ETag.
+ * Notification settings rows for the account Preferences section (mockup P14). A row renders when
+ * the server returned at least one of its keys and switches all of them; differing values show
+ * as partly on. Each change saves at once with the full returned key set and the latest ETag.
  * Needs the notifications provider (see `OptionalNotifications`).
  */
 export function NotificationPreferencesCard() {
@@ -32,8 +37,11 @@ export function NotificationPreferencesCard() {
       <div className="notification-preferences-header">
         <h2 id={`${id}-title`}>{t("title")}</h2>
         <span className="notification-preferences-note">{t("savedImmediately")}</span>
+        <InfoTip label={t("aboutTip")} title={t("title")}>
+          <p>{t("toggleHint")}</p>
+          <p>{t("how5")}</p>
+        </InfoTip>
       </div>
-      <p className="notification-preferences-hint">{t("toggleHint")}</p>
       {context.blocked ? (
         <div className="notification-preferences-state">
           <p role="alert" className="notification-preferences-forbidden">
@@ -81,28 +89,30 @@ function PreferenceSwitches({ id }: { id: string }) {
       }
     },
   });
-  // The switch being saved and its requested position; null once the server answered.
-  const [pending, setPending] = useState<{ name: PreferenceName; value: boolean } | null>(null),
+  // The row being saved and its requested position; null once the server answered.
+  const [pending, setPending] = useState<{ group: PreferenceGroupId; value: boolean } | null>(null),
     // The last write that failed retryably; Retry resends it unchanged under the same key.
-    [retry, setRetry] = useState<{ name: PreferenceName; value: boolean } | null>(null),
+    [retry, setRetry] = useState<{ group: PreferenceGroupId; value: boolean } | null>(null),
     [saved, setSaved] = useState(false),
     // A command failure dismissed by a successful reload.
     [cleared, setCleared] = useState<unknown>(null);
   const failure = command.error === cleared ? null : command.error;
   const kind = failure ? (failure instanceof AccountFailure ? failure.kind : "uncertain") : null;
-  // 409/412/428 and 422 lock every switch until the preferences are read again.
+  // 409/412/428 and 422 lock every row until the preferences are read again.
   const locked = kind === "conflict" || kind === "invalid";
   const inert =
     !query.data || query.isFetching || command.pending || command.seconds > 0 || !online || locked;
   const data = query.data?.data;
   const capabilities = session.self?.capabilities ?? [];
-  async function send(name: PreferenceName, value: boolean) {
+  async function send(group: PreferenceGroupId, value: boolean) {
     const read = query.data;
     if (inert || !read) return;
-    // Exactly the keys the read returned, so the server's exact-key check accepts the write.
-    const body: Preferences = { ...read.data, [name]: value };
-    setPending({ name, value });
-    setRetry({ name, value });
+    // Exactly the keys the read returned, so the server's exact-key check accepts the write; the
+    // same row and value over an unchanged read give the same body, so a retry keeps its key.
+    const keys = preferenceGroups.find((item) => item.id === group)?.keys ?? [];
+    const body: Preferences = groupWrite(read.data, keys, value);
+    setPending({ group, value });
+    setRetry({ group, value });
     setSaved(false);
     const result = await command.run(
       "/me/notification-preferences",
@@ -112,7 +122,7 @@ function PreferenceSwitches({ id }: { id: string }) {
     );
     setPending(null);
     if (!result || !context.current()) return;
-    // The saved data and its strong ETag become the base of the next switch.
+    // The saved data and its strong ETag become the base of the next change.
     client.setQueryData(key, result);
     setRetry(null);
     setSaved(true);
@@ -146,7 +156,7 @@ function PreferenceSwitches({ id }: { id: string }) {
               variant="outline"
               size="xs"
               aria-disabled={inert || undefined}
-              onClick={() => void send(retry.name, retry.value)}
+              onClick={() => void send(retry.group, retry.value)}
             >
               {t("retrySave")}
             </Button>
@@ -166,42 +176,64 @@ function PreferenceSwitches({ id }: { id: string }) {
         </div>
       )}
       {data && !query.isError && (
-        <ul className="notification-switches">
-          {visiblePreferences(data).map((name) => {
-            const input = `${id}-${name}`,
-              audience = (preferenceAudience as readonly string[]).includes(name);
-            const checked = pending?.name === name ? pending.value : data[name] === true;
-            return (
-              <li className="notification-switch-row" key={name}>
-                <span className="notification-switch-text">
-                  <label htmlFor={input}>
-                    {t(`toggles.${preferenceLabel(name, data, capabilities)}`)}
-                  </label>
-                  {audience && (
-                    <span id={`${input}-audience`} className="notification-switch-audience">
-                      {" "}
-                      · {t(`audience.${name}`)}
+        <>
+          <div className="notification-switch-columns">
+            <span>{t("columns.name")}</span>
+            <span className="notification-switch-cell">{t("columns.site")}</span>
+          </div>
+          <ul className="notification-switches">
+            {visibleGroups(data).map((group) => {
+              const input = `${id}-${group.id}`,
+                name = t(`groups.${group.id}`),
+                confirmed = groupState(data, group.keys),
+                busy = pending?.group === group.id;
+              // A pending row shows its requested position; otherwise the server-confirmed one.
+              const shown: GroupState = busy ? (pending.value ? "on" : "off") : confirmed;
+              return (
+                <li className="notification-switch-row" key={group.id}>
+                  <span className="notification-switch-text">
+                    <label htmlFor={input}>{name}</label>
+                    {group.audience && (
+                      <span id={`${input}-audience`} className="notification-switch-audience">
+                        {" "}
+                        · {t(`audience.${group.id}`)}
+                      </span>
+                    )}{" "}
+                    <InfoTip label={t("rowTip", { name })} title={name}>
+                      {groupDetails(group, data, capabilities).map((detail) => (
+                        <p key={detail}>{t(`details.${detail}`)}</p>
+                      ))}
+                      {confirmed === "mixed" && <p>{t("details.mixed")}</p>}
+                    </InfoTip>
+                  </span>
+                  <span className="notification-switch-cell">
+                    <span className="notification-switch">
+                      <input
+                        id={input}
+                        type="checkbox"
+                        checked={shown === "on"}
+                        // Partly on has no attribute; the DOM property is set on every render.
+                        ref={(element) => {
+                          if (element) element.indeterminate = shown === "mixed";
+                        }}
+                        aria-describedby={group.audience ? `${input}-audience` : undefined}
+                        aria-disabled={inert || undefined}
+                        aria-busy={busy || undefined}
+                        onChange={(event) => {
+                          // A click clears the mixed mark even when nothing is sent.
+                          event.currentTarget.indeterminate = shown === "mixed";
+                          // Off and partly on turn every key of the row on; on turns them off.
+                          void send(group.id, shown !== "on");
+                        }}
+                      />
+                      <span className="notification-switch-track" aria-hidden="true" />
                     </span>
-                  )}
-                </span>
-                <span className="notification-switch">
-                  <input
-                    id={input}
-                    type="checkbox"
-                    role="switch"
-                    checked={checked}
-                    aria-checked={checked}
-                    aria-describedby={audience ? `${input}-audience` : undefined}
-                    aria-disabled={inert || undefined}
-                    aria-busy={pending?.name === name || undefined}
-                    onChange={(event) => void send(name, event.target.checked)}
-                  />
-                  <span className="notification-switch-track" aria-hidden="true" />
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </>
   );

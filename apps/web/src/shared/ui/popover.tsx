@@ -2,6 +2,7 @@
 import { Popover as Primitive } from "radix-ui";
 import type { ComponentProps } from "react";
 import { cn } from "../cn.js";
+import "./popover.css";
 
 export const Popover = Primitive.Root;
 export const PopoverTrigger = Primitive.Trigger;
