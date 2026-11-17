@@ -11836,7 +11836,64 @@
                 "conditions"
               ],
               "position": 1,
-              "transferLevel": null
+              "transferLevel": null,
+              "values": {
+                "before": {
+                  "name": "Fictional Trainee",
+                  "position": 1,
+                  "limits": {
+                    "massMinKg": null,
+                    "massMaxKg": "25000",
+                    "distanceMinM": null,
+                    "distanceMaxM": "800000",
+                    "trailers": {
+                      "mode": "any",
+                      "types": []
+                    },
+                    "adr": {
+                      "mode": "forbidden",
+                      "classes": []
+                    },
+                    "hardModeRequired": false
+                  },
+                  "conditions": {
+                    "requiredTrips": 8,
+                    "requiredDistanceM": "5000000"
+                  }
+                },
+                "after": {
+                  "name": "Fictional Trainee",
+                  "position": 1,
+                  "limits": {
+                    "massMinKg": null,
+                    "massMaxKg": "20000",
+                    "distanceMinM": null,
+                    "distanceMaxM": "800000",
+                    "trailers": {
+                      "mode": "selected",
+                      "types": [
+                        {
+                          "entityId": "41500000-0000-4000-8000-000000000330",
+                          "label": "Fictional Curtainsider",
+                          "requestedLocale": "en",
+                          "renderedLocale": "en",
+                          "englishFallback": false,
+                          "hidden": false
+                        }
+                      ]
+                    },
+                    "adr": {
+                      "mode": "forbidden",
+                      "classes": []
+                    },
+                    "hardModeRequired": false
+                  },
+                  "conditions": {
+                    "requiredTrips": 10,
+                    "requiredDistanceM": "5000000"
+                  }
+                }
+              }
             }
           ]
         },
@@ -12099,7 +12156,64 @@
                   "conditions"
                 ],
                 "position": 1,
-                "transferLevel": null
+                "transferLevel": null,
+                "values": {
+                  "before": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "25000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "any",
+                        "types": []
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 8,
+                      "requiredDistanceM": "5000000"
+                    }
+                  },
+                  "after": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "20000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "selected",
+                        "types": [
+                          {
+                            "entityId": "41500000-0000-4000-8000-000000000330",
+                            "label": "Fictional Curtainsider",
+                            "requestedLocale": "en",
+                            "renderedLocale": "en",
+                            "englishFallback": false,
+                            "hidden": false
+                          }
+                        ]
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 10,
+                      "requiredDistanceM": "5000000"
+                    }
+                  }
+                }
               }
             ]
           },
@@ -12227,7 +12341,64 @@
                   "conditions"
                 ],
                 "position": 1,
-                "transferLevel": null
+                "transferLevel": null,
+                "values": {
+                  "before": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "25000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "any",
+                        "types": []
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 8,
+                      "requiredDistanceM": "5000000"
+                    }
+                  },
+                  "after": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "20000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "selected",
+                        "types": [
+                          {
+                            "entityId": "41500000-0000-4000-8000-000000000330",
+                            "label": "Fictional Curtainsider",
+                            "requestedLocale": "en",
+                            "renderedLocale": "en",
+                            "englishFallback": false,
+                            "hidden": false
+                          }
+                        ]
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 10,
+                      "requiredDistanceM": "5000000"
+                    }
+                  }
+                }
               }
             ]
           },
@@ -12334,7 +12505,64 @@
                   "conditions"
                 ],
                 "position": 1,
-                "transferLevel": null
+                "transferLevel": null,
+                "values": {
+                  "before": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "25000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "any",
+                        "types": []
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 8,
+                      "requiredDistanceM": "5000000"
+                    }
+                  },
+                  "after": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "20000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "selected",
+                        "types": [
+                          {
+                            "entityId": "41500000-0000-4000-8000-000000000330",
+                            "label": "Fictional Curtainsider",
+                            "requestedLocale": "en",
+                            "renderedLocale": "en",
+                            "englishFallback": false,
+                            "hidden": false
+                          }
+                        ]
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 10,
+                      "requiredDistanceM": "5000000"
+                    }
+                  }
+                }
               }
             ]
           },
@@ -12441,7 +12669,64 @@
                   "conditions"
                 ],
                 "position": 1,
-                "transferLevel": null
+                "transferLevel": null,
+                "values": {
+                  "before": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "25000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "any",
+                        "types": []
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 8,
+                      "requiredDistanceM": "5000000"
+                    }
+                  },
+                  "after": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "20000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "selected",
+                        "types": [
+                          {
+                            "entityId": "41500000-0000-4000-8000-000000000330",
+                            "label": "Fictional Curtainsider",
+                            "requestedLocale": "en",
+                            "renderedLocale": "en",
+                            "englishFallback": false,
+                            "hidden": false
+                          }
+                        ]
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 10,
+                      "requiredDistanceM": "5000000"
+                    }
+                  }
+                }
               }
             ]
           },
