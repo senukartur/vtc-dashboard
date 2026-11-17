@@ -229,6 +229,9 @@ describe("driver profile model", () => {
       expect(failureView(new DriversFailure("unavailable", status))).toBe("notFound");
     expect(failureView(new DriversFailure("forbidden", 403))).toBe("forbidden");
     expect(failureView(new DriversFailure("conflict", 409))).toBe("setup");
+    // A 429 is "limited" with or without a known Retry-After.
+    expect(failureView(new DriversFailure("limited", 429, 1))).toBe("limited");
+    expect(failureView(new DriversFailure("limited", 429))).toBe("limited");
     expect(failureView(new DriversFailure("unavailable", 503))).toBe("error");
     // Timeouts and unparseable responses carry no status.
     expect(failureView(new DriversFailure("unavailable"))).toBe("error");

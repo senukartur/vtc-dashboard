@@ -101,7 +101,7 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
   return (
     <div className="stack trip-page trip-detail">
       <TripHeader summary={summary} view={own} status={status} owner={owner} actions={actions} />
-      <State query={query} />
+      <State query={query} rateLimitNotice />
       {summary && (
         <>
           {!own && <p className="trip-muted">{t("summaryView")}</p>}
@@ -285,7 +285,7 @@ function PrivateHistory({ tripId }: { tripId: string }) {
       {tab === "proposals" ? (
         <ProposalList tripId={tripId} etag={null} self />
       ) : (
-        <State query={query} />
+        <State query={query} rateLimitNotice />
       )}
       {tab === "revisions" &&
         revisions.data?.data.data.items.map((r, _i, items) => {

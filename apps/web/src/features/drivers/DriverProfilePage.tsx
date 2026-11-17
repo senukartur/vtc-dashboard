@@ -3,7 +3,9 @@ import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { accountTimeZone, type Locale } from "../../shared/formatting.js";
+import { rateLimitSeconds } from "../../shared/rate-limit.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
+import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import { PERIOD_FALLBACK_TIMEZONE, periodTimeZone } from "../dashboard/model.js";
 import { useReportingTimezoneSource } from "../dashboard/queries.js";
 import { untilAnchored } from "../dashboard/view-model.js";
@@ -148,14 +150,20 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
       </Card>
     );
   } else if (failure) {
+    // A read still rate limited explains the wait in a status notice, never inside an alert.
+    const limited = failure === "limited";
     content = (
-      <Card className="driver-error" role="alert">
-        <p>{t("states.error")}</p>
+      <Card className="driver-error" role={limited ? undefined : "alert"}>
+        {limited ? (
+          <RateLimitNotice seconds={rateLimitSeconds(profileQuery.error)} />
+        ) : (
+          <p>{t("states.error")}</p>
+        )}
         <Button
           type="button"
           variant="outline"
           onClick={() => {
-            // The alert unmounts on success; the title stays mounted and keeps focus.
+            // The error unmounts on success; the title stays mounted and keeps focus.
             titleRef.current?.focus();
             void profileQuery.refetch();
           }}

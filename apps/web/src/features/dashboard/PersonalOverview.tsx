@@ -5,6 +5,8 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { accountTimeZone, type Locale } from "../../shared/formatting.js";
+import { isRateLimited, rateLimitSeconds } from "../../shared/rate-limit.js";
+import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { KeepFocusButton } from "../events/components.js";
 import { useUpcomingEventCard } from "../events/event-list-queries.js";
@@ -221,7 +223,11 @@ export function PersonalOverview() {
             failure={
               chartFailed ? (
                 <div className="dashboard-block-error">
-                  <p>{t("personal.monthError")}</p>
+                  {isRateLimited(chartRetry.error) ? (
+                    <RateLimitNotice seconds={rateLimitSeconds(chartRetry.error)} />
+                  ) : (
+                    <p>{t("personal.monthError")}</p>
+                  )}
                   <KeepFocusButton
                     variant="outline"
                     onClick={chartRetry.retry}

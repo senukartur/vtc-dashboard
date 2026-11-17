@@ -12,8 +12,10 @@ import {
   formatUtc,
   type Locale,
 } from "../../shared/formatting.js";
+import { rateLimitSeconds } from "../../shared/rate-limit.js";
 import { ChartContainer } from "../../shared/ui/chart.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
+import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { progressPercent } from "../dashboard/model.js";
 import type { QueryView } from "../dashboard/view-model.js";
@@ -499,7 +501,11 @@ export function DriverTrips({
   } else if (!data && query.isError) {
     body = (
       <div className="driver-block-error">
-        <p>{t("trips.error")}</p>
+        {failureView(query.error) === "limited" ? (
+          <RateLimitNotice seconds={rateLimitSeconds(query.error)} />
+        ) : (
+          <p>{t("trips.error")}</p>
+        )}
         <Button
           type="button"
           variant="outline"
@@ -658,7 +664,11 @@ export function DistanceByMonth({
   } else if (failure) {
     body = (
       <div className="driver-chart-body driver-chart-empty driver-block-error">
-        <p>{t("chart.error")}</p>
+        {failure === "limited" ? (
+          <RateLimitNotice seconds={rateLimitSeconds(query.error)} />
+        ) : (
+          <p>{t("chart.error")}</p>
+        )}
         <Button
           type="button"
           variant="outline"

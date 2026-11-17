@@ -5,7 +5,9 @@ import { useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatDecimal, formatQuantity, type Locale } from "../../shared/formatting.js";
+import { isRateLimited, rateLimitSeconds } from "../../shared/rate-limit.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
+import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import { KeepFocusButton } from "../events/components.js";
 import { useBlockRetry } from "./blocks.js";
 import { Skeleton } from "./components.js";
@@ -60,7 +62,7 @@ export function MyMonthCard({
   const { t } = useTranslation("dashboard");
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
-  const { retrying, retry } = useBlockRetry({ ...query, refetch: async () => onRetry() });
+  const { retrying, error, retry } = useBlockRetry({ ...query, refetch: async () => onRetry() });
   const data = query.data;
   const failed = !data && (query.isError || retrying);
   const number = (value: number) => formatDecimal(String(value), locale);
@@ -89,7 +91,11 @@ export function MyMonthCard({
       </div>
       {failed && (
         <div className="dashboard-block-error">
-          <p>{t("personal.monthError")}</p>
+          {isRateLimited(error) ? (
+            <RateLimitNotice seconds={rateLimitSeconds(error)} />
+          ) : (
+            <p>{t("personal.monthError")}</p>
+          )}
           <KeepFocusButton
             variant="outline"
             focusTarget={() => heading.current?.focus()}

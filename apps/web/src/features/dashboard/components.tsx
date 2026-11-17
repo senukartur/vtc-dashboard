@@ -9,8 +9,10 @@ import {
   formatUtc,
   type Locale,
 } from "../../shared/formatting.js";
+import { isRateLimited, rateLimitSeconds } from "../../shared/rate-limit.js";
 import { ChartContainer } from "../../shared/ui/chart.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
+import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import {
   bucketLabel,
@@ -475,7 +477,11 @@ export function LeaderboardWidget({
   if (!query.data && query.isError) {
     body = (
       <div className="dashboard-block-error">
-        <p>{t("leaderboard.error")}</p>
+        {isRateLimited(query.error) ? (
+          <RateLimitNotice seconds={rateLimitSeconds(query.error)} />
+        ) : (
+          <p>{t("leaderboard.error")}</p>
+        )}
         <Button
           type="button"
           variant="outline"

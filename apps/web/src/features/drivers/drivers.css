@@ -344,6 +344,11 @@
 .driver-profile-page .driver-error {
   justify-items: start;
 }
+/* The rate-limit notice replaces the error text; the gap spaces it from Retry. */
+.driver-profile-page .driver-error > .notice,
+.driver-profile-page .driver-block-error > .notice {
+  margin: 0;
+}
 .driver-profile-page .driver-notice {
   justify-items: start;
 }
