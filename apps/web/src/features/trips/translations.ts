@@ -552,7 +552,6 @@ export const tripTranslations = {
     code_confirmed_facts_require_review: "Confirmed facts changed after the decision",
     code_manual_evidence_missing: "No completion screenshot",
     // Trip page layout (VTC-158).
-    breadcrumb: "Trip breadcrumb",
     tripTitle: "Trip",
     tripNumber: "Trip #{{number}}",
     completedOn: "completed {{date}}",
@@ -1187,7 +1186,6 @@ export const tripTranslations = {
     code_confirmed_facts_require_review: "Подтверждённые факты изменились после решения",
     code_manual_evidence_missing: "Нет скриншота завершения",
     // Trip page layout (VTC-158).
-    breadcrumb: "Путь к рейсу",
     tripTitle: "Рейс",
     tripNumber: "Рейс #{{number}}",
     completedOn: "завершён {{date}}",

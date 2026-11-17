@@ -1,6 +1,5 @@
 import { type ReactNode, useId } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { InfoTip } from "../../shared/ui/info-tip.js";
 import { Badge, Card } from "../../shared/ui/primitives.js";
@@ -44,7 +43,7 @@ export function useTripLabel(summary: DTO["TripSummary"] | undefined) {
 }
 
 /**
- * Breadcrumb, route title with the status, the secondary line (number, game, sources, completion and
+ * Route title with the status, the secondary line (number, game, sources, completion and
  * the driver for staff) and the page actions.
  */
 export function TripHeader({
@@ -80,11 +79,6 @@ export function TripHeader({
   }
   return (
     <header className="trip-detail-header">
-      <nav aria-label={t("breadcrumb")} className="trip-detail-breadcrumb">
-        <Link to="/account/trips">{t("title")}</Link>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">{label}</span>
-      </nav>
       <div className="trip-detail-heading">
         <div className="trip-detail-title">
           <div className="trip-detail-title-row">

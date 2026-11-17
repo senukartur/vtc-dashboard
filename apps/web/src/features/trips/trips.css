@@ -210,14 +210,6 @@
   display: grid;
   gap: 10px;
 }
-.trip-detail-breadcrumb {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: var(--font-small);
-}
 .trip-detail-heading {
   display: flex;
   flex-wrap: wrap;
@@ -457,8 +449,9 @@
   .trip-detail-actions {
     width: 100%;
   }
-  .trip-detail-actions > .button {
-    flex: 1 1 auto;
+  /* Only the primary action takes the full row; secondary buttons keep their width and wrap. */
+  .trip-detail-actions > .button-primary {
+    flex: 1 1 100%;
   }
   .trip-detail-tile[data-attention] {
     order: -1;

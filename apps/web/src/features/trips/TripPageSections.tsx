@@ -127,14 +127,23 @@ function Place({ city, company }: { city: DTO["CatalogLabel"] | null; company: R
   );
 }
 
-/** A company of the effective fact, else the company the manual report selected, else nothing. */
+/**
+ * A company of the effective fact, else, when the fact carries no company field, the company the
+ * manual report selected, else nothing, so the place reads as the city alone. An unresolved company
+ * that kept a provider code stays visible as unknown; one without a code counts as missing.
+ */
 function placeCompany(
   facts: DTO["EffectiveTripFacts"] | null,
   fields: DTO["ManualReportReadFields"] | null,
   side: "origin" | "destination",
 ) {
   const key = side === "origin" ? "originCompany" : "destinationCompany";
-  if (facts && key in facts) return <Company value={facts[key] ?? null} />;
+  if (facts && key in facts) {
+    const effective = facts[key];
+    return effective && (effective.state === "resolved" || effective.code) ? (
+      <Company value={effective} />
+    ) : null;
+  }
   const reported = fields?.[side === "origin" ? "originCompanyId" : "destinationCompanyId"];
   return reported && fields ? (
     <CatalogEntryName list="companies" id={reported} game={fields.game} />
