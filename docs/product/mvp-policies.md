@@ -133,7 +133,7 @@ Qualifications remain separate for ETS2 and ATS. Both ladders start with **Train
 - Promotion is automatic: when a credited trip, or a level edit that lowers the conditions, makes the driver meet every set condition, the driver moves to the next level at once. The change is audited and the driver is notified.
 - Leaving the first level in either game, by promotion, manual change or removal transfer, changes a held Trainee role to Driver. Other global roles and the other game's level stay as recorded. The director or deputy may also set Trainee or Driver directly without changing any level.
 - The director or deputy may change a member's level manually with a comment. The change is audited.
-- Reordering keeps current assignments and roles. Removing a level moves its drivers to an explicitly selected level in the same game, which may be lower, after staff review the affected driver count. Removed levels stay in history.
+- Reordering keeps current assignments. A trainee whose level is no longer first after a reorder or a new first level becomes a Driver. Removing a level moves its drivers to an explicitly selected level in the same game, which may be lower, after staff review the affected driver count. Removed levels stay in history.
 - A corrected or revoked trip recalculates statistics and progress but never demotes a driver.
 
 ## Qualification exceptions for company events
@@ -253,7 +253,7 @@ The current manual form requires game, origin and destination cities, cargo, car
 9. An author edits a pending report. The revision history retains the previous values, and a reviewer cannot approve an obsolete revision as if it were the current report.
 10. An author requests a correction to an accepted report. An authorized staff member records the correction with its history; affected statistics are recalculated without creating another trip.
 11. A driver supplies reference start and completion for a manual report and provides the required evidence. Its age alone does not prevent submission. Once confirmed, it belongs to the reporting period containing its confirmation time, is checked against the qualification/rules at confirmation, and contributes to that game-specific level's progress.
-12. A rule or qualification changes after a trip starts but before it finishes or is submitted. The assessment uses the historical versions effective at the start.
+12. Staff edit a level's limits after a trip starts but before it is decided. The decision checks the level the driver held at the attribution time against that level's current limits and stores a snapshot of the level name, limits and results. Later edits never change the decided trip.
 13. A driver meets every set promotion condition of the current level. The driver moves to the next level at once; the change is audited and the driver is notified.
 14. A trainee selects a company event on a report, and the director confirms actual participation. The level limits do not apply to that trip; once accepted, it also contributes to qualification progress. An RSVP without actual-participation confirmation does not authorize the exception.
 15. ETS2 and ATS each start with Trainee → Driver III → Driver II → Driver I and can be configured independently. A new member receives the current first level in each admitted game. Reordering changes the next promotion without moving any current driver. Removing a level moves its drivers to a selected level, and removed levels remain in history.
