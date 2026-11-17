@@ -2,7 +2,7 @@
    because this file also loads with the Connections chunk through SensitiveValue; portaled
    confirmation dialogs are reached through .dialog-content:has(.applications-dialog).
    The shared .table and .admin-detail break anywhere; text here wraps only between words, and
-   only .applications-break (email, Steam URL, IDs) may break anywhere. */
+   only .applications-break (email, Steam URL, provider names) may break anywhere. */
 .applications-page .applications-heading {
   display: grid;
   gap: 4px;
@@ -49,28 +49,35 @@
 .applications-page .applications-table {
   table-layout: fixed;
 }
+/* At 1440 px the games, TruckersMP and Status columns fit their longest RU content on one line. */
 .applications-page .applications-table thead th:nth-child(1) {
-  width: 28%;
-}
-.applications-page .applications-table thead th:nth-child(2) {
   width: 18%;
 }
-.applications-page .applications-table thead th:nth-child(3),
-.applications-page .applications-table thead th:nth-child(4) {
-  width: 27%;
+.applications-page .applications-table thead th:nth-child(2) {
+  width: 14%;
 }
-.applications-page .applications-table:has(thead th:nth-child(5)) thead th:nth-child(1) {
-  width: 26%;
+.applications-page .applications-table thead th:nth-child(3) {
+  width: 24%;
 }
-.applications-page .applications-table:has(thead th:nth-child(5)) thead th:nth-child(2) {
-  width: 13%;
+.applications-page .applications-table thead th:nth-child(4),
+.applications-page .applications-table thead th:nth-child(5) {
+  width: 22%;
 }
-.applications-page .applications-table:has(thead th:nth-child(5)) thead th:nth-child(3),
-.applications-page .applications-table:has(thead th:nth-child(5)) thead th:nth-child(5) {
-  width: 21%;
+.applications-page .applications-table:has(thead th:nth-child(6)) thead th:nth-child(1) {
+  width: 16%;
 }
-.applications-page .applications-table:has(thead th:nth-child(5)) thead th:nth-child(4) {
-  width: 19%;
+.applications-page .applications-table:has(thead th:nth-child(6)) thead th:nth-child(2) {
+  width: 11%;
+}
+.applications-page .applications-table:has(thead th:nth-child(6)) thead th:nth-child(3) {
+  width: 20%;
+}
+.applications-page .applications-table:has(thead th:nth-child(6)) thead th:nth-child(4),
+.applications-page .applications-table:has(thead th:nth-child(6)) thead th:nth-child(6) {
+  width: 18%;
+}
+.applications-page .applications-table:has(thead th:nth-child(6)) thead th:nth-child(5) {
+  width: 17%;
 }
 .applications-page .applications-table :is(th, td) {
   vertical-align: middle;
@@ -96,7 +103,8 @@
 .applications-page .applications-row-button:focus-visible {
   outline-offset: -3px;
 }
-.applications-page .applications-games {
+.applications-page .applications-games,
+.applications-page .applications-check-cell {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -247,8 +255,8 @@
 }
 
 /* Phones: the shared toggle shows the list or the detail; each queue row becomes a block with
-   the name, then games, submitted time and status. The header row stays available to assistive
-   technology only. */
+   the name, then games, the TruckersMP badge, submitted time and status. The header row stays
+   available to assistive technology only. */
 @media (max-width: 700px) {
   .applications-page .applications-table,
   .applications-page .applications-table tbody,

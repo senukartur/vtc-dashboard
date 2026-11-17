@@ -1,6 +1,8 @@
 import type { Locator, Page } from "@playwright/test";
 import {
   attemptAt,
+  badgeApplicants,
+  badgeChecks,
   box,
   brokenWords,
   type Check,
@@ -17,9 +19,11 @@ import { ids, mockApplications, names } from "./support/applications.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
-// VTC-149: the TruckersMP check and referral source in the staff application detail. Fictional
-// applicant, player and VTC only; every stubbed shape is the Stage 4 shape the API returns.
+// VTC-149: the TruckersMP check and referral source in the staff application detail; VTC-161: the
+// check badges in the queue list. Fictional applicant, player and VTC only; every stubbed shape is
+// the Stage 4 shape the API returns.
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const anyUuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const detailPath = `/admin/applications/${ids.submitted}`;
 const master = (page: Page) => page.locator(".admin-master");
 const detail = (page: Page) => page.locator(".applications-detail");
@@ -115,6 +119,41 @@ test(
         ),
       ).toBe(true);
     }
+    // The queue list carries the same check on each item; history items have none.
+    const item = (id: string, check: Check | null) => ({
+      id,
+      version: 1,
+      status: "submitted",
+      submittedAt: "2026-10-30T09:30:00.000Z",
+      fields: {
+        nickname: names.submitted,
+        email: "fictional.birch.run@example.invalid",
+        steamProfileUrl: player.steamUrl,
+        games: ["ets2"],
+        discord: null,
+        introduction: null,
+      },
+      decisionReason: null,
+      invitationId: null,
+      decision: null,
+      ...(check ? { truckersmpCheck: check } : {}),
+    });
+    expect(
+      validEnvelope(
+        "EnvelopeListAdminApplication",
+        envelope({
+          items: all.map((check) => item(ids.submitted, check)),
+          nextCursor: null,
+          statusCounts: { submitted: all.length, approved: 0, rejected: 0 },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      validEnvelope(
+        "EnvelopeListAdminApplication",
+        envelope({ items: [item(ids.prior, null)], nextCursor: null }),
+      ),
+    ).toBe(true);
   },
 );
 
@@ -468,3 +507,160 @@ for (const locale of ["en", "ru"] as const)
       }
     },
   );
+
+// VTC-161: the queue's TruckersMP column. The group decides symbol and tone; the label names why.
+const badgeText = {
+  en: {
+    passed: "✓No bans",
+    attention: "!Has bans",
+    failed: "✕Check failed",
+    pending: "–Checking",
+    legend: "What the TruckersMP badges mean",
+    title: "TruckersMP check",
+    meanings: [
+      "No bans: player found, no bans, not in a VTC.",
+      "Attention: bans found or hidden, player not found on TruckersMP, or in a VTC.",
+      "Check failed: TruckersMP did not answer. Check again in the application.",
+      "Checking or not checked: running, not started yet, or the Steam link has no SteamID.",
+    ],
+  },
+  ru: {
+    passed: "✓Банов нет",
+    attention: "!Есть баны",
+    failed: "✕Ошибка проверки",
+    pending: "–Проверяется",
+    legend: "Что означают отметки TruckersMP",
+    title: "Проверка TruckersMP",
+    meanings: [
+      "Банов нет — игрок найден, банов нет, не состоит в ВТК.",
+      "Внимание — есть или скрыты баны, игрок не найден на TruckersMP или состоит в ВТК.",
+      "Ошибка проверки — TruckersMP не ответил. Повторите проверку в заявке.",
+      "Проверяется или не проверено — проверка идёт, ещё не запускалась или в ссылке на Steam нет SteamID.",
+    ],
+  },
+} as const;
+const groups = ["passed", "attention", "failed", "pending"] as const;
+const rows = (page: Page) => master(page).locator("tbody tr");
+const badge = (row: Locator) => row.locator(".applications-check-badge");
+/** Opens the submitted queue; `prepare` adjusts the mocked applications before the first read. */
+async function queue(
+  page: Page,
+  locale: "en" | "ru",
+  prepare: (state: Awaited<ReturnType<typeof mockApplications>>) => void,
+) {
+  const state = await mockApplications(page);
+  prepare(state);
+  await page.goto("/account/admin/applications?status=submitted");
+  await catalogLanguage(page, locale);
+  await expect(page.locator("html")).toHaveAttribute("lang", locale);
+  await expect(rows(page).first()).toBeVisible();
+  return state;
+}
+async function capture(page: Page, path: string) {
+  await page.evaluate(() => document.fonts.ready);
+  await noOverflow(page);
+  await page.screenshot({ path, fullPage: true });
+}
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `C8 ${locale} list badges show every check state and fit every width`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const s = badgeText[locale];
+      await queue(page, locale, (state) => badgeApplicants(state));
+      await expect(rows(page)).toHaveCount(groups.length);
+      const phone = info.project.name === "mobile-chromium";
+      for (const [index, group] of groups.entries()) {
+        const row = rows(page).nth(index);
+        await expect(badge(row)).toHaveText(s[group]);
+        await expect(badge(row)).toHaveClass(new RegExp(`applications-check-${group}`));
+        // Text, not colour, carries the state; the symbol is decorative.
+        await expect(badge(row).locator("[aria-hidden=true]")).toHaveCount(1);
+        const prefix = row.locator(".applications-check-prefix");
+        if (phone) {
+          await expect(prefix).toBeVisible();
+          const card = await box(row),
+            mark = await box(badge(row));
+          expect(mark.x).toBeGreaterThanOrEqual(card.x);
+          expect(mark.x + mark.width).toBeLessThanOrEqual(card.x + card.width + 0.5);
+          expect(mark.y).toBeGreaterThanOrEqual(card.y);
+          expect(mark.y + mark.height).toBeLessThanOrEqual(card.y + card.height + 0.5);
+        } else await expect(prefix).toBeHidden();
+      }
+      if (phone) expect((await box(master(page).locator("thead"))).height).toBeLessThanOrEqual(1);
+      else await expect(master(page).getByRole("columnheader").nth(2)).toHaveText("TruckersMP");
+      await noOverflow(page);
+      expect(await brokenWords(master(page))).toEqual([]);
+      // No application UUID anywhere in the list.
+      expect(
+        await master(page).evaluate((element) => (element as HTMLElement).innerText),
+      ).not.toMatch(anyUuid);
+
+      const trigger = master(page).getByRole("button", { name: s.legend, exact: true });
+      const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+      const target = await box(trigger);
+      expect(target.height).toBeGreaterThanOrEqual(coarse ? 40 : 24);
+      expect(target.width).toBeGreaterThanOrEqual(coarse ? 40 : 24);
+      await capture(page, info.outputPath(`applications-list-badges-${locale}.png`));
+
+      await trigger.focus();
+      await page.keyboard.press("Enter");
+      const tip = page.locator(".info-tip-content");
+      await expect(tip).toBeVisible();
+      await expect(tip.locator("strong")).toHaveText(s.title);
+      const meanings = tip.locator("p");
+      await expect(meanings).toHaveCount(s.meanings.length + 1);
+      for (const [index, meaning] of s.meanings.entries())
+        await expect(meanings.nth(index)).toContainText(meaning);
+      await capture(page, info.outputPath(`applications-list-legend-${locale}.png`));
+      await page.keyboard.press("Escape");
+      await expect(tip).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+
+      // The wide desktop the owner reviews (1440 px) keeps the columns without overflow.
+      if (info.project.name === "desktop-chromium") {
+        await trigger.blur();
+        await page.setViewportSize({ width: 1440, height: 900 });
+        expect(await brokenWords(master(page))).toEqual([]);
+        await capture(page, info.outputPath(`applications-list-badges-${locale}-1440.png`));
+      }
+    },
+  );
+
+test("C8 variants map per the owner rule", browserCase(["@functional"]), async ({ page }) => {
+  const clean = badgeChecks.passed;
+  for (const [check, locale, text] of [
+    [clean, "en", "✓No bans"],
+    [checks.notFound(), "en", "!Not found"],
+    [checks.found({ bans: { any: true, count: 0 } }), "en", "!Has bans"],
+    [checks.found({ bans: null }), "en", "!Bans hidden"],
+    [checks.found(), "en", "!In a VTC"],
+    [checks.failed("rate_limited", clean), "en", "✕Check failed"],
+    [checks.checking(clean), "en", "–Checking"],
+    [checks.checking(checks.found({ bans: { any: true, count: 3 } })), "en", "–Checking"],
+    [checks.notRequested(), "en", "–Not checked"],
+    [null, "en", "–Not checked"],
+    [clean, "ru", "✓Банов нет"],
+    [checks.notFound(), "ru", "!Не найден"],
+    [checks.found(), "ru", "!В ВТК"],
+    [checks.failed("timeout"), "ru", "✕Ошибка проверки"],
+    [checks.vanity(), "ru", "–Не проверено"],
+  ] as const) {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await queue(page, locale, (state) => canonicalApplicant(state, ids.submitted, check));
+    await expect(badge(rows(page).first())).toHaveText(text);
+  }
+});
+
+test("C8 the detail shows no application UUID", browserCase(["@functional"]), async ({ page }) => {
+  await open(page, { check: checks.found() });
+  await expect(
+    detail(page)
+      .locator(".applications-detail-head")
+      .getByText(/^Submitted /),
+  ).toBeVisible();
+  const text = await detail(page).evaluate((element) => (element as HTMLElement).innerText);
+  expect(text).not.toContain(ids.submitted);
+  expect(text).not.toMatch(anyUuid);
+});

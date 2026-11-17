@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
+  checkBadge,
+  checkBadgeLook,
   checkView,
   newerCheck,
   pollDelay,
@@ -157,6 +159,105 @@ describe("checkView", () => {
         previous: null,
         recheck: "hidden",
       });
+  });
+});
+
+describe("checkBadge", () => {
+  const clean = () =>
+    found({
+      vtc: { inVtc: false, id: null, name: null, tag: null },
+      bans: { any: false, count: 0 },
+    });
+  test("passed: a found player without bans who is not in a VTC", () => {
+    expect(checkBadge(clean())).toEqual({ group: "passed", label: "noBans" });
+  });
+  test("attention: not found, bans counted or flagged, bans hidden, in a VTC or unknown VTC", () => {
+    expect(checkBadge({ ...empty, state: "completed", found: false, checkedAt })).toEqual({
+      group: "attention",
+      label: "notFound",
+    });
+    expect(checkBadge({ ...clean(), bans: { any: true, count: 2 } })).toEqual({
+      group: "attention",
+      label: "hasBans",
+    });
+    expect(checkBadge({ ...clean(), bans: { any: false, count: 1 } }).label).toBe("hasBans");
+    expect(checkBadge({ ...clean(), bans: { any: true, count: 0 } }).label).toBe("hasBans");
+    expect(checkBadge({ ...clean(), bans: null })).toEqual({
+      group: "attention",
+      label: "bansHidden",
+    });
+    expect(checkBadge(found())).toEqual({ group: "attention", label: "inVtc" });
+    expect(
+      checkBadge({ ...clean(), vtc: { inVtc: true, id: null, name: null, tag: null } }).label,
+    ).toBe("inVtc");
+    // A found player without a stored membership is not treated as clean.
+    expect(checkBadge({ ...clean(), vtc: null })).toEqual({ group: "attention", label: "inVtc" });
+  });
+  test("bans outrank the VTC reason when both apply", () => {
+    expect(checkBadge(found({ bans: { any: true, count: 1 } })).label).toBe("hasBans");
+    expect(checkBadge(found({ bans: null })).label).toBe("bansHidden");
+  });
+  test("failed: every failure category, even with an earlier clean result", () => {
+    for (const failure of [
+      "transport",
+      "timeout",
+      "rate_limited",
+      "unavailable",
+      "invalid_response",
+    ] as const)
+      expect(checkBadge({ ...empty, state: "failed", failure })).toEqual({
+        group: "failed",
+        label: "failed",
+      });
+    expect(checkBadge({ ...clean(), state: "failed", failure: "timeout" })).toEqual({
+      group: "failed",
+      label: "failed",
+    });
+  });
+  test("pending: a running check wins over an earlier clean or banned result", () => {
+    expect(checkBadge({ ...empty, state: "checking", found: null })).toEqual({
+      group: "pending",
+      label: "checking",
+    });
+    expect(checkBadge({ ...clean(), state: "checking" }).label).toBe("checking");
+    expect(checkBadge({ ...clean(), state: "checking", bans: { any: true, count: 4 } })).toEqual({
+      group: "pending",
+      label: "checking",
+    });
+  });
+  test("pending: vanity, never requested, no reason, and absent checks are not checked", () => {
+    const notChecked = { group: "pending", label: "notChecked" };
+    expect(checkBadge({ ...empty, notCheckedReason: "steam_vanity_url" })).toEqual(notChecked);
+    expect(checkBadge({ ...empty, notCheckedReason: "not_requested" })).toEqual(notChecked);
+    expect(checkBadge(empty)).toEqual(notChecked);
+    expect(checkBadge(undefined)).toEqual(notChecked);
+    expect(checkBadge(null)).toEqual(notChecked);
+  });
+  test("the four groups have distinct symbols and tones, and every label is translated", () => {
+    const looks = Object.values(checkBadgeLook);
+    expect(new Set(looks.map((look) => look.symbol)).size).toBe(4);
+    expect(new Set(looks.map((look) => look.tone)).size).toBe(4);
+    const labels = [
+      "noBans",
+      "notFound",
+      "hasBans",
+      "bansHidden",
+      "inVtc",
+      "failed",
+      "checking",
+      "notChecked",
+    ] as const;
+    for (const language of ["ru", "en"] as const) {
+      const badge = applicationChecksTranslations[language].badge,
+        texts = labels.map((label) => badge[label]);
+      expect(new Set(texts).size).toBe(labels.length);
+      expect(Object.keys(badge).sort()).toEqual([...labels].sort());
+      for (const group of Object.keys(checkBadgeLook) as (keyof typeof checkBadgeLook)[])
+        expect(applicationChecksTranslations[language].legend[group].trim()).not.toBe("");
+    }
+    // The badge reuses the detail line's VTC term in each locale.
+    expect(applicationChecksTranslations.ru.badge.inVtc).toContain("ВТК");
+    expect(applicationChecksTranslations.en.badge.inVtc).toContain("VTC");
   });
 });
 
