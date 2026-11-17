@@ -582,7 +582,7 @@ test(
     await expect(page.locator(".trip-detail-meta")).toContainText("Driver: Fictional Other Driver");
     await expect(tile(page, "What next")).toContainText("Waiting for the driver's fix");
     await expect(tile(page, "What next")).toContainText(
-      "The report was returned to the driver for fixes.",
+      `Fictional Stage Four Dispatcher: "${needsFixReason}"`,
     );
     await expect(tile(page, "What next")).not.toHaveAttribute("data-attention", "true");
     await expect(tile(page, "Credited")).toContainText("Not yet");
