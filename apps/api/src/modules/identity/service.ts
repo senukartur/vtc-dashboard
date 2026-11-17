@@ -43,6 +43,7 @@ import {
   engine,
   type IdentityConfig,
   prepareCredential,
+  signedSessionToken,
   validateIdentityConfig,
   verifySignInCredential,
 } from "./engine.js";
@@ -364,6 +365,37 @@ export function createIdentity(
   const digest = (value: string): Buffer =>
     createHmac("sha256", config.secret).update(value).digest();
   const client = (tx: TxContext) => unit.client(tx);
+  // Charges one fixed-window admission row; `window` is the charged minute.
+  async function chargeLimit(
+    tx: TxContext,
+    name: string,
+    maximum: number,
+  ): Promise<{ allowed: boolean; window: number }> {
+    const window = Math.floor(now().getTime() / 60000);
+    await client(tx)
+      .insert(limits)
+      .values({ bucket: name, window, count: 0 })
+      .onDuplicateKeyUpdate({ set: { bucket: name } });
+    const [row] = await client(tx)
+      .select()
+      .from(limits)
+      .where(eq(limits.bucket, name))
+      .for("update");
+    if (!row) throw identityError(503);
+    const count = row.window === window ? row.count + 1 : 1;
+    await client(tx)
+      .update(limits)
+      .set({ window, count: Math.min(count, maximum + 1) })
+      .where(eq(limits.bucket, name));
+    return { allowed: count <= maximum, window };
+  }
+  // A denied read waits exactly until its fixed window ends (1-60 s).
+  const readDenied = (window: number): Error =>
+    identityError(
+      429,
+      undefined,
+      Math.min(60, Math.max(1, Math.ceil(((window + 1) * 60000 - now().getTime()) / 1000))),
+    );
 
   async function lockCompany(tx: TxContext, mode: "update" | "share" = "update"): Promise<Company> {
     const [row] = await client(tx).select().from(company).where(eq(company.singleton, 1)).for(mode);
@@ -853,33 +885,59 @@ export function createIdentity(
     ): Promise<void> {
       // Fixed slots prevent unbounded attacker-created identity/IP rows; collisions throttle conservatively.
       const bucket = `${scope}:${category}:${digest(source)[0]}`;
-      const allowed = await run(async (tx) => {
-        const charge = async (name: string, maximum: number) => {
-          const window = Math.floor(now().getTime() / 60000);
-          await client(tx)
-            .insert(limits)
-            .values({ bucket: name, window, count: 0 })
-            .onDuplicateKeyUpdate({ set: { bucket: name } });
-          const [row] = await client(tx)
-            .select()
-            .from(limits)
-            .where(eq(limits.bucket, name))
-            .for("update");
-          if (!row) throw identityError(503);
-          const count = row.window === window ? row.count + 1 : 1;
-          await client(tx)
-            .update(limits)
-            .set({ window, count: Math.min(count, maximum + 1) })
-            .where(eq(limits.bucket, name));
-          return count <= maximum;
-        };
+      const denied = await run(async (tx) => {
         // Always lock the source/actor slot before the category's global row.
         // A denied source never spends another source's or category's budget.
-        if (!(await charge(bucket, category === "read" && scope === "source" ? 40 : 20)))
-          return false;
-        return scope === "actor" || (await charge(`global:${category}`, 200));
+        const slot = await chargeLimit(
+          tx,
+          bucket,
+          category === "read" && scope === "source" ? 40 : 20,
+        );
+        if (!slot.allowed) return slot;
+        if (scope === "actor") return null;
+        const global = await chargeLimit(tx, `global:${category}`, 200);
+        return global.allowed ? null : global;
       });
-      if (!allowed) throw identityError(429);
+      if (denied) throw category === "read" ? readDenied(denied.window) : identityError(429);
+    },
+    /**
+     * Admits one browser read before module authentication. A signed-in session
+     * spends its own member budget; anything else falls back to the source read
+     * limits. The session cookie signature is checked in process first. A missing,
+     * junk or forged session cookie (or only other cookies, such as the pre-session
+     * CSRF nonce) goes straight to the source charge: one transaction. Only a
+     * server-signed token opens a transaction for one indexed session lookup
+     * (deleting that one session when it has expired) and, when the session is live,
+     * the member charge in the same transaction. A signed but logged-out or expired
+     * token then falls back to the source charge in a second transaction. This is
+     * admission only: the module's own full authentication and authorization still
+     * run afterwards.
+     */
+    async admitRead(source: string, cookie: string | undefined): Promise<void> {
+      if (cookie && signedSessionToken(config, cookie) !== null) {
+        const denied = await run(async (tx) => {
+          // Session row (only an expired one is deleted) before the limits row;
+          // no path locks them in reverse order. No company/member lock here.
+          // Better Auth repeats the signature check and decides whether the session is live.
+          const found = await engine(client(tx), config).api.getSession({
+            headers: new Headers({ cookie }),
+            query: { disableRefresh: true },
+          });
+          if (!found) return undefined;
+          // 65,536 fixed, domain-separated slots bound the rows to the members with
+          // live sessions; a colliding pair shares one budget. Member reads have no
+          // global row, so one member cannot spend another's reads.
+          const slot = await chargeLimit(
+            tx,
+            `member:read:${digest(`member-read:${found.user.id}`).readUInt16BE(0)}`,
+            240,
+          );
+          return slot.allowed ? null : slot;
+        });
+        if (denied) throw readDenied(denied.window);
+        if (denied === null) return;
+      }
+      await this.rateLimit("read", source);
     },
     async insertWithCredential(
       tx: TxContext,

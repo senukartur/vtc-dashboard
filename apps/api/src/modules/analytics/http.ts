@@ -109,7 +109,7 @@ export async function registerAnalyticsRoutes(
       return;
     }
     if (!url || !owned(url)) return;
-    await identity.rateLimit("read", r.ip);
+    await identity.admitRead(r.ip, r.headers.cookie);
     const current = await actor(r);
     if (!current.capabilities.includes("company.read")) {
       throw identityError(403);

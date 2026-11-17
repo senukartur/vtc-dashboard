@@ -96,8 +96,11 @@ export async function registerEventMediaRoutes(
   }
   app.addHook("onRequest", async (request) => {
     const read = request.method === "GET";
-    await identity.rateLimit(read ? "read" : "command", request.ip);
     const path = request.routeOptions.url;
+    // The anonymous public cover keeps the source read budget and never uses cookies.
+    if (!read || path === coverPath)
+      await identity.rateLimit(read ? "read" : "command", request.ip);
+    else await identity.admitRead(request.ip, request.headers.cookie);
     if (path === coverPath) return;
     const current = await identity.authenticate(
       new Headers({ cookie: request.headers.cookie ?? "" }),

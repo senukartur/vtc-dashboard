@@ -12,7 +12,9 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { AccountFailure, type DTO, readSelf } from "../features/account/transport.js";
 import i18n, { readStoredLocale, writeStoredLocale } from "../shared/i18n.js";
+import { isRateLimited, rateLimitSeconds } from "../shared/rate-limit.js";
 import { Button, Card } from "../shared/ui/primitives.js";
+import { RateLimitNotice } from "../shared/ui/rate-limit-notice.js";
 import { clearPrivateQueries } from "./session-cache.js";
 
 type Session = {
@@ -21,6 +23,10 @@ type Session = {
   eventsStage2Enabled: boolean;
   eventsDraftsEnabled: boolean;
   etag: string | null;
+  /** The /me check is still rate limited after its one automatic retry. */
+  rateLimited: boolean;
+  /** The server's remaining wait for that limit, when known (1-60 s). */
+  rateLimitSeconds: number | null;
   generation: number;
   refresh: () => Promise<void>;
   confirmSessionLoss: (signal: AbortSignal) => Promise<void>;
@@ -137,6 +143,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         eventsStage2Enabled: state === "authenticated" && query.data?.eventsStage2Enabled === true,
         eventsDraftsEnabled: state === "authenticated" && query.data?.eventsDraftsEnabled === true,
         etag: self ? (query.data?.etag ?? null) : null,
+        rateLimited: state === "unavailable" && isRateLimited(query.error),
+        rateLimitSeconds: state === "unavailable" ? rateLimitSeconds(query.error) : null,
         generation,
         refresh: async () => {
           if (ended) {
@@ -201,7 +209,11 @@ export function ProtectedAccount({ children }: { children: ReactNode }) {
           </Button>
         ) : session.state === "unavailable" ? (
           <>
-            <p>{t("sessionUnavailableHelp")}</p>
+            {session.rateLimited ? (
+              <RateLimitNotice seconds={session.rateLimitSeconds} />
+            ) : (
+              <p>{t("sessionUnavailableHelp")}</p>
+            )}
             <Button onClick={() => void session.refresh()}>{t("refresh")}</Button>
           </>
         ) : (

@@ -361,7 +361,10 @@ describe("Analytics Unit Tests", () => {
   describe("public company statistics database failures (VTC-052)", () => {
     const failing = (error: unknown) => {
       const uow = { run: async () => Promise.reject(error) } as unknown as UnitOfWork;
-      const identity = { rateLimit: async () => {} } as unknown as Identity;
+      const identity = {
+        rateLimit: async () => {},
+        admitRead: async () => {},
+      } as unknown as Identity;
       return { identity, service: createAnalytics(uow, identity, { cursorKey: validKey }) };
     };
     const outcome = (error: unknown) =>
@@ -759,6 +762,7 @@ describe("Company analytics breakdown (VTC-112)", () => {
     const harness = async () => {
       const identity = {
         rateLimit: async () => {},
+        admitRead: async () => {},
         authenticate: async (headers: Headers) => {
           const cookie = headers.get("cookie");
           if (cookie === "session=reader") return reader;

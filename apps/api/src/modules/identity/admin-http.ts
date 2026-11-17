@@ -62,7 +62,8 @@ export async function registerAdministrationRoutes(
   app.addHook("onRequest", async (request) => {
     const path = request.routeOptions.url;
     if (!path || !owned(path)) return;
-    await identity.rateLimit(request.method === "GET" ? "read" : "command", request.ip);
+    if (request.method === "GET") await identity.admitRead(request.ip, request.headers.cookie);
+    else await identity.rateLimit("command", request.ip);
     const current = await actor(request);
     await identity.transaction((tx) =>
       identity.authorizeInTransaction(

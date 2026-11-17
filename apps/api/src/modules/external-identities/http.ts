@@ -49,8 +49,10 @@ export async function registerExternalIdentityRoutes(
         .header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
         .header("Cache-Control", "no-store");
     // /me routes already use the identity module's persistent early admission hook.
-    if (route && (ownedAdmin(route) || route === "/api/v1/identity/steam/callback"))
-      await identity.rateLimit(request.method === "GET" ? "read" : "command", request.ip);
+    if (route && (ownedAdmin(route) || route === "/api/v1/identity/steam/callback")) {
+      if (request.method === "GET") await identity.admitRead(request.ip, request.headers.cookie);
+      else await identity.rateLimit("command", request.ip);
+    }
   });
   app.addHook("preValidation", async (request) => {
     const route = request.routeOptions.url;
