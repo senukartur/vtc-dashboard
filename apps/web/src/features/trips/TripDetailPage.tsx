@@ -26,6 +26,7 @@ import {
 } from "./components.js";
 import { HistoricalRules } from "./HistoricalRules.js";
 import { useTripCommand, useTripQuery } from "./queries.js";
+import { TripDeliveryFacts, TripQualificationCheck, TripSources } from "./TripPageSections.js";
 import { validId } from "./transport.js";
 import "./trips.css";
 export function TripDetailPage({ review = false }: { review?: boolean }) {
@@ -79,11 +80,17 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
         <>
           <Card>
             <TripSummary trip={summary} link={false} />
+            <TripDeliveryFacts
+              summary={summary}
+              facts={view?.view === "private" ? view.effectiveFacts : undefined}
+            />
             <small className="trip-wrap">{summary.id}</small>
             <p>{t(view?.view === "private" ? "privateView" : "summaryView")}</p>
           </Card>
           {view?.view === "private" && (
             <>
+              <TripSources sources={view.sources} />
+              <TripQualificationCheck check={view.qualificationCheck} />
               <EffectiveFacts facts={view.effectiveFacts} />
               <Codes values={view.reviewReasonCodes} />
               {view.manualRevision && (
