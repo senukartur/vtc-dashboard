@@ -12,13 +12,9 @@ import {
   browserTimingLimit,
   browserTimingLine,
   browserTimingPrefix,
-  qualificationPhaseAnnotation,
-  qualificationPhaseScenario,
-  qualificationPromotionPhases,
   safeBrowserFailure,
   safeBrowserPreparation,
   safeBrowserTiming,
-  safeQualificationPhase,
 } from "../../scripts/browser-diagnostics.mjs";
 import { collectEvents, qualityReport, safeEvent } from "../../scripts/ci-result.mjs";
 import { browserFailureProof } from "../support/browser-failure-proof.ts";
@@ -256,20 +252,22 @@ test("failure locations keep the first existing test file and line and read noth
     safeBrowserFailure({
       ...valid,
       file: "qualifications",
-      ...promotionPhase,
+      ...retiredPhase,
       failureAt: "test/e2e/support/review-ui.ts:97",
     }),
-  ).toMatchObject({ ...promotionPhase, failureAt: "test/e2e/support/review-ui.ts:97" });
+  ).toBeUndefined();
 });
-const promotionPhase = {
-  scenario: qualificationPhaseScenario,
+// The retired VTC-112 promotion-phase fields and annotation are no longer part of any record.
+const retiredPhase = {
+  scenario: "qualification-promotion-refresh",
   phase: "finally-release-held",
   primaryPhase: "command-arrived",
 };
-function phaseAnnotation(value: unknown = promotionPhase) {
-  return { type: qualificationPhaseAnnotation, description: JSON.stringify(value) };
-}
-function phasePipeline(annotations: unknown, file = "qualifications", status = "timedOut") {
+const retiredAnnotation = {
+  type: "vtc-qualification-promotion-phase",
+  description: JSON.stringify(retiredPhase),
+};
+function reporterPipeline(annotations: unknown, file = "qualifications", status = "timedOut") {
   const output = vi.spyOn(console, "log").mockImplementation(() => {}),
     forbidden = () => {
       throw new Error("PRIVATE_FIELD_READ");
@@ -310,99 +308,30 @@ function phasePipeline(annotations: unknown, file = "qualifications", status = "
     output.mockRestore();
   }
 }
-test("runtime result annotations retain only the controlled promotion's closed phases through the real pipeline", () => {
-  const annotation = phaseAnnotation();
-  Object.defineProperty(annotation, "location", {
-    enumerable: true,
-    get() {
-      throw Error("PRIVATE_LOCATION_READ");
-    },
-  });
-  const report = phasePipeline([annotation]);
-  expect(report.browserFailures).toEqual([
-    {
-      kind: "test",
-      file: "qualifications",
-      project: "tablet-chromium",
-      line: 73,
-      status: "timedOut",
-      ...promotionPhase,
-    },
-  ]);
-  expect(report.status).toBe("failure");
-  expect(report.exitCode).toBe(1);
-  for (const phase of qualificationPromotionPhases)
-    expect(safeQualificationPhase({ ...promotionPhase, phase })).toBeDefined();
-  expect(safeQualificationPhase({ ...promotionPhase, primaryPhase: "none" })).toBeDefined();
-  for (const primaryPhase of ["complete", "finally-release-held"])
-    expect(safeQualificationPhase({ ...promotionPhase, primaryPhase })).toBeUndefined();
-  const safe = safeBrowserFailure(report.browserFailures[0]);
-  expect(safe).not.toBe(report.browserFailures[0]);
-});
-test("invalid, private and extra annotation metadata keeps the known coarse failure", () => {
-  const forbidden = () => {
-    throw Error("PRIVATE_ANNOTATION_FIELD_READ");
-  };
-  const getter = {
-    type: qualificationPhaseAnnotation,
-    get description() {
-      return forbidden();
-    },
-  };
-  const unrelated = {
-    type: "unrelated",
-    get description() {
-      return forbidden();
-    },
-  };
-  const invalid: unknown[] = [
-    undefined,
-    null,
-    {},
-    [],
-    [getter],
-    [unrelated],
-    [phaseAnnotation({ ...promotionPhase, phase: privateText })],
-    [phaseAnnotation({ ...promotionPhase, primaryPhase: privateText })],
-    [phaseAnnotation({ ...promotionPhase, scenario: privateText })],
-    [phaseAnnotation({ ...promotionPhase, payload: privateText })],
-    [{ ...phaseAnnotation(), error: privateText }],
-    [phaseAnnotation(), phaseAnnotation()],
-    Array(33).fill(phaseAnnotation()),
-    [{ type: qualificationPhaseAnnotation, description: privateText.repeat(40) }],
-    [{ type: qualificationPhaseAnnotation, description: "{" }],
-    [phaseAnnotation([privateText])],
-  ];
-  for (const annotations of invalid) {
-    const report = phasePipeline(annotations);
-    expect(report.browserFailures).toEqual([
-      {
-        kind: "test",
-        file: "qualifications",
-        project: "tablet-chromium",
-        line: 73,
-        status: "timedOut",
-      },
-    ]);
-    expect(JSON.stringify(report)).not.toContain(privateText);
-    expect(report.status).toBe("failure");
-  }
-});
-test("unknown or other file metadata cannot carry phases and is not inspected", () => {
+test("runtime result annotations are never read and every file keeps the coarse failure", () => {
   const poisonous = new Proxy([], {
     get() {
       throw Error("ANNOTATIONS_READ");
     },
   });
-  for (const file of ["landing", "unknown-file"]) {
-    const report = phasePipeline(poisonous, file);
-    expect(report.browserFailures).toEqual(
-      file === "landing"
-        ? [{ kind: "test", file, project: "tablet-chromium", line: 73, status: "timedOut" }]
-        : [{ kind: "global", category: "unmapped-test", status: "timedOut" }],
-    );
-  }
-  expect(safeBrowserFailure({ ...valid, ...promotionPhase })).toBeUndefined();
+  for (const annotations of [
+    poisonous,
+    [retiredAnnotation],
+    [{ ...retiredAnnotation, error: privateText }],
+  ])
+    for (const file of ["qualifications", "landing", "unknown-file"]) {
+      const report = reporterPipeline(annotations, file);
+      expect(report.browserFailures).toEqual(
+        file === "unknown-file"
+          ? [{ kind: "global", category: "unmapped-test", status: "timedOut" }]
+          : [{ kind: "test", file, project: "tablet-chromium", line: 73, status: "timedOut" }],
+      );
+      expect(JSON.stringify(report)).not.toContain(privateText);
+      expect(report.status).toBe("failure");
+      expect(report.exitCode).toBe(1);
+    }
+  for (const file of ["qualifications", "landing"])
+    expect(safeBrowserFailure({ ...valid, file, ...retiredPhase })).toBeUndefined();
 });
 test("an unavailable runtime annotation property cannot suppress a known failure", () => {
   const output = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -445,13 +374,13 @@ test("an unavailable runtime annotation property cannot suppress a known failure
     output.mockRestore();
   }
 });
-test("extended records are revalidated at collector and report boundaries with exact keys and unchanged bounds", () => {
-  const value = { ...valid, file: "qualifications", ...promotionPhase };
+test("records are revalidated at collector and report boundaries with exact keys and unchanged bounds", () => {
+  const value = { ...valid, file: "qualifications" };
   const invalid = [
     { ...value, error: privateText },
     { ...value, phase: privateText },
-    { ...value, file: "landing" },
-    { ...value, primaryPhase: {} },
+    { ...value, file: "unknown-file" },
+    { ...value, ...retiredPhase },
     { ...value, scenario: null },
   ];
   const collector = collectEvents();
@@ -471,7 +400,7 @@ test("extended records are revalidated at collector and report boundaries with e
   });
   expect(JSON.stringify(qualityReport(1, 1, [], undefined, invalid))).not.toContain(privateText);
 });
-test("phase records keep the reporter's existing 32-record bound", () => {
+test("failure records keep the reporter's existing 32-record bound", () => {
   const output = vi.spyOn(console, "log").mockImplementation(() => {});
   try {
     const reporter = new SafeBrowserReporter();
@@ -482,7 +411,7 @@ test("phase records keep the reporter's existing 32-record bound", () => {
           location: { file: resolve("test/e2e/qualifications.spec.ts"), line },
           parent: { project: () => ({ name: "tablet-chromium" }) },
         } as unknown as TestCase,
-        { status: "failed", annotations: [phaseAnnotation()] } as TestResult,
+        { status: "failed", annotations: [retiredAnnotation] } as TestResult,
       );
     expect(output).toHaveBeenCalledTimes(32);
     const collector = collectEvents();
@@ -491,7 +420,9 @@ test("phase records keep the reporter's existing 32-record bound", () => {
     expect(qualityReport(1, 1, [], undefined, collector.browserFailures)).toMatchObject({
       exitCode: 1,
       status: "failure",
-      browserFailures: expect.arrayContaining([expect.objectContaining(promotionPhase)]),
+      browserFailures: expect.arrayContaining([
+        expect.objectContaining({ file: "qualifications" }),
+      ]),
     });
   } finally {
     output.mockRestore();

@@ -15,6 +15,7 @@ export const browserFiles = {
   "test/e2e/events-date-time.spec.ts": "events-date-time",
   "test/e2e/administration-real.spec.ts": "administration-real",
   "test/e2e/qualifications.spec.ts": "qualifications",
+  "test/e2e/qualifications-layout.spec.ts": "qualifications-layout",
   "test/e2e/trips-corrections.spec.ts": "trips-corrections",
   "test/e2e/trips.spec.ts": "trips",
   "test/e2e/trips-real.spec.ts": "trips-real",
@@ -76,81 +77,6 @@ const categories = [
   "unreported-runner-failure",
 ];
 export const browserFailurePrefix = "VTC_BROWSER_FAILURE ";
-export const qualificationPhaseAnnotation = "vtc-qualification-promotion-phase";
-export const qualificationPhaseScenario = "qualification-promotion-refresh";
-export const qualificationPromotionPhases = Object.freeze([
-  "setup",
-  "initial-route",
-  "initial-reason",
-  "open-promotion",
-  "confirm-promotion",
-  "command-arrived",
-  "trigger-old-reads",
-  "old-reads-held",
-  "release-promotion",
-  "promotion-committed",
-  "release-old-reads",
-  "promotion-dialog-settled",
-  "current-level",
-  "promotion-disabled",
-  "history-assignment",
-  "history-level",
-  "assignment-purpose",
-  "assignment-level",
-  "open-assignment",
-  "confirm-assignment",
-  "assignment-dialog-settled",
-  "command-etags",
-  "finally-release-command",
-  "finally-release-held",
-  "finally-persist-race",
-  "complete",
-]);
-export function safeQualificationPhase(value) {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.keys(value).sort().join(",") !== "phase,primaryPhase,scenario" ||
-    value.scenario !== qualificationPhaseScenario ||
-    !qualificationPromotionPhases.includes(value.phase) ||
-    !(
-      value.primaryPhase === "none" ||
-      qualificationPromotionPhases.slice(0, -4).includes(value.primaryPhase)
-    )
-  )
-    return undefined;
-  return {
-    scenario: qualificationPhaseScenario,
-    phase: value.phase,
-    primaryPhase: value.primaryPhase,
-  };
-}
-// Runtime annotations are untrusted metadata. Never inspect unrelated descriptions or locations.
-export function safeQualificationAnnotations(annotations) {
-  try {
-    if (!Array.isArray(annotations) || annotations.length > 32) return undefined;
-    let found;
-    for (let i = 0; i < annotations.length; i++) {
-      const item = Object.getOwnPropertyDescriptor(annotations, String(i))?.value;
-      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-      if (Object.getOwnPropertyDescriptor(item, "type")?.value !== qualificationPhaseAnnotation)
-        continue;
-      if (
-        found ||
-        Object.keys(item).some((key) => !["type", "description", "location"].includes(key))
-      )
-        return undefined;
-      const description = Object.getOwnPropertyDescriptor(item, "description")?.value;
-      if (typeof description !== "string" || description.length > 512) return undefined;
-      found = safeQualificationPhase(JSON.parse(description));
-      if (!found) return undefined;
-    }
-    return found;
-  } catch {
-    return undefined;
-  }
-}
 
 // Where the failure was thrown: a test file of this checkout and a line. Playwright derives error
 // locations by parsing stack text, which can include message lines, so the shape is not enough.
@@ -176,18 +102,15 @@ export function safeBrowserFailure(value) {
     .join(",");
   if (!statuses.includes(value.status)) return undefined;
   if (
-    [
-      "file,kind,line,project,status",
-      "file,kind,line,phase,primaryPhase,project,scenario,status",
-    ].includes(keys) &&
+    keys === "file,kind,line,project,status" &&
     value.kind === "test" &&
     Object.values(browserFiles).includes(value.file) &&
     browserProjects.includes(value.project) &&
     Number.isSafeInteger(value.line) &&
     value.line >= 1 &&
     value.line <= 100000
-  ) {
-    const result = {
+  )
+    return {
       kind: "test",
       file: value.file,
       project: value.project,
@@ -195,17 +118,6 @@ export function safeBrowserFailure(value) {
       status: value.status,
       ...(failureAt ? { failureAt } : {}),
     };
-    if (keys === "file,kind,line,project,status") return result;
-    const phase =
-      value.file === "qualifications"
-        ? safeQualificationPhase({
-            scenario: value.scenario,
-            phase: value.phase,
-            primaryPhase: value.primaryPhase,
-          })
-        : undefined;
-    return phase ? { ...result, ...phase } : undefined;
-  }
   if (
     keys === "category,kind,status" &&
     !located &&
