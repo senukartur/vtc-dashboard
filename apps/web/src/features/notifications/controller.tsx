@@ -116,7 +116,8 @@ function ActiveNotifications({
   }
   const query = useQuery({
     queryKey: ["notifications-feed", scope],
-    meta: { private: true },
+    // The poller below schedules its own Retry-After wait.
+    meta: { private: true, rateLimitRetry: false },
     enabled: false,
     retry: false,
     gcTime: 0,

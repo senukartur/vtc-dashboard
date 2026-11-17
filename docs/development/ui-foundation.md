@@ -64,6 +64,10 @@ Enabled input, select, outline-button and segmented-control boundaries use a sep
 
 `/foundation` shows a static DataTable in every state (including empty after filters) and a synthetic server-table example. That example has header sort, a local cursor, the busy state and a toggle between the range and page footers.
 
+### Rate-limited reads
+
+[VTC-163](https://trello.com/c/NPC9ncHv): the app query client (`createAppQueryClient` in `app/session-cache.ts`) gives every read one automatic retry after an HTTP 429 with a known 1 to 60 second `Retry-After`, even when the query sets `retry: false`. The query stays pending during the wait; other failures keep the query's own retry policy, and mutations are never retried. A reader that schedules its own wait sets `meta.rateLimitRetry: false` (the notification feed does). A read still limited after its retry fails as before. `shared/rate-limit.ts` exposes `isRateLimited(error)` and `rateLimitSeconds(error)` (the 1 to 60 second wait or null), and `shared/ui/rate-limit-notice.tsx` renders `RateLimitNotice` from the RU/EN `core.rateLimit` strings. The account session gate already shows it instead of the generic "session unavailable" help; page error states can adopt it later.
+
 ## Locale, identity and exact values
 
 Core messages live in `i18n/core/resources.ts`; feature messages live beside the feature in `translations.ts`. Initialization uses explicit `core` and `foundation` namespaces, Russian by default and English fallback. `html.lang` follows the selected language. The preview intentionally includes one missing Russian namespace key in its explanatory dialog to exercise fallback. Foundation-preview preferences remain memory-only. [VTC-017 account preferences](account.md) use the authenticated identity API.

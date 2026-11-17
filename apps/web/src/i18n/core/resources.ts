@@ -132,6 +132,11 @@ export const core = {
       resetFilters: "Reset filters",
       sort: "Sort",
     },
+    rateLimit: {
+      title: "Too many requests",
+      wait: "Wait {{seconds}} s, then try again.",
+      waitUnknown: "Wait a minute, then try again.",
+    },
   },
   ru: {
     language: "Язык",
@@ -265,6 +270,11 @@ export const core = {
       nothingFound: "Ничего не найдено",
       resetFilters: "Сбросить фильтры",
       sort: "Сортировка",
+    },
+    rateLimit: {
+      title: "Слишком много запросов",
+      wait: "Подождите {{seconds}} с и повторите попытку.",
+      waitUnknown: "Подождите минуту и повторите попытку.",
     },
   },
 } as const;
