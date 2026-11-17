@@ -10214,7 +10214,12 @@
             "actualDistanceM": "12000000"
           },
           "memberSince": "2026-09-01T08:00:00.000Z",
-          "lastAcceptedTripAt": "2026-11-10T18:00:00.000Z"
+          "lastAcceptedTripAt": "2026-11-10T18:00:00.000Z",
+          "last30Days": {
+            "acceptedTrips": 12,
+            "actualDistanceM": "3600000"
+          },
+          "last30DaysEndsAt": "2026-11-14T12:00:00.000Z"
         },
         "meta": {
           "requestId": "synthetic-stage-4"
@@ -10241,7 +10246,12 @@
             "actualDistanceM": "0"
           },
           "memberSince": "2026-11-01T08:00:00.000Z",
-          "lastAcceptedTripAt": null
+          "lastAcceptedTripAt": null,
+          "last30Days": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          },
+          "last30DaysEndsAt": "2026-11-14T12:00:00.000Z"
         },
         "meta": {
           "requestId": "synthetic-stage-4"
