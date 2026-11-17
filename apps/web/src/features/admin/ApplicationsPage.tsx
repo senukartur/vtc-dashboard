@@ -5,7 +5,12 @@ import { useSession } from "../../app/Session.js";
 import { accountTimeZone, formatUtc } from "../../shared/formatting.js";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../../shared/ui/dialog.js";
 import { Badge, Button, Card, Label, Table } from "../../shared/ui/primitives.js";
-import { ReferralFact, TruckersmpFact } from "./ApplicationChecks.js";
+import {
+  ReferralFact,
+  TruckersmpBadge,
+  TruckersmpFact,
+  TruckersmpLegend,
+} from "./ApplicationChecks.js";
 import {
   type ApplicationStatus,
   applicationTone,
@@ -338,7 +343,6 @@ function ApplicationDetail({ id, back }: { id: string; back: () => void }) {
             <p className="muted">
               {t("applicationsUi.submittedOn", { date: dates.format(app.submittedAt) })}
             </p>
-            <p className="admin-id applications-break">{app.id}</p>
           </div>
           <dl className="applications-facts">
             <div>
@@ -533,6 +537,7 @@ function Applications() {
     columns = [
       "colApplicant",
       "colGames",
+      "colTruckersmp",
       "colSubmitted",
       "colStatus",
       ...(status === "rejected" ? ["colDecided"] : []),
@@ -573,6 +578,7 @@ function Applications() {
             retry={query.refetch}
             empty={query.data?.data.data.items.length === 0}
           />
+          {items && items.length > 0 && <TruckersmpLegend />}
           {items && items.length > 0 && (
             <Table size="xs" className="applications-table" role="table">
               <caption className="visually-hidden">{t("applicationsUi.listCaption")}</caption>
@@ -612,6 +618,12 @@ function Applications() {
                             {t(`applicationsUi.gameShort.${game}`)}
                           </Badge>
                         ))}
+                      </span>,
+                      <span key="truckersmp" className="applications-check-cell">
+                        <span className="applications-check-prefix" aria-hidden="true">
+                          {t("applicationsUi.colTruckersmp")}
+                        </span>
+                        <TruckersmpBadge check={app.truckersmpCheck} />
                       </span>,
                       dates.format(app.submittedAt),
                       <StatusBadge key="status" status={app.status} />,

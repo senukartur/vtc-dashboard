@@ -101,6 +101,49 @@ export function checkView(check: TruckersmpCheck | null | undefined): CheckView 
   }
 }
 
+export type CheckGroup = "passed" | "attention" | "failed" | "pending";
+export type CheckBadgeLabel =
+  | "noBans"
+  | "notFound"
+  | "hasBans"
+  | "bansHidden"
+  | "inVtc"
+  | "failed"
+  | "checking"
+  | "notChecked";
+/** The list badge: the group decides symbol and tone, `label` names the reason in `badge.*`. */
+export interface CheckBadge {
+  group: CheckGroup;
+  label: CheckBadgeLabel;
+}
+/** Symbols are decorative (aria-hidden); the label carries the state. */
+export const checkBadgeLook: Record<
+  CheckGroup,
+  { tone: "accepted" | "pending" | "rejected" | "neutral"; symbol: "✓" | "!" | "✕" | "–" }
+> = {
+  passed: { tone: "accepted", symbol: "✓" },
+  attention: { tone: "pending", symbol: "!" },
+  failed: { tone: "rejected", symbol: "✕" },
+  pending: { tone: "neutral", symbol: "–" },
+};
+/**
+ * Owner rule (VTC-161): passed = found, no bans, not in a VTC; attention = not found, bans present
+ * or hidden, or in a VTC (an unknown membership counts as one); failed = the check itself failed;
+ * pending = running, not checked or no data. The current state wins over an earlier result.
+ */
+export function checkBadge(check: TruckersmpCheck | null | undefined): CheckBadge {
+  const badge = (group: CheckGroup, label: CheckBadgeLabel): CheckBadge => ({ group, label });
+  if (!check) return badge("pending", "notChecked");
+  if (check.state === "failed") return badge("failed", "failed");
+  if (check.state === "checking") return badge("pending", "checking");
+  if (check.state !== "completed") return badge("pending", "notChecked");
+  if (check.found !== true) return badge("attention", "notFound");
+  if (!check.bans) return badge("attention", "bansHidden");
+  if (check.bans.any || check.bans.count > 0) return badge("attention", "hasBans");
+  if (!check.vtc || check.vtc.inVtc) return badge("attention", "inVtc");
+  return badge("passed", "noBans");
+}
+
 /** Poll delays after each read while a check runs: 5, 10, 20, 30 s, then once a minute. */
 export function pollDelay(step: number) {
   return ([5, 10, 20, 30][step] ?? 60) * 1000;

@@ -4,7 +4,7 @@ import type { components } from "@vtc/contracts";
 import { browserSchemaDocument, browserSchemaRef } from "@vtc/contracts/runtime";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import type { Command, mockApplications } from "./applications.ts";
+import { application, type Command, ids, type mockApplications, names } from "./applications.ts";
 
 type S = components["schemas"];
 export type Check = S["ApplicationStage4TruckersmpCheck"];
@@ -81,7 +81,10 @@ addFormats.default(ajv);
 ajv.addSchema(browserSchemaDocument);
 /** True when a stubbed body satisfies the generated envelope the browser parses strictly. */
 export function validEnvelope(
-  name: "EnvelopeApplication" | "ApplicationStage4TruckersmpCheckEnvelope",
+  name:
+    | "EnvelopeApplication"
+    | "EnvelopeListAdminApplication"
+    | "ApplicationStage4TruckersmpCheckEnvelope",
   body: unknown,
 ) {
   return ajv.validate(browserSchemaRef(name), body);
@@ -95,6 +98,37 @@ export function canonicalApplicant(state: ApplicationsState, id: string, check: 
   app.fields.steamProfileUrl = player.steamUrl;
   if (check) state.checks.set(id, check);
   else state.checks.delete(id);
+}
+
+const steamProfile = (n: number) => `https://steamcommunity.com/profiles/7656119000000000${n}`;
+/** One fictional submitted applicant per badge group: passed, attention, failed and pending. */
+export const badgeChecks = {
+  passed: checks.found({ vtc: { inVtc: false, id: null, name: null, tag: null } }),
+  attention: checks.found({ bans: { any: true, count: 2 } }),
+  failed: checks.failed("timeout", checks.found()),
+  pending: checks.checking(),
+} as const;
+/**
+ * Gives the two submitted applicants /profiles/ links and adds two more, so the queue shows one
+ * row per badge group in the order of `badgeChecks`.
+ */
+export function badgeApplicants(state: ApplicationsState) {
+  const rows = [
+    [ids.submitted, names.submitted, "2026-10-30T09:30:00.000Z", badgeChecks.passed],
+    [ids.second, names.second, "2026-10-29T18:05:00.000Z", badgeChecks.attention],
+    [ids.third, names.third, "2026-10-29T11:20:00.000Z", badgeChecks.failed],
+    [ids.fourth, names.fourth, "2026-10-28T07:45:00.000Z", badgeChecks.pending],
+  ] as const;
+  rows.forEach(([id, nickname, submittedAt, check], index) => {
+    let app = state.apps.find((item) => item.id === id);
+    if (!app) {
+      app = application(id, nickname, "submitted", { submittedAt });
+      state.apps.push(app);
+    }
+    app.fields.steamProfileUrl = steamProfile(index + 1);
+    state.checks.set(id, check);
+  });
+  return rows.map(([id, nickname]) => ({ id, nickname }));
 }
 
 export type RecheckOutcome = { status: number; retryAfter?: string } | "abort";
@@ -156,13 +190,18 @@ export async function box(locator: Locator) {
 export async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
-/** Words that wrap mid-word; only .applications-break (links, IDs, provider text) may. */
+/**
+ * Words that wrap mid-word; only .applications-break (links, provider text) may. A clipped phone
+ * header row has no visible lines to check.
+ */
 export async function brokenWords(root: Locator) {
   return root.evaluate((element) => {
     const broken: string[] = [];
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       if (node.parentElement?.closest(".applications-break")) continue;
+      const head = node.parentElement?.closest("thead");
+      if (head && head.getBoundingClientRect().height <= 1) continue;
       for (const match of (node.textContent ?? "").matchAll(/[^\s-]+/g)) {
         const range = document.createRange();
         range.setStart(node, match.index);

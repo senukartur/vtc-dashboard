@@ -3,9 +3,13 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { accountTimeZone, formatUtc } from "../../shared/formatting.js";
 import i18n from "../../shared/i18n.js";
-import { Button } from "../../shared/ui/primitives.js";
+import { InfoTip } from "../../shared/ui/info-tip.js";
+import { Badge, Button } from "../../shared/ui/primitives.js";
 import {
+  type CheckGroup,
   type CheckPart,
+  checkBadge,
+  checkBadgeLook,
   checkView,
   newerCheck,
   pollDelay,
@@ -17,6 +21,9 @@ import { useCheckPoll } from "./application-checks-query.js";
 import { applicationChecksTranslations } from "./application-checks-translations.js";
 import type { DTO, useWorkspaceCommand } from "./transport.js";
 import "./application-checks.css";
+// The shared .popover-content surface lives in this stylesheet, which the applications chunk does
+// not load otherwise; without it the legend tip renders without its background.
+import "../../shared/ui/date-time-field.css";
 
 // The namespace loads with the applications chunk instead of the shared startup bundle.
 for (const language of ["ru", "en"] as const)
@@ -200,6 +207,44 @@ export function ReferralFact({ fields }: { fields: DTO["ApplicationInput"] }) {
               })
             : t(`admissions:referralOptions.${view.source}`)}
       </dd>
+    </div>
+  );
+}
+
+/** List badge of one application's check; text and symbol, not colour, carry the state. */
+export function TruckersmpBadge({ check }: { check: TruckersmpCheck | null | undefined }) {
+  const { t } = useTranslation("applicationChecks"),
+    { group, label } = checkBadge(check),
+    { symbol } = checkBadgeLook[group];
+  return (
+    <Badge size="xs" className={`applications-check-badge applications-check-${group}`}>
+      <span aria-hidden="true">{symbol}</span>
+      {t(`badge.${label}`)}
+    </Badge>
+  );
+}
+
+const legendGroups: readonly CheckGroup[] = ["passed", "attention", "failed", "pending"];
+/** What the list badges mean, behind the shared info tip. */
+export function TruckersmpLegend() {
+  const { t } = useTranslation("applicationChecks");
+  return (
+    <div className="applications-check-legend">
+      <span>{t("legendLead")}</span>
+      <InfoTip label={t("legendLabel")} title={t("legendTitle")}>
+        {legendGroups.map((group) => (
+          <p key={group}>
+            <span
+              aria-hidden="true"
+              className={`applications-check-symbol applications-check-${group}`}
+            >
+              {checkBadgeLook[group].symbol}
+            </span>{" "}
+            {t(`legend.${group}`)}
+          </p>
+        ))}
+        <p>{t("legend.detail")}</p>
+      </InfoTip>
     </div>
   );
 }
