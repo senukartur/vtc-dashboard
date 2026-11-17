@@ -87,7 +87,7 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
     game: effectiveGame,
     enabled: anchored,
   });
-  // Until the zone is known the KPIs and chart show loading, never cached data or errors of a
+  // Until the zone is known the chart shows loading, never cached data or errors of a
   // fallback-dates key from an earlier visit.
   const analyticsView = untilAnchored(analyticsQuery, anchored);
   const tripsQuery = useMemberAcceptedTrips(memberId, { isSelf, game: effectiveGame });
@@ -180,10 +180,11 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
     content = (
       <>
         <DriverKpis
-          query={analyticsView}
           lifetime={profile.lifetimeTotals}
+          last30={profile.last30Days}
+          endsAt={profile.last30DaysEndsAt}
           locale={locale}
-          onRetry={() => void retryAnalytics()}
+          timezone={displayTimezone}
         />
         <div className="driver-layout">
           <div className="driver-main">
@@ -209,7 +210,11 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
               />
             ))}
             <p className="driver-note">{t("qualification.note")}</p>
-            <DistanceByMonth query={analyticsView} locale={locale} />
+            <DistanceByMonth
+              query={analyticsView}
+              locale={locale}
+              onRetry={() => void retryAnalytics()}
+            />
           </div>
         </div>
       </>

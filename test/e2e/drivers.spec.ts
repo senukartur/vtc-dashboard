@@ -28,19 +28,30 @@ async function open(page: Page, memberId: string, clock = "2026-11-15T12:00:00Z"
 }
 const main = (page: Page) => page.getByRole("main");
 const kpis = (page: Page) => page.getByRole("region", { name: /^(Driver statistics|Показатели)/ });
-/** The 12-month and current-month values, after the all-time item from the profile. */
-const windowKpis = (page: Page) => kpis(page).locator(".driver-kpi:not(.driver-kpi-all) > dd");
-const allTimeKpi = (page: Page) => kpis(page).locator(".driver-kpi-all > dd");
+/** Total, trips, average trip and the last 30 days: profile values that ignore the game filter. */
+const kpiValues = (page: Page) => kpis(page).getByRole("definition");
+const alphaKpis = ["64,585.25 km", "253", "255 km", "4,210 km"];
 const tripsCard = (page: Page) =>
   page.getByRole("region", { name: /^(Accepted trips|Принятые рейсы)$/ });
 const qualification = (page: Page, game: "ETS2" | "ATS") =>
   page.getByRole("region", { name: new RegExp(`^${game}( ·|$)`) });
 const chartCard = (page: Page) =>
   page.getByRole("region", { name: /^(Distance by month|Пробег по месяцам)$/ });
+const chartHeading = (page: Page) =>
+  chartCard(page).getByRole("heading", {
+    level: 2,
+    name: /^(Distance by month|Пробег по месяцам)$/,
+  });
+/** The last month of the analytics window, from the chart's table view. */
+async function lastMonth(page: Page) {
+  const table = chartCard(page).getByRole("button", { name: "Table", exact: true });
+  if ((await table.getAttribute("aria-pressed")) !== "true") await table.click();
+  return chartCard(page).getByRole("rowheader").last();
+}
 const gameGroup = (page: Page) => page.getByRole("group", { name: /^(Game|Игра)$/ });
 async function loaded(page: Page) {
   await expect(tripsCard(page).getByRole("table")).toBeVisible();
-  await expect(kpis(page).getByText("Accepted trips")).toBeVisible();
+  await expect(kpis(page).getByRole("term").first()).toBeVisible();
 }
 async function box(locator: Locator) {
   const value = await locator.boundingBox();
@@ -122,28 +133,36 @@ test.describe("Compact driver profile", () => {
         "Active",
         "ETS2 · Driver II",
         "ATS · Highway Driver III",
-        "In the company since 12 Mar 2026 · last trip 14 Nov 2026",
+        "In the company since 12 Mar 2026 · last trip yesterday",
       ])
         await expect(header.getByText(text, { exact: true })).toBeVisible();
+      const lastTrip = header.locator("time");
+      await expect(lastTrip).toHaveAttribute("datetime", "2026-11-14T16:20:00.000Z");
+      await lastTrip.hover();
+      await expect(page.getByRole("tooltip")).toHaveText("14 Nov 2026, 16:20");
+      await page.mouse.move(0, 0);
       await expect(header.getByText("You", { exact: true })).toHaveCount(0);
       // Access links need members.manage.
       await expect(header.getByRole("link", { name: "Access and roles" })).toHaveCount(0);
 
-      // KPIs: exact window totals and the current (last) month bucket.
+      // KPIs: lifetime totals, the rounded average trip and the directory's 30-day distance.
       const strip = kpis(page);
       await expect(strip).toHaveAccessibleName("Driver statistics");
+      await expect(strip.getByText("both games", { exact: true })).toBeVisible();
       await expect(strip.getByRole("term")).toHaveText([
-        "All time",
-        "Accepted trips",
-        "Actual distance",
-        "This month",
+        "Total",
+        "Trips",
+        "Average trip",
+        /^Last 30 days/,
       ]);
-      await expect(strip.getByRole("definition")).toHaveText([
-        "64,585.25 kmTrips: 253 · all games",
-        "139last 12 months",
-        "31,836.5 kmlast 12 months",
-        "1,482 kmTrips: 5 · November 2026",
-      ]);
+      await expect(kpiValues(page)).toHaveText(alphaKpis);
+      const hint = strip.getByRole("button", { name: "How the 30 days are counted" });
+      await hint.click();
+      await expect(page.getByRole("dialog")).toHaveText(
+        "The 30-day distance counts accepted trips whose reporting time falls in the 30 days up to 14 Nov 2026, 12:00 (UTC), as in the drivers list. Pending and rejected reports are not counted.",
+      );
+      await page.keyboard.press("Escape");
+      await expect(hint).toBeFocused();
 
       // Qualification cards with public progress toward the current level's conditions and the ladder.
       const ets2 = qualification(page, "ETS2");
@@ -212,8 +231,7 @@ test.describe("Compact driver profile", () => {
 
       const text = (await main(page).innerText()).toLowerCase();
       expect(text).not.toContain(levelId("ets2", "driver_ii"));
-      for (const absent of ["average trip", "convoys", "last 30 days", "steam", "truckersmp"])
-        expect(text).not.toContain(absent);
+      for (const absent of ["convoys", "steam", "truckersmp"]) expect(text).not.toContain(absent);
       expect(await page.content()).not.toContain("@example.invalid");
       expect(
         await page.evaluate(() => JSON.stringify([localStorage, sessionStorage])),
@@ -224,7 +242,7 @@ test.describe("Compact driver profile", () => {
   );
 
   test(
-    "shows the membership line and all-time totals for each Stage 4 profile shape",
+    "shows the membership line and the four KPIs for each Stage 4 profile shape",
     browserCase(["@functional"]),
     async ({ page }) => {
       const state = await mockDriverRoutes(page, {
@@ -234,17 +252,15 @@ test.describe("Compact driver profile", () => {
       await open(page, alphaId);
       await loaded(page);
       const access = header.getByRole("link", { name: "Access and roles" });
-      await expect(access).toHaveAttribute(
-        "href",
-        "/account/admin/members?status=active&search=AlphaHauler",
-      );
+      // Access opens the panel over the drivers directory, on the Left tab for a former member.
+      await expect(access).toHaveAttribute("href", `/account/drivers?access=${alphaId}`);
       await open(page, formerId);
       await expect(header.getByRole("link", { name: "Access and roles" })).toHaveAttribute(
         "href",
-        "/account/admin/members?status=inactive&search=GammaRetired",
+        `/account/drivers?access=${formerId}&tab=former`,
       );
 
-      // No accepted trip: zero totals, never "Unavailable".
+      // No accepted trip: zero totals and no average, never "Unavailable".
       state.profileTrips = "none";
       await open(page, betaId);
       await expect(
@@ -252,7 +268,8 @@ test.describe("Compact driver profile", () => {
           exact: true,
         }),
       ).toBeVisible();
-      await expect(allTimeKpi(page)).toHaveText("0 kmTrips: 0 · all games");
+      await expect(kpiValues(page)).toHaveText(["0 km", "0", "—No accepted trips", "0 km"]);
+      await expect(kpis(page).locator('[data-kpi="average"] [aria-hidden="true"]')).toHaveText("—");
 
       // Without Trips the totals and the last trip are absent: unavailable, never 0.
       state.profileTrips = "off";
@@ -261,7 +278,10 @@ test.describe("Compact driver profile", () => {
         header.getByText("In the company since 12 Mar 2026", { exact: true }),
       ).toBeVisible();
       await expect(header.getByText(/last trip|no accepted trips/)).toHaveCount(0);
-      await expect(allTimeKpi(page)).toHaveText("Unavailable");
+      await expect(kpiValues(page)).toHaveText(Array(4).fill("Unavailable"));
+      await expect(
+        kpis(page).getByRole("button", { name: "How the 30 days are counted" }),
+      ).toHaveCount(0);
       expect(state.requests.some((url) => url.pathname.startsWith("/api/v1/admin"))).toBe(false);
       expect(state.unexpected).toEqual([]);
     },
@@ -327,7 +347,7 @@ test.describe("Compact driver profile", () => {
         "false",
       );
       await expect(tripsCard(page).getByRole("row")).toHaveCount(3);
-      await expect(windowKpis(page).first()).toHaveText("31last 12 months");
+      await expect(kpiValues(page)).toHaveText(alphaKpis);
       expect(profileRequests(state).slice(before).sort()).toEqual(
         [
           `/api/v1/members/${alphaId}/analytics?fromDate=2025-12-01&toDateExclusive=2026-12-01&granularity=month&game=ats`,
@@ -340,8 +360,8 @@ test.describe("Compact driver profile", () => {
       await expect(header.getByText("ETS2 · Driver II", { exact: true })).toBeVisible();
       await expect(header.getByText("ATS · Highway Driver III", { exact: true })).toBeVisible();
       await expect(ats).toBeFocused();
-      // All-time totals cover all games and do not follow the game filter.
-      await expect(allTimeKpi(page)).toHaveText("64,585.25 kmTrips: 253 · all games");
+      // The KPIs cover both games and do not follow the game filter.
+      await expect(kpiValues(page)).toHaveText(alphaKpis);
       await tripsCard(page).getByRole("link", { name: "All trips by AlphaHauler" }).click();
       await expect(page).toHaveURL(`/account/trips?scope=company&ownerId=${alphaId}&game=ats`);
       await expect(page.getByRole("table", { name: "Trip list" }).getByRole("row")).toHaveCount(3);
@@ -415,7 +435,7 @@ test.describe("Compact driver profile", () => {
     async ({ page }) => {
       const state = await mockDriverRoutes(page);
       await open(page, formerId);
-      await expect(kpis(page).getByText("Accepted trips")).toBeVisible();
+      await expect(kpis(page).getByRole("term").first()).toBeVisible();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("GammaRetired");
       await expect(
         page.locator("header.driver-header").getByText("Former member", { exact: true }),
@@ -430,7 +450,7 @@ test.describe("Compact driver profile", () => {
           qualification(page, game).getByText("No qualification assigned"),
         ).toBeVisible();
       await expect(page.locator("header.driver-header .driver-level-chip")).toHaveCount(0);
-      await expect(windowKpis(page).first()).toHaveText("139last 12 months");
+      await expect(kpiValues(page)).toHaveText(["21,400 km", "87", "246 km", "0 km"]);
       await expect(tripsCard(page).getByText("No accepted trips yet.")).toBeVisible();
       const paths = profileRequests(state);
       expect(paths.filter((path) => path.includes("qualification"))).toEqual([]);
@@ -487,30 +507,28 @@ test.describe("Compact driver profile", () => {
     async ({ page }) => {
       const state = await mockDriverRoutes(page, { failures: { analytics: 503 } });
       await open(page, alphaId);
-      await expect(kpis(page).getByText("Could not load statistics.")).toBeVisible();
-      await expect(allTimeKpi(page)).toHaveText("64,585.25 kmTrips: 253 · all games");
+      // The KPIs come from the profile, so only the chart reports an analytics failure.
       await expect(chartCard(page).getByText("Could not load statistics.")).toBeVisible();
+      await expect(kpiValues(page)).toHaveText(alphaKpis);
+      await expect(kpis(page).getByRole("alert")).toHaveCount(0);
       await expect(tripsCard(page).getByRole("table")).toBeVisible();
       delete state.failures.analytics;
-      await kpis(page).getByRole("button", { name: "Retry" }).click();
-      await expect(windowKpis(page).first()).toHaveText("139last 12 months");
+      await chartCard(page).getByRole("button", { name: "Retry" }).click();
+      await expect(chartCard(page).getByText("Highest: October 2026, 4,000 km")).toBeVisible();
+      await expect(chartHeading(page)).toBeFocused();
 
       state.failures.analytics = 409;
       await open(page, alphaId);
       await expect(
-        kpis(page).getByText(/until the company reporting timezone is configured/),
+        chartCard(page).getByText(/until the company reporting timezone is configured/),
       ).toBeVisible();
-      await expect(kpis(page).getByRole("button", { name: "Retry" })).toHaveCount(0);
+      await expect(chartCard(page).getByRole("button", { name: "Retry" })).toHaveCount(0);
+      await expect(kpiValues(page)).toHaveText(alphaKpis);
       delete state.failures.analytics;
 
       state.emptyAnalytics = true;
       await open(page, alphaId);
-      await expect(kpis(page).getByRole("definition")).toHaveText([
-        "64,585.25 kmTrips: 253 · all games",
-        "0last 12 months",
-        "0 kmlast 12 months",
-        "0 kmTrips: 0 · November 2026",
-      ]);
+      await expect(kpiValues(page)).toHaveText(alphaKpis);
       await expect(
         chartCard(page).getByText("No accepted trips in the last 12 months."),
       ).toBeVisible();
@@ -708,7 +726,7 @@ test.describe("Compact driver profile", () => {
       const back = page.getByRole("link", { name: "All drivers", exact: true });
       await back.focus();
       const order: string[] = [];
-      for (let step = 0; step < 10; step += 1) {
+      for (let step = 0; step < 12; step += 1) {
         order.push(
           await page.evaluate(() => {
             const active = document.activeElement as HTMLElement | null;
@@ -719,9 +737,13 @@ test.describe("Compact driver profile", () => {
       }
       expect(order).toEqual([
         "← All drivers",
+        // The relative last trip shows its absolute date on focus.
+        "2 days ago",
         "All games",
         "ETS2",
         "ATS",
+        // How the 30 days are counted.
+        "i",
         "Гамбург → Берлин",
         "Прага → Вена",
         "All my trips",
@@ -755,7 +777,15 @@ test.describe("Compact driver profile", () => {
         gameGroup(page).getByRole("button", { name: "ATS", exact: true }),
       ).toHaveAttribute("aria-pressed", "true");
       await expect(kpis(page)).toHaveAccessibleName("Показатели водителя");
-      await expect(allTimeKpi(page)).toHaveText("64 585,25 кмРейсы: 253 · все игры");
+      await expect(kpis(page).getByRole("term")).toHaveText([
+        "Всего",
+        "Рейсов",
+        "Средний рейс",
+        /^За 30 дней/,
+      ]);
+      await expect(kpis(page).getByText("обе игры", { exact: true })).toBeVisible();
+      await expect(kpiValues(page)).toHaveText(["64 585,25 км", "253", "255 км", "4 210 км"]);
+      await expect(page.locator("header.driver-header time")).toHaveText("вчера");
       await expect(tripsCard(page).getByRole("columnheader")).toHaveText([
         "Завершён / подтверждён",
         "Маршрут",
@@ -796,7 +826,6 @@ test.describe("Driver profile reporting-timezone window", () => {
     state.requests
       .filter((url) => url.pathname === analyticsPath)
       .map((url) => `${url.pathname}${url.search}`);
-  const currentMonth = (page: Page) => windowKpis(page).nth(2);
   const loadingStatus = (page: Page) =>
     page.getByRole("status").filter({ hasText: "Loading data..." });
 
@@ -812,7 +841,7 @@ test.describe("Driver profile reporting-timezone window", () => {
         const state = await mockDriverRoutes(page, { reportingTimezone: zone });
         await open(page, alphaId, clock);
         await loaded(page);
-        await expect(currentMonth(page)).toContainText("November 2026");
+        await expect(await lastMonth(page)).toHaveText("November 2026");
         expect(statsRequests(state)).toHaveLength(1);
         const firstStats = state.requests.findIndex((url) => url.pathname === statsPath);
         const firstAnalytics = state.requests.findIndex((url) => url.pathname === analyticsPath);
@@ -822,7 +851,8 @@ test.describe("Driver profile reporting-timezone window", () => {
         expect(state.unexpected).toEqual([]);
 
         await gameGroup(page).getByRole("button", { name: "ATS", exact: true }).click();
-        await expect(windowKpis(page).first()).toHaveText("31last 12 months");
+        await expect.poll(() => analyticsRequests(state).length).toBe(2);
+        await expect(await lastMonth(page)).toHaveText("November 2026");
         expect(analyticsRequests(state)).toEqual([
           novemberWindow,
           windowOf("2025-12-01", "2026-12-01", "ats"),
@@ -841,13 +871,14 @@ test.describe("Driver profile reporting-timezone window", () => {
       await expect.poll(() => statsRequests(state).length).toBe(1);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("AlphaHauler");
       await expect(tripsCard(page).getByRole("table")).toBeVisible();
-      await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
+      await expect(chartCard(page)).toHaveAttribute("aria-busy", "true");
+      await expect(kpiValues(page)).toHaveText(alphaKpis);
       await expect(loadingStatus(page)).toHaveCount(1);
       expect(analyticsRequests(state)).toEqual([]);
 
       state.release("stats");
-      await expect(currentMonth(page)).toContainText("November 2026");
-      await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
+      await expect(await lastMonth(page)).toHaveText("November 2026");
+      await expect(chartCard(page)).toHaveAttribute("aria-busy", "false");
       expect(analyticsRequests(state)).toEqual([novemberWindow]);
       expect(state.unexpected).toEqual([]);
     },
@@ -866,7 +897,7 @@ test.describe("Driver profile reporting-timezone window", () => {
         );
         await open(page, alphaId, monthEnd);
         await loaded(page);
-        await expect(currentMonth(page)).toContainText("October 2026");
+        await expect(await lastMonth(page)).toHaveText("October 2026");
         await expect(page.getByRole("alert")).toHaveCount(0);
         expect(statsRequests(state)).toHaveLength(1);
         expect(analyticsRequests(state)).toEqual([utcOctoberWindow]);
@@ -880,28 +911,29 @@ test.describe("Driver profile reporting-timezone window", () => {
     async ({ page }) => {
       const state = await mockDriverRoutes(page, { failures: { stats: 503, analytics: 503 } });
       await open(page, alphaId, monthEnd);
-      await expect(kpis(page).getByText("Could not load statistics.")).toBeVisible();
+      await expect(chartCard(page).getByText("Could not load statistics.")).toBeVisible();
       expect(analyticsRequests(state)).toEqual([utcOctoberWindow]);
 
       delete state.failures.stats;
       delete state.failures.analytics;
       state.hold("stats");
       // Two presses in one task: the second reuses the stats read already in flight.
-      await kpis(page)
+      await chartCard(page)
         .getByRole("button", { name: "Retry" })
         .evaluate((button: HTMLButtonElement) => {
           button.click();
           button.click();
         });
-      await expect(kpis(page)).toBeFocused();
+      await expect(chartHeading(page)).toBeFocused();
       await expect.poll(() => statsRequests(state).length).toBe(2);
-      await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
-      await expect(kpis(page).getByText("Could not load statistics.")).toHaveCount(0);
+      await expect(chartCard(page)).toHaveAttribute("aria-busy", "true");
+      await expect(chartCard(page).getByText("Could not load statistics.")).toHaveCount(0);
       expect(analyticsRequests(state)).toEqual([utcOctoberWindow]);
 
       state.release("stats");
-      await expect(currentMonth(page)).toContainText("November 2026");
-      await expect(kpis(page)).toBeFocused();
+      await expect(chartCard(page).getByText("Highest: October 2026, 4,000 km")).toBeVisible();
+      await expect(chartHeading(page)).toBeFocused();
+      await expect(await lastMonth(page)).toHaveText("November 2026");
       expect(statsRequests(state)).toHaveLength(2);
       expect(analyticsRequests(state)).toEqual([utcOctoberWindow, novemberWindow]);
     },
@@ -914,7 +946,7 @@ test.describe("Driver profile reporting-timezone window", () => {
       const state = await mockDriverRoutes(page, { failures: { stats: 503 } });
       await open(page, alphaId, monthEnd);
       await loaded(page);
-      await expect(currentMonth(page)).toContainText("October 2026");
+      await expect(await lastMonth(page)).toHaveText("October 2026");
 
       // Leave and return in the same document, so the failed stats and UTC analytics stay cached.
       await page.evaluate(() => {
@@ -928,13 +960,12 @@ test.describe("Driver profile reporting-timezone window", () => {
       await page.goBack();
       await expect.poll(() => statsRequests(state).length).toBe(2);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("AlphaHauler");
-      await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
-      await expect(kpis(page).getByText("October 2026")).toHaveCount(0);
+      await expect(chartCard(page)).toHaveAttribute("aria-busy", "true");
       await expect(chartCard(page).getByText(/October 2026/)).toHaveCount(0);
       expect(analyticsRequests(state).slice(before)).toEqual([]);
 
       state.release("stats");
-      await expect(currentMonth(page)).toContainText("November 2026");
+      await expect(await lastMonth(page)).toHaveText("November 2026");
       expect(analyticsRequests(state).slice(before)).toEqual([novemberWindow]);
     },
   );

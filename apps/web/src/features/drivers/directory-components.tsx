@@ -1,21 +1,17 @@
-// Drivers directory building blocks (VTC-145): the search draft, the toolbar, the 30-day hint
-// and the DataTable columns. State and requests live in DriversPage.tsx.
-import { type RefObject, useEffect, useEffectEvent, useId, useState } from "react";
+// Drivers directory building blocks (VTC-145): the search draft, the toolbar, the 30-day hint,
+// the relative last-trip day (VTC-160) and the DataTable columns. State and requests live in
+// DriversPage.tsx; the hint and the relative day are shared with the driver profile.
+import { Tooltip } from "radix-ui";
+import { type RefObject, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigationType } from "react-router-dom";
-import { formatDecimal, formatQuantity, formatUtc, type Locale } from "../../shared/formatting.js";
+import { formatDecimal, formatQuantity, type Locale } from "../../shared/formatting.js";
 import type { DataTableColumn } from "../../shared/ui/DataTable.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../shared/ui/popover.js";
 import { Badge, Button, Input, Label, Select } from "../../shared/ui/primitives.js";
+import { normalizeSearch, orderedRoles, searchMaxLength } from "../admin/members-model.js";
 import {
-  formatDay,
-  normalizeSearch,
-  orderedRoles,
-  searchMaxLength,
-} from "../admin/members-model.js";
-import {
-  accessHref,
   activityView,
   type DirectoryEntry,
   type DirectoryRole,
@@ -26,6 +22,8 @@ import {
   levelView,
 } from "./directory-model.js";
 import { initial, type Level } from "./model.js";
+import { relativeDay } from "./relative-day.js";
+import "./drivers-common.css";
 
 /**
  * The search box draft: committed to the URL 300 ms after typing stops; Back/Forward and other
@@ -63,6 +61,82 @@ export function InfoHint({ label, children }: { label: string; children: string 
         <p>{children}</p>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** Wall clock that advances once a minute, so "today" turns into "yesterday" after midnight. */
+export function useMinuteNow() {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+}
+
+/**
+ * A relative day ("today", "2 days ago") whose absolute date and time show in a tooltip on hover
+ * or keyboard focus, and on tap on touch screens; Escape hides it. Null for a malformed value.
+ */
+export function RelativeDay({
+  iso,
+  now,
+  locale,
+  timezone,
+}: {
+  iso: string;
+  now: number;
+  locale: Locale;
+  timezone: string;
+}) {
+  const [open, setOpen] = useState(false);
+  // A tap: whether the tooltip was open when the finger touched the day. Radix closes it on the
+  // touch and may open it again on the tap's focus; the click then sets the toggled state.
+  const tap = useRef<{ wasOpen: boolean } | null>(null);
+  const view = relativeDay(iso, now, locale, timezone);
+  if (!view) return null;
+  return (
+    <Tooltip.Provider delayDuration={300}>
+      <Tooltip.Root open={open} onOpenChange={setOpen}>
+        <Tooltip.Trigger asChild>
+          <time
+            className="drivers-relative"
+            dateTime={iso}
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users reach the absolute date of this relative day through focus.
+            tabIndex={0}
+            onPointerDown={(event) => {
+              tap.current = event.pointerType === "touch" ? { wasOpen: open } : null;
+            }}
+            onClick={(event) => {
+              // Radix closes a tooltip on click; a tap toggles it instead.
+              const touch = tap.current;
+              tap.current = null;
+              if (!touch) return;
+              event.preventDefault();
+              setOpen(!touch.wasOpen);
+            }}
+            onKeyDown={(event) => {
+              // Focus already shows the date; Enter or Space toggles it like a tap.
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              setOpen((value) => !value);
+            }}
+          >
+            {view.text}
+          </time>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content
+            className="drivers-tooltip"
+            side="top"
+            sideOffset={4}
+            collisionPadding={8}
+          >
+            {view.absolute}
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }
 
@@ -237,6 +311,8 @@ export function directoryColumns({
   activitySortable,
   locale,
   timezone,
+  now,
+  onAccess,
   t,
 }: {
   tab: Exclude<DirectoryTab, "invited">;
@@ -245,6 +321,10 @@ export function directoryColumns({
   activitySortable: boolean;
   locale: Locale;
   timezone: string;
+  /** The minute clock that anchors the relative last-trip days. */
+  now: number;
+  /** Opens the access panel of a member (members.manage). */
+  onAccess: (id: string) => void;
   t: TFunction<"drivers">;
 }): DataTableColumn<DirectoryEntry, DirectorySort>[] {
   const sort = (
@@ -343,11 +423,8 @@ export function directoryColumns({
         if (view.kind === "unavailable") return <Unavailable />;
         if (view.kind === "none")
           return <span className="drivers-muted">{t("directory.noTrips")}</span>;
-        const day = formatDay(view.iso, locale, timezone);
-        return day ? (
-          <time dateTime={view.iso} title={formatUtc(view.iso, locale, timezone)}>
-            {day}
-          </time>
+        return relativeDay(view.iso, now, locale, timezone) ? (
+          <RelativeDay iso={view.iso} now={now} locale={locale} timezone={timezone} />
         ) : (
           <Unavailable />
         );
@@ -359,13 +436,18 @@ export function directoryColumns({
       cardLabel: false,
       className: "drivers-col-access",
       cell: (entry) => (
-        <Link
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
           className="drivers-access"
-          to={accessHref(entry)}
+          aria-haspopup="dialog"
           aria-label={t("directory.accessFor", { nickname: entry.nickname })}
+          data-access-member={entry.id}
+          onClick={() => onAccess(entry.id)}
         >
           {t("directory.access")}
-        </Link>
+        </Button>
       ),
     },
   ];

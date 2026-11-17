@@ -1,5 +1,6 @@
 // Pure view model of the drivers directory (VTC-145): validated URL state, the effective sort with
-// its trips-off fallback, request paths, the cursor filter key and the cell values.
+// its trips-off fallback, request paths, the cursor filter key, the cell values and the access
+// panel links (VTC-160).
 import { queryString } from "../../shared/paging.js";
 import { normalizeSearch } from "../admin/members-model.js";
 import type { DTO } from "./transport.js";
@@ -47,6 +48,11 @@ export type DirectoryUrl = {
   sort: DirectorySort | null;
   order: SortOrder | null;
   state: InvitationState;
+  /**
+   * Member whose access panel is open (VTC-160): a lowercase UUID, never on Invited. The page
+   * honours it only with members.manage.
+   */
+  access: string | null;
 };
 
 /** `canInvite` is applications.manage: without it `tab=invited` silently falls back. */
@@ -57,6 +63,7 @@ export function parseDirectoryUrl(params: URLSearchParams, canInvite: boolean): 
   const role = params.get("role");
   const sort = params.get("sort");
   const order = params.get("order");
+  const access = params.get("access");
   const active = tab === "active";
   const level = (name: string) => {
     const id = params.get(name);
@@ -74,6 +81,7 @@ export function parseDirectoryUrl(params: URLSearchParams, canInvite: boolean): 
     sort: explicitSort,
     order: explicitSort && (order === "asc" || order === "desc") ? order : null,
     state: params.get("state") === "expired" ? "expired" : "active",
+    access: tab !== "invited" && access && uuid.test(access) ? access.toLowerCase() : null,
   };
 }
 
@@ -198,6 +206,14 @@ export function headerParts(
   return counts.droveLast30Days === undefined
     ? { active: counts.active }
     : { active: counts.active, drove: counts.droveLast30Days };
+}
+
+/** The directory with this member's access panel open, on Left for a former member. */
+export function driverAccessHref(member: { id: string; formerMember: boolean }) {
+  return `/account/drivers?${new URLSearchParams({
+    access: member.id,
+    ...(member.formerMember ? { tab: "former" } : {}),
+  })}`;
 }
 
 /** The Members administration page, filtered to this member (members.manage only). */

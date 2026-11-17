@@ -4,7 +4,9 @@ import {
   invitationCountPath,
   invitationsPath,
 } from "../../apps/web/src/features/admin/invitations-model.ts";
-import { membershipLine } from "../../apps/web/src/features/drivers/model.ts";
+import { accessSave } from "../../apps/web/src/features/drivers/access-model.ts";
+import { capitalize, membershipParts } from "../../apps/web/src/features/drivers/model.ts";
+import { calendarDayDiff, relativeDay } from "../../apps/web/src/features/drivers/relative-day.ts";
 import {
   accessHref,
   activeOnlyParams,
@@ -14,6 +16,7 @@ import {
   directoryFailure,
   directoryFilterKey,
   directoryPath,
+  driverAccessHref,
   effectiveSort,
   filtersActive,
   headerParts,
@@ -42,6 +45,7 @@ describe("directory URL state", () => {
       sort: null,
       order: null,
       state: "active",
+      access: null,
     });
   });
 
@@ -272,30 +276,191 @@ describe("profile membership line", () => {
   const t = ((key: string, options?: { date?: string }) => {
     const text = en[key.replace("profile.", "") as keyof typeof en];
     return text.replace("{{date}}", options?.date ?? "");
-  }) as Parameters<typeof membershipLine>[3];
+  }) as Parameters<typeof membershipParts>[3];
   const profile = (trips: "on" | "none" | "off", formerMember = false) => {
     const data = profileFixture(alphaId, trips).data;
     return { ...data, member: { ...data.member, formerMember } };
   };
 
-  it("joins the latest join, the last trip and the no-trip state in the display timezone", () => {
-    expect(membershipLine(profile("on"), "en", "UTC", t)).toBe(
-      "In the company since 12 Mar 2026 · last trip 14 Nov 2026",
-    );
-    // 16:20 UTC is already the next day east of Tokyo.
-    expect(membershipLine(profile("on"), "en", "Asia/Tokyo", t)).toBe(
-      "In the company since 12 Mar 2026 · last trip 15 Nov 2026",
-    );
-    expect(membershipLine(profile("none"), "en", "UTC", t)).toBe(
-      "In the company since 12 Mar 2026 · no accepted trips yet",
-    );
-    expect(membershipLine(profile("off"), "en", "UTC", t)).toBe("In the company since 12 Mar 2026");
-    expect(membershipLine(profile("on", true), "en", "UTC", t)).toBe(
-      "Joined the company on 12 Mar 2026 · last trip 14 Nov 2026",
+  it("returns the latest join and the last trip parts in the display timezone", () => {
+    expect(membershipParts(profile("on"), "en", "UTC", t)).toEqual({
+      since: "In the company since 12 Mar 2026",
+      lastTrip: { kind: "date", iso: "2026-11-14T16:20:00.000Z" },
+    });
+    // The join day follows the display timezone too.
+    expect(
+      membershipParts(
+        { ...profile("off"), memberSince: "2026-03-12T20:30:00.000Z" },
+        "en",
+        "Asia/Tokyo",
+        t,
+      ).since,
+    ).toBe("In the company since 13 Mar 2026");
+    expect(membershipParts(profile("none"), "en", "UTC", t)).toEqual({
+      since: "In the company since 12 Mar 2026",
+      lastTrip: { kind: "none" },
+    });
+    // Without Trips the last trip is unavailable: no part, never "no trips".
+    expect(membershipParts(profile("off"), "en", "UTC", t)).toEqual({
+      since: "In the company since 12 Mar 2026",
+      lastTrip: null,
+    });
+    expect(membershipParts(profile("on", true), "en", "UTC", t).since).toBe(
+      "Joined the company on 12 Mar 2026",
     );
     const { memberSince: _, ...withoutSince } = profile("none");
-    expect(membershipLine(withoutSince, "en", "UTC", t)).toBe("No accepted trips yet");
-    const { memberSince: __, ...bare } = profile("off");
-    expect(membershipLine(bare, "en", "UTC", t)).toBeNull();
+    expect(membershipParts(withoutSince, "en", "UTC", t)).toEqual({
+      since: null,
+      lastTrip: { kind: "none" },
+    });
+    expect(
+      membershipParts({ ...profile("on"), lastAcceptedTripAt: "2026-11-14" }, "en", "UTC", t)
+        .lastTrip,
+    ).toBeNull();
+    expect(capitalize(en.noTrips, "en")).toBe("No accepted trips yet");
+    expect(capitalize(driverTranslations.ru.profile.lastTripLabel, "ru")).toBe("Последний рейс");
+  });
+});
+
+describe("relative last-trip days", () => {
+  const at = (iso: string) => Date.parse(iso);
+  const text = (iso: string, now: string, locale: "ru" | "en", zone: string) =>
+    relativeDay(iso, at(now), locale, zone)?.text;
+
+  it("turns at local midnight of the display timezone, not at UTC midnight", () => {
+    const now = "2026-11-15T12:00:00.000Z";
+    // 21:30 UTC is already 15 November 00:30 in Moscow (UTC+3), but still 14 November in UTC.
+    expect(text("2026-11-14T21:30:00.000Z", now, "ru", "Europe/Moscow")).toBe("сегодня");
+    expect(text("2026-11-14T21:30:00.000Z", now, "en", "Europe/Moscow")).toBe("today");
+    expect(text("2026-11-14T21:30:00.000Z", now, "en", "UTC")).toBe("yesterday");
+    // 20:59 UTC is 23:59 in Moscow: the previous day there.
+    expect(text("2026-11-14T20:59:00.000Z", now, "ru", "Europe/Moscow")).toBe("вчера");
+    expect(text("2026-11-14T20:59:00.000Z", now, "en", "Europe/Moscow")).toBe("yesterday");
+    // Los Angeles (UTC-8) is still on 15 November at 04:00 its time; 07:59 UTC is 23:59 on the 14th.
+    expect(text("2026-11-15T08:00:00.000Z", now, "en", "America/Los_Angeles")).toBe("today");
+    expect(text("2026-11-15T07:59:00.000Z", now, "en", "America/Los_Angeles")).toBe("yesterday");
+    expect(text("2026-11-15T07:59:00.000Z", now, "en", "UTC")).toBe("today");
+  });
+
+  it("counts whole calendar days across daylight saving changes", () => {
+    // New York leaves DST on 1 November 2026 (a 25-hour day).
+    expect(
+      calendarDayDiff(
+        "2026-10-31T16:00:00.000Z",
+        at("2026-11-02T15:00:00.000Z"),
+        "America/New_York",
+      ),
+    ).toBe(2);
+    expect(
+      // 00:30 EDT to 00:30 EST the next day is 25 hours and one calendar day.
+      calendarDayDiff(
+        "2026-11-01T04:30:00.000Z",
+        at("2026-11-02T05:30:00.000Z"),
+        "America/New_York",
+      ),
+    ).toBe(1);
+    // Berlin enters DST on 29 March 2026 (a 23-hour day).
+    expect(
+      // 23:30 CET to 23:30 CEST the next day is 23 hours and one calendar day.
+      calendarDayDiff("2026-03-28T22:30:00.000Z", at("2026-03-29T21:30:00.000Z"), "Europe/Berlin"),
+    ).toBe(1);
+    expect(
+      text("2026-03-28T23:30:00.000Z", "2026-03-29T21:30:00.000Z", "en", "Europe/Berlin"),
+    ).toBe("today");
+  });
+
+  it("says N days ago up to six days and shows the date from a week on", () => {
+    const now = "2026-11-15T12:00:00.000Z";
+    expect(text("2026-11-13T09:30:00.000Z", now, "en", "UTC")).toBe("2 days ago");
+    expect(text("2026-11-13T09:30:00.000Z", now, "ru", "UTC")).toBe("2 дня назад");
+    expect(text("2026-11-12T09:30:00.000Z", now, "ru", "UTC")).toBe("3 дня назад");
+    expect(text("2026-11-10T09:30:00.000Z", now, "ru", "UTC")).toBe("5 дней назад");
+    expect(text("2026-11-09T00:00:00.000Z", now, "en", "UTC")).toBe("6 days ago");
+    expect(text("2026-11-08T23:59:59.000Z", now, "en", "UTC")).toBe("8 Nov 2026");
+    expect(text("2026-11-08T23:59:59.000Z", now, "ru", "UTC")).toBe("8 нояб. 2026 г.");
+    expect(relativeDay("2026-11-13T09:30:00.000Z", at(now), "en", "UTC")?.absolute).toBe(
+      "13 Nov 2026, 09:30",
+    );
+    expect(relativeDay("2026-11-13T09:30:00.000Z", at(now), "ru", "Europe/Moscow")?.absolute).toBe(
+      "13 нояб. 2026 г., 12:30",
+    );
+  });
+
+  it("reads a future trip as today and rejects malformed values or timezones", () => {
+    const now = "2026-11-15T12:00:00.000Z";
+    expect(text("2026-11-16T09:00:00.000Z", now, "en", "UTC")).toBe("today");
+    expect(text("2026-11-15T23:00:00.000Z", now, "ru", "UTC")).toBe("сегодня");
+    for (const bad of ["2026-11-14", "2026-11-14T10:00:00+03:00", "not a date", ""])
+      expect(relativeDay(bad, at(now), "en", "UTC")).toBeNull();
+    expect(relativeDay("2026-11-14T10:00:00.000Z", at(now), "en", "Mars/Olympus")).toBeNull();
+    expect(relativeDay("2026-11-14T10:00:00.000Z", Number.NaN, "en", "UTC")).toBeNull();
+  });
+});
+
+describe("access panel state and commands", () => {
+  const id = "41000000-0000-4000-8000-000000000201";
+
+  it("opens the panel from a valid member UUID on the list tabs only", () => {
+    expect(url(`access=${id}`).access).toBe(id);
+    expect(url(`access=${id.toUpperCase()}&tab=former`)).toMatchObject({
+      tab: "former",
+      access: id,
+    });
+    expect(url(`access=${id}&tab=invited`, true).access).toBeNull();
+    for (const bad of ["", "42", `${id}x`, "../admin"])
+      expect(url(`access=${bad}`).access).toBeNull();
+    // The panel is no filter: opening it keeps the cursor stack of the list.
+    const open = url(`access=${id}&sort=trips30d`);
+    const closed = url("sort=trips30d");
+    expect(directoryFilterKey(open, effectiveSort("active", open, false))).toBe(
+      directoryFilterKey(closed, effectiveSort("active", closed, false)),
+    );
+    expect(filtersActive(open)).toBe(false);
+  });
+
+  it("deep-links the profile to the directory panel, on Left for a former member", () => {
+    expect(driverAccessHref({ id, formerMember: false })).toBe(`/account/drivers?access=${id}`);
+    expect(driverAccessHref({ id, formerMember: true })).toBe(
+      `/account/drivers?access=${id}&tab=former`,
+    );
+    const parsed = url(driverAccessHref({ id, formerMember: true }).split("?")[1] ?? "");
+    expect(parsed).toMatchObject({ tab: "former", access: id });
+  });
+
+  it("sends exactly one Members page command per save", () => {
+    const path = `/admin/members/${id}`;
+    expect(accessSave(id, ["driver"], "driver", [], "x")).toEqual({ kind: "none" });
+    expect(accessSave(id, ["driver", "dispatcher"], "driver", ["dispatcher"], "x")).toEqual({
+      kind: "none",
+    });
+    expect(accessSave(id, ["driver", "dispatcher"], "trainee", ["dispatcher"], "Promoted")).toEqual(
+      {
+        kind: "membership",
+        path: `${path}/membership`,
+        body: { membership: "trainee", reason: "Promoted" },
+        change: { from: "driver", to: "trainee" },
+      },
+    );
+    expect(
+      accessSave(id, ["driver", "dispatcher"], "driver", ["deputy_director"], "Rotation"),
+    ).toEqual({
+      kind: "roles",
+      path: `${path}/roles`,
+      // The server's membership roles as they are, the chosen additional roles, never Director.
+      body: { roles: ["driver", "deputy_director"], reason: "Rotation" },
+      diff: { added: ["deputy_director"], removed: ["dispatcher"] },
+    });
+    expect(accessSave(id, ["director", "driver"], "driver", ["dispatcher"], "x")).toMatchObject({
+      kind: "roles",
+      body: { roles: ["driver", "dispatcher"] },
+    });
+    // Both groups changed: no combined command exists, so nothing is sent.
+    expect(accessSave(id, ["driver"], "trainee", ["dispatcher"], "x")).toEqual({ kind: "both" });
+    // Neither or both membership roles: choosing one is a membership change.
+    expect(accessSave(id, ["trainee", "driver"], "driver", [], "x")).toMatchObject({
+      kind: "membership",
+      change: { from: "both", to: "driver" },
+    });
+    expect(accessSave(id, [], null, [], "x")).toEqual({ kind: "none" });
   });
 });

@@ -1,9 +1,9 @@
 // Drivers directory (VTC-145): In company / Invited / Left tabs with company-wide counters, URL
 // filters, server sorts and cursor pages over listMembers. Invitations need applications.manage;
-// the Access links need members.manage and open the separate Members administration page.
-import { useRef, useState } from "react";
+// the Access buttons need members.manage and open the access panel over the list (VTC-160).
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { accountTimeZone, formatDecimal, formatUtc, type Locale } from "../../shared/formatting.js";
 import { useCursorPages } from "../../shared/paging.js";
@@ -12,11 +12,13 @@ import { Button, Card } from "../../shared/ui/primitives.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs.js";
 import { InvitationsList, useInvitationCount } from "../admin/InvitationsTab.js";
 import { useQualificationQuery } from "../qualifications/queries.js";
+import { AccessPanel } from "./AccessPanel.js";
 import {
   DirectoryToolbar,
   directoryColumns,
   InfoHint,
   useDirectorySearch,
+  useMinuteNow,
 } from "./directory-components.js";
 import {
   activeOnlyParams,
@@ -123,6 +125,23 @@ function DriversDirectory() {
   const parts = headerParts(counts);
   const windowEndsAt = (listTab ? list : countsQuery.data)?.windowEndsAt;
 
+  // The access panel opens only with members.manage. Once open, a lost capability (a 403 that
+  // refreshed the session) keeps the panel to explain it instead of closing it silently. The
+  // history entry remembers the member opened with the capability, since the session refresh can
+  // remount this page.
+  const location = useLocation();
+  const managed = (location.state as { managedAccess?: unknown } | null)?.managedAccess;
+  const accessId = url.access && (canManage || managed === url.access) ? url.access : null;
+  useEffect(() => {
+    if (!canManage || !url.access || managed === url.access) return;
+    const state = location.state;
+    setParams(new URLSearchParams(window.location.search), {
+      replace: true,
+      state: { ...(state && typeof state === "object" ? state : {}), managedAccess: url.access },
+    });
+  }, [canManage, url.access, managed, location.state, setParams]);
+  const now = useMinuteNow();
+
   const searchRef = useRef<HTMLInputElement>(null);
   // Use the current URL so rapid successive updates keep each other's parameters.
   function update(change: (next: URLSearchParams) => void, replace = false) {
@@ -142,6 +161,7 @@ function DriversDirectory() {
     const tab = value as DirectoryTab;
     update((next) => {
       set(next, "tab", tab === "active" ? null : tab);
+      next.delete("access");
       if (tab !== "active") for (const name of activeOnlyParams) next.delete(name);
       if (tab !== "invited") next.delete("state");
     });
@@ -195,6 +215,8 @@ function DriversDirectory() {
       activitySortable,
       locale,
       timezone,
+      now,
+      onAccess: (id) => update((next) => set(next, "access", id), true),
       t,
     });
     body = (
@@ -218,7 +240,10 @@ function DriversDirectory() {
           columns={columns}
           rows={list?.items}
           rowKey={(entry) => entry.id}
-          rowAttributes={() => ({ className: "drivers-row" })}
+          rowAttributes={(entry) => ({
+            className: "drivers-row",
+            ...(entry.id === accessId ? { "data-access-open": "" } : {}),
+          })}
           cardsBelow={800}
           status={query.isError ? "error" : list ? "ready" : "loading"}
           busy={query.isPlaceholderData}
@@ -326,6 +351,27 @@ function DriversDirectory() {
           </TabsContent>
         ))}
       </Tabs>
+      {accessId && listTab && (
+        <AccessPanel
+          key={accessId}
+          memberId={accessId}
+          nickname={list?.items.find((entry) => entry.id === accessId)?.nickname}
+          allowed={canManage}
+          locale={locale}
+          timezone={timezone}
+          onClose={() => update((next) => next.delete("access"), true)}
+          returnFocus={() => {
+            // Back to the row's Access button when it is still on screen, else the search.
+            const button = document.querySelector<HTMLElement>(
+              `[data-access-member="${accessId}"]`,
+            );
+            (button?.isConnected && button.getClientRects().length
+              ? button
+              : searchRef.current
+            )?.focus();
+          }}
+        />
+      )}
     </div>
   );
 }
