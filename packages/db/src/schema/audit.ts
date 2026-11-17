@@ -38,6 +38,7 @@ export const auditReasons = [
   "staff_review",
   "initial_setup",
   "catalog_update",
+  "automatic_promotion",
 ] as const;
 export const auditSubjects = [
   "company",

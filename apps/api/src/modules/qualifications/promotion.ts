@@ -155,7 +155,11 @@ export function createAssignments(
     await audit.append(tx, {
       actorKind: input.actorId ? "user" : "system",
       actorId: input.actorId,
-      reason: input.actorId ? "operator_request" : "initial_setup",
+      reason: input.actorId
+        ? "operator_request"
+        : promoted
+          ? "automatic_promotion"
+          : "initial_setup",
       occurredAt: at,
       companyId: input.companyId,
       operation: promoted ? "qualification.promoted" : "qualification.assigned",

@@ -452,6 +452,7 @@ export function createIdentity(
     current: Company,
     change: AccessAuditChange = { operation: "membership.changed" },
     occurredAt: string = now().toISOString(),
+    systemReason: "initial_setup" | "automatic_promotion" = "initial_setup",
   ) {
     if (!ports.accessEvents) throw identityError(503);
     const [member] = await client(tx).select().from(membership).where(eq(membership.userId, id));
@@ -464,7 +465,7 @@ export function createIdentity(
       subjectId: id,
       companyId: current.id,
       occurredAt,
-      reason: actorId ? "operator_request" : "initial_setup",
+      reason: actorId ? "operator_request" : systemReason,
     });
     await ports.accessEvents.append(tx, {
       eventId: newId(),
@@ -2153,13 +2154,21 @@ export function createIdentity(
         .update(membership)
         .set({ version: member.version + 1 })
         .where(eq(membership.userId, targetId));
-      await changed(tx, actorId, targetId, current, {
-        operation: "membership.changed",
-        details: {
-          before: membershipSnapshot(member.status, assigned),
-          after: membershipSnapshot(member.status, ["driver"]),
+      await changed(
+        tx,
+        actorId,
+        targetId,
+        current,
+        {
+          operation: "membership.changed",
+          details: {
+            before: membershipSnapshot(member.status, assigned),
+            after: membershipSnapshot(member.status, ["driver"]),
+          },
         },
-      });
+        undefined,
+        "automatic_promotion",
+      );
     },
     /** Active members among ids (at most 100) who hold the Trainee role, read under share locks. */
     async traineeIdsInTransaction(tx: TxContext, ids: readonly string[]) {

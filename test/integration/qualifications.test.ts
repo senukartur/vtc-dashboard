@@ -221,7 +221,7 @@ const promotions = async (userId = owner.userId) => ({
     [userId],
   ),
   audits: await count(
-    "SELECT COUNT(*) n FROM audit_entries a JOIN qualification_assignments q ON q.id=a.subject_id WHERE a.operation='qualification.promoted' AND q.user_id=?",
+    "SELECT COUNT(*) n FROM audit_entries a JOIN qualification_assignments q ON q.id=a.subject_id WHERE a.operation='qualification.promoted' AND a.actor_kind='system' AND a.reason='automatic_promotion' AND q.user_id=?",
     [userId],
   ),
 });
@@ -644,11 +644,11 @@ test("a trainee who is no longer on the first level becomes a driver, also after
     ["driver"],
     ["driver"],
   ]);
-  const [completion] = await rows<{ actor_kind: string }>(
-    "SELECT actor_kind FROM audit_entries WHERE subject_id=? AND operation='membership.changed'",
+  const [completion] = await rows<{ actor_kind: string; reason: string }>(
+    "SELECT actor_kind, reason FROM audit_entries WHERE subject_id=? AND operation='membership.changed'",
     [owner.userId],
   );
-  expect(completion).toEqual({ actor_kind: "system" });
+  expect(completion).toEqual({ actor_kind: "system", reason: "automatic_promotion" });
   // A trainee stranded off the first level by earlier data is completed by the next promotion.
   await configure(0, { requiredTrips: 1, requiredDistanceM: null });
   await control.query("DELETE FROM identity_roles WHERE user_id=?", [owner.userId]);
