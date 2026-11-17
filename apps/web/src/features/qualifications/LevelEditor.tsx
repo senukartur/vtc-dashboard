@@ -546,7 +546,7 @@ function Editor({
           </Card>
           {command.failure && (
             <p role="alert" className="field-error">
-              {failureText(t, command.failure)}
+              {failureText(t, command.failure, ladder)}
             </p>
           )}
           <div className="qualification-card-actions">

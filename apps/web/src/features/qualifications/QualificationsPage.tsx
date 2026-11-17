@@ -176,7 +176,7 @@ function Ladder({ game }: { game: Game }) {
         )}
         {command.failure && (
           <p role="alert" className="field-error">
-            {failureText(t, command.failure)}
+            {failureText(t, command.failure, levels)}
           </p>
         )}
         <DataTable

@@ -30,6 +30,8 @@ export class QualificationFailure extends AccountFailure {
     public readonly status = 0,
     delay: number | null = null,
     public readonly code: string | null = null,
+    /** The existing level a create or move would leave without conditions, when named. */
+    public readonly levelId: string | null = null,
   ) {
     super(kind, delay);
   }
@@ -47,10 +49,17 @@ const kinds: Record<number, AccountFailure["kind"]> = {
   503: "unavailable",
 };
 async function failure(response: Response): Promise<QualificationFailure> {
-  let code: string | null = null;
+  let code: string | null = null,
+    levelId: string | null = null;
   try {
     const parsed = schema("Error").safeParse(await response.json());
-    if (parsed.success) code = parsed.data.error.code;
+    if (parsed.success) {
+      code = parsed.data.error.code;
+      levelId =
+        parsed.data.error.details?.find(
+          (detail) => detail.code === "QUALIFICATION_CONDITIONS_REQUIRED",
+        )?.ownResourceId ?? null;
+    }
   } catch {
     // A body that is not the error envelope keeps only the status.
   }
@@ -59,6 +68,7 @@ async function failure(response: Response): Promise<QualificationFailure> {
     response.status,
     retryDelay(response.headers.get("Retry-After")),
     code,
+    levelId,
   );
 }
 export async function qualificationRead<K extends keyof DTO>(

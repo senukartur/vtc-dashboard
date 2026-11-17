@@ -13,7 +13,15 @@ import {
 } from "../../shared/ui/dialog.js";
 import { InfoTip } from "../../shared/ui/info-tip.js";
 import { Badge, Button, Card, Label, Select } from "../../shared/ui/primitives.js";
-import { failureText, LimitList, ProgressRow, progressRows, Time, useLocale } from "./limits.js";
+import {
+  failureText,
+  historyDiffs,
+  LimitList,
+  ProgressRow,
+  progressRows,
+  Time,
+  useLocale,
+} from "./limits.js";
 import { hasConditions, percent } from "./model.js";
 import { levelPath, MineCard } from "./QualificationsPage.js";
 import { useQualificationCommand, useQualificationQuery } from "./queries.js";
@@ -316,6 +324,7 @@ function Drivers({
 }
 function History({ entries }: { entries: DTO["QualificationLevelHistoryEntry"][] }) {
   const { t } = useTranslation("qualifications"),
+    locale = useLocale(),
     headingId = useId();
   const changeNames = {
     name: t("changeName"),
@@ -352,12 +361,15 @@ function History({ entries }: { entries: DTO["QualificationLevelHistoryEntry"][]
               <span className="qualification-muted">
                 <Time value={entry.at} />
               </span>
-              <span>
+              <div>
                 {text(entry)}{" "}
                 <span className="qualification-muted">
                   · {entry.actor ? entry.actor.displayName : t("system")}
                 </span>
-              </span>
+                {entry.operation !== "created" && entry.operation !== "removed" && (
+                  <HistoryDiff lines={historyDiffs(t, entry.values, locale)} />
+                )}
+              </div>
             </li>
           ))}
         </ol>
@@ -365,6 +377,19 @@ function History({ entries }: { entries: DTO["QualificationLevelHistoryEntry"][]
         <p className="qualification-muted">{t("historyEmpty")}</p>
       )}
     </Card>
+  );
+}
+function HistoryDiff({ lines }: { lines: ReturnType<typeof historyDiffs> }) {
+  const { t } = useTranslation("qualifications");
+  if (!lines.length) return null;
+  return (
+    <ul className="qualification-history-diff">
+      {lines.map((line) => (
+        <li key={line.label}>
+          {t("diffLine", { label: line.label, before: line.from, after: line.to })}
+        </li>
+      ))}
+    </ul>
   );
 }
 function ChangeDialog({

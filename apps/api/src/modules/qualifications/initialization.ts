@@ -53,6 +53,9 @@ export function createQualificationInitialization(
       completeTraineeAsSystemInTransaction: () => {
         throw new Error("QUALIFICATION_LIFECYCLE_ROLE_CHANGE");
       },
+      traineeIdsInTransaction: () => {
+        throw new Error("QUALIFICATION_LIFECYCLE_ROLE_CHANGE");
+      },
     },
     ...(outbox ? { events: outbox } : {}),
   });

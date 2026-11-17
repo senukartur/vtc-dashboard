@@ -1,5 +1,6 @@
 // Pure presentation helpers. The server applies every limit and promotes drivers; these only
 // format its data, convert form units and preview a draft.
+import type { TFunction } from "i18next";
 import { decimalShift } from "../../shared/formatting.js";
 import { type Conditions, type DTO, type Limits, QualificationFailure } from "./transport.js";
 
@@ -91,18 +92,21 @@ export function setLimits(limits: Limits) {
     hardMode: limits.hardModeRequired,
   };
 }
-/** The message key text for a failed command; the 422 conditions code has its own message. */
-type FailureKey =
-  | "errorConditions"
-  | "errorConflict"
-  | "errorForbidden"
-  | "errorLimited"
-  | "errorInvalid"
-  | "errorUnavailable"
-  | "errorUncertain";
-export function failureText(t: (key: FailureKey) => string, failure: unknown) {
+/** The message text for a failed command; the 422 conditions code has its own messages. */
+/**
+ * `levels` names the existing level a create or move would leave below the top without
+ * conditions; without it, or for the edited level itself, the general conditions message shows.
+ */
+export function failureText(
+  t: TFunction<"qualifications">,
+  failure: unknown,
+  levels: readonly { id: string; name: string }[] = [],
+) {
   if (!(failure instanceof QualificationFailure)) return t("errorUncertain");
-  if (failure.code === "QUALIFICATION_CONDITIONS_REQUIRED") return t("errorConditions");
+  if (failure.code === "QUALIFICATION_CONDITIONS_REQUIRED") {
+    const stranded = levels.find((level) => level.id === failure.levelId);
+    return stranded ? t("errorConditionsLevel", { name: stranded.name }) : t("errorConditions");
+  }
   switch (failure.kind) {
     case "conflict":
       return t("errorConflict");

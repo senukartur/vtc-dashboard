@@ -379,13 +379,28 @@ test("create, edit, move and remove keep a dense ladder and record history", asy
     position: 4,
   });
   expect(moved.level.position).toBe(4);
-  expect(
-    (moved.level.history ?? []).map((entry) => [entry.operation, entry.actor?.id ?? null]),
-  ).toEqual([
+  const history = moved.level.history ?? [];
+  expect(history.map((entry) => [entry.operation, entry.actor?.id ?? null])).toEqual([
     ["moved", director.userId],
     ["edited", director.userId],
     ["created", deputy.userId],
   ]);
+  // Each entry keeps the values before and after, so the page can show what changed.
+  const [movedEntry, editedEntry, createdEntry] = history;
+  expect(movedEntry?.values?.before?.position).toBe(2);
+  expect(movedEntry?.values?.after?.position).toBe(4);
+  expect(editedEntry?.changes).toEqual(["name", "limits", "conditions"]);
+  expect(editedEntry?.values?.before).toMatchObject({
+    name: "Fictional Heavy",
+    limits: { massMinKg: "10000", massMaxKg: "30000", hardModeRequired: true },
+    conditions: { requiredTrips: 3, requiredDistanceM: "500000" },
+  });
+  expect(editedEntry?.values?.after).toMatchObject({
+    name: "Fictional Heavy II",
+    limits: { massMinKg: null, massMaxKg: null, adr: { mode: "any", classes: [] } },
+    conditions: { requiredTrips: 2, requiredDistanceM: null },
+  });
+  expect(createdEntry?.values).toMatchObject({ before: null, after: { name: "Fictional Heavy" } });
   ladder = (await service.list(director, "ets2")).levels;
   expect(ladder.map((level) => [level.position, level.name])).toEqual([
     [1, "Trainee"],
@@ -399,6 +414,11 @@ test("create, edit, move and remove keep a dense ladder and record history", asy
     transferLevelId: levelId(1),
   });
   expect(removed.transferLevel.id).toBe(levelId(1));
+  const [removal] = await rows<{ details: { before: { name: string } | null; after: null } }>(
+    "SELECT details FROM audit_entries WHERE subject_id=? AND operation='qualification.level_removed'",
+    [created.level.id],
+  );
+  expect(removal?.details).toMatchObject({ before: { name: "Fictional Heavy II" }, after: null });
   ladder = (await service.list(director, "ets2")).levels;
   expect(ladder.map((level) => level.position)).toEqual([1, 2, 3, 4]);
   expect(ladder.some((level) => level.id === created.level.id)).toBe(false);
@@ -540,14 +560,111 @@ test("lowering conditions promotes the drivers who already meet them", async () 
   expect(again.promotedCount).toBe(1);
 });
 
-test("a level without conditions never promotes, even with credited trips", async () => {
-  await configure(2, { requiredTrips: 1, requiredDistanceM: null });
+test("a level below the top without conditions never promotes, and the API cannot create one", async () => {
+  // The 0035 upgrade leaves non-top levels without conditions until staff set them, as here.
   await service.changeMember(director, owner.userId, "ets2", {
-    levelId: levelId(3),
-    reason: "Fictional move to the top",
+    levelId: levelId(1),
+    reason: "Fictional upgraded placement",
   });
-  await replace([await credit()]);
-  expect(await openLevel()).toEqual([{ levelId: levelId(3), kind: "manual" }]);
+  expect((await service.detail(director, levelId(1))).conditions).toEqual(noConditions);
+  for (let index = 0; index < 3; index++) await replace([await credit()]);
+  expect(await openLevel()).toEqual([{ levelId: levelId(1), kind: "manual" }]);
+  expect(await promotions()).toEqual({ assignments: 0, events: 0, audits: 0 });
+  // Through the API a level below the top cannot lose its conditions.
+  const configured = await configure(1, { requiredTrips: 5, requiredDistanceM: null });
+  await rejects(
+    service.update(director, levelId(1), {
+      expectedVersion: configured.level.version,
+      name: configured.level.name,
+      limits: openLimits,
+      conditions: noConditions,
+    }),
+    422,
+    "QUALIFICATION_CONDITIONS_REQUIRED",
+  );
+});
+
+test("a create or move that pushes the top level down needs that level's conditions first", async () => {
+  const named = async (promise: Promise<unknown>, stranded: string) => {
+    const error = await promise.then(
+      () => null,
+      (e: unknown) => e as { statusCode?: number; publicCode?: string; details?: unknown },
+    );
+    expect(error).toMatchObject({
+      statusCode: 422,
+      publicCode: "QUALIFICATION_CONDITIONS_REQUIRED",
+      details: [
+        { field: "conditions", code: "QUALIFICATION_CONDITIONS_REQUIRED", ownResourceId: stranded },
+      ],
+    });
+  };
+  const top = levelId(3);
+  const create = (position: number) =>
+    service.create(director, {
+      game: "ets2",
+      position,
+      name: "Fictional new top",
+      limits: openLimits,
+      conditions: noConditions,
+    });
+  await named(create(5), top);
+  const third = await service.detail(director, levelId(2));
+  await named(
+    service.move(director, third.id, { expectedVersion: third.version, position: 4 }),
+    top,
+  );
+  const current = await service.detail(director, top);
+  await named(service.move(director, top, { expectedVersion: current.version, position: 2 }), top);
+  expect((await service.list(director, "ets2")).levels.map((level) => level.id)).toEqual(
+    [0, 1, 2, 3].map((rank) => levelId(rank)),
+  );
+  // Levels below the top keep working as before, even without conditions after an upgrade.
+  const moved = await service.move(director, third.id, {
+    expectedVersion: third.version,
+    position: 1,
+  });
+  expect(moved.level.position).toBe(1);
+  await configure(3, { requiredTrips: 2, requiredDistanceM: null });
+  expect((await create(5)).level.position).toBe(5);
+});
+
+test("a trainee who is no longer on the first level becomes a driver, also after a reorder", async () => {
+  const second = await member(["trainee"]);
+  // A new first level puts both trainees on the second level: the recheck completes them.
+  const created = await service.create(director, {
+    game: "ets2",
+    position: 1,
+    name: "Fictional new first",
+    limits: openLimits,
+    conditions: { requiredTrips: 1, requiredDistanceM: null },
+  });
+  expect(created.level.position).toBe(1);
+  expect(await openLevel()).toEqual([{ levelId: levelId(0), kind: "admission" }]);
+  expect([await rolesOf(owner.userId), await rolesOf(second.userId)]).toEqual([
+    ["driver"],
+    ["driver"],
+  ]);
+  const [completion] = await rows<{ actor_kind: string }>(
+    "SELECT actor_kind FROM audit_entries WHERE subject_id=? AND operation='membership.changed'",
+    [owner.userId],
+  );
+  expect(completion).toEqual({ actor_kind: "system" });
+  // A trainee stranded off the first level by earlier data is completed by the next promotion.
+  await configure(0, { requiredTrips: 1, requiredDistanceM: null });
+  await control.query("DELETE FROM identity_roles WHERE user_id=?", [owner.userId]);
+  await control.query("INSERT INTO identity_roles (user_id, role) VALUES (?, 'trainee')", [
+    owner.userId,
+  ]);
+  expect((await replace([await credit()])).promotedCount).toBe(1);
+  expect(await openLevel()).toEqual([{ levelId: levelId(1), kind: "promotion" }]);
+  expect(await rolesOf(owner.userId)).toEqual(["driver"]);
+  // Moving the first level up the ladder completes the trainees left on it.
+  const third = await member(["trainee"]);
+  expect(await openLevel(third.userId)).toEqual([{ levelId: created.level.id, kind: "admission" }]);
+  const first = await service.detail(director, created.level.id);
+  await service.move(director, first.id, { expectedVersion: first.version, position: 3 });
+  expect(await openLevel(third.userId)).toEqual([{ levelId: created.level.id, kind: "admission" }]);
+  expect(await rolesOf(third.userId)).toEqual(["driver"]);
 });
 
 test("a manual change needs a reason, is audited and refuses the current level", async () => {

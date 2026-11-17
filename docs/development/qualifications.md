@@ -10,7 +10,7 @@ Three tables in `packages/db/src/schema/qualifications`:
 - `qualification_level_trailers`: the trailer types allowed by a level in `selected` trailer mode, with a foreign key to the game's catalog row.
 - `qualification_assignments`: half-open UTC periods `[assigned_at, ended_at)` per member and game. `kind` is `admission`, `promotion`, `manual`, `level_removed` or `reinstatement`. The generated `open_marker` and the unique `(user_id, game, open_marker)` index keep at most one open period per member and game. The unique `previous_assignment_id` keeps the history a chain.
 
-The five limits are cargo mass (min/max kg), actual distance (min/max m), trailer types (`any` or `selected`), ADR (`forbidden`, `selected` or `any`) and Hard Mode (required or not). Empty bounds mean no limit. A `selected` mode needs at least one item. The conditions are a trip count and an actual distance; every set condition must be met. A non-top level must have at least one condition (`422 QUALIFICATION_CONDITIONS_REQUIRED`); a level without conditions never promotes.
+The five limits are cargo mass (min/max kg), actual distance (min/max m), trailer types (`any` or `selected`), ADR (`forbidden`, `selected` or `any`) and Hard Mode (required or not). Empty bounds mean no limit. A `selected` mode needs at least one item. The conditions are a trip count and an actual distance; every set condition must be met. A non-top level must have at least one condition (`422 QUALIFICATION_CONDITIONS_REQUIRED`); a level without conditions never promotes. A create or move that would push the top level down without conditions fails the same way, and the error detail names that level in `ownResourceId`.
 
 `QUALIFICATIONS_ENABLED=true` requires Identity and Trips and has no other settings. The retired cursor key, ladder-edit and eligibility-tracking settings are ignored.
 
@@ -34,7 +34,7 @@ Each decision stores a snapshot of the level name, edit version, limits and rule
 
 Lock order is company, then sorted members, then assignments, then contributions. The unique open marker and predecessor indexes are the database backstop, so two concurrent credits produce exactly one promotion.
 
-Leaving the first level in either game, whether by promotion, manual change or removal transfer, replaces a held Trainee role with Driver through the identity-owned same-transaction facade.
+Leaving the first level in either game, whether by promotion, manual change or removal transfer, replaces a held Trainee role with Driver through the identity-owned same-transaction facade. A create or move that changes which level is first does the same for trainees whose level is no longer first.
 
 ## Commands and reads
 
@@ -47,7 +47,7 @@ Leaving the first level in either game, whether by promotion, manual change or r
 | `POST /admin/qualification-levels/{id}/removal` | `qualifications.manage` |
 | `PUT /admin/members/{id}/qualifications/{game}` | `qualifications.manage` |
 
-Writes take `expectedVersion` and return `409` on a stale version. Edits and moves return `promotedCount`. Removing a level moves its drivers to the chosen level as `level_removed` periods and shifts later positions up. A manual change needs a comment and is audited. A level's change history comes from the audit log and is shown only to managers (`history: null` for others).
+Writes take `expectedVersion` and return `409` on a stale version. Edits and moves return `promotedCount`. Removing a level moves its drivers to the chosen level as `level_removed` periods and shifts later positions up. A manual change needs a comment and is audited. A level's change history comes from the audit log and is shown only to managers (`history: null` for others). Each entry carries bounded before/after `values` (name, position, limits and conditions) so the level page shows what changed.
 
 ## Web
 

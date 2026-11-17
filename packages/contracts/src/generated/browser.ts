@@ -5444,6 +5444,18 @@ export interface components {
             operation: "created" | "edited" | "moved" | "removed" | "legacy";
             position: number | null;
             transferLevel: components["schemas"]["QualificationLevelRef"] | null;
+            /** @description The level's values before and after the change; before is null for a created level and after for a removed one. Null on entries recorded without values. */
+            values: {
+                after: components["schemas"]["QualificationLevelHistoryValues"] | null;
+                before: components["schemas"]["QualificationLevelHistoryValues"] | null;
+            } | null;
+        };
+        /** @description A level's name, position, limits and conditions at one point of its history; null position means it was off the ladder. */
+        QualificationLevelHistoryValues: {
+            conditions: components["schemas"]["QualificationConditions"];
+            limits: components["schemas"]["QualificationLimits"];
+            name: string;
+            position: number | null;
         };
         QualificationLevelList: {
             canManage: boolean;

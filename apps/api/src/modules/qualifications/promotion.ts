@@ -4,7 +4,9 @@ import {
   asc,
   eq,
   inArray,
+  isNotNull,
   isNull,
+  ne,
   qualificationAssignments,
   qualificationLevels,
 } from "@vtc/db/qualifications-schema";
@@ -18,7 +20,7 @@ export type Assignment = typeof qualificationAssignments.$inferSelect;
 export type AssignmentKind = Assignment["kind"];
 
 interface Ports {
-  identity: Pick<Identity, "completeTraineeAsSystemInTransaction">;
+  identity: Pick<Identity, "completeTraineeAsSystemInTransaction" | "traineeIdsInTransaction">;
   totals?: Pick<ContributionRegister, "totalsByAssignment">;
   events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
@@ -55,17 +57,47 @@ export function createAssignments(
       .for("update");
     return row;
   }
-  async function positionOf(tx: TxContext, levelId: string) {
+  /** The game's current first level, which is the only level a trainee belongs on. */
+  async function lowestLevel(tx: TxContext, game: Game) {
     const [row] = await c(tx)
-      .select({ position: qualificationLevels.position })
+      .select({ id: qualificationLevels.id })
       .from(qualificationLevels)
-      .where(eq(qualificationLevels.id, levelId))
+      .where(and(eq(qualificationLevels.game, game), isNotNull(qualificationLevels.position)))
+      .orderBy(asc(qualificationLevels.position))
+      .limit(1)
       .for("share");
-    return row?.position ?? null;
+    return row?.id ?? null;
   }
   /**
-   * Close the member's open assignment (if any) and open one on levelId. Leaving the first level
-   * completes a trainee. Writes the audit entry and the outbox event in the caller transaction.
+   * Off the first level a member is no longer a trainee (Trainee becomes Driver). Ladder edits can
+   * move the first level under a trainee, so every recheck applies the rule to the whole game.
+   */
+  async function completeTrainees(tx: TxContext, game: Game) {
+    const lowest = await lowestLevel(tx, game);
+    if (!lowest) return;
+    const rows = await c(tx)
+      .select({ userId: qualificationAssignments.userId })
+      .from(qualificationAssignments)
+      .where(
+        and(
+          eq(qualificationAssignments.game, game),
+          isNull(qualificationAssignments.endedAt),
+          ne(qualificationAssignments.levelId, lowest),
+        ),
+      )
+      .orderBy(asc(qualificationAssignments.userId))
+      .for("share");
+    for (let offset = 0; offset < rows.length; offset += 100)
+      for (const userId of await ports.identity.traineeIdsInTransaction(
+        tx,
+        rows.slice(offset, offset + 100).map((row) => row.userId),
+      ))
+        await ports.identity.completeTraineeAsSystemInTransaction(tx, userId, null);
+  }
+  /**
+   * Close the member's open assignment (if any) and open one on levelId. A promotion or manual
+   * change onto any level other than the first completes a trainee, and so does a removal of the
+   * first level. Writes the audit entry and the outbox event in the caller transaction.
    */
   async function assign(
     tx: TxContext,
@@ -110,7 +142,14 @@ export function createAssignments(
       previousAssignmentId: previous?.id ?? null,
     };
     await c(tx).insert(qualificationAssignments).values(row);
-    if (previous && (await positionOf(tx, previous.levelId)) === 1)
+    const lowest =
+      input.kind === "promotion" || input.kind === "manual" || input.kind === "level_removed"
+        ? await lowestLevel(tx, input.game)
+        : undefined;
+    if (
+      lowest !== undefined &&
+      (input.kind === "level_removed" ? previous?.levelId === lowest : input.levelId !== lowest)
+    )
       await ports.identity.completeTraineeAsSystemInTransaction(tx, input.userId, input.actorId);
     const promoted = input.kind === "promotion";
     await audit.append(tx, {
@@ -195,7 +234,10 @@ export function createAssignments(
       }
       return promote(tx, rows, companyId);
     },
-    /** After a ladder edit: lock every open assignment of the game and promote qualifying ones. */
+    /**
+     * After a ladder edit: lock every open assignment of the game, promote qualifying ones, then
+     * complete the trainees who are no longer on the first level.
+     */
     async recheckGameInTransaction(tx: TxContext, game: Game, companyId: string | null) {
       const rows = await c(tx)
         .select()
@@ -205,7 +247,9 @@ export function createAssignments(
         )
         .orderBy(asc(qualificationAssignments.userId))
         .for("update");
-      return promote(tx, rows, companyId);
+      const promoted = await promote(tx, rows, companyId);
+      await completeTrainees(tx, game);
+      return promoted;
     },
     /** Open assignments on the given levels, locked, ordered by member. */
     async openOnLevelsInTransaction(tx: TxContext, levelIds: string[]) {

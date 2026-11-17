@@ -96,6 +96,10 @@ const en = {
   changeLimits: "trip limits",
   changeConditions: "promotion conditions",
   changePosition: "place",
+  diffName: "Name",
+  diffPosition: "Place",
+  diffConditions: "Promotion conditions",
+  diffLine: "{{label}}: {{before}} → {{after}}",
   system: "System",
   driversTitle: "Drivers on this level",
   driversCaption: "Drivers on “{{name}}”",
@@ -187,6 +191,8 @@ const en = {
     "The level was changed elsewhere. The page has been refreshed — check and try again.",
   errorConditions:
     "Enter a distance or a number of trips, otherwise drivers cannot move to the next level.",
+  errorConditionsLevel:
+    "“{{name}}” would no longer be the top level. Set a distance or a number of trips for it first.",
   errorForbidden: "You do not have permission for this action.",
   errorLimited: "Too many requests. Wait a little and try again.",
   errorInvalid: "Check the fields and try again.",
@@ -319,6 +325,10 @@ const ru: Messages = {
   changeLimits: "ограничения рейса",
   changeConditions: "условия перехода",
   changePosition: "место",
+  diffName: "Название",
+  diffPosition: "Место",
+  diffConditions: "Условия перехода",
+  diffLine: "{{label}}: {{before}} → {{after}}",
   system: "Система",
   driversTitle: "Водители на этом уровне",
   driversCaption: "Водители на уровне «{{name}}»",
@@ -415,6 +425,8 @@ const ru: Messages = {
   errorConflict: "Уровень изменили в другом окне. Данные обновлены — проверьте и повторите.",
   errorConditions:
     "Укажите пробег или количество рейсов — иначе водители не смогут перейти на следующий уровень.",
+  errorConditionsLevel:
+    "«{{name}}» перестанет быть верхним уровнем. Сначала укажите для него пробег или количество рейсов.",
   errorForbidden: "Нет прав на это действие.",
   errorLimited: "Слишком много запросов. Подождите немного и повторите.",
   errorInvalid: "Проверьте поля и повторите.",

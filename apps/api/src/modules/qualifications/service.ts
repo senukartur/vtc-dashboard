@@ -4,6 +4,7 @@ import {
   createAudit,
   decimal38_18,
   newId,
+  type QualificationLevelValues,
   type TxContext,
   type UnitOfWork,
   utcDateTime,
@@ -46,6 +47,7 @@ import {
   activeLevels,
   conditionsOf,
   type Game,
+  hasConditions,
   type LevelRow,
   levelTrailers,
   limitsOf,
@@ -66,6 +68,7 @@ interface Ports {
     | "transaction"
     | "qualificationContextInTransaction"
     | "completeTraineeAsSystemInTransaction"
+    | "traineeIdsInTransaction"
     | "memberSummariesInTransaction"
     | "authorizeInTransaction"
   >;
@@ -272,7 +275,7 @@ export function createQualifications(
     }
     return names;
   }
-  async function history(tx: TxContext, levelId: string) {
+  async function history(tx: TxContext, levelId: string, language: Locale) {
     const rows = await audit.subjectHistory(tx, {
       subjectKind: "qualification_level",
       subjectId: levelId,
@@ -296,6 +299,30 @@ export function createQualifications(
       tx,
       rows.flatMap((row) => (row.actorId ? [row.actorId] : [])),
     );
+    // One bounded label read for every recorded trailer type of the listed entries.
+    const typeIds = [
+      ...new Set(
+        contexts.flatMap((context) =>
+          [context?.before, context?.after].flatMap((side) => side?.limits.trailers.typeIds ?? []),
+        ),
+      ),
+    ].slice(0, 300);
+    const labels = await trailerLabels(tx, typeIds, language);
+    const shown = (side: QualificationLevelValues | null | undefined) =>
+      side
+        ? {
+            name: side.name,
+            position: side.position,
+            limits: {
+              ...side.limits,
+              trailers: {
+                mode: side.limits.trailers.mode,
+                types: labelsOf(labels, side.limits.trailers.typeIds),
+              },
+            },
+            conditions: side.conditions,
+          }
+        : null;
     return rows.map((row, index): S["QualificationLevelHistoryEntry"] => {
       const context = contexts[index];
       const operation =
@@ -311,6 +338,10 @@ export function createQualifications(
         changes: context?.changes ?? [],
         position: context?.position ?? null,
         transferLevel: transfer ? { id: transfer.id, name: transfer.name } : null,
+        values:
+          context && ("before" in context || "after" in context)
+            ? { before: shown(context.before), after: shown(context.after) }
+            : null,
       };
     });
   }
@@ -361,7 +392,7 @@ export function createQualifications(
         since: row.assignedAt,
         credited: credited(row.id),
       })),
-      history: canManage ? await history(tx, levelId) : null,
+      history: canManage ? await history(tx, levelId, language) : null,
     };
   }
   async function readContext(tx: TxContext, actor: Actor, targets: string[] = []) {
@@ -444,6 +475,31 @@ export function createQualifications(
       hardModeRequired: limits.hardModeRequired,
     };
   }
+  /** A 422 that names, when known, the existing level that would be left without conditions. */
+  function conditionsRequired(levelId?: string) {
+    return Object.assign(
+      identityError(422, "QUALIFICATION_CONDITIONS_REQUIRED"),
+      levelId
+        ? {
+            details: [
+              {
+                field: "conditions",
+                code: "QUALIFICATION_CONDITIONS_REQUIRED",
+                ownResourceId: levelId,
+              },
+            ],
+          }
+        : {},
+    );
+  }
+  /**
+   * A level below the top needs a condition. A create or move that makes another level the top
+   * pushes the former top level below it, so that level must already have conditions.
+   */
+  function requireFormerTopConditions(ladder: readonly ActiveLevel[], newTopId: string) {
+    const top = ladder.at(-1);
+    if (top && top.id !== newTopId && !hasConditions(top)) throw conditionsRequired(top.id);
+  }
   function validConditions(input: S["QualificationConditions"], top: boolean) {
     const requiredTrips = input.requiredTrips;
     if (
@@ -456,7 +512,7 @@ export function createQualifications(
       requiredDistanceM: amount(input.requiredDistanceM, true),
     };
     if (!top && conditions.requiredTrips === null && conditions.requiredDistanceM === null)
-      throw identityError(422, "QUALIFICATION_CONDITIONS_REQUIRED");
+      throw conditionsRequired();
     return conditions;
   }
   const levelValues = (limits: QualificationLimits, conditions: QualificationConditions) => ({
@@ -489,6 +545,30 @@ export function createQualifications(
         .set({ position: row.position + delta, version: row.version + 1 })
         .where(eq(qualificationLevels.id, row.id));
   }
+  /** A level's audited values: name, position, limits and conditions, at most 100 trailers. */
+  const values = (
+    name: string,
+    position: number | null,
+    limits: QualificationLimits,
+    conditions: QualificationConditions,
+  ): QualificationLevelValues => ({
+    name,
+    position,
+    limits: {
+      massMinKg: limits.massMinKg,
+      massMaxKg: limits.massMaxKg,
+      distanceMinM: limits.distanceMinM,
+      distanceMaxM: limits.distanceMaxM,
+      trailers: { mode: limits.trailers.mode, typeIds: [...limits.trailers.typeIds] },
+      adr: { mode: limits.adr.mode, classes: [...limits.adr.classes] },
+      hardModeRequired: limits.hardModeRequired,
+    },
+    conditions: { ...conditions },
+  });
+  async function currentValues(tx: TxContext, level: ActiveLevel, position = level.position) {
+    const trailers = (await levelTrailers(unit, tx, [level.id])).get(level.id) ?? [];
+    return values(level.name, position, limitsOf(level, trailers), conditionsOf(level));
+  }
   async function levelAudit(
     tx: TxContext,
     actor: Actor,
@@ -497,6 +577,7 @@ export function createQualifications(
     level: { id: string; game: Game; name: string },
     position: number | null,
     changes: LevelChange[],
+    change: { before: QualificationLevelValues | null; after: QualificationLevelValues | null },
     transferLevelId: string | null = null,
     occurredAt = at(),
   ) {
@@ -509,7 +590,15 @@ export function createQualifications(
       operation,
       subjectKind: "qualification_level",
       subjectId: level.id,
-      details: { game: level.game, name: level.name, position, changes, transferLevelId },
+      details: {
+        game: level.game,
+        name: level.name,
+        position,
+        changes,
+        transferLevelId,
+        before: change.before,
+        after: change.after,
+      },
     });
   }
   async function lockedLadder(tx: TxContext, levelId: string, expectedVersion?: number) {
@@ -680,12 +769,13 @@ export function createQualifications(
           throw identityError(422);
         const limits = await validLimits(tx, input.game, input.limits);
         const conditions = validConditions(input.conditions, input.position === ladder.length + 1);
+        const level = { id: newId(), game: input.game, name };
+        if (input.position === ladder.length + 1) requireFormerTopConditions(ladder, level.id);
         await shift(
           tx,
           ladder.filter((row) => row.position >= input.position),
           1,
         );
-        const level = { id: newId(), game: input.game, name };
         await c(tx)
           .insert(qualificationLevels)
           .values({
@@ -703,6 +793,7 @@ export function createQualifications(
           level,
           input.position,
           [],
+          { before: null, after: values(name, input.position, limits, conditions) },
         );
         const promotedCount = await assignments.recheckGameInTransaction(tx, input.game, companyId);
         return { level: await detail(tx, actor, level.id, true), promotedCount };
@@ -715,13 +806,11 @@ export function createQualifications(
         const { ladder, level } = await lockedLadder(tx, levelId, input.expectedVersion);
         const limits = await validLimits(tx, level.game, input.limits);
         const conditions = validConditions(input.conditions, level.position === ladder.length);
-        const before = limitsOf(
-          level,
-          (await levelTrailers(unit, tx, [level.id])).get(level.id) ?? [],
-        );
+        const previous = await currentValues(tx, level);
+        const after = values(name, level.position, limits, conditions);
         const changes: LevelChange[] = [
           ...(name !== level.name ? (["name"] as const) : []),
-          ...(!same(before, limits) ? (["limits"] as const) : []),
+          ...(!same(previous.limits, after.limits) ? (["limits"] as const) : []),
           ...(!same(conditionsOf(level), conditions) ? (["conditions"] as const) : []),
         ];
         await c(tx)
@@ -737,6 +826,7 @@ export function createQualifications(
           { ...level, name },
           level.position,
           changes,
+          { before: previous, after },
         );
         const promotedCount = await assignments.recheckGameInTransaction(tx, level.game, companyId);
         return { level: await detail(tx, actor, level.id, true), promotedCount };
@@ -753,6 +843,12 @@ export function createQualifications(
         )
           throw identityError(422);
         if (input.position !== level.position) {
+          const previous = await currentValues(tx, level);
+          const others = ladder.filter((row) => row.id !== level.id);
+          requireFormerTopConditions(
+            ladder,
+            input.position === ladder.length ? level.id : (others.at(-1)?.id ?? level.id),
+          );
           const instant = at();
           // Park the moved level outside the ladder, shift the rest, then place it.
           await c(tx)
@@ -781,6 +877,7 @@ export function createQualifications(
             level,
             input.position,
             ["position"],
+            { before: previous, after: { ...previous, position: input.position } },
             null,
             instant,
           );
@@ -797,6 +894,7 @@ export function createQualifications(
         const target = ladder.find((row) => row.id === transferId);
         if (!target || target.id === level.id) throw identityError(422);
         const instant = at();
+        const previous = await currentValues(tx, level);
         for (const row of await assignments.openOnLevelsInTransaction(tx, [level.id]))
           await assignments.assign(tx, {
             userId: row.userId,
@@ -826,6 +924,7 @@ export function createQualifications(
           level,
           null,
           [],
+          { before: previous, after: null },
           target.id,
           instant,
         );

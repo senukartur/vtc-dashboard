@@ -12,6 +12,7 @@ import { Badge } from "../../shared/ui/primitives.js";
 import { percent, setLimits } from "./model.js";
 
 export { failureText } from "./model.js";
+
 import type { Conditions, DTO, Limits } from "./transport.js";
 
 type T = TFunction<"qualifications">;
@@ -58,6 +59,44 @@ export function needText(t: T, conditions: Conditions, locale: Locale) {
     conditions.requiredTrips === null ? null : t("trips", { count: conditions.requiredTrips });
   if (distance && trips) return t("needBoth", { distance, trips });
   return distance ?? trips ?? t("noConditions");
+}
+function trailersFull(t: T, limits: Limits) {
+  if (limits.trailers.mode === "any") return t("trailersAny");
+  return limits.trailers.types.map((type) => type.label).join(", ") || t("trailersSelected");
+}
+/**
+ * Before → after lines of a history entry, one per changed value; empty when either side is
+ * missing (created, removed and entries recorded without values).
+ */
+export function historyDiffs(
+  t: T,
+  values: DTO["QualificationLevelHistoryEntry"]["values"],
+  locale: Locale,
+) {
+  type Side = DTO["QualificationLevelHistoryValues"];
+  if (!values?.before || !values.after) return [];
+  const before: Side = values.before,
+    after: Side = values.after;
+  const pair = (label: string, read: (side: Side) => string) =>
+    [label, read(before), read(after)] as const;
+  return [
+    pair(t("diffName"), (side) => side.name),
+    pair(t("diffPosition"), (side) => String(side.position ?? "—")),
+    pair(t("massLabel"), (side) =>
+      rangeText(t, side.limits.massMinKg, side.limits.massMaxKg, "t", locale),
+    ),
+    pair(t("distanceLabel"), (side) =>
+      rangeText(t, side.limits.distanceMinM, side.limits.distanceMaxM, "km", locale),
+    ),
+    pair(t("trailersLabel"), (side) => trailersFull(t, side.limits)),
+    pair(t("adrLabel"), (side) => adrText(t, side.limits)),
+    pair(t("hardMode"), (side) =>
+      t(side.limits.hardModeRequired ? "hardModeRequired" : "hardModeOptional"),
+    ),
+    pair(t("diffConditions"), (side) => needText(t, side.conditions, locale)),
+  ]
+    .filter(([, from, to]) => from !== to)
+    .map(([label, from, to]) => ({ label, from, to }));
 }
 /** Compact chips of the set limits; a level without limits credits any trip. */
 export function LimitChips({ limits }: { limits: Limits }) {

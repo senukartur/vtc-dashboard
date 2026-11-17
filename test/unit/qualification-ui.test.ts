@@ -96,12 +96,26 @@ describe("limits and messages", () => {
     });
   });
   test("a level without conditions below the top gets its own validation message", () => {
-    const t = (key: string) => key;
+    const t = ((key: string, options?: { name?: string }) =>
+      options?.name ? `${key}:${options.name}` : key) as unknown as Parameters<
+      typeof failureText
+    >[0];
     const failure = (status: number, code: string | null) =>
       new QualificationFailure("invalid", status, null, code);
     expect(failureText(t, failure(422, "QUALIFICATION_CONDITIONS_REQUIRED"))).toBe(
       "errorConditions",
     );
+    // A create or move that strands an existing level names it when the ladder knows it.
+    const stranded = new QualificationFailure(
+      "invalid",
+      422,
+      null,
+      "QUALIFICATION_CONDITIONS_REQUIRED",
+      "c1570000-0000-4000-8000-000000000201",
+    );
+    const ladder = [{ id: "c1570000-0000-4000-8000-000000000201", name: "Fictional Driver" }];
+    expect(failureText(t, stranded, ladder)).toBe("errorConditionsLevel:Fictional Driver");
+    expect(failureText(t, stranded)).toBe("errorConditions");
     expect(failureText(t, failure(422, null))).toBe("errorInvalid");
     expect(failureText(t, new QualificationFailure("conflict", 409))).toBe("errorConflict");
     expect(failureText(t, new Error("network"))).toBe("errorUncertain");

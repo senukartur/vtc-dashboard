@@ -2161,6 +2161,26 @@ export function createIdentity(
         },
       });
     },
+    /** Active members among ids (at most 100) who hold the Trainee role, read under share locks. */
+    async traineeIdsInTransaction(tx: TxContext, ids: readonly string[]) {
+      const unique = [...new Set(ids)].map(applicationId);
+      if (unique.length > 100) throw new Error("TRAINEE_LOOKUP_BOUND_EXCEEDED");
+      if (!unique.length) return [];
+      const rows = await client(tx)
+        .select({ userId: roles.userId })
+        .from(roles)
+        .innerJoin(membership, eq(membership.userId, roles.userId))
+        .where(
+          and(
+            inArray(roles.userId, unique),
+            eq(roles.role, "trainee"),
+            eq(membership.status, "active"),
+          ),
+        )
+        .orderBy(roles.userId)
+        .for("share");
+      return rows.map((row) => row.userId);
+    },
     // Transaction-scoped seam for future source/qualification coordinators. Current state is authoritative.
     async authorizeInTransaction(tx: TxContext, actor: Actor, capability: string) {
       const current = await lockCompany(tx);

@@ -207,6 +207,19 @@
   grid-template-columns: minmax(140px, auto) minmax(0, 1fr);
   gap: var(--space);
 }
+.qualification-history-diff {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--font-small);
+  overflow-wrap: anywhere;
+}
+.qualification-history .qualification-history-diff li {
+  display: block;
+}
 @media (max-width: 600px) {
   .qualification-history li {
     grid-template-columns: minmax(0, 1fr);
