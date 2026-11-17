@@ -7,7 +7,8 @@ const CLOSE_DELAY_MS = 150;
 /**
  * A small circled "i" button with a short explanation. A mouse shows it on hover; a click keeps it open, and
  * a tap or the keyboard opens it too, so touch screens and assistive technology reach the same text. The label
- * names the button for assistive technology.
+ * names the button for assistive technology. After Escape, an outside click or a click closes the tip, a hover
+ * does not reopen it until the pointer moves away from the button.
  */
 export function InfoTip({
   label,
@@ -23,10 +24,39 @@ export function InfoTip({
   const pinned = useRef(false);
   const closeTimer = useRef<number | undefined>(undefined);
   const cancelClose = () => window.clearTimeout(closeTimer.current);
-  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+  const trigger = useRef<HTMLButtonElement>(null);
+  // Chromium sends pointer enter/leave on its own after a layout or scroll change under a resting pointer, with
+  // no pointermove. So after an explicit close only a real pointermove away from the button allows hover again;
+  // a leave does not, since a layout-caused leave and enter pair would release and reopen at once.
+  const hoverBlocked = useRef(false);
+  const stopWatching = useRef<(() => void) | undefined>(undefined);
+  const allowHover = () => {
+    hoverBlocked.current = false;
+    stopWatching.current?.();
+    stopWatching.current = undefined;
+  };
+  const blockHover = () => {
+    if (hoverBlocked.current) return;
+    hoverBlocked.current = true;
+    const watch = (event: Event) => {
+      if (event.target instanceof Node && trigger.current?.contains(event.target)) return;
+      allowHover();
+    };
+    document.addEventListener("pointermove", watch, true);
+    stopWatching.current = () => document.removeEventListener("pointermove", watch, true);
+  };
+  useEffect(
+    () => () => {
+      window.clearTimeout(closeTimer.current);
+      hoverBlocked.current = false;
+      stopWatching.current?.();
+      stopWatching.current = undefined;
+    },
+    [],
+  );
 
   const hoverStart = (event: PointerEvent) => {
-    if (event.pointerType !== "mouse") return;
+    if (event.pointerType !== "mouse" || hoverBlocked.current) return;
     cancelClose();
     setOpen(true);
   };
@@ -42,10 +72,13 @@ export function InfoTip({
       onOpenChange={(next) => {
         cancelClose();
         pinned.current = next;
+        if (next) allowHover();
+        else blockHover();
         setOpen(next);
       }}
     >
       <PopoverTrigger
+        ref={trigger}
         type="button"
         className="info-tip-trigger"
         aria-label={label}

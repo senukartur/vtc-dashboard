@@ -231,6 +231,74 @@ test(
 );
 
 test(
+  "an info tip closed under a resting pointer stays closed until the pointer moves away",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await open(page, false);
+    const trigger = page.getByRole("button", { name: "How qualifications work", exact: true });
+    const content = page.locator(".info-tip-content");
+    // Two animation frames let React and the browser handle any pending pointer events.
+    const settled = () =>
+      page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+    for (const mode of ["hover preview", "pinned by keyboard"]) {
+      await page.mouse.move(0, 0);
+      if (mode === "hover preview") {
+        await trigger.hover();
+      } else {
+        await trigger.focus();
+        await page.keyboard.press("Enter");
+      }
+      await expect(content, mode).toBeVisible();
+
+      // The open text covers the button, as after a layout shift under a pointer left at the click point.
+      const triggerBox = await trigger.boundingBox();
+      const contentBox = await content.boundingBox();
+      if (!triggerBox || !contentBox) throw new Error(`${mode}: the tip has no layout box`);
+      await content.evaluate(
+        (node, shift) => {
+          (node as HTMLElement).style.translate = `${shift.x}px ${shift.y}px`;
+        },
+        { x: triggerBox.x - contentBox.x, y: triggerBox.y - contentBox.y },
+      );
+      const x = triggerBox.x + triggerBox.width / 2;
+      const y = triggerBox.y + triggerBox.height / 2;
+      await page.mouse.move(x - 1, y);
+      const overContent = await page.evaluate(
+        (point) =>
+          document.elementFromPoint(point.x, point.y)?.closest(".info-tip-content") !== null,
+        { x: x - 1, y },
+      );
+      expect(overContent, mode).toBe(true);
+
+      await page.keyboard.press("Escape");
+      await expect(content, mode).toHaveCount(0);
+      // The button is now under the pointer: a real nudge inside it, then the boundary events Chromium
+      // sends after a layout change without any pointer movement.
+      await page.mouse.move(x + 1, y);
+      await trigger.evaluate((node) => {
+        for (const type of ["pointerout", "pointerover"]) {
+          node.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: "mouse" }));
+        }
+      });
+      await settled();
+      await expect(content, mode).toHaveCount(0);
+
+      // Once the pointer has really left, hovering opens the tip again.
+      await page.mouse.move(0, 0);
+      await trigger.hover();
+      await expect(content, mode).toBeVisible();
+      await page.mouse.move(0, 0);
+      await expect(content, mode).toHaveCount(0);
+    }
+  },
+);
+
+test(
   "placing a level above the top shows how many drivers move up before saving",
   browserCase(["@functional"]),
   async ({ page }) => {
