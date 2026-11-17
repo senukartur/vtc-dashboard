@@ -15,7 +15,14 @@ import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { useQualificationQuery } from "../qualifications/queries.js";
 import { progressPercent } from "./model.js";
 import type { DTO } from "./transport.js";
-import type { QueryView } from "./view-model.js";
+import {
+  activeDriversView,
+  gameSplit,
+  type LeaderboardRow,
+  leaderboardRows,
+  type PlaceView,
+  type QueryView,
+} from "./view-model.js";
 import "./dashboard.css";
 
 type AnalyticsData = DTO["AnalyticsStage4Company"];
@@ -35,41 +42,83 @@ export function Skeleton({ className }: { className?: string }) {
 export function KpiStrip({
   analytics,
   analyticsPending,
-  leaderboard,
+  place,
   leaderboardPending,
-  leaderboardFailed,
   locale,
 }: {
   analytics: AnalyticsData | undefined;
   analyticsPending: boolean;
-  leaderboard: LeaderboardData | undefined;
+  /** The viewer's place from the leaderboard read (see `placeView`). */
+  place: PlaceView;
   leaderboardPending: boolean;
-  /** True only when the leaderboard errored and no earlier data is available. */
-  leaderboardFailed: boolean;
   locale: Locale;
 }) {
   const { t } = useTranslation("dashboard");
-  // Shown values come from the latest data; a failure without data is unknown, never zero.
-  const activeDrivers = leaderboard
-    ? `${formatDecimal(String(leaderboard.items.length), locale)}${leaderboard.nextCursor ? "+" : ""}`
-    : leaderboardFailed
-      ? formatDecimal(null, locale)
-      : undefined;
-  const items = [
+  const number = (value: number) => formatDecimal(String(value), locale);
+  const km = (value: string) => formatQuantity(value, "km", locale);
+  // Shown values come from the latest data; an absent value is unavailable, never zero.
+  const split = analytics ? gameSplit(analytics) : null;
+  const drivers = analytics ? activeDriversView(analytics) : null;
+  // Each game is one unit, so a narrow tile wraps the split at the separator only (two lines).
+  const splitText = (ets2: string, ats: string) => (
+    <>
+      <span className="dashboard-kpi-part">ETS2 {ets2}</span>
+      {" · "}
+      <span className="dashboard-kpi-part">ATS {ats}</span>
+    </>
+  );
+  const items: { key: string; label: string; value: string | undefined; sub?: ReactNode }[] = [
     {
       key: "distance",
       label: t("metrics.totalDistance"),
-      value: analytics ? formatQuantity(analytics.actualDistanceM, "km", locale) : undefined,
+      value: analytics ? km(analytics.actualDistanceM) : undefined,
+      ...(split && {
+        sub: splitText(km(split.ets2.actualDistanceM), km(split.ats.actualDistanceM)),
+      }),
     },
     {
       key: "trips",
       label: t("metrics.acceptedTrips"),
-      value: analytics ? formatDecimal(String(analytics.acceptedTrips), locale) : undefined,
+      value: analytics ? number(analytics.acceptedTrips) : undefined,
+      ...(split && {
+        sub: splitText(number(split.ets2.acceptedTrips), number(split.ats.acceptedTrips)),
+      }),
     },
     {
       key: "drivers",
       label: t("metrics.activeDrivers"),
-      value: activeDrivers,
+      value: drivers
+        ? drivers.drivers === null
+          ? formatDecimal(null, locale)
+          : number(drivers.drivers)
+        : undefined,
+      ...(drivers &&
+        drivers.members !== null && {
+          sub: t("metrics.activeMembers", { members: number(drivers.members) }),
+        }),
+    },
+    {
+      key: "place",
+      label: t("metrics.myPlace"),
+      ...(place.kind === "ranked"
+        ? {
+            value:
+              place.ranked === undefined
+                ? number(place.position)
+                : t("metrics.placeOf", {
+                    position: number(place.position),
+                    ranked: number(place.ranked),
+                  }),
+            sub: t("metrics.placeTotals", {
+              distance: km(place.actualDistanceM),
+              trips: number(place.acceptedTrips),
+            }),
+          }
+        : place.kind === "notRanked"
+          ? { value: t("metrics.notRanked"), sub: t("metrics.noTrips") }
+          : {
+              value: place.kind === "unavailable" ? formatDecimal(null, locale) : undefined,
+            }),
     },
   ];
 
@@ -83,7 +132,15 @@ export function KpiStrip({
         {items.map((item) => (
           <div key={item.key} className="dashboard-kpi">
             <dt>{item.label}</dt>
-            <dd>{item.value ?? <Skeleton />}</dd>
+            <dd className="dashboard-kpi-value">{item.value ?? <Skeleton />}</dd>
+            {item.sub ? (
+              <dd className="dashboard-kpi-sub">{item.sub}</dd>
+            ) : (
+              // While the value loads, reserve the sub-line so the strip keeps its height.
+              item.value === undefined && (
+                <dd className="dashboard-kpi-sub-reserve" aria-hidden="true" />
+              )
+            )}
           </div>
         ))}
       </dl>
@@ -100,6 +157,7 @@ export function ActualDistanceChart({
   displayTimezone,
   granularity,
   onGranularityChange,
+  showGranularity = true,
 }: {
   analytics: AnalyticsData | undefined;
   pending: boolean;
@@ -107,6 +165,8 @@ export function ActualDistanceChart({
   displayTimezone: string;
   granularity: "day" | "month";
   onGranularityChange: (g: "day" | "month") => void;
+  /** False for all time, which only has month buckets; the chosen interval is kept. */
+  showGranularity?: boolean;
 }) {
   const { t } = useTranslation("dashboard");
   const headingId = useId();
@@ -215,15 +275,17 @@ export function ActualDistanceChart({
       <div className="dashboard-card-head">
         <h2 id={headingId}>{t("chart.title")}</h2>
         <div className="dashboard-card-controls">
-          <SegmentedControl
-            aria-label={t("chart.granularity")}
-            value={granularity}
-            onValueChange={onGranularityChange}
-            options={[
-              { value: "day", label: t("chart.day") },
-              { value: "month", label: t("chart.month") },
-            ]}
-          />
+          {showGranularity && (
+            <SegmentedControl
+              aria-label={t("chart.granularity")}
+              value={granularity}
+              onValueChange={onGranularityChange}
+              options={[
+                { value: "day", label: t("chart.day") },
+                { value: "month", label: t("chart.month") },
+              ]}
+            />
+          )}
           <SegmentedControl
             aria-label={t("chart.view")}
             value={view}
@@ -257,17 +319,37 @@ export function ActualDistanceChart({
   );
 }
 
+function RankCell({ rank }: { rank: number }) {
+  return (
+    <td>
+      {rank <= 3 ? (
+        <Badge size="xs" className="dashboard-rank">
+          {rank}
+        </Badge>
+      ) : (
+        <span className="dashboard-rank-plain">{rank}</span>
+      )}
+    </td>
+  );
+}
+
 export function LeaderboardWidget({
   query,
   locale,
+  self,
 }: {
   query: QueryView<LeaderboardData>;
   locale: Locale;
+  /** The signed-in member, for marking the own row and the own place below the top ten. */
+  self: { id: string; nickname: string } | undefined;
 }) {
   const { t } = useTranslation("dashboard");
   const headingId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const entries = query.data?.items.slice(0, 10) ?? [];
+  const { rows, offPage } = query.data
+    ? leaderboardRows(query.data, self?.id)
+    : { rows: [] as LeaderboardRow[], offPage: null };
+  const you = <span className="dashboard-you"> · {t("leaderboard.you")}</span>;
 
   // Data first: a failed background refresh keeps the last rows instead of an error.
   let body: ReactNode;
@@ -296,7 +378,7 @@ export function LeaderboardWidget({
         ))}
       </div>
     );
-  } else if (entries.length === 0) {
+  } else if (rows.length === 0) {
     body = <p className="dashboard-empty">{t("leaderboard.empty")}</p>;
   } else {
     body = (
@@ -316,37 +398,44 @@ export function LeaderboardWidget({
           </tr>
         </thead>
         <tbody>
-          {entries.map((entry, index) => {
-            const rank = index + 1;
-            return (
-              <tr key={entry.member.id}>
-                <td>
-                  {rank <= 3 ? (
-                    <Badge size="xs" className="dashboard-rank">
-                      {rank}
-                    </Badge>
-                  ) : (
-                    <span className="dashboard-rank-plain">{rank}</span>
-                  )}
-                </td>
-                <td>
-                  <Link
-                    to={`/account/drivers/${entry.member.id}`}
-                    className="dashboard-driver-link"
-                  >
-                    {entry.member.nickname}
-                  </Link>
-                </td>
-                <td className="dashboard-num">
-                  {formatDecimal(String(entry.acceptedTrips), locale)}
-                </td>
-                <td className="dashboard-num">
-                  {formatQuantity(entry.actualDistanceM, "km", locale)}
-                </td>
-              </tr>
-            );
-          })}
+          {rows.map(({ entry, rank, self: own }) => (
+            <tr key={entry.member.id} className={own ? "dashboard-own-row" : undefined}>
+              <RankCell rank={rank} />
+              <td>
+                <Link to={`/account/drivers/${entry.member.id}`} className="dashboard-driver-link">
+                  {entry.member.nickname}
+                </Link>
+                {own && you}
+              </td>
+              <td className="dashboard-num">
+                {formatDecimal(String(entry.acceptedTrips), locale)}
+              </td>
+              <td className="dashboard-num">
+                {formatQuantity(entry.actualDistanceM, "km", locale)}
+              </td>
+            </tr>
+          ))}
         </tbody>
+        {/* The viewer's own place below the shown rows, set apart by a separator. */}
+        {offPage && self && (
+          <tbody className="dashboard-leaderboard-self">
+            <tr className="dashboard-own-row">
+              <RankCell rank={offPage.position} />
+              <td>
+                <Link to={`/account/drivers/${self.id}`} className="dashboard-driver-link">
+                  {self.nickname}
+                </Link>
+                {you}
+              </td>
+              <td className="dashboard-num">
+                {formatDecimal(String(offPage.acceptedTrips), locale)}
+              </td>
+              <td className="dashboard-num">
+                {formatQuantity(offPage.actualDistanceM, "km", locale)}
+              </td>
+            </tr>
+          </tbody>
+        )}
       </Table>
     );
   }
