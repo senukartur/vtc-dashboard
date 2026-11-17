@@ -50,7 +50,7 @@ export function useDirectorySearch(committed: string, onCommit: (value: string) 
   return { draft, setDraft };
 }
 
-/** An ⓘ button that explains a figure; the text stays out of the page until asked for. */
+/** An info (i) button that explains a figure; the text stays out of the page until asked for. */
 export function InfoHint({ label, children }: { label: string; children: string }) {
   return (
     <Popover>

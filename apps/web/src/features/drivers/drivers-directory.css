@@ -43,7 +43,7 @@
   margin: 0;
 }
 
-/* The ⓘ button: a small circle inside a target that grows to 40px on touch screens. */
+/* The info (i) button: a small circle inside a target that grows to 40px on touch screens. */
 .drivers-page .drivers-hint-button {
   display: inline-flex;
   align-items: center;
