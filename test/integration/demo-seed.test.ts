@@ -12,11 +12,13 @@ import type { Connection } from "mysql2/promise";
 import { expect, test, afterAll as vitestAfterAll, beforeAll as vitestBeforeAll } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import {
+  demoAssignmentEnd,
+  demoAssignmentStart,
   demoDataset,
   demoEmail,
-  demoEpoch,
   demoId,
   demoMembers,
+  games,
 } from "../../apps/api/src/demo-dataset.ts";
 import { createSeedIdentity, seedDashboard } from "../../apps/api/src/demo-seed.ts";
 import { createAnalytics } from "../../apps/api/src/modules/analytics/service.ts";
@@ -100,6 +102,28 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
     addedTrips: 0,
     addedEvents: 0,
   });
+  // Admissions carry believable dates before the first trip instead of 1 January 2000.
+  const admissions = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select({
+        id: qualificationAssignments.id,
+        assignedAt: qualificationAssignments.assignedAt,
+        endedAt: qualificationAssignments.endedAt,
+      })
+      .from(qualificationAssignments)
+      .where(eq(qualificationAssignments.kind, "admission")),
+  );
+  const firstTrip = expected.trips.map((trip) => trip.start).sort()[0] ?? "";
+  for (const [memberIndex, member] of demoMembers.entries())
+    for (const [gameIndex, game] of games.entries()) {
+      const row = admissions.find((item) => item.id === demoId(`assignment/${member.id}/${game}`));
+      expect(row?.assignedAt, `${member.nickname} ${game}`).toBe(
+        demoAssignmentStart(now, memberIndex, gameIndex, member.rank),
+      );
+      expect(row?.endedAt ?? null).toBe(member.former ? demoAssignmentEnd(now) : null);
+      expect((row?.assignedAt ?? "") < firstTrip).toBe(true);
+    }
   const cursorKey = randomBytes(32).toString("hex");
   const catalogs = createCatalogs(unit, catalogConfig(), { identity });
   const tripService = createTrips(unit, { cursorKey }, { identity, catalogs });
@@ -140,6 +164,16 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
     const directory = await get("/api/v1/members");
     expect(directory.statusCode).toBe(200);
     expect(directory.json().data.items).toHaveLength(8);
+    // Fixture members joined with their earliest admission, not at the seed instant.
+    for (const [memberIndex, member] of demoMembers.entries()) {
+      const profile = await get(`/api/v1/members/${member.id}`);
+      expect(profile.statusCode).toBe(200);
+      expect(profile.json().data.memberSince, member.nickname).toBe(
+        games
+          .map((_, gameIndex) => demoAssignmentStart(now, memberIndex, gameIndex, member.rank))
+          .sort()[0],
+      );
+    }
     expect(directory.body).not.toContain("@example.invalid");
     const mine = await get("/api/v1/me/qualifications");
     expect(mine.statusCode).toBe(200);

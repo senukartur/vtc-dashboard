@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { computePeriodDates } from "../../apps/web/src/features/dashboard/model.ts";
 import {
   assignmentFor,
+  averageTripKm,
   failureView,
   initial,
   type Level,
@@ -20,15 +21,21 @@ import {
   analyticsFixture,
   betaId,
   type DirectoryOptions,
+  directoryAdminMember,
   directoryCounts,
+  directoryLast30Days,
   directoryMembers,
+  directoryPopulation,
+  directoryProfile,
   directoryResponse,
+  directoryWindowEndsAt,
   formerId,
   invitationsFixture,
   levelId,
   levelsFixture,
   profileFixture,
   qualificationsFixture,
+  reinstatementOptionsFixture,
   selfId,
   topId,
   tripsFixture,
@@ -229,6 +236,39 @@ describe("driver profile model", () => {
     expect(failureView(new Error("network"))).toBe("error");
   });
 
+  it("averages the lifetime trip to whole kilometres, half up, without Number", () => {
+    // 64,585.25 km over 253 trips is 255.277 km.
+    expect(averageTripKm({ acceptedTrips: 253, actualDistanceM: "64585250" })).toEqual({
+      kind: "value",
+      distanceM: "255000",
+    });
+    expect(averageTripKm({ acceptedTrips: 2, actualDistanceM: "1001000" })).toEqual({
+      kind: "value",
+      distanceM: "501000",
+    });
+    expect(averageTripKm({ acceptedTrips: 2, actualDistanceM: "1000999.999" })).toEqual({
+      kind: "value",
+      distanceM: "500000",
+    });
+    expect(averageTripKm({ acceptedTrips: 1, actualDistanceM: "499.5" })).toEqual({
+      kind: "value",
+      distanceM: "0",
+    });
+    expect(averageTripKm({ acceptedTrips: 1, actualDistanceM: "500" })).toEqual({
+      kind: "value",
+      distanceM: "1000",
+    });
+    // Far beyond Number.MAX_SAFE_INTEGER metres, with a fraction, stays exact.
+    expect(
+      averageTripKm({ acceptedTrips: 3, actualDistanceM: "30000000000000000000001.5" }),
+    ).toEqual({ kind: "value", distanceM: "10000000000000000000000" });
+    expect(averageTripKm({ acceptedTrips: 0, actualDistanceM: "0" })).toEqual({ kind: "none" });
+    expect(averageTripKm(undefined)).toEqual({ kind: "unavailable" });
+    expect(averageTripKm({ acceptedTrips: 1, actualDistanceM: "-5" })).toEqual({
+      kind: "unavailable",
+    });
+  });
+
   it("takes the first user-perceived character of the nickname", () => {
     expect(initial("ёжик")).toBe("Ё");
     expect(initial("  alpha")).toBe("A");
@@ -290,6 +330,25 @@ describe("driver profile translations", () => {
       "trips.lifetime",
     ])
       expect(present).not.toContain(key);
+    // The 12-month and this-month KPI tiles are gone; the chart owns its failure (VTC-160).
+    for (const key of [
+      "kpi.allTime",
+      "kpi.allTimeSub",
+      "kpi.distance",
+      "kpi.window",
+      "kpi.month",
+      "kpi.monthSub",
+      "kpi.error",
+      "kpi.setup",
+      "kpi.retry",
+      "profile.lastTrip",
+    ])
+      expect(present).not.toContain(key);
+    for (const key of ["chart.error", "chart.setup", "chart.retry", "profile.lastTripLabel"])
+      expect(present).toContain(key);
+    expect(
+      ["total", "trips", "average", "last30"].map((key) => ru.kpi[key as keyof typeof ru.kpi]),
+    ).toEqual(["Всего", "Рейсов", "Средний рейс", "За 30 дней"]);
   });
 });
 
@@ -329,6 +388,23 @@ describe("driver profile fixtures match the browser contract", () => {
         .data.items.map((item) => item.game)
         .sort(),
     ).toEqual(["ats", "ets2"]);
+  });
+
+  it("repeats the directory's 30-day totals and window on the profile", () => {
+    for (const id of [selfId, alphaId, betaId, formerId, topId]) {
+      const data = profileFixture(id).data;
+      expect(data.last30Days, id).toEqual(directoryLast30Days(id));
+      expect(data.last30DaysEndsAt).toBe(directoryWindowEndsAt);
+      const row = directoryResponse(new URLSearchParams("limit=100")).body;
+      const entry = "data" in row ? row.data.items.find((item) => item.id === id) : undefined;
+      expect(entry?.last30Days, id).toEqual(data.last30Days);
+    }
+    expect(profileFixture(alphaId, "none").data.last30Days).toEqual({
+      acceptedTrips: 0,
+      actualDistanceM: "0",
+    });
+    expect(profileFixture(alphaId, "off").data).not.toHaveProperty("last30Days");
+    expect(profileFixture(alphaId, "off").data).not.toHaveProperty("last30DaysEndsAt");
   });
 
   it("keeps fixtures free of private account data", () => {
@@ -411,6 +487,27 @@ describe("drivers directory fixtures match the live Stage 4 contract", () => {
             invitationsFixture(new URLSearchParams({ state, limit })),
           ),
         ).toBe(true);
+  });
+
+  it("parses the access panel builders with the Members page and profile envelopes", () => {
+    const { active, former } = directoryPopulation();
+    for (const item of [...active, ...former]) {
+      expect(parses("EnvelopeMemberAdmin", directoryAdminMember(item, 3)), item.nickname).toBe(
+        true,
+      );
+      for (const options of [{}, { tripsOff: true }])
+        expect(
+          parses("EnvelopeMemberProfile", directoryProfile(item, options)),
+          item.nickname,
+        ).toBe(true);
+    }
+    const gone = former[0];
+    if (!gone) throw new Error("MISSING_FORMER_SEED");
+    expect(directoryAdminMember(gone, 1).data.status).toBe("inactive");
+    expect(parses("EnvelopeReinstatementOptions", reinstatementOptionsFixture())).toBe(true);
+    // Each mock keeps its own copy, so commands in one test never leak into another.
+    active[0]?.roles.splice(0);
+    expect(directoryPopulation().active[0]?.roles.length).toBeGreaterThan(0);
   });
 
   it("keeps the list and row key sets of the matching examples.json cases", () => {

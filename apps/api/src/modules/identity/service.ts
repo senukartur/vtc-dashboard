@@ -2489,13 +2489,24 @@ export function createIdentity(
         await checkActor(tx, actor, current);
         const validMemberId = applicationId(memberId);
         const activity = ports.memberActivity;
+        // The directory's rolling 30-day window (VTC-160), ending at this read's server clock.
+        const windowEndsAt = activity ? now().toISOString() : null;
+        const windowFrom = windowEndsAt
+          ? new Date(Date.parse(windowEndsAt) - DIRECTORY_WINDOW_MS).toISOString()
+          : null;
         const [memberRow] = await client(tx)
           .select({
             id: user.id,
             nickname: user.name,
             status: membership.status,
             joinedAt: membership.joinedAt,
-            ...(activity ? { last: activity.lastAcceptedAt(user.id) } : {}),
+            ...(activity && windowEndsAt && windowFrom
+              ? {
+                  last: activity.lastAcceptedAt(user.id),
+                  trips: activity.acceptedTrips(user.id, windowFrom, windowEndsAt),
+                  distance: activity.acceptedDistance(user.id, windowFrom, windowEndsAt),
+                }
+              : {}),
           })
           .from(user)
           .innerJoin(membership, eq(membership.userId, user.id))
@@ -2527,6 +2538,15 @@ export function createIdentity(
           memberSince: memberRow.joinedAt,
           ...(activity && "last" in memberRow
             ? { lastAcceptedTripAt: (memberRow.last as string | null) ?? null }
+            : {}),
+          ...(activity && windowEndsAt && "trips" in memberRow && "distance" in memberRow
+            ? {
+                last30Days: activity.totals(
+                  memberRow.trips as number | string,
+                  memberRow.distance as number | string,
+                ),
+                last30DaysEndsAt: windowEndsAt,
+              }
             : {}),
         };
       });

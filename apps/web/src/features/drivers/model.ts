@@ -116,34 +116,58 @@ export function initial(nickname: string): string {
   return segment ? segment.toLocaleUpperCase() : "?";
 }
 
+/** The profile header's last trip: a dated accepted trip, none yet, or unavailable (Trips off). */
+export type LastTripPart = { kind: "date"; iso: string } | { kind: "none" } | null;
+
 /**
- * "In the company since … · last trip …" (a former member: "Joined the company on …"). An absent
- * field is omitted; a null last trip means no accepted trip yet.
+ * Parts of "In the company since … · last trip …" (a former member: "Joined the company on …").
+ * An absent or malformed field is null; a null last trip means no accepted trip yet. The header
+ * renders the last trip as a relative day (VTC-160).
  */
-export function membershipLine(
+export function membershipParts(
   profile: DTO["MemberProfile"],
   locale: Locale,
   timeZone: string,
   t: TFunction<"drivers">,
-): string | null {
-  const since = profile.memberSince ? formatDay(profile.memberSince, locale, timeZone) : null;
-  const lastDay = profile.lastAcceptedTripAt
-    ? formatDay(profile.lastAcceptedTripAt, locale, timeZone)
-    : null;
-  const last =
-    profile.lastAcceptedTripAt === null
-      ? t("profile.noTrips")
-      : lastDay
-        ? t("profile.lastTrip", { date: lastDay })
+): { since: string | null; lastTrip: LastTripPart } {
+  const sinceDay = profile.memberSince ? formatDay(profile.memberSince, locale, timeZone) : null;
+  const last = profile.lastAcceptedTripAt;
+  const lastTrip: LastTripPart =
+    last === null
+      ? { kind: "none" }
+      : last && formatDay(last, locale, timeZone)
+        ? { kind: "date", iso: last }
         : null;
-  const parts = [
-    since &&
-      t(profile.member.formerMember ? "profile.joinedOn" : "profile.inCompanySince", {
-        date: since,
-      }),
-    last,
-  ].filter((part): part is string => !!part);
-  if (!parts.length) return null;
-  const text = parts.join(" · ");
+  return {
+    since: sinceDay
+      ? t(profile.member.formerMember ? "profile.joinedOn" : "profile.inCompanySince", {
+          date: sinceDay,
+        })
+      : null,
+    lastTrip,
+  };
+}
+
+/** Uppercases the first character, for a line that starts with a lowercase part. */
+export function capitalize(text: string, locale: Locale): string {
   return `${text.charAt(0).toLocaleUpperCase(locale)}${text.slice(1)}`;
+}
+
+/**
+ * Average accepted trip, all games, rounded half up to whole kilometres and returned in metres
+ * for `formatQuantity`. Exact BigInt arithmetic: lifetime distances can exceed a safe Number.
+ * Absent totals are unavailable; zero trips have no average.
+ */
+export function averageTripKm(
+  totals: DTO["LifetimeTripTotals"] | undefined,
+): { kind: "unavailable" } | { kind: "none" } | { kind: "value"; distanceM: string } {
+  if (!totals) return { kind: "unavailable" };
+  if (totals.acceptedTrips <= 0) return { kind: "none" };
+  const match = /^(0|[1-9]\d*)(?:\.(\d+))?$/.exec(totals.actualDistanceM);
+  if (!match) return { kind: "unavailable" };
+  const fraction = match[2] ?? "";
+  const numerator = BigInt(`${match[1]}${fraction}`);
+  const denominator = BigInt(totals.acceptedTrips) * 1000n * 10n ** BigInt(fraction.length);
+  const km = (2n * numerator + denominator) / (2n * denominator);
+  return { kind: "value", distanceM: String(km * 1000n) };
 }

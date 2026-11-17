@@ -30,6 +30,35 @@ export const demoMembers = [
   roles: member.roles as ("driver" | "trainee" | "dispatcher" | "deputy_director")[],
 }));
 
+const DAY_MS = 86400000;
+
+/** Start of the earliest demo trip: the previous month's first midnight (UTC) minus the drive. */
+export function demoFirstTripStart(now: Date): number {
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1) - 3 * 3600000;
+}
+
+/**
+ * A believable admission date for a fixture member's level (VTC-160): 09:00 UTC two weeks to
+ * about six months before the first demo trip, earlier for higher ranks, deterministic per
+ * member and game, so every demo trip falls inside it and reruns of a day keep it.
+ */
+export function demoAssignmentStart(
+  now: Date,
+  memberIndex: number,
+  gameIndex: number,
+  rank: number,
+): string {
+  const first = demoFirstTripStart(now);
+  const day = first - (((first % DAY_MS) + DAY_MS) % DAY_MS);
+  const daysBefore = 14 + rank * 45 + memberIndex * 5 + gameIndex * 3;
+  return new Date(day + 9 * 3600000 - daysBefore * DAY_MS).toISOString();
+}
+
+/** The former member's levels ended a week before the first demo trip. */
+export function demoAssignmentEnd(now: Date): string {
+  return new Date(demoFirstTripStart(now) - 7 * DAY_MS).toISOString();
+}
+
 export function demoDataset(now: Date) {
   if (!Number.isFinite(now.getTime()) || now.toISOString() <= demoEpoch)
     throw new Error("DEMO_DATE_INVALID");
