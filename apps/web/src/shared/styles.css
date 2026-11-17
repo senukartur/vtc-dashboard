@@ -586,6 +586,17 @@ input[type="checkbox"] {
 .info-tip-trigger[data-state="open"] {
   color: var(--secondary);
 }
+/* Shared by every popover; a feature stylesheet loads only with its own chunk. */
+.popover-content {
+  z-index: 70;
+  max-width: calc(100vw - 16px);
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: 0 16px 40px #00000066;
+}
 .info-tip-content {
   display: flex;
   flex-direction: column;

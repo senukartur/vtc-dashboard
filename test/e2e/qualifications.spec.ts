@@ -167,6 +167,35 @@ test(
 );
 
 test(
+  "an info tip shows on hover over an opaque surface, and a click keeps it open",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await open(page, false);
+    const trigger = page.getByRole("button", { name: "How qualifications work", exact: true });
+    const content = page.locator(".info-tip-content");
+    await trigger.hover();
+    await expect(content).toBeVisible();
+    // The page behind must not show through the explanation.
+    expect(await content.evaluate((node) => getComputedStyle(node).backgroundColor)).toBe(
+      "rgb(18, 26, 41)",
+    );
+    await content.hover();
+    await expect(content).toBeVisible();
+    await page.mouse.move(0, 0);
+    await expect(content).toHaveCount(0);
+
+    await trigger.hover();
+    await trigger.click();
+    await page.mouse.move(0, 0);
+    // Longer than the hover close delay, so a hover-only tip would be gone by now.
+    await page.waitForTimeout(400);
+    await expect(content).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(content).toHaveCount(0);
+  },
+);
+
+test(
   "placing a level above the top shows how many drivers move up before saving",
   browserCase(["@functional"]),
   async ({ page }) => {
