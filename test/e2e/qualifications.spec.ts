@@ -141,3 +141,22 @@ test(
     expect(mock.ladder.map((row) => row.name)).toEqual(["Fictional Trainee"]);
   },
 );
+
+test(
+  "an info tip opens with Enter or Space, closes with Escape and returns focus",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await open(page, false);
+    const trigger = page.getByRole("button", { name: "How qualifications work", exact: true });
+    const content = page.locator(".info-tip-content");
+    for (const key of ["Enter", "Space"]) {
+      await trigger.focus();
+      await page.keyboard.press(key);
+      await expect(content).toBeVisible();
+      await expect(content).toContainText("A level decides which trips the company credits.");
+      await page.keyboard.press("Escape");
+      await expect(content).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+    }
+  },
+);
