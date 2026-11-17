@@ -17990,6 +17990,10 @@
             }
           ],
           "description": "reportingAt of the member's latest accepted canonical trip; null when none."
+        },
+        "levels": {
+          "$ref": "#/$defs/MemberStage4DirectoryLevels",
+          "description": "Current level per game; absent when qualifications are unavailable."
         }
       },
       "required": [
@@ -18025,6 +18029,9 @@
         "windowEndsAt": {
           "$ref": "#/$defs/Timestamp",
           "description": "End of the 30-day window used by every row of this page and bound into the cursor."
+        },
+        "statusCounts": {
+          "$ref": "#/$defs/MemberStage4DirectoryCounts"
         }
       },
       "required": [
@@ -18032,6 +18039,93 @@
         "nextCursor"
       ],
       "additionalProperties": false
+    },
+    "MemberStage4DirectoryLevel": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 25
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "position"
+      ],
+      "additionalProperties": false,
+      "description": "A current level as listQualificationLevels returns it to the reader: same ID, name and 1-based position."
+    },
+    "MemberStage4DirectoryLevels": {
+      "type": "object",
+      "properties": {
+        "ets2": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberStage4DirectoryLevel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ats": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberStage4DirectoryLevel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "ets2",
+        "ats"
+      ],
+      "additionalProperties": false,
+      "description": "The member's current level per game. A game is null when the member has no current assignment in it, for every former member, and when the assigned level is no longer on the active ladder."
+    },
+    "MemberStage4DirectoryCounts": {
+      "type": "object",
+      "properties": {
+        "active": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Active members of the company; ignores the search, role, level and status filters."
+        },
+        "former": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Former members of the company; ignores the search, role, level and status filters."
+        },
+        "droveLast30Days": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Active members with at least one accepted canonical trip whose reportingAt lies in [windowEndsAt - 30 days, windowEndsAt], the rule of last30Days; ignores the filters. Absent, never zero, when accepted-trip facts are unavailable."
+        }
+      },
+      "required": [
+        "active",
+        "former"
+      ],
+      "additionalProperties": false,
+      "description": "Company-wide member totals returned on every page and read in the page's transaction."
     },
     "MemberStage4DirectoryListEnvelope": {
       "type": "object",

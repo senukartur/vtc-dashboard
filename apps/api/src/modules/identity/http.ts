@@ -351,6 +351,7 @@ export async function registerIdentityRoutes(
       cursor?: string;
       search?: string;
       role?: "trainee" | "driver" | "dispatcher" | "deputy_director" | "director";
+      status?: "active" | "former";
       ets2Level?: string;
       atsLevel?: string;
       sort?: "nickname" | "distance30d" | "trips30d" | "lastTrip";
@@ -370,6 +371,7 @@ export async function registerIdentityRoutes(
               type: "string",
               enum: ["trainee", "driver", "dispatcher", "deputy_director", "director"],
             },
+            status: { type: "string", enum: ["active", "former"] },
             ets2Level: levelId,
             atsLevel: levelId,
             sort: { type: "string", enum: ["nickname", "distance30d", "trips30d", "lastTrip"] },
