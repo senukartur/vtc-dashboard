@@ -132,11 +132,13 @@ test(
     await expect(page.locator(".trip-detail-meta")).toHaveText(
       "ETS2 · Telemetry · completed 10 Nov, 18:00",
     );
-    await expect(
-      page
-        .getByRole("navigation", { name: "Trip breadcrumb" })
-        .getByRole("link", { name: "Trips" }),
-    ).toHaveAttribute("href", "/account/trips");
+    // The shell breadcrumb is the only one; the page does not repeat it.
+    const crumb = page.getByRole("navigation", { name: "Breadcrumb", exact: true });
+    await expect(page.getByRole("main").getByRole("navigation")).toHaveCount(0);
+    await expect(crumb.getByRole("link", { name: "My trips", exact: true })).toHaveAttribute(
+      "href",
+      "/account/trips",
+    );
     await expect(tile(page, "Distance")).toContainText("812.4005 km");
     await expect(tile(page, "Distance")).toContainText("by telemetry");
     await expect(tile(page, "Distance")).not.toContainText("no telemetry");
@@ -257,9 +259,12 @@ test(
     const sender = fact(card, "From");
     await expect(sender).toContainText("Unknown company");
     await expect(sender).toContainText("fict_unknown_depot");
+    // Without a provider code the company counts as missing: the place reads as the city alone.
     const receiver = fact(card, "To");
-    await expect(receiver).toContainText("Unknown company");
-    await expect(receiver.locator(".trip-company-code")).toHaveCount(0);
+    await expect(receiver.locator(".trip-company")).toHaveCount(0);
+    await expect(receiver).not.toContainText("Unknown company");
+    await expect(receiver).not.toContainText("Not specified");
+    await expect(receiver).not.toContainText("·");
     await expect(page.locator(".company-logo")).toHaveCount(0);
     await expect(card.locator("img")).toHaveCount(0);
     const damage = fact(card, "Damage");
@@ -323,6 +328,14 @@ test(
     await page.reload();
     await loaded(page);
     await expect(fact(tripCard(page), "Damage")).toHaveText("0 % of cargo");
+
+    state.view = manualUnknown("no-company");
+    await page.reload();
+    await loaded(page);
+    const origin = fact(tripCard(page), "From");
+    await expect(origin.locator(".trip-company")).toHaveCount(0);
+    await expect(origin).not.toContainText("Not specified");
+    await expect(origin).not.toContainText("·");
     expect(logoRequests(requests)).toEqual([]);
   },
 );
@@ -487,9 +500,10 @@ test(
     await expect(page.locator(".trip-detail-meta")).toHaveText(
       "Trip #1044 · ETS2 · Manual report · completed 10 Nov, 18:00",
     );
-    await expect(page.getByRole("navigation", { name: "Trip breadcrumb" })).toHaveText(
-      "Trips/Trip #1044",
-    );
+    await expect(page.getByRole("main").getByRole("navigation")).toHaveCount(0);
+    // The effective fact names no receiving company, so the place is the city alone.
+    const receiver = fact(tripCard(page), "To");
+    await expect(receiver).toHaveText("Fictional Eastbrook");
     const fix = page.getByRole("link", { name: "Fix the report", exact: true });
     await expect(fix).toHaveAttribute("href", `/account/reports/${needsFixReportId}/edit`);
     const next = tile(page, "What next");
@@ -726,6 +740,21 @@ test(
             .length;
         });
         expect(statusLines).toBe(1);
+        // On phones only the primary action fills the row; secondary buttons keep their width.
+        const actions = await page.locator(".trip-detail-actions").boundingBox();
+        if (!actions) throw new Error("ACTIONS_NOT_RENDERED");
+        const buttons = await page.locator(".trip-detail-actions > .button").evaluateAll((items) =>
+          items.map((el) => ({
+            primary: el.classList.contains("button-primary"),
+            width: el.getBoundingClientRect().width,
+          })),
+        );
+        expect(buttons.some(({ primary }) => !primary)).toBe(true);
+        expect(buttons.some(({ primary }) => primary)).toBe(name === "needs-fix");
+        if (width <= 760)
+          for (const { primary, width: button } of buttons)
+            if (primary) expect(button).toBeGreaterThanOrEqual(actions.width - 1);
+            else expect(button).toBeLessThan(actions.width * 0.6);
         await capture(page, info, `trip-page-${name}-${locale}-${width}`);
       }
     }

@@ -57,7 +57,7 @@ export function telemetryWithEvent() {
 
 /** F2: a manual trip without an event; unknown companies, distance, damage and level. */
 export function manualUnknown(
-  variant: "no-level" | "no-check" | "event-exempt" | "zero-damage" = "no-level",
+  variant: "no-level" | "no-check" | "event-exempt" | "zero-damage" | "no-company" = "no-level",
 ) {
   const { envelope, view, facts } = stage4("manual-unresolved");
   view.summary.event = null;
@@ -72,6 +72,7 @@ export function manualUnknown(
       rules: [],
     };
   if (variant === "zero-damage") facts.cargoDamagePercent = 0;
+  if (variant === "no-company") facts.originCompany = null;
   return envelope;
 }
 

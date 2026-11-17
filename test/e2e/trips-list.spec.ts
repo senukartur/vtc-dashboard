@@ -506,8 +506,8 @@ test(
     await expect(page).toHaveURL(new RegExp(`/account/trips/${second}$`));
     await expect(
       page
-        .getByRole("navigation", { name: "Trip breadcrumb" })
-        .getByRole("link", { name: "Trips" }),
+        .getByRole("navigation", { name: "Breadcrumb", exact: true })
+        .getByRole("link", { name: "My trips", exact: true }),
     ).toHaveAttribute("href", "/account/trips");
     expectListParams(lists);
   },

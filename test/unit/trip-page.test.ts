@@ -425,7 +425,7 @@ test("unknown recorded values say whether telemetry recorded the trip at all", (
 
 test("every VTC-158 trip page key exists in both languages and is translated", () => {
   const pattern =
-    /^(breadcrumb|tripTitle|tripNumber|completedOn|driverName|fixReport|status_|summaryRegion|tile|distance(By|No|Unknown)|credited|next_|quoted|fact(From|To|Trailer|Started|Completed|Damage)$|damageOfCargo|eventNone|reported(Time|InfoLabel)|unknown(InfoLabel|Help)|history_|reasonOther|code_accepted_over_limits|technical|tripId|pendingProposalId|associateConfirmText|correctionConfirmText)/;
+    /^(tripTitle|tripNumber|completedOn|driverName|fixReport|status_|summaryRegion|tile|distance(By|No|Unknown)|credited|next_|quoted|fact(From|To|Trailer|Started|Completed|Damage)$|damageOfCargo|eventNone|reported(Time|InfoLabel)|unknown(InfoLabel|Help)|history_|reasonOther|code_accepted_over_limits|technical|tripId|pendingProposalId|associateConfirmText|correctionConfirmText)/;
   const keys = Object.keys(tripTranslations.en).filter((key) => pattern.test(key)) as Array<
     keyof typeof tripTranslations.en
   >;
