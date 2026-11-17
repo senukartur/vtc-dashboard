@@ -37,7 +37,7 @@ export function rangeText(
 export function adrText(t: T, limits: Limits) {
   if (limits.adr.mode === "forbidden") return t("adrForbidden");
   if (limits.adr.mode === "any") return t("adrAny");
-  return limits.adr.classes.join(", ");
+  return limits.adr.classes.join(", ") || t("adrSelected");
 }
 export function trailersText(t: T, limits: Limits) {
   if (limits.trailers.mode === "any") return t("trailersAny");
@@ -112,6 +112,9 @@ export function LimitList({ limits }: { limits: Limits }) {
         <dd>
           {limits.trailers.mode === "any" ? (
             t("trailersAny")
+          ) : limits.trailers.types.length === 0 ? (
+            // An editor draft before the first trailer type is added.
+            t("trailersSelected")
           ) : (
             <span className="qualification-chips">
               {limits.trailers.types.map((type) => (
@@ -126,7 +129,7 @@ export function LimitList({ limits }: { limits: Limits }) {
       <div>
         <dt>{t("adrLabel")}</dt>
         <dd>
-          {limits.adr.mode === "selected" ? (
+          {limits.adr.mode === "selected" && limits.adr.classes.length > 0 ? (
             <span className="qualification-chips">
               {limits.adr.classes.map((value) => (
                 <Badge key={value} className="badge-neutral">

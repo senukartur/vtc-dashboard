@@ -401,6 +401,7 @@ function ChangeDialog({
         <DialogDescription>{t("resetNote")}</DialogDescription>
         <form
           className="stack"
+          noValidate
           onSubmit={async (event) => {
             event.preventDefault();
             setTouched(true);
