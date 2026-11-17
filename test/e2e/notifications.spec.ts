@@ -900,8 +900,8 @@ for (const locale of ["en", "ru"] as const)
         notificationFixture({ id: nextId, target: null, messageKey: "UNKNOWN_PRIVATE_KEY" }),
         notificationFixture({
           id: "e0370000-0000-4000-8000-000000000003",
-          category: "promotion.review_required",
-          messageKey: "notifications.promotion.review_required",
+          category: "qualification.promoted",
+          messageKey: "notifications.qualification.promoted",
           target: { kind: "qualification", id: notificationId },
         }),
       ];
@@ -1266,8 +1266,8 @@ test(
     state.items = [
       notificationFixture({
         id: thirdId,
-        category: "promotion.review_required",
-        messageKey: "notifications.promotion.review_required",
+        category: "qualification.promoted",
+        messageKey: "notifications.qualification.promoted",
         occurredAt: "2026-10-29T09:00:00.000Z",
         target: { kind: "qualification", id: notificationId },
       }),
