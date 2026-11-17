@@ -6,7 +6,6 @@ import {
   inArray,
   isNotNull,
   isNull,
-  ne,
   qualificationAssignments,
   qualificationLevels,
 } from "@vtc/db/qualifications-schema";
@@ -69,20 +68,19 @@ export function createAssignments(
     return row?.id ?? null;
   }
   /**
-   * Off the first level a member is no longer a trainee (Trainee becomes Driver). Ladder edits can
-   * move the first level under a trainee, so every recheck applies the rule to the whole game.
+   * A ladder edit that makes another level first moves the former first level up under its
+   * members: they leave the first level, so a held Trainee role becomes Driver. Only members on
+   * that former first level are affected; a Trainee that staff set on another level stays.
    */
-  async function completeTrainees(tx: TxContext, game: Game) {
-    const lowest = await lowestLevel(tx, game);
-    if (!lowest) return;
+  async function completeFormerFirst(tx: TxContext, game: Game, formerFirst: string) {
+    if ((await lowestLevel(tx, game)) === formerFirst) return;
     const rows = await c(tx)
       .select({ userId: qualificationAssignments.userId })
       .from(qualificationAssignments)
       .where(
         and(
-          eq(qualificationAssignments.game, game),
+          eq(qualificationAssignments.levelId, formerFirst),
           isNull(qualificationAssignments.endedAt),
-          ne(qualificationAssignments.levelId, lowest),
         ),
       )
       .orderBy(asc(qualificationAssignments.userId))
@@ -95,9 +93,10 @@ export function createAssignments(
         await ports.identity.completeTraineeAsSystemInTransaction(tx, userId, null);
   }
   /**
-   * Close the member's open assignment (if any) and open one on levelId. A promotion or manual
-   * change onto any level other than the first completes a trainee, and so does a removal of the
-   * first level. Writes the audit entry and the outbox event in the caller transaction.
+   * Close the member's open assignment (if any) and open one on levelId. A promotion, manual
+   * change or removal transfer that leaves the current first level completes a trainee; a
+   * Trainee that staff set on a later level stays one. Writes the audit entry and the outbox
+   * event in the caller transaction.
    */
   async function assign(
     tx: TxContext,
@@ -142,14 +141,12 @@ export function createAssignments(
       previousAssignmentId: previous?.id ?? null,
     };
     await c(tx).insert(qualificationAssignments).values(row);
-    const lowest =
-      input.kind === "promotion" || input.kind === "manual" || input.kind === "level_removed"
-        ? await lowestLevel(tx, input.game)
-        : undefined;
-    if (
-      lowest !== undefined &&
-      (input.kind === "level_removed" ? previous?.levelId === lowest : input.levelId !== lowest)
-    )
+    const leaving =
+      (input.kind === "promotion" || input.kind === "manual" || input.kind === "level_removed") &&
+      previous &&
+      previous.levelId !== input.levelId &&
+      previous.levelId === (await lowestLevel(tx, input.game));
+    if (leaving)
       await ports.identity.completeTraineeAsSystemInTransaction(tx, input.userId, input.actorId);
     const promoted = input.kind === "promotion";
     await audit.append(tx, {
@@ -239,10 +236,16 @@ export function createAssignments(
       return promote(tx, rows, companyId);
     },
     /**
-     * After a ladder edit: lock every open assignment of the game, promote qualifying ones, then
-     * complete the trainees who are no longer on the first level.
+     * After a ladder edit: lock every open assignment of the game, complete the trainees on
+     * formerFirst (the first level before a create, move or removal) when it is no longer first,
+     * then promote qualifying ones.
      */
-    async recheckGameInTransaction(tx: TxContext, game: Game, companyId: string | null) {
+    async recheckGameInTransaction(
+      tx: TxContext,
+      game: Game,
+      companyId: string | null,
+      formerFirst?: string,
+    ) {
       const rows = await c(tx)
         .select()
         .from(qualificationAssignments)
@@ -251,9 +254,8 @@ export function createAssignments(
         )
         .orderBy(asc(qualificationAssignments.userId))
         .for("update");
-      const promoted = await promote(tx, rows, companyId);
-      await completeTrainees(tx, game);
-      return promoted;
+      if (formerFirst) await completeFormerFirst(tx, game, formerFirst);
+      return promote(tx, rows, companyId);
     },
     /** Open assignments on the given levels, locked, ordered by member. */
     async openOnLevelsInTransaction(tx: TxContext, levelIds: string[]) {

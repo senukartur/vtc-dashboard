@@ -794,7 +794,12 @@ export function createQualifications(
           [],
           { before: null, after: values(name, input.position, limits, conditions) },
         );
-        const promotedCount = await assignments.recheckGameInTransaction(tx, input.game, companyId);
+        const promotedCount = await assignments.recheckGameInTransaction(
+          tx,
+          input.game,
+          companyId,
+          ladder[0]?.id,
+        );
         return { level: await detail(tx, actor, level.id, true), promotedCount };
       });
     },
@@ -881,7 +886,12 @@ export function createQualifications(
             instant,
           );
         }
-        const promotedCount = await assignments.recheckGameInTransaction(tx, level.game, companyId);
+        const promotedCount = await assignments.recheckGameInTransaction(
+          tx,
+          level.game,
+          companyId,
+          ladder[0]?.id,
+        );
         return { level: await detail(tx, actor, level.id, true), promotedCount };
       });
     },
@@ -927,7 +937,12 @@ export function createQualifications(
           target.id,
           instant,
         );
-        const promotedCount = await assignments.recheckGameInTransaction(tx, level.game, companyId);
+        const promotedCount = await assignments.recheckGameInTransaction(
+          tx,
+          level.game,
+          companyId,
+          ladder[0]?.id,
+        );
         return { transferLevel: await detail(tx, actor, target.id, true), promotedCount };
       });
     },

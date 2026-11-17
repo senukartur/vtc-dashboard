@@ -34,7 +34,7 @@ Each decision stores a snapshot of the level name, edit version, limits and rule
 
 Lock order is company, then sorted members, then assignments, then contributions. The unique open marker and predecessor indexes are the database backstop, so two concurrent credits produce exactly one promotion.
 
-Leaving the first level in either game, whether by promotion, manual change or removal transfer, replaces a held Trainee role with Driver through the identity-owned same-transaction facade. A create or move that changes which level is first does the same for trainees whose level is no longer first.
+Leaving the first level in either game, whether by promotion, manual change or removal transfer, replaces a held Trainee role with Driver through the identity-owned same-transaction facade. `assign()` applies it only when the closed assignment was on the first level at that moment. A create, move or removal passes the first level from before the edit to `recheckGameInTransaction`; when that level is no longer first, Trainees with an open assignment on it are completed before promotion runs. Nothing else changes roles, so a Trainee that staff set on a later level stays one through renames, limit edits, unrelated reorders and promotions.
 
 ## Commands and reads
 

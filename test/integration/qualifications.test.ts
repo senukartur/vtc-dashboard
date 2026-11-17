@@ -628,9 +628,9 @@ test("a create or move that pushes the top level down needs that level's conditi
   expect((await create(5)).level.position).toBe(5);
 });
 
-test("a trainee who is no longer on the first level becomes a driver, also after a reorder", async () => {
+test("trainees on the first level become drivers when a create or move makes another level first", async () => {
   const second = await member(["trainee"]);
-  // A new first level puts both trainees on the second level: the recheck completes them.
+  // A new first level moves the former first level up under both trainees: they leave it.
   const created = await service.create(director, {
     game: "ets2",
     position: 1,
@@ -649,15 +649,6 @@ test("a trainee who is no longer on the first level becomes a driver, also after
     [owner.userId],
   );
   expect(completion).toEqual({ actor_kind: "system", reason: "automatic_promotion" });
-  // A trainee stranded off the first level by earlier data is completed by the next promotion.
-  await configure(0, { requiredTrips: 1, requiredDistanceM: null });
-  await control.query("DELETE FROM identity_roles WHERE user_id=?", [owner.userId]);
-  await control.query("INSERT INTO identity_roles (user_id, role) VALUES (?, 'trainee')", [
-    owner.userId,
-  ]);
-  expect((await replace([await credit()])).promotedCount).toBe(1);
-  expect(await openLevel()).toEqual([{ levelId: levelId(1), kind: "promotion" }]);
-  expect(await rolesOf(owner.userId)).toEqual(["driver"]);
   // Moving the first level up the ladder completes the trainees left on it.
   const third = await member(["trainee"]);
   expect(await openLevel(third.userId)).toEqual([{ levelId: created.level.id, kind: "admission" }]);
@@ -665,6 +656,58 @@ test("a trainee who is no longer on the first level becomes a driver, also after
   await service.move(director, first.id, { expectedVersion: first.version, position: 3 });
   expect(await openLevel(third.userId)).toEqual([{ levelId: created.level.id, kind: "admission" }]);
   expect(await rolesOf(third.userId)).toEqual(["driver"]);
+});
+
+test("a Trainee that staff set on a later level stays one through edits, reorders and promotions", async () => {
+  await service.changeMember(director, owner.userId, "ets2", {
+    levelId: levelId(2),
+    reason: "Fictional experienced trainee",
+  });
+  // The manual change left the first level; then the director sets Trainee directly (policy 43).
+  expect(await rolesOf(owner.userId)).toEqual(["driver"]);
+  const [membership] = await rows<{ version: number }>(
+    "SELECT version FROM identity_memberships WHERE user_id=?",
+    [owner.userId],
+  );
+  await identity.administer(director, owner.userId, newId(), Number(membership?.version), {
+    kind: "membership",
+    membership: "trainee",
+    reason: "Fictional mentoring period",
+  });
+  expect(await rolesOf(owner.userId)).toEqual(["trainee"]);
+  // A rename, a limit edit and a reorder that keeps the first level change nothing.
+  const third = await service.detail(director, levelId(2));
+  await service.update(director, third.id, {
+    expectedVersion: third.version,
+    name: "Fictional renamed third",
+    limits: openLimits,
+    conditions: { requiredTrips: 1, requiredDistanceM: null },
+  });
+  const renamed = await service.detail(director, levelId(2));
+  await service.update(director, renamed.id, {
+    expectedVersion: renamed.version,
+    name: renamed.name,
+    limits: { ...openLimits, massMaxKg: "30000" },
+    conditions: renamed.conditions,
+  });
+  await configure(3, { requiredTrips: 5, requiredDistanceM: null });
+  const added = await service.create(director, {
+    game: "ets2",
+    position: 5,
+    name: "Fictional fifth",
+    limits: openLimits,
+    conditions: { requiredTrips: 5, requiredDistanceM: null },
+  });
+  await service.move(director, added.level.id, {
+    expectedVersion: added.level.version,
+    position: 4,
+  });
+  expect(await openLevel()).toEqual([{ levelId: levelId(2), kind: "manual" }]);
+  expect(await rolesOf(owner.userId)).toEqual(["trainee"]);
+  // An automatic promotion from the third level to the fourth does not leave the first level.
+  expect((await replace([await credit()])).promotedCount).toBe(1);
+  expect(await openLevel()).toEqual([{ levelId: added.level.id, kind: "promotion" }]);
+  expect(await rolesOf(owner.userId)).toEqual(["trainee"]);
 });
 
 test("a manual change needs a reason, is audited and refuses the current level", async () => {

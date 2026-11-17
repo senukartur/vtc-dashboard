@@ -131,9 +131,9 @@ Qualifications remain separate for ETS2 and ATS. Both ladders start with **Train
 - A pending trip is checked against that level's current limits. The decision stores the level name, limits and results, so later edits never change a decided trip.
 - Progress counts credited trips and their actual distance on the current level, from the moment the level was assigned in that game. Trips from earlier levels stay in statistics but do not count again.
 - Promotion is automatic: when a credited trip, or a level edit that lowers the conditions, makes the driver meet every set condition, the driver moves to the next level at once. The change is audited and the driver is notified.
-- Leaving the first level in either game, by promotion, manual change or removal transfer, changes a held Trainee role to Driver. Other global roles and the other game's level stay as recorded. The director or deputy may also set Trainee or Driver directly without changing any level.
+- Leaving the first level in either game, by promotion, manual change or removal transfer, changes a held Trainee role to Driver. Only leaving the first level does this: a Trainee that the director or deputy set on a later level stays a Trainee through level edits, reorders and promotions. Other global roles and the other game's level stay as recorded. The director or deputy may also set Trainee or Driver directly without changing any level.
 - The director or deputy may change a member's level manually with a comment. The change is audited.
-- Reordering keeps current assignments. A trainee whose level is no longer first after a reorder or a new first level becomes a Driver. Removing a level moves its drivers to an explicitly selected level in the same game, which may be lower, after staff review the affected driver count. Removed levels stay in history.
+- Reordering keeps current assignments. When a new level or a move makes another level first, the members on the former first level have left the first level, so a held Trainee role becomes Driver. Removing a level moves its drivers to an explicitly selected level in the same game, which may be lower, after staff review the affected driver count. Removed levels stay in history.
 - A corrected or revoked trip recalculates statistics and progress but never demotes a driver.
 
 ## Qualification exceptions for company events
