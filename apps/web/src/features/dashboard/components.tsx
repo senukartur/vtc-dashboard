@@ -1,7 +1,7 @@
-import { type ReactNode, useId, useRef, useState } from "react";
+import { type ReactNode, type Ref, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Bar, BarChart, CartesianGrid, Cell, XAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Tooltip, XAxis } from "recharts";
 import {
   chartGeometry,
   formatDecimal,
@@ -12,19 +12,34 @@ import {
 import { ChartContainer } from "../../shared/ui/chart.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
-import { progressPercent } from "./model.js";
+import {
+  bucketLabel,
+  bucketsSpanYears,
+  type CalendarRange,
+  type Delta,
+  inclusiveRangeLabel,
+  progressPercent,
+} from "./model.js";
 import type { DTO } from "./transport.js";
 import {
   activeDriversView,
+  averageTripM,
+  type DeltaLine,
+  formatPercent,
   gameSplit,
+  type KpiDeltas,
   type LeaderboardRow,
   leaderboardRows,
-  type PlaceView,
   type QueryView,
 } from "./view-model.js";
 import "./dashboard.css";
 
 type AnalyticsData = DTO["AnalyticsStage4Company"];
+/** What the distance chart reads; company and member analytics both satisfy it. */
+export type ChartAnalytics = Pick<
+  DTO["Analytics"],
+  "granularity" | "buckets" | "reportingTimezone" | "computedAt"
+>;
 type LeaderboardData = DTO["ListLeaderboardEntry"];
 type ProgressData = DTO["MyQualification"] | null;
 
@@ -38,18 +53,63 @@ export function Skeleton({ className }: { className?: string }) {
   );
 }
 
+/** "+8%", "−12", "<1%": the sign is text, so the change never relies on colour alone. */
+export function deltaChange(delta: Extract<Delta, { difference: string }>, locale: Locale) {
+  const sign = delta.kind === "up" ? "+" : delta.kind === "down" ? "−" : "";
+  if (delta.percent === null) return `${sign}${formatDecimal(delta.difference, locale)}`;
+  return delta.lessThanOne
+    ? `${sign}<${formatPercent(1, locale)}`
+    : `${sign}${formatPercent(delta.percent, locale)}`;
+}
+
+/**
+ * A KPI's comparison with the previous period. The first tile shows the whole sentence
+ * ("+8% vs 1–17 Oct"); the others show the change and keep the period for screen readers only.
+ */
+function DeltaLineView({
+  line,
+  range,
+  locale,
+  compact,
+}: {
+  line: DeltaLine;
+  range: CalendarRange | null;
+  locale: Locale;
+  compact: boolean;
+}) {
+  const { t } = useTranslation("dashboard");
+  if (line === null) return null;
+  if (line === "pending")
+    return <dd className="dashboard-kpi-delta dashboard-kpi-delta-reserve" aria-hidden="true" />;
+  if (line.kind === "unavailable")
+    return <dd className="dashboard-kpi-delta">{t("delta.unavailable")}</dd>;
+  const period = range ? inclusiveRangeLabel(range, locale, "short") : "";
+  const [shown, rest] =
+    line.kind === "noBaseline"
+      ? [t("delta.noData"), t("delta.noDataFor", { range: period })]
+      : [deltaChange(line, locale), t("delta.against", { range: period })];
+  return (
+    <dd
+      className={`dashboard-kpi-delta${line.kind === "noBaseline" ? "" : ` dashboard-delta-${line.kind}`}`}
+    >
+      {shown} <span className={compact ? "visually-hidden" : undefined}>{rest}</span>
+    </dd>
+  );
+}
+
 export function KpiStrip({
   analytics,
   analyticsPending,
-  place,
-  leaderboardPending,
+  deltas,
+  previousRange,
   locale,
 }: {
   analytics: AnalyticsData | undefined;
   analyticsPending: boolean;
-  /** The viewer's place from the leaderboard read (see `placeView`). */
-  place: PlaceView;
-  leaderboardPending: boolean;
+  /** Each tile's comparison with the previous period (see `companyDeltas`). */
+  deltas: KpiDeltas | undefined;
+  /** The previous period, or null for all time (no comparison). */
+  previousRange: CalendarRange | null;
   locale: Locale;
 }) {
   const { t } = useTranslation("dashboard");
@@ -58,6 +118,7 @@ export function KpiStrip({
   // Shown values come from the latest data; an absent value is unavailable, never zero.
   const split = analytics ? gameSplit(analytics) : null;
   const drivers = analytics ? activeDriversView(analytics) : null;
+  const average = analytics ? averageTripM(analytics) : null;
   // Each game is one unit, so a narrow tile wraps the split at the separator only (two lines).
   const splitText = (ets2: string, ats: string) => (
     <>
@@ -66,7 +127,12 @@ export function KpiStrip({
       <span className="dashboard-kpi-part">ATS {ats}</span>
     </>
   );
-  const items: { key: string; label: string; value: string | undefined; sub?: ReactNode }[] = [
+  const items: {
+    key: keyof KpiDeltas;
+    label: string;
+    value: string | undefined;
+    sub?: ReactNode;
+  }[] = [
     {
       key: "distance",
       label: t("metrics.totalDistance"),
@@ -84,6 +150,12 @@ export function KpiStrip({
       }),
     },
     {
+      key: "average",
+      label: t("metrics.averageTrip"),
+      value: analytics ? (average === null ? t("metrics.noAverage") : km(average)) : undefined,
+      ...(analytics && { sub: t("metrics.averageSub") }),
+    },
+    {
       key: "drivers",
       label: t("metrics.activeDrivers"),
       value: drivers
@@ -96,39 +168,16 @@ export function KpiStrip({
           sub: t("metrics.activeMembers", { members: number(drivers.members) }),
         }),
     },
-    {
-      key: "place",
-      label: t("metrics.myPlace"),
-      ...(place.kind === "ranked"
-        ? {
-            value:
-              place.ranked === undefined
-                ? number(place.position)
-                : t("metrics.placeOf", {
-                    position: number(place.position),
-                    ranked: number(place.ranked),
-                  }),
-            sub: t("metrics.placeTotals", {
-              distance: km(place.actualDistanceM),
-              trips: number(place.acceptedTrips),
-            }),
-          }
-        : place.kind === "notRanked"
-          ? { value: t("metrics.notRanked"), sub: t("metrics.noTrips") }
-          : {
-              value: place.kind === "unavailable" ? formatDecimal(null, locale) : undefined,
-            }),
-    },
   ];
 
   return (
     <section
       className="dashboard-kpis"
       aria-label={t("metrics.label")}
-      aria-busy={analyticsPending || leaderboardPending}
+      aria-busy={analyticsPending}
     >
       <dl>
-        {items.map((item) => (
+        {items.map((item, index) => (
           <div key={item.key} className="dashboard-kpi">
             <dt>{item.label}</dt>
             <dd className="dashboard-kpi-value">{item.value ?? <Skeleton />}</dd>
@@ -140,6 +189,21 @@ export function KpiStrip({
                 <dd className="dashboard-kpi-sub-reserve" aria-hidden="true" />
               )
             )}
+            {item.value === undefined ? (
+              previousRange && (
+                <dd
+                  className="dashboard-kpi-delta dashboard-kpi-delta-reserve"
+                  aria-hidden="true"
+                />
+              )
+            ) : (
+              <DeltaLineView
+                line={deltas?.[item.key] ?? null}
+                range={previousRange}
+                locale={locale}
+                compact={index > 0}
+              />
+            )}
           </div>
         ))}
       </dl>
@@ -149,31 +213,68 @@ export function KpiStrip({
 
 type ChartView = "chart" | "table";
 
+/** Decorative hover details; the Table view is the accessible alternative. */
+function ChartTooltip({
+  active,
+  point,
+  locale,
+}: {
+  active: boolean;
+  point: { full: string; exactDistance: string; trips: number } | undefined;
+  locale: Locale;
+}) {
+  const { t } = useTranslation("dashboard");
+  if (!active || !point) return null;
+  return (
+    <div className="dashboard-chart-tooltip">
+      <strong>{point.full}</strong>
+      <span>{formatQuantity(point.exactDistance, "km", locale)}</span>
+      <span>{t("chart.tooltipTrips", { trips: formatDecimal(String(point.trips), locale) })}</span>
+    </div>
+  );
+}
+
 export function ActualDistanceChart({
   analytics,
   pending,
   locale,
   displayTimezone,
-  granularity,
+  title,
+  granularity = "day",
   onGranularityChange,
   showGranularity = true,
+  failure,
+  headingRef,
 }: {
-  analytics: AnalyticsData | undefined;
+  analytics: ChartAnalytics | undefined;
   pending: boolean;
   locale: Locale;
   displayTimezone: string;
-  granularity: "day" | "month";
-  onGranularityChange: (g: "day" | "month") => void;
+  /** The card heading; the company chart keeps its default title. */
+  title?: string;
+  granularity?: "day" | "month";
+  /** Without a handler the card has no Interval control (My overview: days only). */
+  onGranularityChange?: (g: "day" | "month") => void;
   /** False for all time, which only has month buckets; the chosen interval is kept. */
   showGranularity?: boolean;
+  /** Shown in the body when the read failed without data (My overview has no page alert). */
+  failure?: ReactNode;
+  /** Makes the heading programmatically focusable, the focus target of a successful Retry. */
+  headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const { t } = useTranslation("dashboard");
   const headingId = useId();
   const captionId = useId();
   const [view, setView] = useState<ChartView>("chart");
 
-  const points = (analytics?.buckets ?? []).map((b) => ({
+  // Labels follow the buckets the response actually has, never the requested interval.
+  const step = analytics?.granularity ?? "day";
+  const buckets = analytics?.buckets ?? [];
+  const spansYears = bucketsSpanYears(buckets);
+  const points = buckets.map((b) => ({
     date: b.date,
+    axis: bucketLabel(b.date, step, locale, "axis", spansYears),
+    full: bucketLabel(b.date, step, locale, "full"),
     value: chartGeometry(b.actualDistanceM) ?? 0,
     exactDistance: b.actualDistanceM,
     trips: b.acceptedTrips,
@@ -181,9 +282,12 @@ export function ActualDistanceChart({
   const maxValue = Math.max(...points.map((p) => p.value), 0);
   const isPeak = (value: number) => value === maxValue && maxValue > 0;
   const peak = points.find((p) => isPeak(p.value));
+  const axisLabel = new Map(points.map((p) => [p.date, p.axis]));
 
   let body: ReactNode;
-  if (pending || !analytics) {
+  if (failure && !analytics) {
+    body = <div className="dashboard-chart-body dashboard-chart-failure">{failure}</div>;
+  } else if (pending || !analytics) {
     body = <div className="dashboard-chart-body dashboard-chart-skeleton" aria-hidden="true" />;
   } else if (points.length === 0) {
     body = (
@@ -205,7 +309,21 @@ export function ActualDistanceChart({
               dataKey="date"
               tickLine={false}
               axisLine={false}
+              interval="preserveStartEnd"
+              minTickGap={12}
+              tickFormatter={(value: string) => axisLabel.get(value) ?? ""}
               tick={{ fill: "var(--muted)", fontSize: 11 }}
+            />
+            <Tooltip
+              isAnimationActive={false}
+              cursor={{ fill: "var(--surface-active)" }}
+              content={({ active, payload }) => (
+                <ChartTooltip
+                  active={active}
+                  point={payload?.[0]?.payload as (typeof points)[number] | undefined}
+                  locale={locale}
+                />
+              )}
             />
             <Bar dataKey="value" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={48}>
               {points.map((entry) => (
@@ -220,7 +338,7 @@ export function ActualDistanceChart({
         <figcaption className="dashboard-chart-caption">
           {peak
             ? t("chart.peakSummary", {
-                date: peak.date,
+                date: peak.full,
                 distance: formatQuantity(peak.exactDistance, "km", locale),
               })
             : t("chart.tableHint")}
@@ -251,7 +369,7 @@ export function ActualDistanceChart({
               {points.map((p) => (
                 <tr key={p.date}>
                   <th scope="row">
-                    {p.date}
+                    <time dateTime={p.date}>{p.full}</time>
                     {isPeak(p.value) && (
                       <Badge size="xs" className="dashboard-peak-badge">
                         {t("chart.highestPeriod")}
@@ -272,9 +390,11 @@ export function ActualDistanceChart({
   return (
     <Card className="dashboard-chart" aria-labelledby={headingId}>
       <div className="dashboard-card-head">
-        <h2 id={headingId}>{t("chart.title")}</h2>
+        <h2 id={headingId} ref={headingRef} tabIndex={headingRef ? -1 : undefined}>
+          {title ?? t("chart.title")}
+        </h2>
         <div className="dashboard-card-controls">
-          {showGranularity && (
+          {showGranularity && onGranularityChange && (
             <SegmentedControl
               aria-label={t("chart.granularity")}
               value={granularity}
@@ -555,10 +675,13 @@ export function MyQualificationWidget({
   ets2Progress,
   atsProgress,
   available,
+  games = ["ets2", "ats"],
 }: {
   ets2Progress: QueryView<ProgressData>;
   atsProgress: QueryView<ProgressData>;
   available: boolean;
+  /** Games to show, in order: My overview follows its game filter. */
+  games?: readonly ("ets2" | "ats")[];
 }) {
   const { t, i18n } = useTranslation("dashboard");
   const locale = (i18n.resolvedLanguage === "en" ? "en" : "ru") as Locale;
@@ -572,48 +695,15 @@ export function MyQualificationWidget({
           {t("myQualification.qualificationsLink")}
         </Link>
       </div>
-      <QualificationGame label="ETS2" query={ets2Progress} available={available} locale={locale} />
-      <QualificationGame label="ATS" query={atsProgress} available={available} locale={locale} />
-    </Card>
-  );
-}
-
-/**
- * The overview's review queue count. It is the workspace summary's exact count of trips the viewer
- * can decide, without the viewer's own, so it always agrees with the dispatch header and the menu.
- * A summary without the queue (no access) hides the card.
- */
-export function ReviewerQueueWidget({
-  summary,
-  locale,
-}: {
-  summary: { data: DTO["WorkspaceSummary"] | undefined; isError: boolean };
-  locale: Locale;
-}) {
-  const { t } = useTranslation("dashboard");
-  const headingId = useId();
-  const queue = summary.data?.reviewQueue;
-  if (summary.data && !queue) return null;
-
-  return (
-    <Card className="dashboard-side-card" aria-labelledby={headingId}>
-      <div className="dashboard-card-head">
-        <h2 id={headingId}>{t("reviewQueue.title")}</h2>
-      </div>
-      {queue ? (
-        <p className="dashboard-muted">
-          {queue.count > 0
-            ? `${t("reviewQueue.pendingCount")}: ${formatDecimal(String(queue.count), locale)}`
-            : t("reviewQueue.noPending")}
-        </p>
-      ) : summary.isError ? (
-        <p className="dashboard-muted">{t("reviewQueue.error")}</p>
-      ) : (
-        <Skeleton className="dashboard-skeleton-line" />
-      )}
-      <Link to="/account/review" className="dashboard-head-link">
-        {t("reviewQueue.reviewLink")}
-      </Link>
+      {games.map((game) => (
+        <QualificationGame
+          key={game}
+          label={game === "ets2" ? "ETS2" : "ATS"}
+          query={game === "ets2" ? ets2Progress : atsProgress}
+          available={available}
+          locale={locale}
+        />
+      ))}
     </Card>
   );
 }

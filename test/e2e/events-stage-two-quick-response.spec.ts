@@ -300,7 +300,7 @@ test(
     const detailOwnReads = ownReads;
     await page
       .getByRole("navigation", { name: "Main navigation" })
-      .getByRole("link", { name: "Overview", exact: true })
+      .getByRole("link", { name: "My overview", exact: true })
       .click();
     const overview = page.getByRole("region", { name: "Upcoming Event" });
     await expect(overview).toContainText("Going: 5");

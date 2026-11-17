@@ -1,11 +1,14 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
-import { computePeriodDates } from "../../apps/web/src/features/dashboard/model.ts";
+import {
+  averageDistanceM,
+  bucketLabel,
+  computePeriodDates,
+  previousPeriodQuery,
+} from "../../apps/web/src/features/dashboard/model.ts";
 import { formatQuantity } from "../../apps/web/src/shared/formatting.ts";
 import {
   type DashboardMockState,
-  levelIdAts,
-  levelIdEts2,
   makeFilteredAnalyticsFixture,
   mockDashboardRoutes,
 } from "./support/dashboard-ui.ts";
@@ -14,21 +17,19 @@ import { switchLanguage } from "./support/locale.ts";
 
 const kpis = (page: Page) =>
   page.getByRole("region", { name: /^(Key metrics|Ключевые показатели)$/ });
-/** The value of each KPI tile; a tile may add a sub-line as a second definition. */
+/** The value of each KPI tile; a tile may add a sub-line and a comparison as more definitions. */
 const kpiValues = (page: Page) => kpis(page).locator("dd.dashboard-kpi-value");
 const kpiSubs = (page: Page) => kpis(page).locator("dd.dashboard-kpi-sub");
+const kpiDeltas = (page: Page) => kpis(page).locator("dd.dashboard-kpi-delta");
 const chartCard = (page: Page) =>
   page.getByRole("region", { name: /^(Distance Dynamics|Динамика пробега)$/ });
 const leaderboardCard = (page: Page) =>
   page.getByRole("region", { name: /^(Driver Leaderboard|Таблица лидеров)$/ });
-const qualificationCard = (page: Page) =>
-  page.getByRole("region", { name: /^(My Qualification|Моя квалификация)$/ });
-const eventCard = (page: Page) =>
-  page.getByRole("region", { name: /^(Upcoming Event|Ближайшее мероприятие)$/ });
-const reviewCard = (page: Page) =>
-  page.getByRole("region", { name: /^(Review Queue|Очередь проверки)$/ });
-const recentTripsCard = (page: Page) =>
-  page.getByRole("region", { name: /^(Recent company trips|Последние рейсы компании)$/ });
+/** Blocks of My overview that the company overview no longer shows (VTC-159). */
+const personalBlocks = (page: Page) =>
+  page.getByRole("region", {
+    name: /^(My Qualification|Моя квалификация|Upcoming Event|Ближайшее мероприятие|Recent trips|Последние рейсы|Needs attention|Нужно сделать)$/,
+  });
 const routesCard = (page: Page) =>
   page.getByRole("region", { name: /^(Popular routes|Популярные маршруты)$/ });
 const cargoCard = (page: Page) =>
@@ -38,8 +39,6 @@ const sourceCard = (page: Page) =>
 /** Ranked route or cargo rows of a breakdown card. */
 const breakdownItems = (card: Locator) => card.locator(".dashboard-breakdown-list > li");
 const breakdownApi = "/api/v1/analytics/company/breakdown";
-const responseGroup = (page: Page) =>
-  eventCard(page).getByRole("group", { name: /^(Your response|Ваш ответ)$/ });
 const gameGroup = (page: Page) => page.getByRole("group", { name: /^(Game|Игра)$/ });
 const periodSelect = (page: Page) => page.getByRole("combobox", { name: /^(Period|Период)$/ });
 const loadingStatus = (page: Page) =>
@@ -70,10 +69,20 @@ function lastRequest(state: DashboardMockState, path: string) {
   return state.requests.filter((url) => url.pathname === path).at(-1);
 }
 const statsPath = "/api/v1/public/company-stats";
-const periodPaths = ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"] as const;
-// Overview reads gated on the reporting timezone besides the period reads (recent trips read
-// /trips; the review queue card uses the workspace summary).
-const secondaryPaths = ["/api/v1/me/qualifications", "/api/v1/trips"] as const;
+const analyticsPath = "/api/v1/analytics/company";
+const leaderboardPath = "/api/v1/analytics/leaderboard";
+const periodPaths = [analyticsPath, leaderboardPath] as const;
+// Reads of My overview that the company overview never makes (VTC-159).
+const personalPaths = [
+  "/api/v1/me/qualifications",
+  "/api/v1/trips",
+  "/api/v1/me/trip-status-summary",
+] as const;
+/** Clock and previous period of the KPI comparisons: 17 November against 1–17 October. */
+const comparisonNow = new Date("2026-11-17T09:00:00.000Z");
+const previousKey = "2026-10-01..2026-10-18";
+/** October with 40 trips, 116,000 km and 3 drivers: +8%, +2, +3% and −1 against the fixture. */
+const previousOctober = { acceptedTrips: 40, actualDistanceM: "116000000", activeDrivers: 3 };
 /** Period requests to one or both period endpoints, optionally for one date range. */
 function periodRequests(
   state: DashboardMockState,
@@ -88,6 +97,21 @@ function periodRequests(
       (toDateExclusive === undefined ||
         url.searchParams.get("toDateExclusive") === toDateExclusive),
   );
+}
+/**
+ * After a Retry with the Moscow zone: November reads of both period endpoints and one comparison
+ * with the same elapsed day of October, never the UTC fallback dates.
+ */
+async function expectMoscowReads(state: DashboardMockState, before: number) {
+  const after = () => periodRequests({ ...state, requests: state.requests.slice(before) });
+  await expect.poll(() => after().length).toBe(3);
+  for (const path of periodPaths)
+    expect(
+      periodRequests({ ...state, requests: after() }, path, "2026-11-01", "2026-12-01"),
+    ).toHaveLength(1);
+  expect(
+    periodRequests({ ...state, requests: after() }, analyticsPath, "2026-10-01", "2026-10-02"),
+  ).toHaveLength(1);
 }
 async function box(locator: Locator) {
   const value = await locator.boundingBox();
@@ -115,14 +139,16 @@ async function activate(page: Page, target: Locator, touch: boolean) {
 
 test.describe("Company Dashboard E2E", () => {
   test(
-    "loads the compact overview with KPIs, distance chart and existing-data widgets",
+    "loads the company KPIs with comparisons, distance chart and top drivers",
     browserCase(["@layout"]),
     async ({ page }, info) => {
-      await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
+      await page.clock.setFixedTime(comparisonNow);
+      const state = await mockDashboardRoutes(page);
+      state.companyAnalyticsByRange[previousKey] = previousOctober;
+      await page.goto("/account/company");
 
       await expect(
-        page.getByRole("heading", { name: "Company Overview", exact: true }),
+        page.getByRole("heading", { name: "Company overview", exact: true }),
       ).toBeVisible();
       await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
       await expect(
@@ -135,15 +161,34 @@ test.describe("Company Dashboard E2E", () => {
       await expect(metrics.getByRole("term")).toHaveText([
         "Actual distance",
         "Accepted trips",
+        "Average trip",
         "Active drivers",
-        "My place",
       ]);
-      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2", "Not ranked"]);
-      await expect(metrics.locator("dd.dashboard-kpi-sub")).toHaveText([
+      // 125,430 km over 42 trips: 2,986.43 km, shown in whole kilometres.
+      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2,986 km", "2"]);
+      await expect(kpiSubs(page)).toHaveText([
         "ETS2 61,430 km · ATS 64,000 km",
         "ETS2 20 · ATS 22",
+        "per accepted trip",
         "Active members: 5",
-        "No accepted trips for the period",
+      ]);
+      // Each KPI against 1–17 October; only the first tile shows the period, the others keep
+      // it for screen readers.
+      await expect(kpiDeltas(page)).toHaveText([
+        /^\+8% vs 1\s?–\s?17 Oct$/,
+        /^\+2 vs 1\s?–\s?17 Oct$/,
+        /^\+3% vs 1\s?–\s?17 Oct$/,
+        /^−1 vs 1\s?–\s?17 Oct$/,
+      ]);
+      await expect(kpiDeltas(page).first().getByText(/^vs 1/)).toBeVisible();
+      await expect(kpiDeltas(page).nth(1).locator(".visually-hidden")).toHaveText(
+        /^vs 1\s?–\s?17 Oct$/,
+      );
+      await expect(kpiDeltas(page)).toHaveClass([
+        /dashboard-delta-up/,
+        /dashboard-delta-up/,
+        /dashboard-delta-up/,
+        /dashboard-delta-down/,
       ]);
 
       await expect(
@@ -153,25 +198,12 @@ test.describe("Company Dashboard E2E", () => {
 
       await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
       await expect(leaderboardCard(page).getByRole("link", { name: "BetaHauler" })).toBeVisible();
-      await expect(
-        qualificationCard(page).getByRole("link", { name: "All qualifications" }),
-      ).toBeVisible();
-      await expect(reviewCard(page).getByRole("link", { name: "Go to review" })).toBeVisible();
-      await expect(
-        eventCard(page).getByRole("heading", { name: "Autumn Yukon Convoy 2026", exact: true }),
-      ).toBeVisible();
-      await expect(eventCard(page)).toContainText("(UTC)");
-
-      // The convoy quick response and recent company trips come from existing reads (VTC-055).
-      await expect(responseGroup(page).getByRole("button")).toHaveText(["Going", "Can't go"]);
-      await expect(eventCard(page).getByText("Going: 8", { exact: true })).toBeVisible();
-      await expect(recentTripsCard(page).getByRole("listitem")).toHaveCount(5);
-      await expect(
-        recentTripsCard(page).getByRole("link", { name: "All company trips", exact: true }),
-      ).toHaveAttribute("href", "/account/trips?scope=company");
+      // The member's own blocks live on My overview.
+      await expect(personalBlocks(page)).toHaveCount(0);
       await expect(page.getByText(/Достаточно суров|Yukon\?/)).toHaveCount(0);
 
       await loaded(page);
+      for (const path of personalPaths) expect(requestsTo(state, path), path).toEqual([]);
       await capture(page, info, "dashboard-overview-en", true);
       await switchLanguage(page, "ru");
       await expect(
@@ -182,8 +214,100 @@ test.describe("Company Dashboard E2E", () => {
           exact: true,
         }),
       ).toBeVisible();
+      await expect(kpiValues(page).nth(2)).toHaveText(formatQuantity("2986000", "km", "ru"));
+      await expect(kpiSubs(page).nth(2)).toHaveText("по принятым рейсам");
+      await expect(kpiDeltas(page)).toHaveText([
+        /^\+8\s?% к 1–17 окт\.$/,
+        /^\+2 к 1–17 окт\.$/,
+        /^\+3\s?% к 1–17 окт\.$/,
+        /^−1 к 1–17 окт\.$/,
+      ]);
       await loaded(page);
       await capture(page, info, "dashboard-overview-ru", true);
+    },
+  );
+
+  test(
+    "compares with an empty, failed or missing previous period without inventing values",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.clock.setFixedTime(comparisonNow);
+      const state = await mockDashboardRoutes(page);
+      // No accepted trips in 1–17 October: no percentages, a neutral line on every tile.
+      state.companyAnalyticsByRange[previousKey] = { acceptedTrips: 0, actualDistanceM: "0" };
+      await page.goto("/account/company");
+      await loaded(page);
+      await expect(kpiDeltas(page)).toHaveText(
+        Array.from({ length: 4 }, () => /^no data for 1\s?–\s?17 Oct$/),
+      );
+      await expect(kpis(page)).not.toContainText("%");
+      await expect(
+        kpiDeltas(page)
+          .first()
+          .getByText(/^for 1/),
+      ).toBeVisible();
+
+      // A failed comparison read leaves the current values and says so on each tile.
+      state.companyAnalyticsByRange[previousKey] = 503;
+      await page.reload();
+      await loaded(page);
+      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2,986 km", "2"]);
+      await expect(kpiDeltas(page)).toHaveText(Array(4).fill("comparison unavailable"));
+      await expect(page.getByRole("alert")).toHaveCount(0);
+
+      // A tiny change still reads as a change, never as 0%.
+      state.companyAnalyticsByRange[previousKey] = {
+        acceptedTrips: 42,
+        actualDistanceM: "125000000",
+        activeDrivers: 2,
+      };
+      await page.reload();
+      await loaded(page);
+      await expect(kpiDeltas(page)).toHaveText([
+        /^\+<1% vs 1\s?–\s?17 Oct$/,
+        /^0 vs 1\s?–\s?17 Oct$/,
+        /^\+<1% vs 1\s?–\s?17 Oct$/,
+        /^0 vs 1\s?–\s?17 Oct$/,
+      ]);
+
+      // The default October equals the month: no change, in Russian too.
+      delete state.companyAnalyticsByRange[previousKey];
+      await page.reload();
+      await loaded(page);
+      await switchLanguage(page, "ru");
+      await expect(kpiDeltas(page).first()).toHaveText(/^0\s?% к 1–17 окт\.$/);
+
+      // All time has no previous period: no comparison read and no line.
+      const before = state.requests.length;
+      await periodSelect(page).selectOption("allTime");
+      await expect(kpiValues(page).first()).toHaveText(formatQuantity("1505160000", "km", "ru"));
+      await expect(kpiDeltas(page)).toHaveCount(0);
+      expect(
+        state.requests.slice(before).filter((url) => url.pathname === analyticsPath),
+      ).toHaveLength(1);
+    },
+  );
+
+  test(
+    "shows no average or comparison without accepted trips",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.clock.setFixedTime(comparisonNow);
+      const state = await mockDashboardRoutes(page, { emptyCompany: true });
+      state.companyAnalyticsByRange[previousKey] = previousOctober;
+      await page.goto("/account/company");
+      await expect(kpiValues(page)).toHaveText(["0 km", "0", "No trips", "0"]);
+      await expect(kpiDeltas(page)).toHaveCount(3);
+      await expect(kpiDeltas(page)).toHaveClass([
+        /dashboard-delta-down/,
+        /dashboard-delta-down/,
+        /dashboard-delta-down/,
+      ]);
+      await expect(kpiDeltas(page)).toHaveText([
+        /^−100% vs 1\s?–\s?17 Oct$/,
+        /^−40 vs 1\s?–\s?17 Oct$/,
+        /^−3 vs 1\s?–\s?17 Oct$/,
+      ]);
     },
   );
 
@@ -194,7 +318,7 @@ test.describe("Company Dashboard E2E", () => {
       const now = new Date("2026-10-15T12:00:00.000Z");
       await page.clock.setFixedTime(now);
       const state = await mockDashboardRoutes(page, { filterAware: true });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
 
       const group = gameGroup(page);
@@ -214,13 +338,20 @@ test.describe("Company Dashboard E2E", () => {
 
       const expected = computePeriodDates("lastMonth", now, "Europe/Moscow");
       expect(expected).toEqual({ fromDate: "2026-09-01", toDateExclusive: "2026-10-01" });
-      for (const path of ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"]) {
+      const previous = previousPeriodQuery("lastMonth", now, "Europe/Moscow");
+      expect(previous).toEqual({ fromDate: "2026-08-01", toDateExclusive: "2026-09-01" });
+      if (!previous) throw new Error("lastMonth has a previous range");
+      // The period reads and, for the company analytics, the comparison with August.
+      for (const [path, range] of [
+        [analyticsPath, expected],
+        [leaderboardPath, expected],
+        [analyticsPath, previous],
+      ] as const) {
         await expect
-          .poll(() => lastRequest(state, path)?.searchParams.get("fromDate"))
-          .toBe(expected.fromDate);
-        const url = lastRequest(state, path);
+          .poll(() => periodRequests(state, path, range.fromDate, range.toDateExclusive).length)
+          .toBe(1);
+        const [url] = periodRequests(state, path, range.fromDate, range.toDateExclusive);
         expect(url?.searchParams.get("game")).toBe("ets2");
-        expect(url?.searchParams.get("toDateExclusive")).toBe(expected.toDateExclusive);
       }
 
       // The fixture total is the exact sum of its buckets, and the page shows exactly that total.
@@ -232,16 +363,17 @@ test.describe("Company Dashboard E2E", () => {
         0n,
       );
       expect(bucketSum).toBe(BigInt(fixture.actualDistanceM));
+      const average = averageDistanceM(fixture.actualDistanceM, fixture.acceptedTrips);
       await expect(kpiValues(page)).toHaveText([
         formatQuantity(fixture.actualDistanceM, "km", "en"),
         String(fixture.acceptedTrips),
+        formatQuantity(average, "km", "en"),
         "2",
-        "Not ranked",
       ]);
       // One game: no game split under the totals.
       await expect(kpis(page).locator("dd.dashboard-kpi-sub")).toHaveText([
+        "per accepted trip",
         "Active members: 5",
-        "No accepted trips for the period",
       ]);
 
       const chart = chartCard(page);
@@ -249,7 +381,9 @@ test.describe("Company Dashboard E2E", () => {
       const rows = chart.locator("tbody tr");
       await expect(rows).toHaveCount(fixture.buckets.length);
       for (const [index, bucket] of fixture.buckets.entries()) {
-        await expect(rows.nth(index).getByRole("rowheader")).toContainText(bucket.date);
+        await expect(
+          rows.nth(index).getByRole("rowheader").locator(`time[datetime="${bucket.date}"]`),
+        ).toHaveText(bucketLabel(bucket.date, "day", "en", "full"));
         await expect(rows.nth(index)).toContainText(
           formatQuantity(bucket.actualDistanceM, "km", "en"),
         );
@@ -264,7 +398,7 @@ test.describe("Company Dashboard E2E", () => {
       // 01:30 on 1 November in Moscow while the UTC clock still shows 31 October.
       await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
       const state = await mockDashboardRoutes(page, { filterAware: true });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
 
       const statsIndex = state.requests.findIndex((url) => url.pathname === statsPath);
@@ -273,28 +407,48 @@ test.describe("Company Dashboard E2E", () => {
       );
       expect(statsIndex).toBeGreaterThanOrEqual(0);
       expect(firstPeriodIndex).toBeGreaterThan(statsIndex);
-      const initial = periodRequests(state);
-      expect(initial).toHaveLength(2);
-      for (const url of initial) {
-        expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
-        expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
-      }
+      // The month and, for the company analytics, the same elapsed day of October.
+      expect(periodRequests(state, leaderboardPath, "2026-11-01", "2026-12-01")).toHaveLength(1);
+      expect(periodRequests(state, analyticsPath, "2026-11-01", "2026-12-01")).toHaveLength(1);
+      await expect
+        .poll(() => periodRequests(state, analyticsPath, "2026-10-01", "2026-10-02").length)
+        .toBe(1);
+      expect(periodRequests(state)).toHaveLength(3);
 
-      for (const [period, fromDate, toDateExclusive] of [
-        ["lastMonth", "2026-10-01", "2026-11-01"],
-        ["last7Days", "2026-10-26", "2026-11-02"],
-        ["last30Days", "2026-10-03", "2026-11-02"],
+      for (const [period, fromDate, toDateExclusive, previousFrom, previousTo] of [
+        ["lastMonth", "2026-10-01", "2026-11-01", "2026-09-01", "2026-10-01"],
+        ["last7Days", "2026-10-26", "2026-11-02", "2026-10-19", "2026-10-26"],
+        ["last30Days", "2026-10-03", "2026-11-02", "2026-09-03", "2026-10-03"],
       ] as const) {
         await periodSelect(page).selectOption(period);
         for (const path of periodPaths)
           await expect
             .poll(() => periodRequests(state, path, fromDate, toDateExclusive).length)
             .toBe(1);
+        await expect
+          .poll(() => periodRequests(state, analyticsPath, previousFrom, previousTo).length)
+          .toBe(1);
+        const [previous] = periodRequests(state, analyticsPath, previousFrom, previousTo);
+        // The comparison always reads days, whatever the Interval.
+        expect(previous?.searchParams.get("granularity")).toBe("day");
         await loaded(page);
       }
       expect(requestsTo(state, statsPath)).toHaveLength(1);
-      // One request per endpoint for the initial period and for each change.
-      for (const path of periodPaths) expect(periodRequests(state, path)).toHaveLength(4);
+      // One request per endpoint for the initial period and for each change, plus one comparison
+      // read per dated period.
+      expect(periodRequests(state, leaderboardPath)).toHaveLength(4);
+      expect(periodRequests(state, analyticsPath)).toHaveLength(8);
+
+      // All time has no previous period of the same length.
+      await periodSelect(page).selectOption("allTime");
+      const allTime = () =>
+        periodRequests(state, analyticsPath).filter(
+          (url) => url.searchParams.get("period") === "all_time",
+        );
+      await expect.poll(() => allTime().length).toBe(1);
+      await loaded(page);
+      expect(periodRequests(state, analyticsPath)).toHaveLength(9);
+      expect(state.rejected).toEqual([]);
     },
   );
 
@@ -305,11 +459,11 @@ test.describe("Company Dashboard E2E", () => {
       await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
       const state = await mockDashboardRoutes(page, { filterAware: true });
       state.hold("stats");
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await expect.poll(() => requestsTo(state, statsPath).length).toBe(1);
       // Reads outside the gate still run: the shell chip's nearest event.
       await expect.poll(() => requestsTo(state, "/api/v1/me/upcoming-event").length).toBe(1);
-      for (const path of [...periodPaths, ...secondaryPaths, breakdownApi])
+      for (const path of [...periodPaths, breakdownApi])
         expect(requestsTo(state, path)).toEqual([]);
       await expect(loadingStatus(page)).toHaveCount(1);
       for (const button of await gameGroup(page).getByRole("button").all())
@@ -319,22 +473,21 @@ test.describe("Company Dashboard E2E", () => {
       state.release("stats");
       await loaded(page);
       for (const path of periodPaths) {
-        const requests = periodRequests(state, path);
+        const requests = periodRequests(state, path, "2026-11-01", "2026-12-01");
         expect(requests).toHaveLength(1);
-        expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-11-01");
-        expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-12-01");
       }
-      // Progress for both games (one shared read) and the recent trips follow the period reads.
-      await expect.poll(() => requestsTo(state, "/api/v1/me/qualifications").length).toBe(1);
-      await expect.poll(() => requestsTo(state, "/api/v1/trips").length).toBe(1);
-      expect(state.requests.some((url) => url.searchParams.get("scope") === "review")).toBe(false);
+      // The comparison with the same elapsed day of October, already with the zone's dates.
+      await expect
+        .poll(() => periodRequests(state, analyticsPath, "2026-10-01", "2026-10-02").length)
+        .toBe(1);
+      expect(periodRequests(state)).toHaveLength(3);
+      // The member's own reads belong to My overview.
+      for (const path of personalPaths) expect(requestsTo(state, path)).toEqual([]);
       const firstIndex = (path: string) =>
         state.requests.findIndex((url) => url.pathname.startsWith(path));
       const lastPeriod = Math.max(...periodPaths.map(firstIndex));
-      const firstSecondary = Math.min(...secondaryPaths.map(firstIndex));
       expect(lastPeriod).toBeGreaterThanOrEqual(0);
-      expect(firstSecondary).toBeGreaterThan(lastPeriod);
-      // The breakdowns follow too, once per dimension and already with the zone's dates.
+      // The breakdowns follow, once per dimension and already with the zone's dates.
       for (const dimension of ["route", "cargo", "source"] as const)
         await expect.poll(() => breakdownRequests(state, dimension).length).toBe(1);
       expect(firstIndex(breakdownApi)).toBeGreaterThan(lastPeriod);
@@ -355,16 +508,17 @@ test.describe("Company Dashboard E2E", () => {
           filterAware: true,
           ...(variant === "failed" ? { failures: { stats: 503 } } : { reportingTimezone: null }),
         });
-        await page.goto("/account/dashboard");
+        await page.goto("/account/company");
         await loaded(page);
         await expect(page.getByRole("alert")).toHaveCount(0);
         expect(requestsTo(state, statsPath)).toHaveLength(1);
-        for (const path of periodPaths) {
-          const requests = periodRequests(state, path);
-          expect(requests).toHaveLength(1);
-          expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-10-01");
-          expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-11-01");
-        }
+        for (const path of periodPaths)
+          expect(periodRequests(state, path, "2026-10-01", "2026-11-01")).toHaveLength(1);
+        // 31 days of October against the 30 of September.
+        await expect
+          .poll(() => periodRequests(state, analyticsPath, "2026-09-01", "2026-10-01").length)
+          .toBe(1);
+        expect(periodRequests(state)).toHaveLength(3);
       },
     );
   }
@@ -378,15 +532,15 @@ test.describe("Company Dashboard E2E", () => {
         filterAware: true,
         failures: { stats: 503 },
       });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
       expect(requestsTo(state, statsPath)).toHaveLength(1);
 
       // A reconnect must not reread the failed zone and send the page back to loading.
       delete state.failures.stats;
       const selfReads = () => state.requests.filter((url) => url.pathname === "/api/v1/me").length;
-      const progressReads = () => requestsTo(state, "/api/v1/me/qualifications").length;
-      const [selfBefore, progressBefore] = [selfReads(), progressReads()];
+      const leaderboardReads = () => periodRequests(state, leaderboardPath).length;
+      const [selfBefore, leaderboardBefore] = [selfReads(), leaderboardReads()];
       // Past both stale times, so only refetchOnReconnect keeps the failed zone from rereading.
       await page.clock.setFixedTime(new Date("2026-10-31T22:31:01.000Z"));
       await context.setOffline(true);
@@ -396,9 +550,9 @@ test.describe("Company Dashboard E2E", () => {
       // Positive control: queries that opt into reconnect refetches reread, so the reconnect
       // was handled.
       await expect.poll(selfReads).toBeGreaterThan(selfBefore);
-      // The now stale progress read shared by both games refetches once on the same reconnect,
-      // after the stats read would have been issued.
-      await expect.poll(progressReads).toBe(progressBefore + 1);
+      // The now stale leaderboard refetches once on the same reconnect, after the stats read
+      // would have been issued.
+      await expect.poll(leaderboardReads).toBe(leaderboardBefore + 1);
       expect(requestsTo(state, statsPath)).toHaveLength(1);
       await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
       await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
@@ -416,13 +570,11 @@ test.describe("Company Dashboard E2E", () => {
         filterAware: true,
         failures: { stats: 503, analytics: 503 },
       });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
       await expect(alert).toBeVisible();
       expect(requestsTo(state, statsPath)).toHaveLength(1);
-      expect(lastRequest(state, "/api/v1/analytics/company")?.searchParams.get("fromDate")).toBe(
-        "2026-10-01",
-      );
+      expect(periodRequests(state, analyticsPath, "2026-10-01", "2026-11-01")).toHaveLength(1);
 
       delete state.failures.stats;
       delete state.failures.analytics;
@@ -447,13 +599,7 @@ test.describe("Company Dashboard E2E", () => {
       await loaded(page);
       await expect(page.getByRole("alert")).toHaveCount(0);
       expect(requestsTo(state, statsPath)).toHaveLength(2);
-      const after = periodRequests({ ...state, requests: state.requests.slice(before) });
-      for (const path of periodPaths)
-        expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
-      for (const url of after) {
-        expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
-        expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
-      }
+      await expectMoscowReads(state, before);
       // The new zone's keys fetch the breakdowns once each, never the old dates again.
       const breakdownsAfter = () =>
         state.requests.slice(before).filter((url) => url.pathname === breakdownApi);
@@ -480,7 +626,7 @@ test.describe("Company Dashboard E2E", () => {
         filterAware: true,
         failures: { stats: 503, analytics: 503 },
       });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await expect(
         page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" }),
       ).toBeVisible();
@@ -493,7 +639,7 @@ test.describe("Company Dashboard E2E", () => {
         dispatchEvent(new PopStateEvent("popstate"));
       });
       await expect(
-        page.getByRole("heading", { name: "Company Overview", exact: true }),
+        page.getByRole("heading", { name: "Company overview", exact: true }),
       ).toHaveCount(0);
       state.hold("stats");
       const before = state.requests.length;
@@ -501,7 +647,7 @@ test.describe("Company Dashboard E2E", () => {
       await expect.poll(() => requestsTo(state, statsPath).length).toBe(2);
       // The cached failure and the October leaderboard of the fallback keys stay hidden.
       await expect(
-        page.getByRole("heading", { name: "Company Overview", exact: true }),
+        page.getByRole("heading", { name: "Company overview", exact: true }),
       ).toBeVisible();
       await expect(page.getByRole("alert")).toHaveCount(0);
       await expect(loadingStatus(page)).toHaveCount(1);
@@ -513,13 +659,7 @@ test.describe("Company Dashboard E2E", () => {
       await loaded(page);
       await expect(page.getByRole("alert")).toHaveCount(0);
       expect(requestsTo(state, statsPath)).toHaveLength(2);
-      const after = periodRequests({ ...state, requests: state.requests.slice(before) });
-      for (const path of periodPaths)
-        expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
-      for (const url of after) {
-        expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
-        expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
-      }
+      await expectMoscowReads(state, before);
     },
   );
 
@@ -533,7 +673,7 @@ test.describe("Company Dashboard E2E", () => {
         reportingTimezone: null,
         failures: { analytics: 409 },
       });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
       await expect(alert).toBeVisible();
       expect(requestsTo(state, statsPath)).toHaveLength(1);
@@ -546,77 +686,16 @@ test.describe("Company Dashboard E2E", () => {
       await loaded(page);
       await expect(page.getByRole("alert")).toHaveCount(0);
       expect(requestsTo(state, statsPath)).toHaveLength(2);
-      const after = periodRequests({ ...state, requests: state.requests.slice(before) });
-      for (const path of periodPaths)
-        expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
-      for (const url of after) {
-        expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
-        expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
-      }
+      await expectMoscowReads(state, before);
     },
   );
-
-  test(
-    "shows the assigned qualification names for each game instead of UUIDs",
-    browserCase(["@functional"]),
-    async ({ page }) => {
-      await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
-      const widget = page.getByRole("region", { name: "My Qualification", exact: true });
-      await expect(widget.getByText("European Driver II", { exact: true })).toBeVisible();
-      await expect(widget.getByText("Pacific Driver III", { exact: true })).toBeVisible();
-      await expect(widget).not.toContainText(levelIdEts2);
-      await expect(widget).not.toContainText(levelIdAts);
-      await switchLanguage(page, "ru");
-      const russianWidget = page.getByRole("region", { name: "Моя квалификация", exact: true });
-      await expect(russianWidget.getByText("European Driver II", { exact: true })).toBeVisible();
-      await expect(russianWidget.getByText("Pacific Driver III", { exact: true })).toBeVisible();
-    },
-  );
-
-  test(
-    "shows progress toward the next level and the unavailable and no-level states",
-    browserCase(["@functional"]),
-    async ({ page }) => {
-      const state = await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
-      const widget = page.getByRole("region", { name: "My Qualification", exact: true });
-      await expect(widget).toContainText("15 / 20");
-      await expect(widget.getByRole("link", { name: "All qualifications" })).toBeVisible();
-      // Both games come from one read of my qualifications.
-      expect(
-        state.requests.filter((url) => url.pathname === "/api/v1/me/qualifications"),
-      ).toHaveLength(1);
-    },
-  );
-
-  for (const [qualifications, calm, other] of [
-    ["unavailable", "Progress unavailable", "No qualification assigned"],
-    ["missing", "No qualification assigned", "Progress unavailable"],
-  ] as const) {
-    test(
-      `shows a calm state when my qualifications are ${qualifications}`,
-      browserCase(["@functional"]),
-      async ({ page }) => {
-        await mockDashboardRoutes(page, { qualifications });
-        await page.goto("/account/dashboard");
-        const widget = page.getByRole("region", { name: "My Qualification", exact: true });
-        // One calm line per game, never a level, progress or an error alert.
-        await expect(widget.getByText(calm, { exact: true })).toHaveCount(2);
-        await expect(widget.getByText(other, { exact: true })).toHaveCount(0);
-        await expect(widget.getByRole("alert")).toHaveCount(0);
-        await expect(widget).not.toContainText(levelIdEts2);
-        await expect(widget).not.toContainText("15 / 20");
-      },
-    );
-  }
 
   test(
     "expands and collapses metric calculation definitions",
     browserCase(["@functional"]),
     async ({ page }) => {
       await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
 
       const toggleButton = page.getByRole("button", { name: /Show explanations/i });
       await expect(toggleButton).toBeVisible();
@@ -643,10 +722,10 @@ test.describe("Company Dashboard E2E", () => {
     browserCase(["@functional"]),
     async ({ page }, info) => {
       await mockDashboardRoutes(page, { emptyCompany: true });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
 
       await expect(
-        page.getByRole("heading", { name: "Company Overview", exact: true }),
+        page.getByRole("heading", { name: "Company overview", exact: true }),
       ).toBeVisible();
       await expect(page.getByText("Company starting from zero")).toBeVisible();
       await expect(kpis(page).getByRole("definition").first()).toHaveText("0 km");
@@ -676,7 +755,7 @@ test.describe("Company Dashboard E2E", () => {
     async ({ page }) => {
       await mockDashboardRoutes(page);
 
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await page.evaluate(() => document.fonts.ready);
       const hasHorizontalScroll = await page.evaluate(
         () => document.documentElement.scrollWidth > window.innerWidth,
@@ -690,7 +769,7 @@ test.describe("Company Dashboard E2E", () => {
     browserCase(["@functional"]),
     async ({ page }) => {
       await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
 
       // Switch to Russian
       await switchLanguage(page, "ru");
@@ -700,16 +779,16 @@ test.describe("Company Dashboard E2E", () => {
       await expect(kpis(page).getByRole("term")).toHaveText([
         "Пройденное расстояние",
         "Подтвержденные рейсы",
+        "Средний рейс",
         "Активные водители",
-        "Моё место",
       ]);
       await expect(kpiValues(page)).toHaveText([
         formatQuantity("125430000", "km", "ru"),
         "42",
+        formatQuantity("2986000", "km", "ru"),
         "2",
-        "Без места",
       ]);
-      await expect(kpis(page).locator("dd.dashboard-kpi-sub").nth(2)).toHaveText(
+      await expect(kpis(page).locator("dd.dashboard-kpi-sub").nth(3)).toHaveText(
         "Участников в составе: 5",
       );
       await expect(
@@ -721,7 +800,7 @@ test.describe("Company Dashboard E2E", () => {
       // Switch back to English
       await switchLanguage(page, "en");
       await expect(
-        page.getByRole("heading", { name: "Company Overview", exact: true }),
+        page.getByRole("heading", { name: "Company overview", exact: true }),
       ).toBeVisible();
       await expect(kpis(page).getByRole("term").first()).toHaveText("Actual distance");
       await expect(kpiValues(page).first()).toHaveText("125,430 km");
@@ -729,25 +808,24 @@ test.describe("Company Dashboard E2E", () => {
   );
 
   test(
-    "keeps qualification and the leaderboard on the first desktop screen",
+    "keeps the KPIs, the chart and the leaderboard on the first desktop screen",
     browserCase(["@layout", "@viewport-desktop"]),
-    async ({ page }, info) => {
+    async ({ page }) => {
       await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       for (const locale of ["en", "ru"] as const) {
         if (locale === "ru") await switchLanguage(page, "ru");
         await loaded(page);
-        await expect(qualificationCard(page).getByRole("heading", { level: 3 })).toHaveCount(2);
         await page.evaluate(() => document.fonts.ready);
         expect(await page.evaluate(() => scrollY)).toBe(0);
 
-        const qualification = await box(qualificationCard(page));
-        expect(qualification.y).toBeGreaterThanOrEqual(0);
-        expect(qualification.y + qualification.height).toBeLessThanOrEqual(800);
-        for (const heading of await qualificationCard(page)
-          .getByRole("heading", { level: 3 })
-          .all())
-          expect((await box(heading)).y + (await box(heading)).height).toBeLessThanOrEqual(800);
+        // The chart and the top drivers share the row below the KPIs.
+        const chart = await box(chartCard(page));
+        const board = await box(leaderboardCard(page));
+        expect(Math.abs(chart.y - board.y)).toBeLessThanOrEqual(1);
+        expect(chart.x).toBeLessThan(board.x);
+        expect(chart.width).toBeGreaterThan(board.width);
+        expect(chart.y).toBeGreaterThan((await box(kpis(page))).y);
 
         const leaderboard = leaderboardCard(page);
         const firstRow = leaderboard.locator("tbody tr").first();
@@ -781,7 +859,7 @@ test.describe("Company Dashboard E2E", () => {
     async ({ page }, info) => {
       const touch = info.project.name === "mobile-chromium";
       const state = await mockDashboardRoutes(page, { filterAware: true });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
 
       const chart = chartCard(page);
@@ -792,7 +870,7 @@ test.describe("Company Dashboard E2E", () => {
       await expect(tableButton).toHaveAttribute("aria-pressed", "false");
       await expect(chart.getByRole("table")).toHaveCount(0);
       await expect(chart.locator("figcaption")).toHaveText(
-        "Peak: 2026-10-04 — 48,430 km. Exact values are in the Table view.",
+        "Peak: 4 October 2026 — 48,430 km. Exact values are in the Table view.",
       );
       const before = (await box(chart)).height;
 
@@ -804,7 +882,7 @@ test.describe("Company Dashboard E2E", () => {
       await expect(table.locator("caption")).toContainText("Europe/Moscow");
       await expect(table.getByRole("columnheader")).toHaveText(["Date", "Distance", "Trips"]);
       await expect(table.locator("tbody tr")).toHaveCount(4);
-      const peakRow = table.locator("tbody tr").filter({ hasText: "2026-10-04" });
+      const peakRow = table.locator("tbody tr").filter({ hasText: "4 October 2026" });
       await expect(peakRow).toContainText("48,430 km");
       await expect(peakRow).toContainText("17");
       await expect(peakRow).toContainText("Peak");
@@ -839,7 +917,7 @@ test.describe("Company Dashboard E2E", () => {
       await expect(loadingStatus(page)).toHaveCount(0);
       if (!touch) await expect(monthly).toBeFocused();
       expect(Math.abs((await box(chart)).y - loadingTop)).toBeLessThanOrEqual(1);
-      const monthRow = chart.locator("tbody tr").filter({ hasText: "2026-10-01" });
+      const monthRow = chart.locator("tbody tr").filter({ hasText: "October 2026" });
       await expect(chart.locator("tbody tr")).toHaveCount(1);
       await expect(monthRow).toContainText("125,430 km");
       await expect(monthRow).toContainText("42");
@@ -865,11 +943,74 @@ test.describe("Company Dashboard E2E", () => {
   );
 
   test(
+    "labels chart dates in the interface language, never as ISO dates",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      await mockDashboardRoutes(page, { filterAware: true });
+      await page.goto("/account/company");
+      await loaded(page);
+      const chart = chartCard(page);
+      // The chart has only the date axis.
+      const ticks = chart.locator(".recharts-cartesian-axis-tick-value");
+      const tooltip = chart.locator(".dashboard-chart-tooltip");
+      const iso = /\d{4}-\d{2}-\d{2}/;
+      const table = chart.getByRole("button", { name: /^(Table|Таблица)$/ });
+      const graph = chart.getByRole("button", { name: /^(Chart|График)$/ });
+      /** Hovers the peak bar (4 October) and returns the tooltip. */
+      const hoverPeak = async () => {
+        await chart.locator(".recharts-bar-rectangle").nth(3).hover();
+        await expect(tooltip).toBeVisible();
+        return tooltip;
+      };
+
+      for (const [locale, axis, full, km, trips] of [
+        ["en", "4 Oct", "4 October 2026", "48,430 km", "Trips: 17"],
+        ["ru", "4 окт.", "4 октября 2026 г.", formatQuantity("48430000", "km", "ru"), "Рейсы: 17"],
+      ] as const) {
+        if (locale === "ru") await switchLanguage(page, "ru");
+        await expect(ticks.last()).toHaveText(axis);
+        for (const tick of await ticks.allTextContents()) expect(tick).not.toMatch(iso);
+        await expect(await hoverPeak()).toHaveText(`${full}${km}${trips}`);
+        await page.mouse.move(0, 0);
+        await expect(chart).not.toContainText(iso);
+        await table.click();
+        await expect(chart.getByRole("rowheader").last().locator("time")).toHaveText(full);
+        await expect(chart).not.toContainText(iso);
+        await graph.click();
+      }
+
+      // Month buckets: the month name, with the year once the buckets span two years.
+      await chart
+        .getByRole("group", { name: "Шаг", exact: true })
+        .getByRole("button", { name: "По месяцам", exact: true })
+        .click();
+      await expect(ticks).toHaveText(["окт."]);
+      await chart.locator(".recharts-bar-rectangle").first().hover();
+      await expect(tooltip).toContainText(/^октябрь 2026/);
+      await page.mouse.move(0, 0);
+      await switchLanguage(page, "en");
+      await periodSelect(page).selectOption("allTime");
+      await expect(ticks.first()).toHaveText("Dec 2025");
+      await expect(ticks.last()).toHaveText("Nov 2026");
+      await chart.locator(".recharts-bar-rectangle").last().hover();
+      await expect(tooltip).toHaveText("November 2026125,430 kmTrips: 42");
+      await page.mouse.move(0, 0);
+      await expect(chart).not.toContainText(iso);
+      await table.click();
+      await expect(chart.getByRole("rowheader").first().locator("time")).toHaveText(
+        "December 2025",
+      );
+      await expect(chart).not.toContainText(iso);
+    },
+  );
+
+  test(
     "keeps the header usable while loading and recovers from an analytics failure",
     browserCase(["@functional"]),
     async ({ page }, info) => {
       const state = await mockDashboardRoutes(page, { holdAnalytics: true });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await expect(loadingStatus(page)).toHaveCount(1);
       await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
       for (const button of await gameGroup(page).getByRole("button").all())
@@ -913,15 +1054,13 @@ test.describe("Company Dashboard E2E", () => {
         emptyCompany: true,
         failures: { leaderboard: 503 },
       });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       const leaderboard = leaderboardCard(page);
       await expect(leaderboard.getByText("Could not load the leaderboard")).toBeVisible();
       await expect(leaderboard.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
       await expect(leaderboard.getByText("No confirmed trips in this period yet")).toHaveCount(0);
-      // The place comes from the failed leaderboard; active drivers come from analytics.
-      await expect(kpiValues(page).nth(3)).toHaveText("Unavailable");
-      await expect(kpiValues(page).nth(2)).toHaveText("0");
-      await expect(kpiValues(page).first()).toHaveText("0 km");
+      // Active drivers come from analytics, not from the failed leaderboard.
+      await expect(kpiValues(page)).toHaveText(["0 km", "0", "No trips", "0"]);
       await expect(page.getByText("Company starting from zero")).toHaveCount(0);
 
       delete state.failures.leaderboard;
@@ -929,12 +1068,6 @@ test.describe("Company Dashboard E2E", () => {
       await expect(leaderboard.getByText("No confirmed trips in this period yet")).toBeVisible();
       await expect(leaderboard.getByRole("heading", { level: 2 })).toBeFocused();
       await expect(page.getByText("Company starting from zero")).toBeVisible();
-
-      state.failures.progress = 503;
-      await page.reload();
-      const qualification = qualificationCard(page);
-      await expect(qualification.getByText("Progress unavailable", { exact: true })).toHaveCount(2);
-      await expect(qualification.getByText("No qualification assigned")).toHaveCount(0);
     },
   );
 
@@ -944,14 +1077,16 @@ test.describe("Company Dashboard E2E", () => {
     async ({ page }) => {
       await page.clock.install();
       const state = await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
-      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2", "Not ranked"]);
-      const initial = ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"].map(
-        (path) => lastRequest(state, path)?.href ?? "",
-      );
+      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2,986 km", "2"]);
+      // The month, its comparison and the leaderboard.
+      await expect.poll(() => periodRequests(state).length).toBe(3);
+      const initial = periodRequests(state).map((url) => url.href);
+      const deltas = await kpiDeltas(page).allTextContents();
+      expect(deltas).toHaveLength(4);
 
-      // Let the cached data go stale (TanStack marks it on a timer), break both endpoints, then
+      // Let the cached data go stale (TanStack marks it on a timer), break the endpoints, then
       // leave and return to the same period: the cached query keys refetch and fail.
       await page.clock.fastForward(60_000);
       state.failures.analytics = 503;
@@ -970,7 +1105,9 @@ test.describe("Company Dashboard E2E", () => {
       // Retained data has no visible change to wait for; give the failed responses time to settle.
       await page.waitForTimeout(500);
 
-      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2", "Not ranked"]);
+      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2,986 km", "2"]);
+      // The comparison keeps its data too, never turning unavailable.
+      await expect(kpiDeltas(page)).toHaveText(deltas);
       await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
       await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
       await expect(page.getByRole("alert")).toHaveCount(0);
@@ -984,10 +1121,10 @@ test.describe("Company Dashboard E2E", () => {
     browserCase(["@functional"]),
     async ({ page }, info) => {
       const state = await mockDashboardRoutes(page, { capabilities: withoutCompanyRead });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await expect(page.getByText("You do not have access to company statistics.")).toBeVisible();
       await expect(
-        page.getByRole("heading", { name: "Company Overview", exact: true }),
+        page.getByRole("heading", { name: "Company overview", exact: true }),
       ).toBeVisible();
       await expect(gameGroup(page)).toHaveCount(0);
       await expect(kpis(page)).toHaveCount(0);
@@ -1001,56 +1138,11 @@ test.describe("Company Dashboard E2E", () => {
   );
 
   test(
-    "shows no qualification for members who cannot submit own trips",
-    browserCase(["@functional"]),
-    async ({ page }) => {
-      const state = await mockDashboardRoutes(page, { capabilities: ["company.read"] });
-      await page.goto("/account/dashboard");
-      await loaded(page);
-      const qualification = qualificationCard(page);
-      await expect(
-        qualification.getByText("No qualification assigned", { exact: true }),
-      ).toHaveCount(2);
-      await expect(qualification.getByText("Loading progress…")).toHaveCount(0);
-      await expect(reviewCard(page)).toHaveCount(0);
-      expect(requestsTo(state, "/api/v1/me/qualifications")).toEqual([]);
-      // Without events.respond the convoy shows no response controls and reads no own response.
-      await expect(eventCard(page).getByText("Going: 8", { exact: true })).toBeVisible();
-      await expect(responseGroup(page)).toHaveCount(0);
-      expect(
-        state.requests.filter((url) => url.pathname.endsWith("/my-response")).map(String),
-      ).toEqual([]);
-    },
-  );
-
-  test(
-    "keeps review queue and event failures inside their cards",
-    browserCase(["@functional"]),
-    async ({ page }) => {
-      await mockDashboardRoutes(page, { failures: { summary: 503, event: 503 } });
-      await page.goto("/account/dashboard");
-      await loaded(page);
-      await expect(reviewCard(page).getByText("Could not load the review queue")).toBeVisible();
-      await expect(reviewCard(page).getByRole("link", { name: "Go to review" })).toBeVisible();
-      await expect(eventCard(page).getByText("Could not load the upcoming event")).toBeVisible();
-      await expect(eventCard(page).getByText("No scheduled convoys")).toHaveCount(0);
-      await expect(page.getByText("Failed to load dashboard data")).toHaveCount(0);
-      await switchLanguage(page, "ru");
-      await expect(
-        reviewCard(page).getByText("Не удалось загрузить очередь проверки"),
-      ).toBeVisible();
-      await expect(
-        eventCard(page).getByText("Не удалось загрузить ближайшее мероприятие"),
-      ).toBeVisible();
-    },
-  );
-
-  test(
     "replaces earlier values when company access is revoked",
     browserCase(["@functional"]),
     async ({ page }) => {
       const state = await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
       await expect(kpis(page).getByRole("definition").first()).toHaveText("125,430 km");
 
@@ -1068,7 +1160,7 @@ test.describe("Company Dashboard E2E", () => {
     browserCase(["@layout"]),
     async ({ page }, info) => {
       const state = await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
       const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
       if (info.project.name === "mobile-chromium") expect(coarse).toBe(true);
@@ -1096,7 +1188,6 @@ test.describe("Company Dashboard E2E", () => {
         await expectTarget(segment, 24, true);
       await expectTarget(periodSelect(page), 32, true);
       for (const link of [
-        qualificationCard(page).getByRole("link", { name: "All qualifications" }),
         leaderboardCard(page).getByRole("link", { name: "All drivers" }),
         leaderboardCard(page).getByRole("link", { name: "AlphaDriver" }),
         leaderboardCard(page).getByRole("link", { name: "BetaHauler" }),
@@ -1121,32 +1212,30 @@ test.describe("Company Dashboard E2E", () => {
     browserCase(["@layout"]),
     async ({ page }, info) => {
       await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
       await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
 
+      const metrics = await box(kpis(page));
       const chart = await box(chartCard(page));
-      const qualification = await box(qualificationCard(page));
       const leaderboard = await box(leaderboardCard(page));
-      const event = await box(eventCard(page));
+      const breakdowns = await box(page.locator(".dashboard-breakdowns"));
+      expect(chart.y).toBeGreaterThanOrEqual(metrics.y + metrics.height - 0.5);
+      expect(breakdowns.y).toBeGreaterThanOrEqual(leaderboard.y + leaderboard.height - 0.5);
       if (info.project.name === "desktop-chromium") {
-        expect(Math.abs(chart.y - qualification.y)).toBeLessThanOrEqual(2);
-        expect(chart.x).toBeLessThan(qualification.x);
-        expect(leaderboard.y).toBeGreaterThan(chart.y + chart.height);
-        expect(event.x).toBeGreaterThan(leaderboard.x);
+        expect(Math.abs(chart.y - leaderboard.y)).toBeLessThanOrEqual(1);
+        expect(chart.x).toBeLessThan(leaderboard.x);
 
+        // The period comes before the game, as in the header.
         const sequence = [
+          periodSelect(page),
           gameGroup(page).getByRole("button", { name: "All games", exact: true }),
           gameGroup(page).getByRole("button", { name: "ETS2", exact: true }),
           gameGroup(page).getByRole("button", { name: "ATS", exact: true }),
-          periodSelect(page),
           chartCard(page).getByRole("button", { name: "Daily", exact: true }),
           chartCard(page).getByRole("button", { name: "Monthly", exact: true }),
           chartCard(page).getByRole("button", { name: "Chart", exact: true }),
           chartCard(page).getByRole("button", { name: "Table", exact: true }),
-          qualificationCard(page).getByRole("link", { name: "All qualifications" }),
-          qualificationCard(page).getByRole("link", { name: "European Driver II" }),
-          qualificationCard(page).getByRole("link", { name: "Pacific Driver III" }),
           leaderboardCard(page).getByRole("link", { name: "All drivers" }),
           leaderboardCard(page).getByRole("link", { name: "AlphaDriver" }),
         ];
@@ -1156,46 +1245,43 @@ test.describe("Company Dashboard E2E", () => {
           await expect(target).toBeFocused();
         }
       } else {
-        expect(chart.y).toBeLessThan(qualification.y);
-        expect(qualification.y).toBeLessThan(leaderboard.y);
-        expect(leaderboard.y).toBeLessThan(event.y);
+        // One column in DOM order, or the leaderboard beside the chart when it fits.
+        expect(leaderboard.y).toBeGreaterThanOrEqual(chart.y - 0.5);
+        if (Math.abs(leaderboard.y - chart.y) > 1)
+          expect(leaderboard.y).toBeGreaterThanOrEqual(chart.y + chart.height - 0.5);
       }
     },
   );
 
   test(
-    "counts active drivers from analytics and shows the exact review queue count",
+    "counts active drivers from analytics and lists the top five drivers",
     browserCase(["@functional"]),
     async ({ page }) => {
       const state = await mockDashboardRoutes(page, { leaderboardSize: 12 });
-      // The card shows the workspace summary count, the same as the dispatch header and the menu.
-      state.summary = { ...state.summary, reviewQueue: { count: 12, oldestAgeSeconds: 7200 } };
-      await page.goto("/account/dashboard");
-      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(10);
+      await page.goto("/account/company");
+      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(5);
       // Active drivers come from analytics, never from counting leaderboard rows.
-      await expect(kpiValues(page).nth(2)).toHaveText("2");
+      await expect(kpiValues(page).nth(3)).toHaveText("2");
       await expect(kpis(page)).not.toContainText("+");
-      expect(lastRequest(state, "/api/v1/analytics/leaderboard")?.searchParams.get("limit")).toBe(
-        "10",
-      );
-      await expect(reviewCard(page)).toContainText("Awaiting your decision: 12");
-      await expect(reviewCard(page)).not.toContainText("+");
-      await switchLanguage(page, "ru");
-      await expect(reviewCard(page)).toContainText("Ждут вашего решения: 12");
+      expect(lastRequest(state, leaderboardPath)?.searchParams.get("limit")).toBe("5");
+      // The review queue lives in Needs attention on My overview.
+      await expect(
+        page.getByRole("region", { name: /^(Review Queue|Очередь проверки)$/ }),
+      ).toHaveCount(0);
     },
   );
 
   test(
-    "marks the viewer's place in the leaderboard and the KPIs",
+    "marks the viewer's place in the leaderboard",
     browserCase(["@functional"]),
     async ({ page }) => {
       const state = await mockDashboardRoutes(page, { leaderboardViewer: "offPage" });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
       const board = leaderboardCard(page);
-      await expect(board.locator("tbody").first().locator("tr")).toHaveCount(10);
-      await expect(board).not.toContainText("Fictional Driver 011");
-      // Below the top ten the own place follows in a separate row.
+      await expect(board.locator("tbody").first().locator("tr")).toHaveCount(5);
+      await expect(board).not.toContainText("Fictional Driver 006");
+      // Below the top five the own place follows in a separate row.
       const own = board.locator(".dashboard-leaderboard-self tr");
       await expect(own).toHaveCount(1);
       await expect(own.locator("td")).toHaveText([
@@ -1205,17 +1291,12 @@ test.describe("Company Dashboard E2E", () => {
         "37,400 km",
       ]);
       await expect(own.getByRole("link")).toHaveAttribute("href", `/account/drivers/${fixtureId}`);
-      await expect(kpiValues(page).nth(3)).toHaveText("14 of 15");
-      await expect(kpiValues(page).nth(2)).toHaveText("15");
-      await expect(kpiSubs(page).nth(3)).toHaveText("37,400 km · trips: 4");
-      expect(lastRequest(state, "/api/v1/analytics/leaderboard")?.searchParams.get("limit")).toBe(
-        "10",
-      );
+      // Active drivers equal the ranked members behind the place; the place itself is on My
+      // overview.
+      await expect(kpiValues(page).nth(3)).toHaveText("15");
+      await expect(kpis(page)).not.toContainText("My place");
+      expect(lastRequest(state, leaderboardPath)?.searchParams.get("limit")).toBe("5");
       await switchLanguage(page, "ru");
-      await expect(kpiValues(page).nth(3)).toHaveText("14 из 15");
-      await expect(kpiSubs(page).nth(3)).toHaveText(
-        `${formatQuantity("37400000", "km", "ru")} · рейсы: 4`,
-      );
       await expect(own.locator("td").nth(1)).toHaveText("Fictional Yukon Member · вы");
       await switchLanguage(page, "en");
 
@@ -1229,8 +1310,7 @@ test.describe("Company Dashboard E2E", () => {
         "Fictional Yukon Member · you",
       );
       await expect(board.getByText("· you")).toHaveCount(1);
-      await expect(kpiValues(page).nth(3)).toHaveText("3 of 3");
-      await expect(kpiValues(page).nth(2)).toHaveText("3");
+      await expect(kpiValues(page).nth(3)).toHaveText("3");
     },
   );
 
@@ -1239,24 +1319,25 @@ test.describe("Company Dashboard E2E", () => {
     browserCase(["@functional"]),
     async ({ page }) => {
       const state = await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
-      await expect(kpiValues(page).nth(3)).toHaveText("Not ranked");
-      await expect(kpiSubs(page).nth(3)).toHaveText("No accepted trips for the period");
       await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
       await expect(leaderboardCard(page).locator(".dashboard-leaderboard-self")).toHaveCount(0);
       await expect(leaderboardCard(page)).not.toContainText("you");
 
-      // An API without the Stage 4 fields: active drivers and the place are unavailable.
+      // An API without the Stage 4 fields: active drivers and their comparison are unavailable;
+      // the totals and the average still compare.
       state.stage4 = false;
       await page.reload();
       await loaded(page);
-      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "Unavailable", "Unavailable"]);
-      await expect(kpiSubs(page)).toHaveCount(0);
+      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2,986 km", "Unavailable"]);
+      await expect(kpiSubs(page)).toHaveText(["per accepted trip"]);
+      await expect(kpiDeltas(page).nth(3)).toHaveText("comparison unavailable");
+      await expect(kpiDeltas(page).nth(0)).toHaveText(/^0% vs /);
       await expect(leaderboardCard(page).locator("tbody tr td:first-child")).toHaveText(["1", "2"]);
       await switchLanguage(page, "ru");
-      await expect(kpiValues(page).nth(2)).toHaveText("Недоступно");
       await expect(kpiValues(page).nth(3)).toHaveText("Недоступно");
+      await expect(kpiDeltas(page).nth(3)).toHaveText("сравнение недоступно");
     },
   );
 
@@ -1269,7 +1350,7 @@ test.describe("Company Dashboard E2E", () => {
         filterAware: true,
         leaderboardViewer: "offPage",
       });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
       await expect(breakdownItems(routesCard(page))).toHaveCount(5);
       const interval = chartCard(page).getByRole("group", { name: "Interval", exact: true });
@@ -1280,13 +1361,15 @@ test.describe("Company Dashboard E2E", () => {
       await expect(periodSelect(page)).toHaveValue("allTime");
       await expect(periodSelect(page).locator("option:checked")).toHaveText("All time");
       // Active drivers equal the ranked members of the same period, as the API guarantees.
-      await expect(kpiValues(page)).toHaveText(["1,505,160 km", "504", "15", "14 of 15"]);
+      await expect(kpiValues(page)).toHaveText(["1,505,160 km", "504", "2,986 km", "15"]);
       await expect(kpiSubs(page)).toHaveText([
         "ETS2 737,160 km · ATS 768,000 km",
         "ETS2 240 · ATS 264",
+        "per accepted trip",
         "Active members: 5",
-        "448,800 km · trips: 48",
       ]);
+      // No previous period of the same length: no comparison.
+      await expect(kpiDeltas(page)).toHaveCount(0);
       await expect(interval).toHaveCount(0);
       await expect(leaderboardCard(page).locator("tbody tr").first()).toContainText("288");
       await expect(breakdownItems(routesCard(page)).first()).toContainText("108 trips");
@@ -1302,7 +1385,7 @@ test.describe("Company Dashboard E2E", () => {
       expect(analytics?.search).toBe("?period=all_time&granularity=month");
       const [leaderboard, ...extraLeaderboard] = allTimeRequests("/api/v1/analytics/leaderboard");
       expect(extraLeaderboard).toEqual([]);
-      expect(leaderboard?.search).toBe("?period=all_time&limit=10");
+      expect(leaderboard?.search).toBe("?period=all_time&limit=5");
       const breakdowns = allTimeRequests(breakdownApi);
       expect(breakdowns.map((url) => url.searchParams.get("dimension"))).toEqual([
         "route",
@@ -1321,8 +1404,8 @@ test.describe("Company Dashboard E2E", () => {
       await chart.getByRole("button", { name: "Table", exact: true }).click();
       const rows = chart.locator("tbody tr");
       await expect(rows).toHaveCount(12);
-      await expect(rows.first().getByRole("rowheader")).toContainText("2025-12-01");
-      await expect(rows.last().getByRole("rowheader")).toContainText("2026-11-01");
+      await expect(rows.first().getByRole("rowheader").locator("time")).toHaveText("December 2025");
+      await expect(rows.last().getByRole("rowheader").locator("time")).toHaveText("November 2026");
       await expect(rows.first()).toContainText("125,430 km");
 
       // A dated period restores the interval control, the kept daily interval and the dates.
@@ -1341,18 +1424,23 @@ test.describe("Company Dashboard E2E", () => {
         "32 trips",
       );
       const dated = state.requests.slice(restored);
+      // The current reads and the comparison with September, all with dates.
+      const october = (url: URL) =>
+        url.searchParams.get("fromDate") === "2026-10-01" &&
+        url.searchParams.get("toDateExclusive") === "2026-11-01";
+      const september = (url: URL) =>
+        url.searchParams.get("fromDate") === "2026-09-01" &&
+        url.searchParams.get("toDateExclusive") === "2026-10-01";
       for (const path of [...periodPaths, breakdownApi]) {
         const requests = dated.filter((url) => url.pathname === path);
-        expect(requests).toHaveLength(path === breakdownApi ? 3 : 1);
+        expect(requests.filter(october)).toHaveLength(path === breakdownApi ? 3 : 1);
+        expect(requests.filter(september)).toHaveLength(path === analyticsPath ? 1 : 0);
+        expect(requests).toHaveLength(path === breakdownApi ? 3 : path === analyticsPath ? 2 : 1);
         for (const url of requests) {
-          expect(url.searchParams.get("fromDate")).toBe("2026-10-01");
-          expect(url.searchParams.get("toDateExclusive")).toBe("2026-11-01");
           expect(url.searchParams.has("period")).toBe(false);
+          if (path === analyticsPath) expect(url.searchParams.get("granularity")).toBe("day");
         }
       }
-      expect(lastRequest(state, "/api/v1/analytics/company")?.searchParams.get("granularity")).toBe(
-        "day",
-      );
       expect(state.rejected).toEqual([]);
     },
   );
@@ -1366,7 +1454,7 @@ test.describe("Company Dashboard E2E", () => {
         filterAware: true,
         failures: { stats: 503, analytics: 503 },
       });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
       await expect(alert).toBeVisible();
       await periodSelect(page).selectOption("allTime");
@@ -1424,7 +1512,7 @@ test.describe("Company Dashboard E2E", () => {
     async ({ page }) => {
       await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
       const state = await mockDashboardRoutes(page);
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
       const routes = routesCard(page);
       const cargo = cargoCard(page);
@@ -1530,7 +1618,7 @@ test.describe("Company Dashboard E2E", () => {
     async ({ page }) => {
       const state = await mockDashboardRoutes(page);
       state.emptyBreakdowns = true;
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
       for (const card of [routesCard(page), cargoCard(page), sourceCard(page)]) {
         await expect(
@@ -1555,7 +1643,7 @@ test.describe("Company Dashboard E2E", () => {
     async ({ page }) => {
       const state = await mockDashboardRoutes(page);
       state.unrecognizedBreakdowns = true;
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
       // Every route and cargo trip is unrecognized: no ranked list, bars or empty state.
       for (const [card, text] of [
@@ -1595,7 +1683,7 @@ test.describe("Company Dashboard E2E", () => {
     browserCase(["@functional"]),
     async ({ page }) => {
       const state = await mockDashboardRoutes(page, { failures: { breakdownRoute: 503 } });
-      await page.goto("/account/dashboard");
+      await page.goto("/account/company");
       await loaded(page);
       const routes = routesCard(page);
       await expect(

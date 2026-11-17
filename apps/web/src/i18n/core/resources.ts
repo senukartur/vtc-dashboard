@@ -62,7 +62,8 @@ export const core = {
         account: "Account",
       },
       items: {
-        overview: "Overview",
+        overview: "My overview",
+        companyOverview: "Company overview",
         myTrips: "My trips",
         drafts: "Drafts",
         events: "Events",
@@ -132,6 +133,11 @@ export const core = {
       resetFilters: "Reset filters",
       sort: "Sort",
     },
+    rateLimit: {
+      title: "Too many requests",
+      wait: "Wait {{seconds}} s, then try again.",
+      waitUnknown: "Wait a minute, then try again.",
+    },
   },
   ru: {
     language: "Язык",
@@ -196,7 +202,8 @@ export const core = {
         account: "Аккаунт",
       },
       items: {
-        overview: "Обзор",
+        overview: "Мой обзор",
+        companyOverview: "Обзор компании",
         myTrips: "Мои рейсы",
         drafts: "Черновики",
         events: "События",
@@ -265,6 +272,11 @@ export const core = {
       nothingFound: "Ничего не найдено",
       resetFilters: "Сбросить фильтры",
       sort: "Сортировка",
+    },
+    rateLimit: {
+      title: "Слишком много запросов",
+      wait: "Подождите {{seconds}} с и повторите попытку.",
+      waitUnknown: "Подождите минуту и повторите попытку.",
     },
   },
 } as const;

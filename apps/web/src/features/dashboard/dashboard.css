@@ -56,14 +56,14 @@
   width: auto;
 }
 
-/* KPI strip: one bordered row; inset shadows draw dividers only between cells, so a wrapped
-   row never shows a coloured empty cell. */
+/* KPI strip: one bordered row of four tiles, two by two in a narrow strip and one column in a
+   very narrow one; inset shadows draw dividers only between cells. */
 .dashboard-page .dashboard-kpis {
   container: dashboard-kpis / inline-size;
 }
 .dashboard-page .dashboard-kpis dl {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -120,6 +120,34 @@
     min-height: calc(var(--font-small) * 2.6);
   }
 }
+@container dashboard-kpis (max-width: 639px) {
+  .dashboard-page .dashboard-kpis dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container dashboard-kpis (max-width: 319px) {
+  .dashboard-page .dashboard-kpis dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* The comparison with the previous period. The sign and the words carry the meaning; the tone
+   only supports them. A pending comparison reserves its line. */
+.dashboard-page .dashboard-kpi-delta,
+.dashboard-page .dashboard-month-delta {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+.dashboard-page .dashboard-kpi-delta-reserve {
+  min-height: calc(var(--font-small) * 1.3);
+}
+.dashboard-page .dashboard-delta-up {
+  color: var(--accepted);
+}
+.dashboard-page .dashboard-delta-down {
+  color: var(--destructive);
+}
 
 /* Static placeholders (no animation); the status line carries the loading announcement. */
 .dashboard-page .dashboard-skeleton {
@@ -149,27 +177,38 @@
   height: 22px;
 }
 
-/* Layout: chart | qualification, then leaderboard | side column on wide screens. */
-.dashboard-page .dashboard-grid {
+/* Layouts (VTC-159). My overview: Needs attention, a row of the month, qualification and the
+   nearest event, then the daily chart beside the own latest trips. Company overview: the KPIs,
+   the chart beside the leaders, the breakdown row and the definitions. Narrow screens stack every
+   block in DOM order. */
+.dashboard-page .dashboard-personal-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space);
-  align-items: start;
-}
-.dashboard-page .dashboard-side {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
   gap: var(--space);
   align-items: start;
   min-width: 0;
 }
-@media (min-width: 1051px) {
-  .dashboard-page .dashboard-grid {
-    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
-  }
-  .dashboard-page .dashboard-side {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.dashboard-page .dashboard-personal-split,
+.dashboard-page .dashboard-company-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space);
+  align-items: flex-start;
+  min-width: 0;
+}
+.dashboard-page .dashboard-personal-split > *,
+.dashboard-page .dashboard-company-split > * {
+  min-width: 0;
+}
+.dashboard-page .dashboard-personal-split > .dashboard-chart,
+.dashboard-page .dashboard-company-split > .dashboard-chart {
+  flex: 999 1 560px;
+}
+.dashboard-page .dashboard-personal-split > .dashboard-recent-trips {
+  flex: 1 1 340px;
+}
+.dashboard-page .dashboard-company-split > .dashboard-leaderboard-card {
+  flex: 1 1 320px;
 }
 
 /* Card heading row; deliberately not `.card > h2`, so no accent bar. */
@@ -203,7 +242,6 @@
   justify-self: start;
 }
 .dashboard-page .dashboard-actions {
-  grid-column: 1 / -1;
   min-block-size: 78px;
   overflow-wrap: anywhere;
 }
@@ -274,6 +312,29 @@
 .dashboard-page .dashboard-chart-skeleton {
   border-radius: var(--radius-control);
   background: var(--inset);
+}
+.dashboard-page .dashboard-chart-failure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+/* Decorative hover details beside the pointer; the Table view has every exact value. */
+.dashboard-page .dashboard-chart-tooltip {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--secondary);
+  font-size: var(--font-small);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.dashboard-page .dashboard-chart-tooltip strong {
+  color: var(--foreground);
+  font-weight: 600;
 }
 .dashboard-page .dashboard-chart-empty {
   display: flex;
@@ -643,10 +704,7 @@
   background: var(--dashboard-source-undetermined);
 }
 
-/* Recent company trips: a full-width third row, below the first desktop screen. */
-.dashboard-page .dashboard-recent-trips {
-  grid-column: 1 / -1;
-}
+/* Own latest trips: route and meta, then the game chip and the decision badge. */
 .dashboard-page .dashboard-trip-list {
   margin: 0;
   padding: 0;
@@ -715,6 +773,122 @@
 }
 .dashboard-page .dashboard-nowrap {
   white-space: nowrap;
+}
+.dashboard-page .dashboard-trip-tags {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px 6px;
+}
+/* The decision text and symbol carry the status; the tint only supports them. */
+.dashboard-page .dashboard-decision[data-decision="accepted"] {
+  background: var(--accepted-surface);
+  color: var(--accepted);
+}
+.dashboard-page .dashboard-decision[data-decision="pending_review"] {
+  background: var(--pending-surface);
+  color: var(--pending);
+}
+.dashboard-page .dashboard-decision[data-decision="rejected"] {
+  background: var(--rejected-surface);
+  color: var(--destructive);
+}
+
+/* My month: distance, trips and place side by side, then the comparison sentence. */
+.dashboard-page .dashboard-month-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(84px, 100%), 1fr));
+  gap: 8px 12px;
+  margin: 0;
+}
+.dashboard-page .dashboard-month-stats dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.3;
+}
+.dashboard-page .dashboard-month-stats dd {
+  margin: 0;
+}
+.dashboard-page .dashboard-month-value {
+  color: var(--foreground);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.dashboard-page .dashboard-month-value .dashboard-skeleton {
+  display: inline-block;
+  width: 4em;
+  max-width: 100%;
+  height: 0.8em;
+  vertical-align: middle;
+}
+.dashboard-page .dashboard-month-place-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  font-size: var(--font-small);
+  font-weight: 400;
+}
+
+/* Start steps for a member without trips: two numbered ways to begin. */
+.dashboard-page .dashboard-start-steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dashboard-page .dashboard-start-steps li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.dashboard-page .dashboard-start-number {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--focus);
+  font-size: var(--font-small);
+  font-weight: 700;
+}
+.dashboard-page .dashboard-start-text {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* The company overview link: phones only, where the sidebar group is behind More. */
+.dashboard-page .dashboard-company-link {
+  display: none;
+}
+@media (max-width: 767.98px) {
+  .dashboard-page .dashboard-company-link {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 4px;
+    min-height: 48px;
+    color: var(--foreground);
+    text-decoration: none;
+  }
+  .dashboard-page .dashboard-company-link-title {
+    font-weight: 600;
+  }
+  .dashboard-page .dashboard-company-link-arrow {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 18px;
+  }
 }
 
 /* States and notices */

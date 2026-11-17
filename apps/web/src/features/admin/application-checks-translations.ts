@@ -1,5 +1,6 @@
-// RU/EN strings for the application TruckersMP check and referral source (VTC-149). Pure data:
-// ApplicationChecks.tsx registers them as the `applicationChecks` namespace from its lazy chunk.
+// RU/EN strings for the application TruckersMP check and referral source (VTC-149) and the list
+// badges (VTC-161). Pure data: ApplicationChecks.tsx registers them as the `applicationChecks`
+// namespace from its lazy chunk.
 export const applicationChecksTranslations = {
   ru: {
     truckersmp: "TruckersMP",
@@ -46,6 +47,28 @@ export const applicationChecksTranslations = {
       uncertain: "Не удалось подтвердить запуск проверки. Повторите.",
       wait: "Повторить можно через {{seconds}} с.",
     },
+    badge: {
+      noBans: "Банов нет",
+      notFound: "Не найден",
+      hasBans: "Есть баны",
+      bansHidden: "Баны скрыты",
+      inVtc: "В ВТК",
+      failed: "Ошибка проверки",
+      checking: "Проверяется",
+      notChecked: "Не проверено",
+    },
+    legendLead: "Отметки TruckersMP",
+    legendLabel: "Что означают отметки TruckersMP",
+    legendTitle: "Проверка TruckersMP",
+    legend: {
+      passed: "Банов нет — игрок найден, банов нет, не состоит в ВТК.",
+      attention:
+        "Внимание — есть или скрыты баны, игрок не найден на TruckersMP или состоит в ВТК.",
+      failed: "Ошибка проверки — TruckersMP не ответил. Повторите проверку в заявке.",
+      pending:
+        "Проверяется или не проверено — проверка идёт, ещё не запускалась или в ссылке на Steam нет SteamID.",
+      detail: "Подробности — в карточке заявки.",
+    },
   },
   en: {
     truckersmp: "TruckersMP",
@@ -89,6 +112,27 @@ export const applicationChecksTranslations = {
       limited: "Too many requests. Try again later.",
       uncertain: "Couldn't confirm the recheck. Try again.",
       wait: "You can retry in {{seconds}} s.",
+    },
+    badge: {
+      noBans: "No bans",
+      notFound: "Not found",
+      hasBans: "Has bans",
+      bansHidden: "Bans hidden",
+      inVtc: "In a VTC",
+      failed: "Check failed",
+      checking: "Checking",
+      notChecked: "Not checked",
+    },
+    legendLead: "TruckersMP badges",
+    legendLabel: "What the TruckersMP badges mean",
+    legendTitle: "TruckersMP check",
+    legend: {
+      passed: "No bans: player found, no bans, not in a VTC.",
+      attention: "Attention: bans found or hidden, player not found on TruckersMP, or in a VTC.",
+      failed: "Check failed: TruckersMP did not answer. Check again in the application.",
+      pending:
+        "Checking or not checked: running, not started yet, or the Steam link has no SteamID.",
+      detail: "Details are in the application.",
     },
   },
 } as const;

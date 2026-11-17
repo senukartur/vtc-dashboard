@@ -31,7 +31,7 @@ test(
 const text = {
   en: {
     title: "Applications",
-    headers: ["Applicant", "Games", "Submitted", "Status"],
+    headers: ["Applicant", "Games", "TruckersMP", "Submitted", "Status"],
     awaiting: "Awaiting review",
     approve: "Approve application",
     reject: "Reject application",
@@ -42,7 +42,7 @@ const text = {
   },
   ru: {
     title: "Заявки",
-    headers: ["Кандидат", "Игры", "Подана", "Статус"],
+    headers: ["Кандидат", "Игры", "TruckersMP", "Подана", "Статус"],
     awaiting: "Ожидает решения",
     approve: "Одобрить заявку",
     reject: "Отклонить заявку",
@@ -89,8 +89,8 @@ async function settledDetail(page: Page, invitationShown: boolean) {
 }
 /**
  * Words in the queue and detail that wrap mid-word (a word whose text range spans several lines).
- * Only .applications-break (email, Steam URL, IDs) may break anywhere; a clipped phone header row
- * has no visible lines to check.
+ * Only .applications-break (email, Steam URL, provider names) may break anywhere; a clipped phone
+ * header row has no visible lines to check.
  */
 async function brokenWords(root: Locator) {
   return root.evaluate((element) => {
@@ -143,7 +143,7 @@ for (const locale of ["en", "ru"] as const)
       const table = master(page).getByRole("table");
       await expect(table.getByRole("columnheader")).toHaveText([...s.headers]);
       await expect(rows(page)).toHaveCount(2);
-      await expect(rows(page).first().getByRole("cell").nth(2)).toContainText(s.awaiting);
+      await expect(rows(page).first().getByRole("cell").nth(3)).toContainText(s.awaiting);
       const workbench = page.locator(".admin-workbench"),
         display = () => workbench.evaluate((element) => getComputedStyle(element).display);
       if (info.project.name === "mobile-chromium") {
@@ -154,6 +154,8 @@ for (const locale of ["en", "ru"] as const)
         await select(page, names.submitted);
         await expect(master(page)).toBeHidden();
         await settledDetail(page, false);
+        // The submission date is the reference; the application ID is not shown (VTC-161).
+        await expect(detail(page)).not.toContainText(ids.submitted);
         expect(await brokenWords(detail(page))).toEqual([]);
         await capture(page, info, `applications-detail-${locale}`);
         await page.getByRole("button", { name: s.back, exact: true }).click();
@@ -163,6 +165,7 @@ for (const locale of ["en", "ru"] as const)
         expect(await display()).toBe("flex");
         await select(page, names.submitted);
         await settledDetail(page, false);
+        await expect(detail(page)).not.toContainText(ids.submitted);
         const list = await box(master(page)),
           side = await box(detail(page));
         if (info.project.name === "desktop-chromium")

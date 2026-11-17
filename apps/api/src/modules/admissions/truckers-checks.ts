@@ -1,5 +1,5 @@
 import { applicationId, newId, type TxContext, type UnitOfWork } from "@vtc/db";
-import { eq, truckersChecks } from "@vtc/db/admissions-schema";
+import { eq, inArray, truckersChecks } from "@vtc/db/admissions-schema";
 import {
   createQueue,
   type Handler,
@@ -310,4 +310,27 @@ export async function readTruckersCheck(
     .from(truckersChecks)
     .where(eq(truckersChecks.applicationId, id));
   return checkDto(row, steamProfileUrl, now);
+}
+/** One batched read for a list page; every application gets a check, rows or not. */
+export async function readTruckersChecks(
+  unit: UnitOfWork,
+  tx: TxContext,
+  apps: readonly { id: string; steamProfileUrl: string }[],
+  now: Date,
+) {
+  const found = new Map<string, TruckersCheck>();
+  if (!apps.length) return found;
+  const rows = await unit
+    .client(tx)
+    .select()
+    .from(truckersChecks)
+    .where(
+      inArray(
+        truckersChecks.applicationId,
+        apps.map((app) => app.id),
+      ),
+    );
+  const byId = new Map(rows.map((row) => [row.applicationId, row]));
+  for (const app of apps) found.set(app.id, checkDto(byId.get(app.id), app.steamProfileUrl, now));
+  return found;
 }

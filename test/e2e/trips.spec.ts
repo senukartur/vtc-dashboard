@@ -237,6 +237,8 @@ test(
     );
     await page.goto(`/account/trips/${id}`);
     await catalogLanguage(page);
+    // Private downloads live in the staff technical details, collapsed until opened.
+    await page.locator("summary").filter({ hasText: "Technical details" }).click();
     await page.getByRole("button", { name: "Download private image", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("Image expired");
     await page.route(`**/api/v1/trips/${id}`, (r) =>
@@ -260,7 +262,6 @@ test(
   async ({ page }) => {
     await mockTrips(page);
     const view = example("getTrip:extended-manual-revision");
-    view.data.manualRevision.fields.comment = "Fictional private retained comment";
     let deny = false,
       calls = 0,
       revoked = false;
@@ -279,21 +280,15 @@ test(
       );
     });
     await page.goto(`/account/trips/${id}`);
-    await expect(
-      page.getByText("Fictional private retained comment", { exact: true }),
-    ).toBeVisible();
+    const screenshots = page.getByRole("heading", { name: "Completion screenshots", exact: true });
+    const history = page.getByRole("heading", { name: "History", exact: true });
+    await expect(screenshots).toBeVisible();
+    await expect(history).toBeVisible();
     deny = true;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("permissions");
-    await expect(page.getByText("Fictional private retained comment", { exact: true })).toHaveCount(
-      0,
-    );
-    await expect(
-      page.getByRole("heading", { name: "Completion screenshots", exact: true }),
-    ).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Decision history", exact: true })).toHaveCount(
-      0,
-    );
+    await expect(screenshots).toHaveCount(0);
+    await expect(history).toHaveCount(0);
     const deniedCalls = calls;
     await page.waitForTimeout(250);
     expect(calls).toBe(deniedCalls);
@@ -303,9 +298,8 @@ test(
     await expect(
       page.getByRole("main").getByRole("link", { name: "Sign in", exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Fictional private retained comment", { exact: true })).toHaveCount(
-      0,
-    );
+    await expect(screenshots).toHaveCount(0);
+    await expect(history).toHaveCount(0);
   },
 );
 
@@ -566,7 +560,7 @@ for (const locale of ["en", "ru"] as const)
       );
       await page.goto(`/account/trips/${id}`);
       await catalogLanguage(page, locale);
-      const summary = page.locator(".trip-row").first();
+      const summary = page.getByRole("heading", { level: 1 });
       await expect(summary).toContainText("Крёнбург · Krönburg → Krönburg");
       await expect(summary.locator(".catalog-native")).toHaveCSS("display", "inline");
       await expect(summary).not.toContainText("Krönburg · Krönburg");
@@ -612,9 +606,13 @@ test(
       ],
     ] as const) {
       await catalogLanguage(page, locale);
+      const card = page.getByRole("region", {
+        name: locale === "en" ? "Trip" : "Рейс",
+        exact: true,
+      });
       for (const [label, value] of rows) {
-        // Only the audit term: the qualification check can name Hard Mode too.
-        const term = page.locator("dt").filter({ hasText: new RegExp(`^\\s*${label}$`) });
+        // Only the audit term of the trip block: the qualification check can name Hard Mode too.
+        const term = card.locator("dt").filter({ hasText: new RegExp(`^\\s*${label}$`) });
         await expect(term).toBeVisible();
         await expect(term.locator("xpath=following-sibling::dd")).toHaveText(value);
       }

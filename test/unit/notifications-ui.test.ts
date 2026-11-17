@@ -20,10 +20,11 @@ import {
   notificationVisual,
   observeFeed,
   notificationAccountPath,
-  preferenceAudience,
-  preferenceLabel,
-  preferenceOrder,
-  visiblePreferences,
+  groupDetails,
+  groupState,
+  groupWrite,
+  preferenceGroups,
+  visibleGroups,
 } from "../../apps/web/src/features/notifications/model.ts";
 import { notificationTranslations } from "../../apps/web/src/features/notifications/translations.ts";
 import {
@@ -76,79 +77,157 @@ test("notification fixtures use reviewed DTOs and mirror the server preference k
     ).success,
   ).toBe(false);
 });
-test("switches follow exactly the returned keys in a fixed order with viewer-specific labels", () => {
-  expect(preferenceOrder).toEqual([
-    "tripAccepted",
-    "tripRejected",
-    "tripStarted",
-    "tripFinished",
-    "newEvent",
-    "eventChanges",
-    "eventReminders",
-    "qualificationChanges",
+const rows = (data: Parameters<typeof visibleGroups>[0]) =>
+  visibleGroups(data).map((group) => [group.id, group.keys]);
+test("rows group every contract preference exactly once in the P14 order", () => {
+  expect(preferenceGroups.map((group) => [group.id, [...group.keys]])).toEqual([
+    ["tripDecision", ["tripAccepted", "tripRejected"]],
+    ["companyTrips", ["tripStarted", "tripFinished"]],
+    ["events", ["newEvent", "eventReminders", "eventChanges"]],
+    ["level", ["qualificationChanges"]],
+    ["reviewQueue", ["reviewQueue"]],
+    ["applications", ["newApplications"]],
+  ]);
+  const grouped = preferenceGroups.flatMap((group) => [...group.keys]);
+  expect(grouped).toHaveLength(10);
+  expect(new Set(grouped).size).toBe(10);
+  expect([...grouped].sort()).toEqual([...preferenceKeys(capabilities(["director"]))].sort());
+  expect(preferenceGroups.filter((group) => "audience" in group).map((group) => group.id)).toEqual([
     "reviewQueue",
-    "newApplications",
+    "applications",
   ]);
-  expect(visiblePreferences(notificationPreferences)).toEqual([
-    "tripAccepted",
-    "tripRejected",
-    "tripStarted",
-    "tripFinished",
-    "newEvent",
-    "eventChanges",
-    "eventReminders",
-    "qualificationChanges",
+});
+test("a row renders only when the read returned one of its keys and controls only those", () => {
+  const count = (roles: Role[]) =>
+    visibleGroups(notificationPreferencesFor(capabilities(roles))).map((group) => group.id);
+  for (const roles of [["trainee"], ["driver"]] as Role[][])
+    expect(count(roles), roles.join()).toEqual(["tripDecision", "companyTrips", "events", "level"]);
+  expect(count(["dispatcher"])).toEqual([
+    "tripDecision",
+    "companyTrips",
+    "events",
+    "level",
+    "reviewQueue",
   ]);
-  expect(visiblePreferences(notificationPreferencesFor(capabilities(["director"])))).toEqual(
-    preferenceOrder,
+  for (const roles of [["deputy_director"], ["director"]] as Role[][])
+    expect(count(roles), roles.join()).toEqual(preferenceGroups.map((group) => group.id));
+  expect(rows(notificationPreferencesFor(capabilities(["director"])))).toEqual(
+    preferenceGroups.map((group) => [group.id, [...group.keys]]),
   );
-  // A pre-Stage 4 read without the optional keys renders the six it returned.
+  // A pre-Stage 4 read without the optional keys renders four rows with only its own keys.
   const { tripAccepted: _accepted, newEvent: _event, ...six } = notificationPreferences;
-  expect(visiblePreferences(six)).toEqual([
-    "tripRejected",
-    "tripStarted",
-    "tripFinished",
-    "eventChanges",
-    "eventReminders",
-    "qualificationChanges",
+  expect(rows(six)).toEqual([
+    ["tripDecision", ["tripRejected"]],
+    ["companyTrips", ["tripStarted", "tripFinished"]],
+    ["events", ["eventReminders", "eventChanges"]],
+    ["level", ["qualificationChanges"]],
   ]);
   // False is a returned value, not an absent key.
-  expect(visiblePreferences({ ...six, newEvent: false })).toContain("newEvent");
-  const member = notificationPreferencesFor(capabilities(["driver"])),
-    deputy = notificationPreferencesFor(capabilities(["deputy_director"]));
-  expect(preferenceLabel("tripRejected", member, capabilities(["driver"]))).toBe("tripRejectedOwn");
-  expect(preferenceLabel("tripRejected", deputy, capabilities(["deputy_director"]))).toBe(
-    "tripRejected",
-  );
-  expect(preferenceLabel("eventChanges", member, capabilities(["driver"]))).toBe("eventChanges");
-  expect(preferenceLabel("eventChanges", deputy, capabilities(["deputy_director"]))).toBe(
-    "eventChangesAccess",
-  );
-  expect(preferenceLabel("newEvent", member, [])).toBe("newEvent");
+  expect(rows({ ...six, tripRejected: false })[0]).toEqual(["tripDecision", ["tripRejected"]]);
+  expect(rows({ ...six, newEvent: false })).toContainEqual([
+    "events",
+    ["newEvent", "eventReminders", "eventChanges"],
+  ]);
 });
-test("switch labels and audience suffixes have RU/EN parity and no removed form keys", () => {
+test("differing grouped values are mixed and one row change sets exactly the row's returned keys", () => {
+  const deputy = notificationPreferencesFor(capabilities(["deputy_director"]));
+  const keys = (id: string) => visibleGroups(deputy).find((group) => group.id === id)?.keys ?? [];
+  const values = { ...deputy, tripRejected: false, eventChanges: false, newEvent: false };
+  expect(groupState(values, keys("tripDecision"))).toBe("mixed");
+  expect(groupState(values, keys("events"))).toBe("mixed");
+  expect(groupState(values, keys("companyTrips"))).toBe("on");
+  expect(
+    groupState({ ...values, tripStarted: false, tripFinished: false }, keys("companyTrips")),
+  ).toBe("off");
+  // A single-key row is never mixed.
+  expect(groupState(values, keys("level"))).toBe("on");
+  expect(groupState({ ...values, qualificationChanges: false }, keys("level"))).toBe("off");
+  const on = groupWrite(values, keys("tripDecision"), true);
+  expect(on).toEqual({ ...values, tripAccepted: true, tripRejected: true });
+  // Another row's mixed values stay as they are, and the key set is unchanged.
+  expect(groupState(on, keys("events"))).toBe("mixed");
+  expect(Object.keys(on)).toEqual(Object.keys(values));
+  expect(groupWrite(values, keys("events"), false)).toEqual({
+    ...values,
+    newEvent: false,
+    eventReminders: false,
+    eventChanges: false,
+  });
+  expect(values.tripRejected).toBe(false);
+  // A key the read did not return is never added, even when the row lists it.
+  const { tripAccepted: _accepted, newEvent: _event, ...six } = notificationPreferences;
+  const legacy = groupWrite(six, ["tripAccepted", "tripRejected"], false);
+  expect(Object.keys(legacy).sort()).toEqual(Object.keys(six).sort());
+  expect(legacy.tripRejected).toBe(false);
+  expect("tripAccepted" in legacy).toBe(false);
+});
+test("row details follow what the viewer receives", () => {
+  const details = (roles: Role[], id: string) => {
+    const granted = capabilities(roles),
+      data = notificationPreferencesFor(granted),
+      group = visibleGroups(data).find((item) => item.id === id);
+    return group ? groupDetails(group, data, granted) : null;
+  };
+  expect(details(["driver"], "tripDecision")).toEqual(["tripAccepted", "tripRejectedOwn"]);
+  expect(details(["dispatcher"], "tripDecision")).toEqual(["tripAccepted", "tripRejected"]);
+  expect(details(["driver"], "companyTrips")).toEqual(["tripStarted", "tripFinished"]);
+  expect(details(["driver"], "events")).toEqual(["newEvent", "eventReminders", "eventChanges"]);
+  expect(details(["dispatcher"], "events")).toEqual(["newEvent", "eventReminders", "eventChanges"]);
+  expect(details(["deputy_director"], "events")).toEqual([
+    "newEvent",
+    "eventReminders",
+    "eventChanges",
+    "eventChangesAccess",
+  ]);
+  expect(details(["driver"], "level")).toEqual(["qualificationChanges"]);
+  expect(details(["deputy_director"], "level")).toEqual([
+    "qualificationChanges",
+    "qualificationChangesStaff",
+  ]);
+  expect(details(["dispatcher"], "reviewQueue")).toEqual(["reviewQueue"]);
+  expect(details(["director"], "applications")).toEqual(["newApplications"]);
+  expect(details(["driver"], "reviewQueue")).toBeNull();
+});
+test("row names, details, columns and audience suffixes have RU/EN parity and no removed keys", () => {
   const { en, ru } = notificationTranslations;
-  expect(Object.keys(ru.toggles).sort()).toEqual(Object.keys(en.toggles).sort());
-  expect(Object.keys(ru.audience).sort()).toEqual(Object.keys(en.audience).sort());
-  expect(Object.keys(en.audience).sort()).toEqual([...preferenceAudience].sort());
+  for (const part of ["groups", "details", "audience", "columns"] as const)
+    expect(Object.keys(ru[part]).sort(), part).toEqual(Object.keys(en[part]).sort());
+  expect(Object.keys(en.groups)).toEqual(preferenceGroups.map((group) => group.id));
+  expect(Object.keys(en.audience).sort()).toEqual(
+    preferenceGroups
+      .filter((group) => "audience" in group)
+      .map((group) => group.id)
+      .sort(),
+  );
+  const used = new Set(["mixed"]);
+  for (const roles of [["driver"], ["dispatcher"], ["deputy_director"]] as Role[][]) {
+    const granted = capabilities(roles),
+      data = notificationPreferencesFor(granted);
+    for (const group of visibleGroups(data))
+      for (const detail of groupDetails(group, data, granted)) used.add(detail);
+  }
+  expect([...used].sort()).toEqual(Object.keys(en.details).sort());
   for (const locale of [en, ru]) {
-    for (const name of preferenceOrder)
-      for (const label of [
-        preferenceLabel(name, notificationPreferencesFor(capabilities(["driver"])), []),
-        preferenceLabel(name, notificationPreferencesFor(capabilities(["director"])), [
-          "members.manage",
-        ]),
-      ])
-        expect((locale.toggles as Record<string, string>)[label], label).toMatch(/\S/);
+    for (const part of [locale.groups, locale.details, locale.audience, locale.columns])
+      for (const [key, text] of Object.entries(part)) expect(text, key).toMatch(/\S/);
+    expect(locale.rowTip).toContain("{{name}}");
     for (const key of [
       "savedImmediately",
       "toggleHint",
+      "how5",
+      "aboutTip",
       "preferenceKeysChanged",
       "preferencesLink",
       "retrySave",
     ] as const)
       expect(locale[key]).toMatch(/\S/);
-    for (const removed of ["save", "tripStarted", "eventChanges", "qualificationChanges"])
+    for (const removed of [
+      "save",
+      "toggles",
+      "tripStarted",
+      "eventChanges",
+      "qualificationChanges",
+    ])
       expect(removed in locale).toBe(false);
   }
 });

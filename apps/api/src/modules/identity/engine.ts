@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import type { TransactionClient } from "@vtc/db";
 import { authSchema } from "@vtc/db/identity-schema";
@@ -13,6 +13,67 @@ export interface IdentityConfig {
 
 export function secureIdentityCookies(config: IdentityConfig): boolean {
   return new URL(config.origin).protocol === "https:";
+}
+
+/** The exact session token cookie name the engine issues for this configuration. */
+export function sessionCookieName(config: IdentityConfig): string {
+  return secureIdentityCookies(config) ? "__Host-vtc_session" : "vtc_dev_session";
+}
+
+// better-call 1.4.2 parseCookies: the first occurrence of a name wins; names and values
+// are trimmed, one pair of surrounding quotes is removed and `%` escapes are decoded.
+function cookieValue(header: string, name: string): string | undefined {
+  let index = 0;
+  while (index < header.length) {
+    const eqIdx = header.indexOf("=", index);
+    if (eqIdx === -1) break;
+    let endIdx = header.indexOf(";", index);
+    if (endIdx === -1) endIdx = header.length;
+    else if (endIdx < eqIdx) {
+      index = header.lastIndexOf(";", eqIdx - 1) + 1;
+      continue;
+    }
+    if (header.slice(index, eqIdx).trim() === name) {
+      let value = header.slice(eqIdx + 1, endIdx).trim();
+      if (value.codePointAt(0) === 34) value = value.slice(1, -1);
+      try {
+        return value.includes("%") ? decodeURIComponent(value) : value;
+      } catch {
+        return value;
+      }
+    }
+    index = endIdx + 1;
+  }
+  return undefined;
+}
+
+/**
+ * The session token when the Cookie header carries a session cookie signed with this
+ * configuration's secret, otherwise null. It reproduces better-call 1.4.2
+ * `getSignedCookie` (value `token.base64(HMAC-SHA256(secret, token))`, a 44-character
+ * padded signature) in process, without database work. Better Auth's own `getSession`
+ * repeats the check and stays the authority for whether the session is live.
+ */
+export function signedSessionToken(
+  config: IdentityConfig,
+  header: string | undefined,
+): string | null {
+  const value = header ? cookieValue(header, sessionCookieName(config)) : undefined;
+  if (!value) return null;
+  const split = value.lastIndexOf(".");
+  if (split < 1) return null;
+  const token = value.slice(0, split),
+    signature = value.slice(split + 1);
+  if (signature.length !== 44 || !signature.endsWith("=")) return null;
+  let supplied: Buffer;
+  try {
+    // atob, as better-call uses, rejects malformed base64 that Buffer would skip.
+    supplied = Buffer.from(atob(signature), "latin1");
+  } catch {
+    return null;
+  }
+  const expected = createHmac("sha256", config.secret).update(token).digest();
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected) ? token : null;
 }
 
 export function validateIdentityConfig(config: IdentityConfig): void {
@@ -166,7 +227,7 @@ export function engine(
       },
       cookies: {
         session_token: {
-          name: secureCookies ? "__Host-vtc_session" : "vtc_dev_session",
+          name: sessionCookieName(config),
           attributes: { httpOnly: true, secure: secureCookies, sameSite: "lax", path: "/" },
         },
       },

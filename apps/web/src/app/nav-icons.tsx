@@ -3,6 +3,7 @@ import type { NavItemId } from "./navigation-model.js";
 // Project-authored line icons; decorative only, the adjacent label names every control.
 const shapes: Record<NavItemId | "plus" | "collapse" | "expand" | "check" | "more", string> = {
   overview: "M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z",
+  companyOverview: "M3 3v18h18M7 15l4-4 3 3 5-6",
   myTrips:
     "M3 16V7h11v9M14 10h4l3 3v3h-7M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4M17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
   drafts: "M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5",

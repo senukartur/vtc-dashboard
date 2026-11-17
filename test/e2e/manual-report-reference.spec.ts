@@ -576,6 +576,27 @@ test(
     await page.goto(`/account/trips/${id}`);
     for (const locale of ["en", "ru"] as const) {
       await catalogLanguage(page, locale);
+      // The trip block shows the reported companies, times and damage in words.
+      const trip = page.getByRole("region", {
+        name: locale === "en" ? "Trip" : "Рейс",
+        exact: true,
+      });
+      await expect(trip).toContainText("Fictional North Depot");
+      await expect(trip).toContainText("Fictional South Depot");
+      await expect(trip).toContainText(locale === "en" ? "0 % of cargo" : "0 % груза");
+      await expect(trip.locator("time").first()).toHaveAttribute(
+        "datetime",
+        "2026-10-20T09:00:00.000Z",
+      );
+      await expect(trip.locator("time").first()).toContainText("09:00");
+      await expect(trip).toContainText(locale === "en" ? "by the report" : "по отчёту");
+      await expect(page.getByText(companyId, { exact: true })).toHaveCount(0);
+      // Staff keep the original reference block in the collapsed technical details; a language
+      // change rereads the trip, so the disclosure starts collapsed again.
+      await page
+        .locator("summary")
+        .filter({ hasText: locale === "en" ? "Technical details" : "Технические сведения" })
+        .click();
       const heading =
         locale === "en" ? "Driver-reported reference facts" : "Справочные данные водителя";
       const facts = page.getByRole("region", { name: heading, exact: true });
@@ -586,8 +607,6 @@ test(
         "datetime",
         "2026-10-20T09:00:00.000Z",
       );
-      await expect(facts.locator("time").first()).toContainText("09:00");
-      await expect(page.getByText(companyId, { exact: true })).toHaveCount(0);
       await capture(page, info, `private-manual-reference-${locale}`);
     }
   },
@@ -618,6 +637,7 @@ test(
     );
     await page.goto(`/account/trips/${id}`);
     await catalogLanguage(page);
+    await page.locator("summary").filter({ hasText: "Technical details" }).click();
     const revisionCard = page.locator("section.trip-revision").filter({
       has: page.getByRole("heading", { name: "Revision 2", exact: true }),
     });
@@ -668,19 +688,23 @@ test(
     });
     await page.goto(`/account/trips/${id}`);
     await catalogLanguage(page);
+    const technical = page.locator("summary").filter({ hasText: "Technical details" });
+    await technical.click();
     const facts = page.getByRole("region", { name: "Driver-reported reference facts" });
     await expect(facts.getByText("Not specified", { exact: true })).toHaveCount(5);
     for (const variant of ["summary", "telemetry"] as const) {
       view = variant;
       await page.reload();
-      await expect(
-        page.getByRole("paragraph").filter({
-          hasText:
-            view === "summary"
-              ? /^Accepted company summary$/
-              : /^Private report and review history$/,
-        }),
-      ).toBeVisible();
+      if (view === "summary")
+        await expect(
+          page.getByRole("paragraph").filter({ hasText: /^Accepted company summary$/ }),
+        ).toBeVisible();
+      else {
+        await expect(page.getByRole("region", { name: "Trip", exact: true })).toBeVisible();
+        // Opened technical details of a telemetry trip have no reference block to resolve.
+        await technical.click();
+        await expect(page.getByText("Trip ID", { exact: true })).toBeVisible();
+      }
       await expect(facts).toHaveCount(0);
     }
     expect(companyReads).toBe(0);

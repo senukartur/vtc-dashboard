@@ -10,6 +10,8 @@ export const ids = {
   approved: "a6300000-0000-4000-8000-000000000003",
   rejected: "a6300000-0000-4000-8000-000000000004",
   prior: "a6300000-0000-4000-8000-000000000005",
+  third: "a6300000-0000-4000-8000-000000000006",
+  fourth: "a6300000-0000-4000-8000-000000000007",
   invitation: "b6300000-0000-4000-8000-000000000001",
   reissued: "b6300000-0000-4000-8000-000000000002",
   delivery: "c6300000-0000-4000-8000-000000000001",
@@ -21,13 +23,15 @@ export const names = {
   second: "Fictional Aspen Ridge",
   approved: "Fictional Pine Echo",
   rejected: "Fictional Cedar Vale",
+  third: "Fictional Larch Bend",
+  fourth: "Fictional Spruce Gap",
 } as const;
 export const rejectedReason = "Fictional closed Steam profile, games are not visible";
 const envelope = (data: unknown) => ({ data, meta: { requestId: "synthetic-applications" } });
 const day = 86_400_000;
 const iso = (ms: number) => new Date(Math.floor(ms / 1000) * 1000).toISOString();
 
-function application(
+export function application(
   id: string,
   nickname: string,
   status: S["Application"]["status"],
@@ -165,7 +169,7 @@ export async function mockApplications(page: Page, options: ApplicationsOptions 
     commandOutcomes: [] as (number | "abort")[],
     commands: [] as Command[],
     reads: [] as string[],
-    /** TruckersMP checks by application ID; the detail derives not_checked for the rest. */
+    /** TruckersMP checks by application ID; the queue and detail derive not_checked for the rest. */
     checks: new Map<string, S["ApplicationStage4TruckersmpCheck"]>(),
   };
   const etag = (prefix: string, version: number) => ({ ETag: `"${prefix}-${version}"` });
@@ -197,9 +201,18 @@ export async function mockApplications(page: Page, options: ApplicationsOptions 
           json: { error: { code: "PRIVATE_SENTINEL" } },
         });
       const status = url.searchParams.get("status");
+      // The queue list carries each check like the detail, as the API does; history omits it.
       return route.fulfill({
         json: envelope({
-          items: state.listEmpty ? [] : state.apps.filter((app) => app.status === status),
+          items: state.listEmpty
+            ? []
+            : state.apps
+                .filter((app) => app.status === status)
+                .map((app) => ({
+                  ...app,
+                  truckersmpCheck:
+                    state.checks.get(app.id) ?? notChecked(app.fields.steamProfileUrl),
+                })),
           nextCursor: null,
           ...(options.statusCounts ? { statusCounts: options.statusCounts } : {}),
         }),
@@ -216,7 +229,6 @@ export async function mockApplications(page: Page, options: ApplicationsOptions 
             status: state.detailStatus,
             json: { error: { code: "PRIVATE_SENTINEL" } },
           });
-        // Only the detail carries the check, as the API does; lists and history omit it.
         return route.fulfill({
           json: envelope({
             ...app,

@@ -35,6 +35,7 @@ import {
 import {
   createTruckersChecks,
   readTruckersCheck,
+  readTruckersChecks,
   steamIdFromProfileUrl,
   type TruckersCheck,
   type TruckersPort,
@@ -629,10 +630,16 @@ export function createAdmissions(
             .groupBy(applications.status);
           for (const total of totals) statusCounts[total.status] = Number(total.count);
         }
+        // The queue carries each check like the detail does; history items omit it.
+        const pageChecks = !parent ? await readTruckersChecks(unit, tx, selected, now()) : null;
         return {
           ...(!parent ? { statusCounts } : {}),
           items: await Promise.all(
-            selected.map((row) => appDto(tx, row, byApplication.get(row.id) ?? null)),
+            selected.map(async (row) => {
+              const item = await appDto(tx, row, byApplication.get(row.id) ?? null);
+              const check = pageChecks?.get(row.id);
+              return { ...item, ...(check ? { truckersmpCheck: check } : {}) };
+            }),
           ),
           nextCursor:
             rows.length > limit && last ? crypto.cursor(binding, last.submittedAt, last.id) : null,

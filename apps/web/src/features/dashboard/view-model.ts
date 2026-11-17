@@ -1,12 +1,22 @@
-// Pure view model for the overview's recent company trips and nearest convoy blocks (VTC-055),
-// plus the pending query view for any page that waits for the reporting timezone (the overview
-// and, since VTC-078, the driver profile). It only decides what the blocks show; requests, keys,
-// ETags and command state stay in the hooks and components. Since VTC-148 it also builds the
-// statistics request paths and the place, leaderboard and breakdown views.
+// Pure view model for the overview blocks: own recent trips and the nearest convoy (VTC-055), plus
+// the pending query view for any page that waits for the reporting timezone (the overviews and,
+// since VTC-078, the driver profile). It only decides what the blocks show; requests, keys, ETags
+// and command state stay in the hooks and components. Since VTC-148 it also builds the statistics
+// request paths and the place, leaderboard and breakdown views, and since VTC-159 the period
+// comparisons of the company KPIs and the personal month.
 import { formatQuantity, formatUtc, type Locale } from "../../shared/formatting.js";
 import { AccountFailure } from "../account/transport.js";
 import type { EventPhase, ResponseValue } from "../events/view-model.js";
-import type { PeriodQuery } from "./model.js";
+import {
+  averageDelta,
+  averageDistanceM,
+  type CalendarRange,
+  countDelta,
+  type Delta,
+  differenceDelta,
+  distanceDelta,
+  type PeriodQuery,
+} from "./model.js";
 import { dashboardTranslations } from "./translations.js";
 import type { DTO } from "./transport.js";
 
@@ -14,11 +24,11 @@ import type { DTO } from "./transport.js";
 export const RECENT_TRIPS_LIMIT = 5;
 
 /**
- * Latest accepted company trips ordered by effective actual completion, labelled in the
- * interface language.
+ * The viewer's own latest trips, with every decision, ordered by effective actual completion and
+ * labelled in the interface language.
  */
 export function recentTripsPath(game?: "ets2" | "ats", locale?: "en" | "ru") {
-  return `/trips?scope=company&limit=${RECENT_TRIPS_LIMIT}&order=completion_desc${game ? `&game=${game}` : ""}${locale ? `&locale=${locale}` : ""}`;
+  return `/trips?scope=mine&limit=${RECENT_TRIPS_LIMIT}&order=completion_desc${game ? `&game=${game}` : ""}${locale ? `&locale=${locale}` : ""}`;
 }
 
 export type BlockState = "ready" | "empty" | "loading" | "error" | "forbidden";
@@ -77,9 +87,9 @@ function isForbidden(error: unknown) {
 export type RecentTripRow = {
   id: string;
   game: DTO["TripSummary"]["game"];
+  decision: DTO["TripSummary"]["decision"];
   origin: string;
   destination: string;
-  driver: string;
   /** True when either place label is an English fallback for the requested locale. */
   fallback: boolean;
   distance: string;
@@ -96,9 +106,9 @@ export function recentTripRow(
   return {
     id: trip.id,
     game: trip.game,
+    decision: trip.decision,
     origin: trip.origin?.label ?? unknown,
     destination: trip.destination?.label ?? unknown,
-    driver: trip.owner.nickname,
     fallback: !!trip.origin?.englishFallback || !!trip.destination?.englishFallback,
     distance: formatQuantity(trip.actualDistanceM, "km", locale),
     countedAt: formatUtc(trip.reportingAt, locale, timezone),
@@ -259,8 +269,25 @@ export function analyticsPath(
   })}`;
 }
 
-/** The overview shows the top ten; the viewer's own row comes with the page when ranked. */
-export const LEADERBOARD_LIMIT = 10;
+/**
+ * One member's analytics (My overview). The endpoint needs both dates and has no all time, so the
+ * path always carries a calendar range.
+ */
+export function memberAnalyticsPath(
+  memberId: string,
+  query: CalendarRange,
+  options: { game?: Game | undefined; granularity: "day" | "month" },
+) {
+  return `/members/${encodeURIComponent(memberId)}/analytics?${new URLSearchParams({
+    fromDate: query.fromDate,
+    toDateExclusive: query.toDateExclusive,
+    granularity: options.granularity,
+    ...(options.game ? { game: options.game } : {}),
+  })}`;
+}
+
+/** The overviews show the top five; the viewer's own row comes with the page when ranked. */
+export const LEADERBOARD_LIMIT = 5;
 
 export function leaderboardPath(query: PeriodQuery, game?: Game) {
   return `/analytics/leaderboard?${new URLSearchParams({
@@ -333,6 +360,85 @@ export function activeDriversView(analytics: CompanyAnalytics) {
     drivers: analytics.activeDrivers ?? null,
     members: analytics.activeMembers ?? null,
   };
+}
+
+/**
+ * The previous period's read as a comparison line sees it: no line (all time), a reserved line
+ * while pending, unavailable after a failure without data, or the previous totals.
+ */
+export type PreviousPeriod<T> =
+  | { state: "none" }
+  | { state: "pending" }
+  | { state: "failed" }
+  | { state: "ready"; data: T; range: CalendarRange };
+
+/** The previous-period view of a query; data wins over a failed background refresh. */
+export function previousPeriod<T>(
+  range: CalendarRange | null,
+  query: { data: T | undefined; isError: boolean },
+): PreviousPeriod<T> {
+  if (!range) return { state: "none" };
+  if (query.data !== undefined) return { state: "ready", data: query.data, range };
+  return query.isError ? { state: "failed" } : { state: "pending" };
+}
+
+/** A tile's comparison line: null shows none, "pending" reserves it. */
+export type DeltaLine = Delta | "pending" | null;
+export type KpiDeltas = Record<"distance" | "trips" | "average" | "drivers", DeltaLine>;
+
+/**
+ * Each company KPI against the previous period of the same length. Without accepted trips in the
+ * previous period nothing is compared; a failed read or an absent Stage 4 count is unavailable.
+ * The average has no line without current trips, where its tile says "No trips".
+ */
+export function companyDeltas(
+  current: CompanyAnalytics,
+  previous: PreviousPeriod<CompanyAnalytics>,
+): KpiDeltas {
+  const all = (line: DeltaLine): KpiDeltas => ({
+    distance: line,
+    trips: line,
+    average: current.acceptedTrips > 0 ? line : null,
+    drivers: line,
+  });
+  if (previous.state === "none") return all(null);
+  if (previous.state === "pending") return all("pending");
+  if (previous.state === "failed") return all({ kind: "unavailable" });
+  const before = previous.data;
+  if (before.acceptedTrips === 0) return all({ kind: "noBaseline" });
+  return {
+    distance: distanceDelta(current.actualDistanceM, before.actualDistanceM),
+    trips: countDelta(current.acceptedTrips, before.acceptedTrips),
+    average: averageDelta(
+      { distanceM: current.actualDistanceM, trips: current.acceptedTrips },
+      { distanceM: before.actualDistanceM, trips: before.acceptedTrips },
+    ),
+    drivers:
+      current.activeDrivers === undefined || before.activeDrivers === undefined
+        ? { kind: "unavailable" }
+        : countDelta(current.activeDrivers, before.activeDrivers),
+  };
+}
+
+/** The average accepted trip of the analytics totals, or null without trips. */
+export function averageTripM(analytics: { actualDistanceM: string; acceptedTrips: number }) {
+  return averageDistanceM(analytics.actualDistanceM, analytics.acceptedTrips);
+}
+
+/**
+ * The own month's distance against the same elapsed days of the previous month, as an exact
+ * difference ("320 km more than 1–17 October"). Without previous accepted trips there is nothing
+ * to compare with.
+ */
+export function personalDistanceDelta(
+  current: { actualDistanceM: string },
+  previous: PreviousPeriod<{ acceptedTrips: number; actualDistanceM: string }>,
+): DeltaLine {
+  if (previous.state === "none") return null;
+  if (previous.state === "pending") return "pending";
+  if (previous.state === "failed") return { kind: "unavailable" };
+  if (previous.data.acceptedTrips === 0) return { kind: "noBaseline" };
+  return differenceDelta(current.actualDistanceM, previous.data.actualDistanceM);
 }
 
 /** Per-game totals for the KPI sub-lines, only when the response splits both games. */

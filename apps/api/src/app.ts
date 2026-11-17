@@ -154,7 +154,8 @@ export async function createApp(options: AppOptions) {
       ].includes(suppliedCode)
         ? suppliedCode
         : (errorCodes[status] ?? "INTERNAL_ERROR");
-    // A policy limiter may report its exact remaining wait; fixed-window limits keep 60 seconds.
+    // A limiter may report its exact remaining wait (read denials send the rest of their
+    // fixed minute); without one, a 429 says 60 seconds.
     const retryAfter = "retryAfter" in httpError ? httpError.retryAfter : undefined;
     if (status === 429)
       reply.header(

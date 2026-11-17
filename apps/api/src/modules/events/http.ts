@@ -62,9 +62,14 @@ export async function registerEventRoutes(
   app.addHook("onRequest", async (request) => {
     const p = request.routeOptions.url;
     if (!p || !owned(p)) return;
-    if (!p.startsWith("/api/v1/me/"))
-      await identity.rateLimit(request.method === "GET" ? "read" : "command", request.ip);
-    if (p.startsWith("/api/v1/public/")) return;
+    // Identity already admits /me routes; public event reads never use cookies.
+    const publicRoute = p.startsWith("/api/v1/public/");
+    if (!p.startsWith("/api/v1/me/")) {
+      if (request.method !== "GET" || publicRoute)
+        await identity.rateLimit(request.method === "GET" ? "read" : "command", request.ip);
+      else await identity.admitRead(request.ip, request.headers.cookie);
+    }
+    if (publicRoute) return;
     const a = await actor(request);
     await events.authorize(a, p.startsWith("/api/v1/admin/"));
     if (request.method !== "GET") csrf.check(request, a);

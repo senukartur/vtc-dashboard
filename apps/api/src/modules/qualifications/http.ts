@@ -48,8 +48,10 @@ export async function registerQualificationRoutes(
     const path = request.routeOptions.url;
     if (!path || !owned(path)) return;
     // Identity already admits every /me route before parsing.
-    if (!path.startsWith("/api/v1/me/"))
-      await identity.rateLimit(request.method === "GET" ? "read" : "command", request.ip);
+    if (!path.startsWith("/api/v1/me/")) {
+      if (request.method === "GET") await identity.admitRead(request.ip, request.headers.cookie);
+      else await identity.rateLimit("command", request.ip);
+    }
     const current = await actor(request);
     await qualifications.authorize(current, path.startsWith("/api/v1/admin/"));
     if (writes.includes(request.method)) csrf.check(request, current);

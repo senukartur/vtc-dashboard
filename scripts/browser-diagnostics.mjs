@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 export const browserFiles = {
   "test/e2e/dashboard.spec.ts": "dashboard",
   "test/e2e/dashboard-blocks.spec.ts": "dashboard-blocks",
+  "test/e2e/dashboard-personal.spec.ts": "dashboard-personal",
   "test/e2e/events.spec.ts": "events",
   "test/e2e/drivers.spec.ts": "drivers",
   "test/e2e/drivers-directory.spec.ts": "drivers-directory",
@@ -26,6 +27,7 @@ export const browserFiles = {
   "test/e2e/manual-report-date-time.spec.ts": "manual-report-date-time",
   "test/e2e/account.spec.ts": "account",
   "test/e2e/account-real.spec.ts": "account-real",
+  "test/e2e/account-rate-limit.spec.ts": "account-rate-limit",
   "test/e2e/catalogs.spec.ts": "catalogs",
   "test/e2e/catalogs-real.spec.ts": "catalogs-real",
   "test/e2e/admissions.spec.ts": "admissions",

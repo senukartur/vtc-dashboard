@@ -114,6 +114,7 @@ test("audit selects a closed response schema for the requested view", async () =
       ...identity,
       config: { secret: "fictional-response-test-secret", origin: "http://127.0.0.1:4173" },
       rateLimit: async () => {},
+      admitRead: async () => {},
       authenticate: async () => actor,
     } as unknown as Identity,
     { audit, auditStage3 } as unknown as Administration,

@@ -64,7 +64,10 @@ export async function registerManualRoutes(
     return result;
   }
   app.addHook("onRequest", async (r) => {
-    await identity.rateLimit(r.method === "GET" ? "read" : "command", r.ip);
+    if (r.method !== "GET") await identity.rateLimit("command", r.ip);
+    // Identity's own hook already admitted /me reads; charge them only once.
+    else if (!r.routeOptions.url?.startsWith("/api/v1/me/"))
+      await identity.admitRead(r.ip, r.headers.cookie);
     const current = await actor(r);
     await manual.authorize(
       current,

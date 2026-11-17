@@ -2,49 +2,93 @@ import type { components } from "@vtc/contracts";
 export type DTO = components["schemas"];
 export type Notification = DTO["Notification"];
 export const notificationAccountPath = (path: string) => /^\/account(?:\/|$)/i.test(path);
-/** Fixed display order of the notification switches; the read decides which ones render. */
-export const preferenceOrder = [
-  "tripAccepted",
-  "tripRejected",
-  "tripStarted",
-  "tripFinished",
-  "newEvent",
-  "eventChanges",
-  "eventReminders",
-  "qualificationChanges",
-  "reviewQueue",
-  "newApplications",
-] as const;
-export type PreferenceName = (typeof preferenceOrder)[number];
+export type PreferenceName = keyof DTO["NotificationPreferences"];
+/**
+ * Fixed notification settings rows in mockup P14 order (plus the company trip row the owner
+ * added). Each row controls every returned preference it groups; `audience` rows are staff-only
+ * and carry a muted suffix. Presentation only: the server decides which keys a viewer receives.
+ */
+export const preferenceGroups = [
+  { id: "tripDecision", keys: ["tripAccepted", "tripRejected"] },
+  { id: "companyTrips", keys: ["tripStarted", "tripFinished"] },
+  { id: "events", keys: ["newEvent", "eventReminders", "eventChanges"] },
+  { id: "level", keys: ["qualificationChanges"] },
+  { id: "reviewQueue", keys: ["reviewQueue"], audience: true },
+  { id: "applications", keys: ["newApplications"], audience: true },
+] as const satisfies readonly {
+  id: string;
+  keys: readonly PreferenceName[];
+  audience?: true;
+}[];
+export type PreferenceGroupId = (typeof preferenceGroups)[number]["id"];
 type Same<A, B> = [Exclude<A, B> | Exclude<B, A>] extends [never] ? true : false;
-/** Fails to compile when the contract and the display order list different preference keys. */
-export const preferenceOrderComplete: Same<keyof DTO["NotificationPreferences"], PreferenceName> =
-  true;
-/**
- * Switches to render, in display order: exactly the keys the server returned. Hiding a key is
- * presentation only; the server decides which notification types a viewer has.
- */
-export function visiblePreferences(data: DTO["NotificationPreferences"]): PreferenceName[] {
-  return preferenceOrder.filter((name) => typeof data[name] === "boolean");
+/** Fails to compile when the contract and the rows list different preference keys. */
+export const preferenceGroupsComplete: Same<
+  PreferenceName,
+  (typeof preferenceGroups)[number]["keys"][number]
+> = true;
+/** A row to render: its returned keys in row order. */
+export interface PreferenceRow {
+  id: PreferenceGroupId;
+  keys: PreferenceName[];
+  audience: boolean;
 }
-/** Staff-only switches carry a muted audience suffix. */
-export const preferenceAudience = ["reviewQueue", "newApplications"] as const;
 /**
- * Translation key under `toggles.` for a switch. Two switches gate more than their name says, so
- * their label follows what this viewer actually receives: with reviewQueue, review notices about
- * own trips move there and tripRejected keeps only rejections; with members.manage, eventChanges
- * also covers member access changes. Presentation only; routing stays on the server.
+ * Rows to render, in display order: a row appears when the read returned at least one of its
+ * keys (false counts) and controls only those keys.
  */
-export function preferenceLabel(
-  name: PreferenceName,
+export function visibleGroups(data: DTO["NotificationPreferences"]): PreferenceRow[] {
+  return preferenceGroups
+    .map((group) => ({
+      id: group.id,
+      keys: group.keys.filter((key) => typeof data[key] === "boolean"),
+      audience: "audience" in group,
+    }))
+    .filter((group) => group.keys.length > 0);
+}
+export type GroupState = "on" | "off" | "mixed";
+/** "mixed" when the row's returned preferences differ, for example set before rows existed. */
+export function groupState(
+  data: DTO["NotificationPreferences"],
+  keys: readonly PreferenceName[],
+): GroupState {
+  const on = keys.filter((key) => data[key] === true).length;
+  return on === keys.length ? "on" : on === 0 ? "off" : "mixed";
+}
+/**
+ * The write for one row change: the read's full key set with every returned key of the row set to
+ * `value`. Other rows keep their values and an unreturned key is never added.
+ */
+export function groupWrite(
+  data: DTO["NotificationPreferences"],
+  keys: readonly PreferenceName[],
+  value: boolean,
+): DTO["NotificationPreferences"] {
+  const body = { ...data };
+  for (const key of keys) if (typeof data[key] === "boolean") body[key] = value;
+  return body;
+}
+/**
+ * Translation keys under `details.` for a row's info tooltip, one line each. Some preferences gate
+ * more than their name says, so the lines follow what this viewer actually receives: without
+ * reviewQueue, tripRejected also covers review notices about own manual reports; with
+ * members.manage, eventChanges also covers member access changes; with qualifications.manage,
+ * qualificationChanges also covers other members' levels. Presentation only.
+ */
+export function groupDetails(
+  group: PreferenceRow,
   data: DTO["NotificationPreferences"],
   capabilities: readonly string[],
-): string {
-  if (name === "tripRejected")
-    return typeof data.reviewQueue === "boolean" ? "tripRejected" : "tripRejectedOwn";
-  if (name === "eventChanges")
-    return capabilities.includes("members.manage") ? "eventChangesAccess" : "eventChanges";
-  return name;
+): string[] {
+  return group.keys.flatMap((key) => {
+    if (key === "tripRejected")
+      return [typeof data.reviewQueue === "boolean" ? "tripRejected" : "tripRejectedOwn"];
+    if (key === "eventChanges" && capabilities.includes("members.manage"))
+      return ["eventChanges", "eventChangesAccess"];
+    if (key === "qualificationChanges" && capabilities.includes("qualifications.manage"))
+      return ["qualificationChanges", "qualificationChangesStaff"];
+    return [key];
+  });
 }
 export const messages = [
   "trip.started",

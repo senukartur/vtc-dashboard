@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure } from "../account/transport.js";
 import { readCompanyStats } from "../landing/stats.js";
-import type { PeriodQuery } from "./model.js";
+import type { CalendarRange, PeriodQuery } from "./model.js";
 import { DashboardPayloadFailure, dashboardRead } from "./transport.js";
 import {
   analyticsPath,
@@ -11,6 +11,7 @@ import {
   type BreakdownDimension,
   breakdownPath,
   leaderboardPath,
+  memberAnalyticsPath,
   recentTripsPath,
 } from "./view-model.js";
 
@@ -82,7 +83,65 @@ export function useCompanyAnalytics(params: {
   });
 }
 
-/** The top ten plus the viewer's own place (`viewer`) and the ranked members count. */
+/**
+ * One member's analytics for a calendar range (My overview: the own month and the same elapsed
+ * days of the previous month). The member analytics shape has no Stage 4 aggregates. Its own
+ * key, separate from the driver profile's 12-month read.
+ */
+export function useMemberPeriodAnalytics(params: {
+  memberId: string | undefined;
+  query: CalendarRange | null;
+  game?: "ets2" | "ats" | undefined;
+  granularity: "day" | "month";
+  enabled?: boolean | undefined;
+}) {
+  const session = useSession();
+  const client = useQueryClient();
+  const { i18n } = useTranslation();
+  const path =
+    params.memberId && params.query
+      ? memberAnalyticsPath(params.memberId, params.query, params)
+      : null;
+
+  return useQuery({
+    queryKey: [
+      "dashboard-member-analytics",
+      session.self?.member.id,
+      session.generation,
+      session.self?.identityEpoch,
+      session.self?.capabilities.join(","),
+      i18n.resolvedLanguage,
+      path,
+    ],
+    meta: { private: true },
+    enabled:
+      params.enabled !== false &&
+      path !== null &&
+      !!session.self?.capabilities.includes("company.read"),
+    retry: false,
+    staleTime: 30000,
+    queryFn: async ({ signal }) => {
+      if (path === null) throw new DashboardPayloadFailure();
+      try {
+        return (await dashboardRead(path, "EnvelopeAnalytics", signal)).data.data;
+      } catch (error) {
+        if (error instanceof AccountFailure && !signal.aborted) {
+          if (error.kind === "unauthorized") await session.confirmSessionLoss(signal);
+          if (error.kind === "forbidden") {
+            client.removeQueries({
+              type: "inactive",
+              predicate: (q) => q.meta?.private === true,
+            });
+            await session.refresh();
+          }
+        }
+        throw error;
+      }
+    },
+  });
+}
+
+/** The top five plus the viewer's own place (`viewer`) and the ranked members count. */
 export function useDriverLeaderboard(params: {
   query: PeriodQuery;
   game?: "ets2" | "ats" | undefined;
@@ -127,7 +186,11 @@ export function useDriverLeaderboard(params: {
   });
 }
 
-export function useTripStatusSummary(game?: "ets2" | "ats") {
+/** Own trip counts; My overview reads it without a game to decide on the start steps. */
+export function useTripStatusSummary(
+  game?: "ets2" | "ats",
+  options?: { enabled?: boolean | undefined },
+) {
   const session = useSession();
   const client = useQueryClient();
   const { i18n } = useTranslation();
@@ -146,7 +209,8 @@ export function useTripStatusSummary(game?: "ets2" | "ats") {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("trips.submit_own"),
+    enabled:
+      options?.enabled !== false && !!session.self?.capabilities.includes("trips.submit_own"),
     retry: false,
     staleTime: 30000,
     queryFn: async ({ signal }) => {
@@ -232,10 +296,10 @@ export function useMyQualificationProgress(
 }
 
 /**
- * Latest accepted company trips for the overview. It follows the page game filter; the period
- * filter does not apply because the trips list has no date filter.
+ * The viewer's own latest trips for My overview, with every decision. It follows the page game
+ * filter; there is no period because the trips list has no date filter.
  */
-export function useRecentCompanyTrips(
+export function useMyRecentTrips(
   game?: "ets2" | "ats",
   options?: { enabled?: boolean | undefined },
 ) {

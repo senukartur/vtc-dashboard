@@ -504,7 +504,11 @@ test(
     expect(details).toEqual([]);
     await rowLink(page, second).click();
     await expect(page).toHaveURL(new RegExp(`/account/trips/${second}$`));
-    await expect(page.getByRole("link", { name: "Back to trips", exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Breadcrumb", exact: true })
+        .getByRole("link", { name: "My trips", exact: true }),
+    ).toHaveAttribute("href", "/account/trips");
     expectListParams(lists);
   },
 );
