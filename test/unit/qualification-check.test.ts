@@ -136,6 +136,34 @@ describe("the five-rule trip check", () => {
     );
   });
 
+  // One-sided bounds and the ADR edge cases; the default trip has 12000 kg and 450000 m.
+  const selectedAdr = { ...open, adr: { mode: "selected" as const, classes: ["3" as const] } };
+  test.each([
+    ["mass min only, at or above", { ...open, massMinKg: "11000" }, facts(), "cargo_mass", "pass"],
+    ["distance min only, above", { ...open, distanceMinM: "400000" }, facts(), "distance", "pass"],
+    ["distance min only, below", { ...open, distanceMinM: "450001" }, facts(), "distance", "fail"],
+    ["mass max only, below", { ...open, massMaxKg: "12000.5" }, facts(), "cargo_mass", "pass"],
+    ["distance max only, at", { ...open, distanceMaxM: "450000" }, facts(), "distance", "pass"],
+    [
+      "selected ADR with non-ADR cargo",
+      selectedAdr,
+      facts({ adrCategory: unknown("cargo_not_adr") }),
+      "adr",
+      "pass",
+    ],
+    [
+      "selected ADR with an unknown ADR class",
+      selectedAdr,
+      facts({ adrCategory: unknown("adr_class_unknown") }),
+      "adr",
+      "unknown",
+    ],
+  ] as const)("%s", (_name, limits, evidence, rule, expected) => {
+    const check = result(limits, evidence);
+    expect(check.rules[rule]).toBe(expected);
+    expect(check.outcome).toBe(expected);
+  });
+
   test("Hard Mode: qualified passes, not-qualified fails, unknown or absent is unknown", () => {
     const required = { ...open, hardModeRequired: true };
     const telemetry = (hardModeResult: "qualified" | "not-qualified" | "unknown") =>
