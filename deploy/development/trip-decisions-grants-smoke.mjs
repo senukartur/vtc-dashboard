@@ -99,6 +99,7 @@ try {
         game: "ets2",
         code: `fictional_${name}`,
         nameEn: `Fictional ${name}`,
+        ...(list === "trailers" ? { commonTrailer: "trailer.fiction_rehearsal" } : {}),
       });
       return { entityId: item.id };
     };
@@ -108,6 +109,7 @@ try {
       ["cargo", await seed("cargoes", "cargo")],
       ["trailer", await seed("trailers", "trailer")],
     ]);
+    const allowedTrailer = await seed("trailers", "allowed_variant");
     step = "seed_rules";
     const level = (await qualifications.list(director, "ets2")).levels.find(
       (l) => l.id === structuralLevels.ets2[0],
@@ -121,7 +123,7 @@ try {
         massMaxKg: "20000",
         distanceMinM: null,
         distanceMaxM: null,
-        trailers: { mode: "any", typeIds: [] },
+        trailers: { mode: "selected", typeIds: [allowedTrailer.entityId] },
         adr: { mode: "any", classes: [] },
         hardModeRequired: false,
       },
@@ -556,6 +558,8 @@ try {
       step = "immutable_denials";
       for (const statement of [
         "CREATE TABLE forbidden_decision (id INT)",
+        "UPDATE catalog_trailers SET common_trailer=common_trailer WHERE FALSE",
+        "DELETE FROM catalog_trailers WHERE FALSE",
         "UPDATE manual_correction_requests SET reason=reason",
         "DELETE FROM manual_correction_requests",
         "UPDATE manual_correction_history SET reason=reason",
