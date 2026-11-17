@@ -169,6 +169,17 @@ test("common trailers page once, search every body code and retain exact hidden 
   expect((await catalogs.summary(driver, "ets2")).lists.trailers.visible).toBe(2);
   const original = await catalogs.get(driver, "trailers", b.id);
   expect(original).toMatchObject({ id: b.id, code: "_fiction_b", nameEn: b.nameEn });
+  const names = csv("game,code,name_en", "ets2,_fiction_b,Fictional imported variant");
+  const namesPreview = await catalogs.previewImport(director, "trailers", names);
+  expect(namesPreview).toMatchObject({ changed: 1, unchanged: 0, errors: 0 });
+  await catalogs.applyImport(director, "trailers", names, newId(), namesPreview.token as string);
+  expect((await catalogs.get(driver, "trailers", a.id)).nameEn).toBe(a.nameEn);
+  expect((await catalogs.get(driver, "trailers", b.id)).nameEn).toBe("Fictional imported variant");
+  expect(await catalogs.previewImport(director, "trailers", names)).toMatchObject({
+    changed: 0,
+    unchanged: 1,
+    errors: 0,
+  });
   const pack = await catalogs.create(director, "dlcs", newId(), {
     game: "ets2",
     code: "fictional-pack",
