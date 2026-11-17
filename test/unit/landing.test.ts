@@ -5,7 +5,9 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   applicationPayload,
   applicationSchema,
+  referralSources,
 } from "../../apps/web/src/features/admissions/schema.ts";
+import { admissionsTranslations } from "../../apps/web/src/features/admissions/translations.ts";
 import {
   ApplicationFailure,
   retryDelay,
@@ -76,6 +78,127 @@ describe("public application technical validation", () => {
         steamProfileUrl: "https://steamcommunity.com/profiles/00000000000000000/",
       }).success,
     ).toBe(true);
+  });
+});
+describe("referral source answer", () => {
+  const ajv = new Ajv2020({ strict: false });
+  addFormats.default(ajv);
+  ajv.addSchema(browserSchemaDocument);
+  const valid = ajv.compile(browserSchemaRef("ApplicationInput"));
+  const other = (referralOther: string) => ({
+    ...fields,
+    referralSource: "other" as const,
+    referralOther,
+  });
+  const definitions = browserSchemaDocument.$defs as unknown as Record<
+    string,
+    { properties: Record<string, { enum?: string[] }> }
+  >;
+  test("the options equal the contract enum and every option has RU/EN labels", () => {
+    expect([...referralSources].sort()).toEqual(
+      [...(definitions.ApplicationInput?.properties.referralSource?.enum ?? [])].sort(),
+    );
+    for (const language of ["ru", "en"] as const) {
+      const strings = admissionsTranslations[language];
+      for (const source of referralSources)
+        expect(strings.referralOptions[source].trim()).not.toBe("");
+      for (const text of [
+        strings.referralSource,
+        strings.referralNone,
+        strings.referralOther,
+        strings.referralCount,
+        strings.errors.referralOther,
+      ])
+        expect(text.trim()).not.toBe("");
+    }
+  });
+  test("an unanswered question keeps the earlier payload byte for byte", () => {
+    const legacy = JSON.stringify(applicationPayload(fields));
+    for (const extra of [
+      {},
+      { referralSource: "" as const, referralOther: "" },
+      { referralSource: "" as const, referralOther: "Fictional poster" },
+    ]) {
+      const parsed = applicationSchema.parse({ ...fields, ...extra });
+      expect(JSON.stringify(applicationPayload(parsed))).toBe(legacy);
+    }
+    expect(legacy).not.toMatch(/referral/);
+  });
+  test("a chosen source is sent alone; text typed for other is dropped after switching", () => {
+    for (const source of referralSources.filter((item) => item !== "other"))
+      for (const referralOther of ["", "Fictional poster", "x".repeat(201)]) {
+        const parsed = applicationSchema.safeParse({
+          ...fields,
+          referralSource: source,
+          referralOther,
+        });
+        expect(parsed.success).toBe(true);
+        const payload = applicationPayload(parsed.data ?? fields);
+        expect(payload).toEqual({ ...applicationPayload(fields), referralSource: source });
+        expect(valid(payload)).toBe(true);
+      }
+  });
+  test("other without text, or with only blank text, sends just the source", () => {
+    for (const referralOther of [
+      "",
+      "   ",
+      "\n\t",
+      "\u3000",
+      "\ufeff",
+      "\u0085",
+      "\u00a0\u2028",
+      " ".repeat(201),
+      "\ufeff".repeat(201),
+    ]) {
+      const parsed = applicationSchema.safeParse(other(referralOther));
+      expect(parsed.success).toBe(true);
+      const payload = applicationPayload(parsed.data ?? fields);
+      expect(payload.referralSource).toBe("other");
+      expect(payload).not.toHaveProperty("referralOther");
+      expect(valid(payload)).toBe(true);
+    }
+  });
+  test("accepted free text is sent untrimmed and satisfies the contract", () => {
+    for (const referralOther of [
+      "x".repeat(200),
+      "\u{1f69a}".repeat(200),
+      " Fictional\tconvoy\r\nposter ",
+      "\u180e",
+      "\u200b",
+      "\u00ad",
+    ]) {
+      const parsed = applicationSchema.safeParse(other(referralOther));
+      expect(parsed.success).toBe(true);
+      const payload = applicationPayload(parsed.data ?? fields);
+      expect(payload.referralOther).toBe(referralOther);
+      expect(valid(payload)).toBe(true);
+    }
+  });
+  test("over-long text, lone surrogates and control characters are field errors", () => {
+    for (const referralOther of [
+      "x".repeat(201),
+      "\u{1f69a}".repeat(201),
+      "\ud800",
+      "Fictional \udc00 text",
+      "Fictional\u0085poster",
+      "Fictional\u001cposter",
+      "Fictional\u007fposter",
+      "Fictional\u0000poster",
+      "\u001c",
+      "\u007f",
+    ]) {
+      const parsed = applicationSchema.safeParse(other(referralOther));
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues.map((issue) => issue.path)).toEqual([["referralOther"]]);
+    }
+  });
+  test("referral text errors are reported together with other field errors", () => {
+    const parsed = applicationSchema.safeParse({ ...other("x".repeat(201)), nickname: " " });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map((issue) => issue.path[0])).toEqual([
+      "nickname",
+      "referralOther",
+    ]);
   });
 });
 describe("same-origin admissions transport", () => {
