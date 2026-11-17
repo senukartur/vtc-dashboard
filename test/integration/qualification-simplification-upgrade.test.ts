@@ -34,6 +34,35 @@ const schema = async () => ({
   ),
 });
 
+const retired = [
+  "qualification_initial_assignments",
+  "qualification_ladder_history",
+  "qualification_promotion_reviews",
+  "qualification_promotions",
+  "qualification_rule_versions",
+  "qualification_states",
+];
+/** The three-table model: the old tables and every rule version reference are gone. */
+const expectThreeTableModel = async () => {
+  expect(
+    (
+      await rows(
+        "SELECT TABLE_NAME t FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'qualification%' ORDER BY 1",
+      )
+    ).map((r) => r.t),
+  ).toEqual(["qualification_assignments", "qualification_level_trailers", "qualification_levels"]);
+  expect(
+    await rows(
+      `SELECT TABLE_NAME t FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (${retired.map((name) => `'${name}'`).join(",")})`,
+    ),
+  ).toEqual([]);
+  expect(
+    await rows(
+      "SELECT TABLE_NAME t, COLUMN_NAME c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND COLUMN_NAME='rule_version_id'",
+    ),
+  ).toEqual([]);
+};
+
 beforeAll(async () => {
   control = await testConnection();
   await reset(control);
@@ -45,7 +74,7 @@ afterAll(async () => {
 });
 
 test(
-  "the old qualification model upgrades to the three-table model and matches a fresh schema",
+  "the old qualification model upgrades to the three-table model, the end state of a fresh migration",
   async () => {
     // Fictional old-model rows: an archived level, rule versions, promotion proof and review,
     // an orphan open assignment, a decided and credited trip that name a rule version, and
@@ -95,17 +124,7 @@ test(
     expect(await runMigrations(settings)).toBe(1);
     expect(await runMigrations(settings)).toBe(0);
 
-    expect(
-      (
-        await rows(
-          `SELECT TABLE_NAME t FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'qualification%' ORDER BY 1`,
-        )
-      ).map((r) => r.t),
-    ).toEqual([
-      "qualification_assignments",
-      "qualification_level_trailers",
-      "qualification_levels",
-    ]);
+    await expectThreeTableModel();
     const levels = await rows(
       "SELECT CAST(id AS CHAR) id, name, position, deleted_at IS NOT NULL deleted FROM qualification_levels WHERE game='ets2' ORDER BY position IS NULL, position",
     );
@@ -162,9 +181,20 @@ test(
     ]);
 
     const upgraded = await schema();
+    // A fresh migration reaches the same model: the three tables, no old tables, the same shape
+    // and the structural levels in order.
     await reset(control);
     expect(await runMigrations(settings)).toBe(36);
+    await expectThreeTableModel();
     expect(await schema()).toEqual(upgraded);
+    expect(
+      (
+        await rows(
+          "SELECT CAST(id AS CHAR) id FROM qualification_levels WHERE game='ets2' AND deleted_at IS NULL ORDER BY position",
+        )
+      ).map((r) => r.id),
+    ).toEqual([...structuralLevels.ets2]);
+    expect(await rows("SELECT id FROM qualification_assignments")).toEqual([]);
   },
   SCHEMA_SETUP_TIMEOUT_MS,
 );
