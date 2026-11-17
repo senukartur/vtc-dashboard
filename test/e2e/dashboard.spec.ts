@@ -52,9 +52,8 @@ const withoutCompanyRead = ["events.respond", "trips.read_own_private", "trips.s
 // Requests only the dashboard makes; the forbidden view must issue none of them.
 const dashboardOnlyPaths = [
   "/api/v1/analytics/",
-  "/api/v1/me/qualification-progress",
+  "/api/v1/me/qualifications",
   "/api/v1/me/upcoming-event",
-  "/api/v1/qualification-levels",
   "/api/v1/trips",
   "/api/v1/events/",
   "/api/v1/public/company-stats",
@@ -74,7 +73,7 @@ const statsPath = "/api/v1/public/company-stats";
 const periodPaths = ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"] as const;
 // Overview reads gated on the reporting timezone besides the period reads (recent trips read
 // /trips; the review queue card uses the workspace summary).
-const secondaryPaths = ["/api/v1/me/qualification-progress", "/api/v1/trips"] as const;
+const secondaryPaths = ["/api/v1/me/qualifications", "/api/v1/trips"] as const;
 /** Period requests to one or both period endpoints, optionally for one date range. */
 function periodRequests(
   state: DashboardMockState,
@@ -155,7 +154,7 @@ test.describe("Company Dashboard E2E", () => {
       await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
       await expect(leaderboardCard(page).getByRole("link", { name: "BetaHauler" })).toBeVisible();
       await expect(
-        qualificationCard(page).getByRole("link", { name: "All my trips" }),
+        qualificationCard(page).getByRole("link", { name: "All qualifications" }),
       ).toBeVisible();
       await expect(reviewCard(page).getByRole("link", { name: "Go to review" })).toBeVisible();
       await expect(
@@ -308,9 +307,8 @@ test.describe("Company Dashboard E2E", () => {
       state.hold("stats");
       await page.goto("/account/dashboard");
       await expect.poll(() => requestsTo(state, statsPath).length).toBe(1);
-      // Reads outside the gate still run: the shell chip's nearest event and the level names.
+      // Reads outside the gate still run: the shell chip's nearest event.
       await expect.poll(() => requestsTo(state, "/api/v1/me/upcoming-event").length).toBe(1);
-      await expect.poll(() => requestsTo(state, "/api/v1/qualification-levels").length).toBe(2);
       for (const path of [...periodPaths, ...secondaryPaths, breakdownApi])
         expect(requestsTo(state, path)).toEqual([]);
       await expect(loadingStatus(page)).toHaveCount(1);
@@ -327,9 +325,7 @@ test.describe("Company Dashboard E2E", () => {
         expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-12-01");
       }
       // Progress for both games and the recent trips follow the period reads.
-      await expect
-        .poll(() => requestsTo(state, "/api/v1/me/qualification-progress").length)
-        .toBe(2);
+      await expect.poll(() => requestsTo(state, "/api/v1/me/qualifications").length).toBe(2);
       await expect.poll(() => requestsTo(state, "/api/v1/trips").length).toBe(1);
       expect(state.requests.some((url) => url.searchParams.get("scope") === "review")).toBe(false);
       const firstIndex = (path: string) =>
@@ -389,8 +385,10 @@ test.describe("Company Dashboard E2E", () => {
       // A reconnect must not reread the failed zone and send the page back to loading.
       delete state.failures.stats;
       const selfReads = () => state.requests.filter((url) => url.pathname === "/api/v1/me").length;
-      const levelReads = () => requestsTo(state, "/api/v1/qualification-levels").length;
-      const [selfBefore, levelsBefore] = [selfReads(), levelReads()];
+      const progressReads = () => requestsTo(state, "/api/v1/me/qualifications").length;
+      const [selfBefore, progressBefore] = [selfReads(), progressReads()];
+      // Past both stale times, so only refetchOnReconnect keeps the failed zone from rereading.
+      await page.clock.setFixedTime(new Date("2026-10-31T22:31:01.000Z"));
       await context.setOffline(true);
       await page.waitForFunction(() => !navigator.onLine);
       await context.setOffline(false);
@@ -398,9 +396,9 @@ test.describe("Company Dashboard E2E", () => {
       // Positive control: queries that opt into reconnect refetches reread, so the reconnect
       // was handled.
       await expect.poll(selfReads).toBeGreaterThan(selfBefore);
-      // The level reads are queued after the stats read (FIFO read slots), so a stats reread
-      // would already be recorded.
-      await expect.poll(levelReads).toBe(levelsBefore + 2);
+      // The now stale progress reads of both games refetch on the same reconnect, after the
+      // stats read would have been issued.
+      await expect.poll(progressReads).toBe(progressBefore + 2);
       expect(requestsTo(state, statsPath)).toHaveLength(1);
       await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
       await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
@@ -1004,7 +1002,7 @@ test.describe("Company Dashboard E2E", () => {
       ).toHaveCount(2);
       await expect(qualification.getByText("Loading progress…")).toHaveCount(0);
       await expect(reviewCard(page)).toHaveCount(0);
-      expect(requestsTo(state, "/api/v1/me/qualification-progress")).toEqual([]);
+      expect(requestsTo(state, "/api/v1/me/qualifications")).toEqual([]);
       // Without events.respond the convoy shows no response controls and reads no own response.
       await expect(eventCard(page).getByText("Going: 8", { exact: true })).toBeVisible();
       await expect(responseGroup(page)).toHaveCount(0);
@@ -1087,7 +1085,7 @@ test.describe("Company Dashboard E2E", () => {
         await expectTarget(segment, 24, true);
       await expectTarget(periodSelect(page), 32, true);
       for (const link of [
-        qualificationCard(page).getByRole("link", { name: "All my trips" }),
+        qualificationCard(page).getByRole("link", { name: "All qualifications" }),
         leaderboardCard(page).getByRole("link", { name: "All drivers" }),
         leaderboardCard(page).getByRole("link", { name: "AlphaDriver" }),
         leaderboardCard(page).getByRole("link", { name: "BetaHauler" }),
@@ -1135,7 +1133,9 @@ test.describe("Company Dashboard E2E", () => {
           chartCard(page).getByRole("button", { name: "Monthly", exact: true }),
           chartCard(page).getByRole("button", { name: "Chart", exact: true }),
           chartCard(page).getByRole("button", { name: "Table", exact: true }),
-          qualificationCard(page).getByRole("link", { name: "All my trips" }),
+          qualificationCard(page).getByRole("link", { name: "All qualifications" }),
+          qualificationCard(page).getByRole("link", { name: "European Driver II" }),
+          qualificationCard(page).getByRole("link", { name: "Pacific Driver III" }),
           leaderboardCard(page).getByRole("link", { name: "All drivers" }),
           leaderboardCard(page).getByRole("link", { name: "AlphaDriver" }),
         ];

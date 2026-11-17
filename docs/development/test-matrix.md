@@ -77,17 +77,17 @@ The owner approved desktop/tablet/mobile for layout, desktop for controlled func
 
 | Category / scope | Cases | Projects |
 | --- | ---: | --- |
-| Layout, no viewport scope | 135 | Desktop 1280×800, tablet 768×1024, mobile 390×844 |
+| Layout, no viewport scope | 184 | Desktop 1280×800, tablet 768×1024, mobile 390×844 |
 | Layout, `@viewport-desktop` | 12 | Desktop; existing wide panels and explicit intermediate-width probes |
-| Layout, `@viewport-mobile` | 12 | Mobile; phone dialogs, bottom navigation and More sheet |
+| Layout, `@viewport-mobile` | 16 | Mobile; phone dialogs, bottom navigation and More sheet |
 | Layout, `@viewport-non-mobile` | 5 | Desktop + tablet; simultaneous panes / side navigation |
-| Layout, `@viewport-narrow` | 1 | Tablet + mobile; full-page trip detail instead of the wide panel |
-| Functional, no smoke | 267 | Desktop |
+| Layout, `@viewport-narrow` | 3 | Tablet + mobile; full-page trip detail instead of the wide panel |
+| Functional, no smoke | 374 | Desktop |
 | Functional, one `@smoke-<area>` | 17 | Desktop + mobile |
-| Real | 48 | Desktop |
+| Real | 59 | Desktop |
 | Assertion probe (outside ordinary inventory) | 1 | All three; required by failure-reporting proof |
 
-Layout therefore selects 441 project executions, functional 301 and real 48. These are per-case categories: `*-layout` files also contain functional cases, and ordinary/real files contain layout cases. Existing breakpoint branches, compact/touch target assertions, keyboard/focus checks and explicit 375px, landscape, 1051–1199px probes remain. The review keyboard case keeps its filter assertions at every width and returns before wide-only panel assertions. The dashboard's former loop over the three configured viewport sizes is now one layout case in each actual project, preserving each size while using the correct mobile touch emulation. Viewport-dependent `test.skip` calls are replaced by central selection; narrow/wide exceptions above preserve their original intent.
+Layout therefore selects 596 project executions, functional 408 and real 59. These are per-case categories: `*-layout` files also contain functional cases, and ordinary/real files contain layout cases. Existing breakpoint branches, compact/touch target assertions, keyboard/focus checks and explicit 375px, landscape, 1051–1199px probes remain. The review keyboard case keeps its filter assertions at every width and returns before wide-only panel assertions. The dashboard's former loop over the three configured viewport sizes is now one layout case in each actual project, preserving each size while using the correct mobile touch emulation. Viewport-dependent `test.skip` calls are replaced by central selection; narrow/wide exceptions above preserve their original intent.
 
 The smoke areas are workflow boundaries, not an assertion of independent backend modules. Each row selects exactly one expanded controlled case on mobile; a test may exercise EN and RU internally without duplicating the smoke.
 

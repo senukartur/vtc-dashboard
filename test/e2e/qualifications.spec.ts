@@ -17,7 +17,7 @@ const writes = (mock: Awaited<ReturnType<typeof mockQualifications>>) =>
 
 test(
   "a driver sees the ladder, their own level and a level page without management controls",
-  browserCase(["@functional", "@smoke-qualifications"]),
+  browserCase(["@functional"]),
   async ({ page }) => {
     const mock = await open(page, false);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Qualifications");
@@ -79,7 +79,8 @@ test(
   async ({ page }) => {
     const mock = await open(page, true);
     await page.getByRole("button", { name: "Move “Fictional Driver” up" }).click();
-    await expect(ladder(page).getByRole("row").nth(1)).toContainText("Fictional Driver");
+    // The next-level column names the following level, so only the row header proves the order.
+    await expect(ladder(page).getByRole("rowheader").first()).toContainText("Fictional Driver");
     expect(writes(mock)).toEqual([
       {
         method: "PUT",
@@ -109,7 +110,7 @@ test(
     await page.getByRole("button", { name: "Change level for Fictional_Driver" }).click();
     const change = page.getByRole("dialog");
     await expect(change).toContainText("Change level: Fictional_Driver");
-    await change.getByLabel("New level in ETS2").selectOption({ label: "Fictional Driver" });
+    await change.getByLabel("New level in ETS2").selectOption({ label: "2 · Fictional Driver" });
     await change.getByRole("button", { name: "Move", exact: true }).click();
     await expect(change.getByText("Enter a reason.")).toBeVisible();
     expect(writes(mock)).toEqual([]);
@@ -129,7 +130,7 @@ test(
     const removal = page.getByRole("dialog");
     await expect(removal).toContainText("Remove “Fictional Driver”?");
     await expect(removal).toContainText("1 driver is on this level.");
-    await removal.getByLabel("Move drivers to").selectOption({ label: "Fictional Trainee" });
+    await removal.getByLabel("Move drivers to").selectOption({ label: "1 · Fictional Trainee" });
     await removal.getByRole("button", { name: "Remove and move" }).click();
     await expect(page).toHaveURL(new RegExp(`/account/qualifications/${qid(1)}`));
     expect(writes(mock)[1]).toEqual({

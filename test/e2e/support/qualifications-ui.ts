@@ -5,7 +5,8 @@ import { inertNotifications } from "./notifications.ts";
 
 type S = components["schemas"];
 type Game = S["Game"];
-// Fictional in-memory ladder answering the nine qualification routes like the API.
+// Fictional in-memory ETS2 ladder and a one-level ATS ladder answering the nine qualification
+// routes like the API.
 export const qid = (n: number) => `41570000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 export const driverId = qid(901);
 const open: S["QualificationLimits"] = {
@@ -28,7 +29,10 @@ type Row = {
 export type QualificationRequest = { method: string; path: string; body: unknown };
 const envelope = (data: unknown) => ({ data, meta: { requestId: "fictional-request" } });
 
-export async function mockQualifications(page: Page, options: { lead: boolean }) {
+export async function mockQualifications(
+  page: Page,
+  options: { lead: boolean; locale?: "en" | "ru" },
+) {
   const requests: QualificationRequest[] = [];
   let next = 100;
   const ladder: Row[] = [
@@ -56,6 +60,16 @@ export async function mockQualifications(page: Page, options: { lead: boolean })
       drivers: [],
     },
   ];
+  const ats: Row[] = [
+    {
+      id: qid(3),
+      name: "Fictional Hauler",
+      version: 1,
+      limits: open,
+      conditions: { requiredTrips: null, requiredDistanceM: null },
+      drivers: [],
+    },
+  ];
   const ref = (row: Row) => ({ id: row.id, name: row.name });
   const mine = (): S["MyQualification"] | null => {
     const index = ladder.findIndex((row) => row.drivers.some((d) => d.memberId === driverId));
@@ -71,11 +85,11 @@ export async function mockQualifications(page: Page, options: { lead: boolean })
       nextLevel: after ? ref(after) : null,
     };
   };
-  const summary = (row: Row, index: number): S["QualificationLevelSummary"] => {
-    const after = ladder[index + 1];
+  const summary = (row: Row, index: number, list = ladder): S["QualificationLevelSummary"] => {
+    const after = list[index + 1];
     return {
       id: row.id,
-      game: "ets2",
+      game: list === ats ? "ats" : "ets2",
       name: row.name,
       position: index + 1,
       version: row.version,
@@ -106,7 +120,7 @@ export async function mockQualifications(page: Page, options: { lead: boolean })
       method = request.method();
     const json = (data: unknown, status = 200) => route.fulfill({ status, json: data });
     if (path === "/me") {
-      const self = accountFixture();
+      const self = accountFixture(options.locale);
       if (options.lead) {
         self.data.member.roles = ["deputy_director"];
         self.data.capabilities.push("qualifications.manage");
@@ -114,6 +128,8 @@ export async function mockQualifications(page: Page, options: { lead: boolean })
       return json(self);
     }
     if (path === "/auth/csrf") return json(envelope({ token: "NONFUNCTIONAL_FIXTURE" }));
+    // The shell's upcoming-event chip reads this on every page; no event is scheduled.
+    if (path === "/me/upcoming-event") return json(envelope(null));
     if (!path.includes("qualification")) return json({ error: { code: "NOT_FOUND" } }, 404);
     const body = method === "GET" ? null : request.postDataJSON();
     requests.push({ method, path: path + url.search, body });
@@ -123,7 +139,9 @@ export async function mockQualifications(page: Page, options: { lead: boolean })
         envelope({
           game,
           canManage: options.lead,
-          levels: game === "ets2" ? ladder.map(summary) : [],
+          levels: (game === "ets2" ? ladder : ats).map((row, index, list) =>
+            summary(row, index, list),
+          ),
           mine: game === "ets2" ? mine() : null,
         }),
       );
