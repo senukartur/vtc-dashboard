@@ -148,6 +148,7 @@ export const catalogTrailers = mysqlTable(
     id: idColumn("id").primaryKey(),
     game: game("game").notNull(),
     code: code("code").notNull(),
+    commonTrailer: code("common_trailer"),
     nameEn: name("name_en").notNull(),
     nameRu: name("name_ru"),
     dlcId: idColumn("dlc_id"),
@@ -157,6 +158,11 @@ export const catalogTrailers = mysqlTable(
   (t) => [
     uniqueIndex("catalog_trailer_game_code").on(t.game, t.code),
     uniqueIndex("catalog_trailer_id_game").on(t.id, t.game),
+    index("catalog_trailer_common").on(t.game, t.commonTrailer, t.hidden, t.id),
+    check(
+      "catalog_trailer_common_nonempty",
+      sql`${t.commonTrailer} IS NULL OR octet_length(${t.commonTrailer}) > 0`,
+    ),
     check("catalog_trailer_code_nonempty", sql`octet_length(${t.code}) > 0`),
     check(
       "catalog_trailer_name_ru_nonempty",

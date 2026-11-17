@@ -121,7 +121,10 @@ class AcceptanceContainers:
         self.save(state)  # Durable creation authority precedes all process execution.
         try:
             self.o.run(['docker', 'start', identity], timeout=10)
-            exit_status = self.o.run(['docker', 'wait', identity], timeout=55).decode().strip()
+            # A fresh schema replays every published migration. Use the same bounded
+            # migrator budget as notification acceptance; runtime/jobs remain at 55s.
+            wait_timeout = 180 if role == 'migrator' else 55
+            exit_status = self.o.run(['docker', 'wait', identity], timeout=wait_timeout).decode().strip()
             output = self.o.run(['docker', 'logs', identity], timeout=10)
             self.o.require(exit_status == '0', 'ACCEPTANCE_CONTAINER_FAILED')
             self.o.require(len(output) <= 32768, 'ACCEPTANCE_RESULT_TOO_LARGE')

@@ -1,0 +1,3 @@
+ALTER TABLE `catalog_trailers` ADD `common_trailer` varbinary(128);--> statement-breakpoint
+ALTER TABLE `catalog_trailers` ADD CONSTRAINT `catalog_trailer_common_nonempty` CHECK (`catalog_trailers`.`common_trailer` IS NULL OR octet_length(`catalog_trailers`.`common_trailer`) > 0);--> statement-breakpoint
+CREATE INDEX `catalog_trailer_common` ON `catalog_trailers` (`game`,`common_trailer`,`hidden`,`id`);

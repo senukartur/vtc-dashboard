@@ -72,6 +72,15 @@ type Common = typeof catalogCities;
 const common = (list: CatalogList) => tables[list] as unknown as Common;
 const dlcParent = alias(catalogDlcs, "dlc_parent");
 const regionParent = alias(catalogRegions, "region_parent");
+const trailerPeer = alias(catalogTrailers, "trailer_peer");
+// Prefer a visible member, then the lowest immutable row ID. Pagination and totals
+// use this same predicate; every original body type remains an independent stored row.
+const trailerRepresentative = sql`NOT EXISTS (
+  SELECT 1 FROM ${catalogTrailers} AS ${sql.identifier("trailer_peer")} WHERE ${trailerPeer.game} = ${catalogTrailers.game}
+  AND ${trailerPeer.commonTrailer} = ${catalogTrailers.commonTrailer}
+  AND (${trailerPeer.hidden} < ${catalogTrailers.hidden}
+    OR (${trailerPeer.hidden} = ${catalogTrailers.hidden} AND ${trailerPeer.id} < ${catalogTrailers.id}))
+)`;
 const depotVisible = and(
   eq(catalogCompanyCities.hidden, false),
   eq(catalogCompanies.hidden, false),
@@ -193,6 +202,15 @@ export function createCatalogs(
       id: t.id,
       game: t.game,
       code: t.code,
+      commonTrailer: list === "trailers" ? catalogTrailers.commonTrailer : sql<Buffer | null>`NULL`,
+      variantCount:
+        list === "trailers"
+          ? sql<number>`CASE WHEN ${catalogTrailers.commonTrailer} IS NULL THEN 1 ELSE (
+        SELECT COUNT(*) FROM ${catalogTrailers} AS ${sql.identifier("trailer_peer")}
+        WHERE ${trailerPeer.game} = ${catalogTrailers.game}
+        AND ${trailerPeer.commonTrailer} = ${catalogTrailers.commonTrailer}
+      ) END`.mapWith(Number)
+          : sql<number>`1`,
       nameEn: t.nameEn,
       nameRu: t.nameRu,
       nameNative: list === "cities" ? catalogCities.nameNative : sql<string | null>`NULL`,
@@ -216,6 +234,8 @@ export function createCatalogs(
     id: string;
     game: Game;
     code: Buffer;
+    commonTrailer: Buffer | null;
+    variantCount: number;
     nameEn: string;
     nameRu: string | null;
     nameNative: string | null;
@@ -281,6 +301,12 @@ export function createCatalogs(
       id: row.id,
       game: row.game,
       code: row.code.toString(),
+      ...(list === "trailers"
+        ? {
+            commonTrailer: row.commonTrailer?.toString() ?? null,
+            variantCount: row.variantCount,
+          }
+        : {}),
       nameEn: row.nameEn,
       // A canonical list's stored Russian name stays in the database but is never returned.
       nameRu: canonical ? null : row.nameRu,
@@ -340,6 +366,14 @@ export function createCatalogs(
       ...("nameRu" in input && !isCanonicalList(list) ? { nameRu } : {}),
       ...("nameEn" in input ? { nameEn: input.nameEn } : {}),
       ...("code" in input ? { code: requireCode(input.code as string) } : {}),
+      ...(list === "trailers" && "commonTrailer" in input
+        ? {
+            commonTrailer:
+              input.commonTrailer === null || input.commonTrailer === ""
+                ? null
+                : requireCode(input.commonTrailer as string),
+          }
+        : {}),
       ...(list === "dlcs" && "steamAppId" in input ? { steamAppId: input.steamAppId } : {}),
       ...(list !== "dlcs" && "dlcId" in input ? { dlcId: input.dlcId } : {}),
       ...(list === "cities" && "nameNative" in input
@@ -378,7 +412,7 @@ export function createCatalogs(
       companies: ["code", "nameEn", "dlcId", "hidden"],
       cities: ["code", "nameEn", "nameRu", "nameNative", "regionId", "dlcId", "hidden"],
       cargoes: ["code", "nameEn", "nameRu", "adrClass", "dlcId", "hidden"],
-      trailers: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
+      trailers: ["code", "nameEn", "nameRu", "dlcId", "hidden", "commonTrailer"],
     }[list];
     if (Object.keys(input).some((key) => !allowed.includes(key))) throw identityError(422);
   }
@@ -481,12 +515,18 @@ export function createCatalogs(
       const code = v.code ?? "";
       const codeOk = validCode(code);
       if (!codeOk) issues.push({ field: "code", reason: code === "" ? "required" : "invalid" });
+      const linkedRow = game && codeOk ? existing.get(keyOf(game, code)) : undefined;
+      const groupingOnly = list === "trailers" && !!v.common_trailer && !!linkedRow;
       const nameEn = v.name_en ?? "";
-      if (!nameEn.trim()) issues.push({ field: "name_en", reason: "required" });
+      if (!nameEn.trim() && (nameEn !== "" || !groupingOnly))
+        issues.push({ field: "name_en", reason: "required" });
       else if ([...nameEn].length > 256) issues.push({ field: "name_en", reason: "too_long" });
       const nameRu = v.name_ru ?? "";
       if ([...nameRu].length > 256) issues.push({ field: "name_ru", reason: "too_long" });
       const nameNative = (v.name_native ?? "").trim();
+      const commonTrailer = v.common_trailer || undefined;
+      if (list === "trailers" && commonTrailer !== undefined && !validCode(commonTrailer))
+        issues.push({ field: "common_trailer", reason: "invalid" });
       if ([...nameNative].length > 256) issues.push({ field: "name_native", reason: "too_long" });
       let steamAppId: number | undefined;
       if (list === "dlcs" && v.steam_app_id) {
@@ -501,7 +541,6 @@ export function createCatalogs(
         else issues.push({ field: "adr_class", reason: "invalid" });
       }
       // A hidden parent stays valid only as the unchanged link the row already has.
-      const linkedRow = game && codeOk ? existing.get(keyOf(game, code)) : undefined;
       let dlcId: string | undefined;
       if (list !== "dlcs" && v.dlc_code && game) {
         const found = dlcCodes.get(keyOf(game, v.dlc_code));
@@ -550,6 +589,11 @@ export function createCatalogs(
             ? { regionId: regionId ?? null, nameNative: nameNative === "" ? null : nameNative }
             : {}),
           ...(list === "cargoes" ? { adrClass: adrClass ?? null } : {}),
+          ...(list === "trailers"
+            ? {
+                commonTrailer: commonTrailer === undefined ? null : Buffer.from(commonTrailer),
+              }
+            : {}),
           hidden: false,
         });
         continue;
@@ -562,7 +606,7 @@ export function createCatalogs(
           changedFields.push(field);
         }
       };
-      compare("name_en", "nameEn", current.nameEn, nameEn);
+      if (nameEn !== "") compare("name_en", "nameEn", current.nameEn, nameEn);
       if (nameRu !== "") compare("name_ru", "nameRu", current.nameRu, nameRu);
       if (nameNative !== "") compare("name_native", "nameNative", current.nameNative, nameNative);
       if (list === "dlcs" && steamAppId !== undefined)
@@ -573,6 +617,12 @@ export function createCatalogs(
         compare("region_code", "regionId", current.regionId, regionId);
       if (list === "cargoes" && adrClass !== undefined)
         compare("adr_class", "adrClass", current.adrClass, adrClass);
+      if (list === "trailers" && commonTrailer !== undefined) {
+        if (current.commonTrailer?.toString() !== commonTrailer) {
+          set.commonTrailer = Buffer.from(commonTrailer);
+          changedFields.push("common_trailer");
+        }
+      }
       if (changedFields.length) {
         changedCount++;
         updates.push({ id: current.id, set });
@@ -974,6 +1024,31 @@ export function createCatalogs(
 
   return {
     config,
+    /** Group membership for qualification comparison. IDs/facts remain unchanged, including hidden rows. */
+    async trailerGroupsInTransaction(tx: TxContext, game: Game, ids: readonly string[]) {
+      if (ids.length > 1010) throw new Error("CATALOG_TRAILER_BATCH_BOUND_EXCEEDED");
+      const result: Record<string, string> = {};
+      if (!ids.length) return result;
+      const rows = await c(tx)
+        .select({
+          id: catalogTrailers.id,
+          commonTrailer: catalogTrailers.commonTrailer,
+        })
+        .from(catalogTrailers)
+        .where(
+          and(
+            eq(catalogTrailers.game, game),
+            inArray(catalogTrailers.id, [...new Set(ids)].map(applicationId)),
+          ),
+        )
+        // Decision preparation may already have an older RR snapshot from ownership discovery.
+        .orderBy(asc(catalogTrailers.id))
+        .for("share");
+      for (const row of rows)
+        if (row.commonTrailer !== null)
+          result[row.id] = `common:${game}:${row.commonTrailer.toString("hex")}`;
+      return result;
+    },
     async authorize(actor: Actor, admin = true) {
       return run((tx) => authority(tx, actor, admin));
     },
@@ -997,7 +1072,7 @@ export function createCatalogs(
                 : {}),
             })
             .from(t)
-            .where(eq(t.game, game))
+            .where(and(eq(t.game, game), list === "trailers" ? trailerRepresentative : undefined))
             .$dynamic();
           if (list === "companies") totals.leftJoin(catalogCompanyLogos, companyLogoLink);
           const [counts] = await totals;
@@ -1053,6 +1128,7 @@ export function createCatalogs(
             locale,
             ...maintenanceBinding(query),
             ...canonicalOrderBinding(isCanonicalList(list)),
+            ...(list === "trailers" ? ["common-trailer-v1"] : []),
           ];
         let after: [string, string] | null = null;
         if (query.cursor) {
@@ -1067,6 +1143,7 @@ export function createCatalogs(
         const escaped = query.search?.replace(/[\\%_]/g, (v) => `\\${v}`);
         const filter = and(
           eq(t.game, query.game),
+          list === "trailers" ? trailerRepresentative : undefined,
           includeHidden ? undefined : eq(t.hidden, query.hidden === "only"),
           query.untranslated ? isNull(t.nameRu) : undefined,
           query.logo === "missing" ? companyMissingLogo : undefined,
@@ -1078,6 +1155,19 @@ export function createCatalogs(
                   ? sql`${catalogCities.nameNative} LIKE ${`%${escaped}%`}`
                   : undefined,
                 sql`CONVERT(${t.code} USING utf8mb4) LIKE ${`%${escaped}%`}`,
+                list === "trailers"
+                  ? or(
+                      sql`CONVERT(${catalogTrailers.commonTrailer} USING utf8mb4) LIKE ${`%${escaped}%`}`,
+                      sql`EXISTS (
+                    SELECT 1 FROM ${catalogTrailers} AS ${sql.identifier("trailer_peer")}
+                    WHERE ${trailerPeer.game} = ${catalogTrailers.game}
+                    AND ${trailerPeer.commonTrailer} = ${catalogTrailers.commonTrailer}
+                    AND (CONVERT(${trailerPeer.code} USING utf8mb4) LIKE ${`%${escaped}%`}
+                      OR ${trailerPeer.nameEn} LIKE ${`%${escaped}%`}
+                      OR ${trailerPeer.nameRu} LIKE ${`%${escaped}%`})
+                  )`,
+                    )
+                  : undefined,
               )
             : undefined,
           list !== "dlcs" && query.dlc === "base" ? sql`${t.dlcId} IS NULL` : undefined,
@@ -1209,6 +1299,7 @@ export function createCatalogs(
                 id: t.id,
                 game: t.game,
                 code: t.code,
+                ...(list === "trailers" ? { commonTrailer: catalogTrailers.commonTrailer } : {}),
                 nameEn: t.nameEn,
                 nameRu: t.nameRu,
                 hidden: t.hidden,
@@ -1230,6 +1321,21 @@ export function createCatalogs(
             const fields = fieldsOf(list, input);
             if (changesFields(row, fields)) {
               try {
+                if (list === "trailers" && row.commonTrailer) {
+                  // Editing the displayed group changes shared presentation/visibility.
+                  // Never copy one member's opaque body code onto another member.
+                  const { code: _code, dlcId: _dlc, commonTrailer: _group, ...shared } = fields;
+                  if (Object.keys(shared).length)
+                    await c(tx)
+                      .update(catalogTrailers)
+                      .set({ ...shared, updatedAt: now().toISOString() })
+                      .where(
+                        and(
+                          eq(catalogTrailers.game, row.game),
+                          eq(catalogTrailers.commonTrailer, row.commonTrailer),
+                        ),
+                      );
+                }
                 await c(tx)
                   .update(t)
                   .set({ ...fields, updatedAt: now().toISOString() })

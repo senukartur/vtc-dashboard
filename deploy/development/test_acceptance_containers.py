@@ -144,6 +144,26 @@ class CreationTests(unittest.TestCase):
         self.assertFalse(self.objects)
         self.assertEqual(self.read()['containers'][self.names[0]]['phase'], 'removed')
 
+    def test_role_wait_bounds_and_migration_timeout_preserve_owned_cleanup(self):
+        waits = []
+
+        def timed_wait(args, **kwargs):
+            if args[1] == 'wait':
+                waits.append(kwargs['timeout'])
+                if kwargs['timeout'] == 180:
+                    raise subprocess.TimeoutExpired('synthetic-wait', 180)
+            return self.docker(args, **kwargs)
+
+        with patch.object(ops, 'run', side_effect=timed_wait):
+            for role, name in zip(['runtime', 'jobs'], self.names[:2]):
+                self.manager.run(['dist/synthetic.js'], role, name)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                self.manager.run(['node_modules/@vtc/db/dist/migrate-cli.js'],
+                                 'migrator', self.names[2])
+        self.assertEqual(waits, [55, 55, 180])
+        self.assertFalse(self.objects)
+        self.assertEqual(self.read()['containers'][self.names[2]]['phase'], 'removed')
+
     def test_interrupted_create_without_receipt_retains_object_and_intent(self):
         self.interrupt_create = True
         with self.assertRaises(subprocess.TimeoutExpired):

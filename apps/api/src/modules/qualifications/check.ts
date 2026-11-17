@@ -70,6 +70,8 @@ export interface TripCheck {
 
 /** The check stored with a trip decision so later ladder edits never rewrite history. */
 export interface QualificationSnapshot {
+  /** Exact group identities used for this check; retained with the immutable decision. */
+  readonly trailerGroups?: Readonly<Record<string, string>>;
   readonly levelId: string | null;
   readonly levelName: string | null;
   readonly editVersion: number | null;
@@ -107,7 +109,11 @@ function range(min: string | null, max: string | null, observed: string | null):
  * The single qualification check of one trip against one level's limits. Bounds are inclusive,
  * unknown facts are never a violation, and any failure outranks any unknown rule.
  */
-export function checkTrip(limits: QualificationLimits, facts: NormalizedTripEvidence): TripCheck {
+export function checkTrip(
+  limits: QualificationLimits,
+  facts: NormalizedTripEvidence,
+  trailerGroups: Readonly<Record<string, string>> = {},
+): TripCheck {
   const mass = known(facts.cargoMassKg.status === "known" ? facts.cargoMassKg.value : null);
   const distance = known(
     facts.actualDistanceM.status === "known" ? facts.actualDistanceM.value : null,
@@ -121,8 +127,9 @@ export function checkTrip(limits: QualificationLimits, facts: NormalizedTripEvid
   ].sort();
   let trailers: RuleResult = "pass";
   if (limits.trailers.mode === "selected") {
-    const allowed = new Set(limits.trailers.typeIds);
-    if (observedTrailers.some((id) => !allowed.has(id))) trailers = "fail";
+    const identity = (id: string) => trailerGroups[id] ?? id;
+    const allowed = new Set(limits.trailers.typeIds.map(identity));
+    if (observedTrailers.some((id) => !allowed.has(identity(id)))) trailers = "fail";
     else if (
       !facts.trailers.complete ||
       !facts.trailers.items.length ||

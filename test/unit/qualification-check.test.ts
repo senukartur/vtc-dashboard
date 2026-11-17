@@ -77,6 +77,32 @@ const result = (limits: QualificationLimits, evidence = facts()) => {
   };
 };
 
+test("trailer groups allow another recognized body variant without changing the observed IDs", () => {
+  const limits: QualificationLimits = {
+    ...open,
+    trailers: { mode: "selected", typeIds: [trailerA] },
+  };
+  const evidence = facts({ trailers: { complete: true, items: [known({ entityId: trailerB })] } });
+  const groups = { [trailerA]: "common:ets2:fiction", [trailerB]: "common:ets2:fiction" };
+  expect(checkTrip(limits, evidence).outcome).toBe("fail");
+  const grouped = checkTrip(limits, evidence, groups);
+  expect(grouped.outcome).toBe("pass");
+  expect(grouped.rules.find((rule) => rule.rule === "trailer_types")).toMatchObject({
+    allowedIds: [trailerA],
+    observedIds: [trailerB],
+  });
+  expect(checkTrip(limits, evidence, { ...groups, [trailerB]: "common:ats:fiction" }).outcome).toBe(
+    "fail",
+  );
+  expect(
+    checkTrip(limits, facts({ trailers: { complete: true, items: [unknown()] } }), groups).outcome,
+  ).toBe("unknown");
+  expect(
+    checkTrip(limits, { ...evidence, trailers: { ...evidence.trailers, complete: false } }, groups)
+      .outcome,
+  ).toBe("unknown");
+});
+
 describe("the five-rule trip check", () => {
   test("a level without limits passes every rule in a fixed order", () => {
     const check = checkTrip(open, facts({ cargoMassKg: unknown(), actualDistanceM: unknown() }));

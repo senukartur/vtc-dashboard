@@ -73,12 +73,13 @@ import {
   root,
   SCHEMA_SETUP_TIMEOUT_MS,
   telemetryPriorFolder,
+  trailerGroupingPriorFolder,
   testConnection,
   tripsPriorFolder,
   withPrefixMembershipJoinedAt,
 } from "./support.ts";
 
-const currentMigrationCount = 36;
+const currentMigrationCount = 37;
 
 const values = mysqlTable("synthetic_values", {
   id: idColumn("id").primaryKey(),
@@ -206,7 +207,7 @@ async function serializedFreshMigrations(
     })),
   );
   const expectedTables = Object.keys(
-    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0035_snapshot.json"), "utf8"))
+    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0036_snapshot.json"), "utf8"))
       .tables,
   ).sort();
   assert.equal(expectedTables.length, 101);
@@ -440,6 +441,45 @@ function publishedUpgrade(name: string, command: (context: MigrationContext) => 
 // Each published prefix has its own finite budget and connection/pool lifecycle.
 // Isolation replaces the former aggregate 180-second allowance; SQL deadlines stay unchanged.
 await describe("published-prefix migration upgrades", { concurrency: false }, () => {
+  publishedUpgrade(
+    "trailer grouping preserves every existing body code and ID without guessing membership",
+    async ({ settings, connection }) => {
+      await reset(connection);
+      const folder = await trailerGroupingPriorFolder();
+      try {
+        assert.equal(await runMigrations(settings, { folder }), 36);
+        const trailerId = newId();
+        await connection.execute(
+          "INSERT INTO catalog_trailers(id,game,code,name_en,hidden) VALUES (?,'ets2',?,'Fictional transporter',0)",
+          [trailerId, Buffer.from("_fiction_body")],
+        );
+        const [before] = await connection.query<RowDataPacket[]>(
+          "SELECT version,hash FROM _vtc_migrations ORDER BY version",
+        );
+        assert.equal(await runMigrations(settings), 1);
+        assert.equal(await runMigrations(settings), 0);
+        const [rows] = await connection.query<RowDataPacket[]>(
+          "SELECT CAST(id AS CHAR) id,HEX(code) code,common_trailer,hidden FROM catalog_trailers",
+        );
+        assert.equal(rows[0]?.id, trailerId);
+        assert.equal(rows[0]?.code, Buffer.from("_fiction_body").toString("hex").toUpperCase());
+        assert.equal(rows[0]?.common_trailer, null);
+        assert.equal(rows[0]?.hidden, 0);
+        const [after] = await connection.query<RowDataPacket[]>(
+          "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 36",
+        );
+        assert.deepEqual(after, before);
+        await assert.rejects(
+          connection.execute("UPDATE catalog_trailers SET common_trailer=? WHERE id=?", [
+            Buffer.alloc(0),
+            trailerId,
+          ]),
+        );
+      } finally {
+        await rm(folder, { recursive: true });
+      }
+    },
+  );
   publishedUpgrade(
     "email stage migration preserves old identity rows and invalidates outstanding proof epochs",
     async ({ settings, connection }) => {
