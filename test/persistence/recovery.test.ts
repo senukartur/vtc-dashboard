@@ -2824,15 +2824,15 @@ await recoveryTest(
       const prefix = await history();
       // 0032, the data-only 0033 catch-up, which repeats the same joined_at derivation, and the
       // data-only 0034 toggle re-copy, which repeats the 0032 toggle copy, then the 0035
-      // qualification simplification.
-      assert.equal(await runMigrations(settings), 4);
+      // qualification simplification and additive 0036 trailer grouping.
+      assert.equal(await runMigrations(settings), 5);
       assert.equal(await runMigrations(settings), 0);
       const applied = await history();
       assert.equal(applied.length, 37);
-      assert.deepEqual(applied.slice(0, -4), prefix);
+      assert.deepEqual(applied.slice(0, -5), prefix);
       assert.deepEqual(
-        applied.slice(-4).map((row) => row.state),
-        ["applied", "applied", "applied", "applied"],
+        applied.slice(-5).map((row) => row.state),
+        ["applied", "applied", "applied", "applied", "applied"],
       );
       assert.deepEqual(await joined(), expectedJoined);
       assert.deepEqual(await toggles(), expectedToggles);
@@ -3074,15 +3074,15 @@ await recoveryTest(
       );
       const prefix = await read("SELECT version,hash,state FROM _vtc_migrations ORDER BY version");
 
-      // 0033, the data-only 0034 toggle re-copy and 0035, which all leave memberships alone.
-      assert.equal(await runMigrations(settings), 3);
+      // 0033, the data-only 0034 toggle re-copy, 0035 and 0036 leave memberships alone.
+      assert.equal(await runMigrations(settings), 4);
       assert.equal(await runMigrations(settings), 0);
       const applied = await read("SELECT version,hash,state FROM _vtc_migrations ORDER BY version");
       assert.equal(applied.length, 37);
-      assert.deepEqual(applied.slice(0, -3), prefix);
+      assert.deepEqual(applied.slice(0, -4), prefix);
       assert.deepEqual(
-        applied.slice(-3).map((row) => row.state),
-        ["applied", "applied", "applied"],
+        applied.slice(-4).map((row) => row.state),
+        ["applied", "applied", "applied", "applied"],
       );
       const expected = [
         { id: director, joinedAt: t1 },
@@ -3253,15 +3253,15 @@ await recoveryTest(
       ]);
       const prefix = await history(),
         shape = await definition();
-      // 0034 and the 0035 qualification simplification follow the 0033 prefix.
-      assert.equal(await runMigrations(settings), 2);
+      // 0034, the 0035 qualification simplification and 0036 follow the 0033 prefix.
+      assert.equal(await runMigrations(settings), 3);
       assert.equal(await runMigrations(settings), 0);
       const applied = await history();
       assert.equal(applied.length, 37);
-      assert.deepEqual(applied.slice(0, -2), prefix);
+      assert.deepEqual(applied.slice(0, -3), prefix);
       assert.deepEqual(
-        applied.slice(-2).map((row) => row.state),
-        ["applied", "applied"],
+        applied.slice(-3).map((row) => row.state),
+        ["applied", "applied", "applied"],
       );
       const expected = [
         { id: bothOff, flags: [0, 0, 0, 0, 0, 1, 0, 5] },

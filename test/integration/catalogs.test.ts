@@ -235,6 +235,57 @@ test("common trailers page once, search every body code and retain exact hidden 
   ).toBe(1);
 });
 
+test("moving or detaching one grouped member preserves the other variants and exact codes", async () => {
+  const a = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_membership_a",
+    nameEn: "Fictional carrier",
+    commonTrailer: "trailer.fiction_first",
+  });
+  const b = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_membership_b",
+    nameEn: "Fictional carrier",
+    commonTrailer: "trailer.fiction_first",
+  });
+  const c = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_membership_c",
+    nameEn: "Fictional other carrier",
+    commonTrailer: "trailer.fiction_second",
+  });
+  await catalogs.patch(director, "trailers", b.id, newId(), { commonTrailer: null });
+  expect(await catalogs.get(driver, "trailers", a.id)).toMatchObject({
+    commonTrailer: "trailer.fiction_first",
+    code: a.code,
+  });
+  expect(await catalogs.get(driver, "trailers", b.id)).toMatchObject({
+    commonTrailer: null,
+    code: b.code,
+  });
+  expect((await catalogs.list(driver, "trailers", { game: "ets2" })).total).toBe(3);
+  await catalogs.patch(director, "trailers", b.id, newId(), {
+    commonTrailer: "trailer.fiction_second",
+  });
+  expect((await catalogs.get(driver, "trailers", a.id)).commonTrailer).toBe(
+    "trailer.fiction_first",
+  );
+  expect((await catalogs.get(driver, "trailers", c.id)).commonTrailer).toBe(
+    "trailer.fiction_second",
+  );
+  expect((await catalogs.list(driver, "trailers", { game: "ets2" })).total).toBe(2);
+  await unit.run(async (tx) => {
+    for (const item of [a, b, c])
+      expect(
+        await catalogs.resolveInTransaction(tx, {
+          game: "ets2",
+          kind: "trailer",
+          code: item.code,
+        }),
+      ).toMatchObject({ status: "resolved", id: item.id });
+  });
+});
+
 test("codes round trip byte-exact through create and import, and search treats wildcards literally", async () => {
   const created = await catalogs.create(director, "trailers", newId(), {
     game: "ets2",

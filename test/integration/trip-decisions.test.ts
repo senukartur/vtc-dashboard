@@ -5538,3 +5538,154 @@ test("grouped body variants pass actual ingestion and acceptance while unknown b
     await configureFirstLevel({ massMaxKg: "20000" });
   }
 });
+
+test("regrouping uses current RR reads and fences old reviews and derived-trailer proposals", async () => {
+  const a = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_fence_fiction_a",
+    nameEn: "Fictional fenced transporter",
+    commonTrailer: "trailer.fiction_fenced",
+  });
+  const b = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_fence_fiction_b",
+    nameEn: "Fictional fenced transporter",
+    commonTrailer: "trailer.fiction_fenced",
+  });
+  ids.set(b.code, b.id);
+  await configureFirstLevel({ trailers: { mode: "selected", typeIds: [a.id] } });
+  let resume!: () => void;
+  let response: Promise<{ data: S["Review"]; version: number }> | undefined;
+  try {
+    const manualTrip = await report(owner, manual, { trailerType: b.code });
+    const before = await service.review(dispatcher, manualTrip.tripId);
+    expect(before.data.acceptance.mode).toBe("ordinary");
+    const allowedSource = payload();
+    allowedSource.snapshot.trailers.items[0]!.bodyType = { available: true, value: a.code };
+    const allowedTrip = await receive(allowedSource);
+    const allowedProposal = await service.propose(
+      dispatcher,
+      allowedTrip.tripId,
+      newId(),
+      (await state(allowedTrip.tripId))!.version,
+      {
+        reason: "Fictional unchanged grouped correction",
+        evidenceIds: [],
+        trailerTypeId: b.id,
+      },
+    );
+    const allowedView = await service.getProposal(
+      dispatcher,
+      allowedTrip.tripId,
+      allowedProposal.data.id,
+    );
+    expect(
+      (
+        await decideProposal(
+          deputy,
+          allowedTrip.tripId,
+          allowedView.data.id,
+          newId(),
+          allowedView.version,
+          {
+            decision: "approve",
+            reviewedRevisionId: allowedView.data.revisionId,
+            reason: "Fictional current grouped approval",
+          },
+        )
+      ).data,
+    ).toMatchObject({ outcome: "accepted" });
+    const source = payload();
+    source.snapshot.trailers.items[0]!.bodyType = { available: true, value: a.code };
+    const accepted = await receive(source),
+      credited = await credit(accepted.tripId);
+    const proposed = await service.propose(
+      dispatcher,
+      accepted.tripId,
+      newId(),
+      (await state(accepted.tripId))!.version,
+      {
+        reason: "Fictional proposed body variant",
+        evidenceIds: [],
+        trailerTypeId: b.id,
+      },
+    );
+    const proposalView = await service.getProposal(dispatcher, accepted.tripId, proposed.data.id);
+    let ready!: () => void,
+      gate = true;
+    const discovered = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const proceed = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const observed = createTripDecisions(
+      unit,
+      service.config,
+      {
+        identity,
+        qualifications,
+        manual,
+        events,
+        trips: {
+          ...tripsService,
+          contributions: {
+            ...tripsService.contributions,
+            owners: async (tx, selected) => {
+              // This real nonlocking ownership query establishes the old RR snapshot.
+              const result = await tripsService.contributions.owners(tx, selected);
+              if (gate && selected.includes(manualTrip.tripId)) {
+                gate = false;
+                ready();
+                await proceed;
+              }
+              return result;
+            },
+          },
+        },
+      },
+      now,
+    );
+    response = observed.review(dispatcher, manualTrip.tripId);
+    await Promise.race([
+      discovered,
+      response.then(() => {
+        throw new Error("SYNTHETIC_GROUPING_RENDEZVOUS_NOT_REACHED");
+      }),
+    ]);
+    const file = Buffer.from(`game,code,common_trailer\nets2,${b.code},trailer.fiction_removed\n`);
+    const preview = await catalogs.previewImport(director, "trailers", file);
+    await catalogs.applyImport(director, "trailers", file, newId(), preview.token as string);
+    resume();
+    const current = await response;
+    expect(
+      current.data.qualificationCheck?.rules.find((rule) => rule.rule === "trailer_types"),
+    ).toMatchObject({ result: "fail" });
+    expect(current.data.acceptance.mode).toBe("over_limits");
+    expect(current.version).toBeGreaterThan(before.version);
+    await expect(
+      service.decide(dispatcher, manualTrip.tripId, newId(), before.version, {
+        decision: "accept",
+        reviewedRevisionId: before.data.trip.manualRevision!.id,
+        factRevisionId: before.data.factRevisionId,
+        proposalId: null,
+        reason: "Fictional stale approval",
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    // The original telemetry still observes A, so only the proposed derived B changed grouping.
+    await expect(
+      decideProposal(deputy, accepted.tripId, proposalView.data.id, newId(), proposalView.version, {
+        decision: "approve",
+        reviewedRevisionId: proposalView.data.revisionId,
+        reason: "Fictional stale derived approval",
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, publicCode: "VERSION_CONFLICT" });
+    expect(await credit(accepted.tripId)).toEqual(credited);
+    expect((await state(accepted.tripId))?.decision).toBe("accepted");
+    expect(await credit(manualTrip.tripId)).toBeUndefined();
+  } finally {
+    resume?.();
+    await response?.catch(() => undefined);
+    await configureFirstLevel({ massMaxKg: "20000" });
+  }
+});

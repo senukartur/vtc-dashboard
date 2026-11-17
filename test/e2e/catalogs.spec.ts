@@ -30,7 +30,7 @@ const phone = (page: Page) => (page.viewportSize()?.width ?? 1280) < 760;
 for (const locale of ["ru", "en"] as const) {
   test(
     `common trailer groups expose one editable row and variant count in ${locale}`,
-    browserCase(["@functional", "@smoke-catalogs"]),
+    browserCase(["@layout"]),
     async ({ page }, info) => {
       const c = catalogTranslations[locale];
       const item = catalogItem(trailerRowId, "Fictional grouped transporter", locale, {

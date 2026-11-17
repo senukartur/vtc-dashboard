@@ -250,6 +250,9 @@ export function createTripDecisions(
         h.status,
         h.status === "resolved" ? h.assignmentId : h.reasonCode,
         h.status === "resolved" ? [h.levelId, h.editVersion] : null,
+        ...(h.status === "resolved" && Object.keys(h.trailerGroups ?? {}).length
+          ? [h.trailerGroups]
+          : []),
       ]);
     }
     const hash = contentHash(
@@ -263,6 +266,25 @@ export function createTripDecisions(
       }),
     );
     return { evidence, event, eventId: eventId ?? null, eventInvalid, hash };
+  }
+  // A proposal can introduce a trailer absent from every original source fact.
+  // Fence its grouping as well, without changing support hashes for ungrouped proposals.
+  async function proposalSupportHash(
+    tx: TxContext,
+    row: TripState,
+    hash: Buffer,
+    derived?: NormalizedTripEvidence,
+  ) {
+    if (!derived) return hash;
+    const h = await ports.qualifications.lookupInTransaction(
+      tx,
+      derived,
+      await confirmation(tx, row, derived, at()),
+    );
+    if (h.status !== "resolved" || !Object.keys(h.trailerGroups ?? {}).length) return hash;
+    return contentHash(
+      canonicalJson({ support: hash.toString("hex"), trailerGroups: h.trailerGroups }),
+    );
   }
   async function latest(tx: TxContext, id: string) {
     const [row] = await c(tx)
@@ -1003,7 +1025,7 @@ export function createTripDecisions(
         baseFactId: base.factRevisionId,
         derivedFactId: derived?.factRevisionId ?? null,
         resolutionId: raw ? revisionId : null,
-        supportHash: s.hash,
+        supportHash: await proposalSupportHash(tx, row, s.hash, derived),
         reason: reason(explanation),
         evidenceIds,
         changes: raw ? changes : null,
@@ -1054,7 +1076,13 @@ export function createTripDecisions(
       .for("share");
     if (old) throw identityError(409, "VERSION_CONFLICT");
     const s = await support(tx, row, members, p.eventId ?? undefined);
-    if (value.decision === "approve" && !p.supportHash.equals(s.hash))
+    const derived = p.derivedFactId
+      ? (await ports.trips.adjudication.facts(tx, [p.derivedFactId], true)).get(p.derivedFactId)
+          ?.evidence
+      : undefined;
+    if (p.derivedFactId && !derived) throw identityError(409, "VERSION_CONFLICT");
+    const currentHash = await proposalSupportHash(tx, row, s.hash, derived);
+    if (value.decision === "approve" && !p.supportHash.equals(currentHash))
       throw identityError(409, "VERSION_CONFLICT");
     const decidedAt = at(),
       closedProposals = [p];
@@ -1119,9 +1147,11 @@ export function createTripDecisions(
           .values({ tripId: row.id, eventId: p.eventId })
           .onDuplicateKeyUpdate({ set: { eventId: p.eventId } });
       }
-      const e = (
-        await ports.trips.adjudication.facts(tx, [p.derivedFactId ?? p.baseFactId], true)
-      ).get(p.derivedFactId ?? p.baseFactId)?.evidence;
+      const e =
+        derived ??
+        (await ports.trips.adjudication.facts(tx, [p.derivedFactId ?? p.baseFactId], true)).get(
+          p.derivedFactId ?? p.baseFactId,
+        )?.evidence;
       if (!e) throw identityError(409);
       await ports.manual.resolutionEvidenceInTransaction(tx, row.id, row.ownerId, p.evidenceIds);
       const h = await ports.qualifications.lookupInTransaction(

@@ -1040,7 +1040,10 @@ export function createCatalogs(
             eq(catalogTrailers.game, game),
             inArray(catalogTrailers.id, [...new Set(ids)].map(applicationId)),
           ),
-        );
+        )
+        // Decision preparation may already have an older RR snapshot from ownership discovery.
+        .orderBy(asc(catalogTrailers.id))
+        .for("share");
       for (const row of rows)
         if (row.commonTrailer !== null)
           result[row.id] = `common:${game}:${row.commonTrailer.toString("hex")}`;
@@ -1321,7 +1324,7 @@ export function createCatalogs(
                 if (list === "trailers" && row.commonTrailer) {
                   // Editing the displayed group changes shared presentation/visibility.
                   // Never copy one member's opaque body code onto another member.
-                  const { code: _code, dlcId: _dlc, ...shared } = fields;
+                  const { code: _code, dlcId: _dlc, commonTrailer: _group, ...shared } = fields;
                   if (Object.keys(shared).length)
                     await c(tx)
                       .update(catalogTrailers)
