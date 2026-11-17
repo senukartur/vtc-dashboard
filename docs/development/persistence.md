@@ -202,7 +202,7 @@ VTC-113 backfills the original active order, leaving the level IDs, names, versi
 
 Active positions are unique by game and bounded from one to 25. Archive clears the position but retains the level. The same company transaction rewrites the bounded active order, advances the structural revision and records any transfers. Optional level rationales use a restrictive FK to the closed audit entry. Reset drops private history before audit and initial evidence before levels.
 
-Apply through the locked migration runner. A partial DDL failure uses the existing recovery runbook. The previous application can run against the additive schema while the original topology is still active. After the first committed structural edit, keep the new application or recover through a reviewed forward fix or coordinated restore. Additional writer grants and gate activation follow the separate deployment procedure in [Qualifications](qualifications.md#activation-and-launch-configuration).
+Apply through the locked migration runner. A partial DDL failure uses the existing recovery runbook. The previous application can run against the additive schema while the original topology is still active. After the first committed structural edit, keep the new application or recover through a reviewed forward fix or coordinated restore. Additional writer grants and gate activation follow the separate deployment procedure in [Qualifications](qualifications.md#migration).
 
 ### Simplified qualifications
 
