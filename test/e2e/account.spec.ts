@@ -2221,6 +2221,14 @@ for (const viewer of [
         expect(select.x + select.width).toBeLessThanOrEqual(languageTime.x + languageTime.width);
         if (coarse) expect(select.height).toBeGreaterThanOrEqual(40);
         else near(select.height, 32);
+        // The header info button is a full touch target on coarse pointers too.
+        const about = await box(
+          card.getByRole("button", {
+            name: locale === "en" ? "About notification settings" : "О настройках уведомлений",
+            exact: true,
+          }),
+        );
+        if (coarse) expect(Math.min(about.width, about.height)).toBeGreaterThanOrEqual(40);
         // Each switch sits centered under the "On site" column label.
         const site = await box(
           card.locator(".notification-switch-columns .notification-switch-cell"),

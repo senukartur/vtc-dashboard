@@ -677,6 +677,7 @@
     height: 40px;
   }
   /* A full touch target that does not stretch the line it sits on. */
+  .notification-preferences-header .info-tip-trigger,
   .notification-switch-text .info-tip-trigger {
     width: 40px;
     height: 40px;
