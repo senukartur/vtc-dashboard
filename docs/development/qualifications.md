@@ -30,7 +30,7 @@ Each decision stores a snapshot of the level name, edit version, limits and rule
 
 ## Promotion
 
-`replaceContributionsInTransaction` records credits and then re-checks the affected members, and so does a level edit that changes conditions. A member whose credited trips and distance on the current level meet every set condition moves to the next level in the same transaction. The move appends a `promotion` period, an audit entry and a `qualification.promoted` outbox event. A revoked or merged trip never demotes.
+`replaceContributionsInTransaction` records credits and then re-checks the affected members. Every level create, edit, move and removal re-checks the whole game through `recheckGameInTransaction`. A member whose credited trips and distance on the current level meet every set condition moves to the next level in the same transaction. The move appends a `promotion` period, an audit entry and a `qualification.promoted` outbox event. A revoked or merged trip never demotes.
 
 Lock order is company, then sorted members, then assignments, then contributions. The unique open marker and predecessor indexes are the database backstop, so two concurrent credits produce exactly one promotion.
 
@@ -47,11 +47,11 @@ Leaving the first level in either game, whether by promotion, manual change or r
 | `POST /admin/qualification-levels/{id}/removal` | `qualifications.manage` |
 | `PUT /admin/members/{id}/qualifications/{game}` | `qualifications.manage` |
 
-Writes take `expectedVersion` and return `409` on a stale version. Edits and moves return `promotedCount`. Removing a level moves its drivers to the chosen level as `level_removed` periods and shifts later positions up. A manual change needs a comment and is audited. A level's change history comes from the audit log and is shown only to managers (`history: null` for others). Each entry carries bounded before/after `values` (name, position, limits and conditions) so the level page shows what changed.
+Edits, moves and removals take `expectedVersion` and return `409` on a stale version; create and the manual level change do not. Create, edit, move and removal return `promotedCount`. Removing a level moves its drivers to the chosen level as `level_removed` periods and shifts later positions up. A manual change needs a reason and is audited. A level's change history comes from the audit log and is shown only to managers (`history: null` for others). Each entry carries bounded before/after `values` (name, position, limits and conditions) so the level page shows what changed.
 
 ## Web
 
-`apps/web/src/features/qualifications` holds the single page at `/account/qualifications`, the level page and the level editor. The editor previews how many drivers a draft would promote. The trip and review pages share `QualificationCheckList`. Driver profiles read `/members/{id}/qualifications`. Hard Mode keeps its English name in both languages and shows the flame icon.
+`apps/web/src/features/qualifications` holds the single page at `/account/qualifications`, the level page and the level editor. The editor previews how many drivers a draft would promote. A create at the top, and an ↑/↓ move that gives the current top a next level, also show how many of the top's drivers move up before saving; the move asks for confirmation. The trip and review pages share `QualificationCheckList`. Driver profiles read `/members/{id}/qualifications`. Hard Mode keeps its English name in both languages and shows the flame icon.
 
 ## Migration
 
