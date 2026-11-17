@@ -578,15 +578,22 @@ test.describe("Company Dashboard E2E", () => {
     "shows progress toward the next level and the unavailable and no-level states",
     browserCase(["@functional"]),
     async ({ page }) => {
-      await mockDashboardRoutes(page);
+      const state = await mockDashboardRoutes(page);
       await page.goto("/account/dashboard");
       const widget = page.getByRole("region", { name: "My Qualification", exact: true });
       await expect(widget).toContainText("15 / 20");
       await expect(widget.getByRole("link", { name: "All qualifications" })).toBeVisible();
+      // Both games come from one read of my qualifications.
+      expect(
+        state.requests.filter((url) => url.pathname === "/api/v1/me/qualifications"),
+      ).toHaveLength(1);
     },
   );
 
-  for (const qualifications of ["unavailable", "missing"] as const) {
+  for (const [qualifications, calm, other] of [
+    ["unavailable", "Progress unavailable", "No qualification assigned"],
+    ["missing", "No qualification assigned", "Progress unavailable"],
+  ] as const) {
     test(
       `shows a calm state when my qualifications are ${qualifications}`,
       browserCase(["@functional"]),
@@ -594,6 +601,10 @@ test.describe("Company Dashboard E2E", () => {
         await mockDashboardRoutes(page, { qualifications });
         await page.goto("/account/dashboard");
         const widget = page.getByRole("region", { name: "My Qualification", exact: true });
+        // One calm line per game, never a level, progress or an error alert.
+        await expect(widget.getByText(calm, { exact: true })).toHaveCount(2);
+        await expect(widget.getByText(other, { exact: true })).toHaveCount(0);
+        await expect(widget.getByRole("alert")).toHaveCount(0);
         await expect(widget).not.toContainText(levelIdEts2);
         await expect(widget).not.toContainText("15 / 20");
       },
