@@ -76,11 +76,13 @@ export function useBlockRetry(query: {
   const retrying = retainsError(held?.since ?? null, query);
   // Data or a later error ends the retry, so a later query (another game) shows its own state.
   if (held !== null && !retrying) setHeld(null);
+  const error = retrying && held ? held.error : query.error;
   return {
     retrying,
-    error: retrying && held ? held.error : query.error,
+    error,
     retry() {
-      setHeld({ since: query.errorUpdateCount, error: query.error });
+      // Another press while retrying keeps the held error: the query's own is already cleared.
+      setHeld({ since: query.errorUpdateCount, error });
       void query.refetch();
     },
   };

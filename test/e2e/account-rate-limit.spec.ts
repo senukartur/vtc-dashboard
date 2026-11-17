@@ -1,5 +1,6 @@
 import type { Locator, Page, Route } from "@playwright/test";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
+import { formatQuantity } from "../../apps/web/src/shared/formatting.ts";
 import { mockDashboardRoutes } from "./support/dashboard-ui.ts";
 import { alphaId } from "./support/drivers-fixtures.ts";
 import { mockDriverRoutes } from "./support/drivers-ui.ts";
@@ -161,8 +162,19 @@ for (const [locale, text] of [
       expect(analytics.requests).toBe(4);
       analytics.remaining = 0;
       await retry.click();
-      await expect(noticeIn(main)).toHaveCount(0);
+      // The KPIs need the reread company analytics to succeed, not merely to be pending.
+      await expect(
+        region(page, /^(Key metrics|Ключевые показатели)$/).locator("dd.dashboard-kpi-value"),
+      ).toHaveText([
+        formatQuantity("125430000", "km", locale),
+        "42",
+        formatQuantity("2986000", "km", locale),
+        "2",
+      ]);
       await expect(region(page, /^(Driver Leaderboard|Таблица лидеров)$/)).toBeVisible();
+      // Retry rereads the current and previous periods once each, and both succeed.
+      await expect.poll(() => analytics.requests).toBe(6);
+      await expect(noticeIn(main)).toHaveCount(0);
     },
   );
 
@@ -252,6 +264,13 @@ test(
       .toBeGreaterThanOrEqual(before + 2);
     expect(await card.getByText(generic["My November"]).count()).toBe(0);
     expect(await noticeIn(card).count()).toBe(1);
+    // Still inside the Retry-After wait: neither read has been retried yet.
+    expect(member.requests).toBe(before + 2);
+    // A second press during the wait reuses the reads in flight and keeps the notice.
+    await page.keyboard.press("Enter");
+    expect(await card.getByText(generic["My November"]).count()).toBe(0);
+    expect(await noticeIn(card).count()).toBe(1);
+    expect(member.requests).toBe(before + 2);
     await expect.poll(() => member.requests).toBe(before + 4);
     await expect(retry).toBeFocused();
     await expect(noticeIn(card)).toHaveText(notice.en);
