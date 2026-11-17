@@ -221,6 +221,12 @@ test(
     await expect(name).toBeFocused();
     await page.keyboard.type("Fictional");
     await expect(name).toHaveValue("Fictional");
+    // Escape during a preview closes it and still leaves focus in the input.
+    await distance.hover();
+    await expect(content).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(content).toHaveCount(0);
+    await expect(name).toBeFocused();
   },
 );
 
