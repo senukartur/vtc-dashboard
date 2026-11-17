@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { keepPreviousPage } from "../../shared/paging.js";
 import { AccountFailure } from "../account/transport.js";
+import { useWorkspaceCommand } from "../admin/transport.js";
 import { type Game, tripsPath } from "./model.js";
 import { type DTO, driversRead } from "./transport.js";
 
@@ -206,4 +207,32 @@ export function useMemberAcceptedTrips(
     enabled: !!memberId && allowed,
     queryFn: async ({ signal }) => (await read(path, "EnvelopeListTripSummary", signal)).data,
   });
+}
+
+/**
+ * The Members page command (same CSRF, Idempotency-Key, If-Match, failure handling, held retry and
+ * administration refresh) for the directory access panel (VTC-160). After every settled attempt
+ * the directory and this member's profile reads are marked stale, so the list shows the new
+ * roles, status and counters without navigation.
+ */
+export function useAccessCommand(memberId: string) {
+  const command = useWorkspaceCommand();
+  const client = useQueryClient();
+  async function run<K extends keyof DTO>(
+    path: string,
+    name: K,
+    body?: unknown,
+    etag: string | null = null,
+    method = "POST",
+  ): Promise<DTO[K] | undefined> {
+    const result = await command.run(path, name, body, etag, method);
+    for (const queryKey of [
+      ["drivers-directory"],
+      ["driver-profile", memberId],
+      ["driver-qualifications", memberId],
+    ])
+      void client.invalidateQueries({ queryKey }).catch(() => undefined);
+    return result;
+  }
+  return { ...command, run };
 }

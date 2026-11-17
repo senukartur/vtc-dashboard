@@ -5134,6 +5134,10 @@ export interface components {
             version: number;
         };
         MemberProfile: {
+            /** @description Accepted canonical trips and exact actual distance with reportingAt in the 30 days ending at last30DaysEndsAt, the directory's rule (VTC-160). Zero is a computed zero; absent, with last30DaysEndsAt, when accepted-trip facts are unavailable. */
+            last30Days?: components["schemas"]["AnalyticsStage4Totals"];
+            /** @description Server-clock end of the profile's 30-day window (VTC-160). */
+            last30DaysEndsAt?: components["schemas"]["Timestamp"];
             /** @description reportingAt of the member's latest accepted canonical trip; null when none. */
             lastAcceptedTripAt?: components["schemas"]["Timestamp"] | null;
             /** @description All-game lifetime accepted canonical trip count and exact actual distance in metres for this visible member profile. */

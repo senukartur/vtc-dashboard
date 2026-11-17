@@ -18,17 +18,20 @@ import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { progressPercent } from "../dashboard/model.js";
 import type { QueryView } from "../dashboard/view-model.js";
 import { tripListTimestamp } from "../trips/list-model.js";
-import { accessHref } from "./directory-model.js";
+import { InfoHint, RelativeDay, useMinuteNow } from "./directory-components.js";
+import { driverAccessHref } from "./directory-model.js";
 import {
   type Assignment,
+  averageTripKm,
+  capitalize,
   driverTripFilters,
   failureView,
   type Game,
   type GameFilter,
   initial,
   type Level,
-  membershipLine,
   ladderFor,
+  membershipParts,
   type MemberQualification,
   monthLabel,
   nextLevel,
@@ -94,7 +97,7 @@ export function ProfileHeader({
   profile: MemberProfile | undefined;
   pending: boolean;
   isSelf: boolean;
-  /** members.manage: links to the Members administration page for this member. */
+  /** members.manage: opens this member's access panel over the drivers directory. */
   canManage: boolean;
   locale: Locale;
   displayTimezone: string;
@@ -105,8 +108,9 @@ export function ProfileHeader({
   titleRef: RefObject<HTMLHeadingElement | null>;
 }) {
   const { t } = useTranslation("drivers");
+  const now = useMinuteNow();
   const member = profile?.member;
-  const since = profile ? membershipLine(profile, locale, displayTimezone, t) : null;
+  const line = profile ? membershipParts(profile, locale, displayTimezone, t) : null;
   const chips = member
     ? (["ets2", "ats"] as const).flatMap((g) => {
         const assignment = assignments[g];
@@ -153,7 +157,27 @@ export function ProfileHeader({
             </>
           )}
         </div>
-        {since && <p className="driver-membership">{since}</p>}
+        {line && (line.since || line.lastTrip) && (
+          <p className="driver-membership">
+            {line.since}
+            {line.since && line.lastTrip && " · "}
+            {line.lastTrip?.kind === "none" &&
+              (line.since ? t("profile.noTrips") : capitalize(t("profile.noTrips"), locale))}
+            {line.lastTrip?.kind === "date" && (
+              <>
+                {line.since
+                  ? t("profile.lastTripLabel")
+                  : capitalize(t("profile.lastTripLabel"), locale)}{" "}
+                <RelativeDay
+                  iso={line.lastTrip.iso}
+                  now={now}
+                  locale={locale}
+                  timezone={displayTimezone}
+                />
+              </>
+            )}
+          </p>
+        )}
         {chips.length > 0 && (
           <p className="driver-chips">
             {chips.map((chip) => (
@@ -166,7 +190,7 @@ export function ProfileHeader({
       </div>
       {member && canManage && (
         <Button asChild variant="outline" className="driver-access">
-          <Link to={accessHref(member)}>{t("profile.access")}</Link>
+          <Link to={driverAccessHref(member)}>{t("profile.access")}</Link>
         </Button>
       )}
       {member && (
@@ -187,126 +211,77 @@ export function ProfileHeader({
 }
 
 /**
- * `onRetry` belongs to the page: it may have to reread the reporting timezone first. The all-time
- * item comes from the profile (all games, exact), so it stays when the analytics read fails;
- * absent totals read "Unavailable", never 0.
+ * Four profile totals, all games: lifetime distance, trips and average trip from the exact
+ * lifetime totals, and the directory's 30-day distance. They come with the profile read, so they
+ * do not follow the game filter or wait for analytics; an absent value reads "Unavailable", never 0.
  */
 export function DriverKpis({
-  query,
   lifetime,
+  last30,
+  endsAt,
   locale,
-  onRetry,
+  timezone,
 }: {
-  query: QueryView<Analytics>;
   lifetime: DTO["LifetimeTripTotals"] | undefined;
+  last30: DTO["AnalyticsStage4Totals"] | undefined;
+  endsAt: string | undefined;
   locale: Locale;
-  onRetry: () => void;
+  timezone: string;
 }) {
   const { t } = useTranslation("drivers");
-  const sectionRef = useRef<HTMLElement>(null);
-  const analytics = query.data;
-  const failure = !analytics && query.isError ? failureView(query.error) : null;
-  const allTime = (
-    <div className="driver-kpi driver-kpi-all">
-      <dt>{t("kpi.allTime")}</dt>
-      <dd>
-        <span className="driver-kpi-value">
-          {formatQuantity(lifetime?.actualDistanceM ?? null, "km", locale)}
-        </span>
-        {lifetime && (
-          <span className="driver-kpi-sub">
-            {t("kpi.allTimeSub", { trips: formatDecimal(String(lifetime.acceptedTrips), locale) })}
-          </span>
-        )}
-      </dd>
-    </div>
-  );
-
-  let body: ReactNode;
-  if (failure === "setup") {
-    body = (
-      <>
-        <dl>{allTime}</dl>
-        <p className="driver-block-note">{t("kpi.setup")}</p>
-      </>
-    );
-  } else if (failure) {
-    body = (
-      <>
-        <dl>{allTime}</dl>
-        <div className="driver-block-error">
-          <p>{t("kpi.error")}</p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              // The button unmounts on success; keep focus inside the statistics region.
-              sectionRef.current?.focus();
-              onRetry();
-            }}
-          >
-            {t("kpi.retry")}
-          </Button>
-        </div>
-      </>
-    );
-  } else {
-    const month = analytics?.buckets.at(-1);
-    const items = [
-      {
-        key: "trips",
-        label: t("kpi.trips"),
-        value: analytics ? formatDecimal(String(analytics.acceptedTrips), locale) : undefined,
-        sub: t("kpi.window"),
-      },
-      {
-        key: "distance",
-        label: t("kpi.distance"),
-        value: analytics ? formatQuantity(analytics.actualDistanceM, "km", locale) : undefined,
-        sub: t("kpi.window"),
-      },
-      {
-        key: "month",
-        label: t("kpi.month"),
-        value: analytics
-          ? month
-            ? formatQuantity(month.actualDistanceM, "km", locale)
-            : formatQuantity(null, "km", locale)
-          : undefined,
-        sub: month
-          ? t("kpi.monthSub", {
-              trips: formatDecimal(String(month.acceptedTrips), locale),
-              month: monthLabel(month.date, locale, "long"),
-            })
-          : undefined,
-      },
-    ];
-    body = (
+  const average = averageTripKm(lifetime);
+  const items: { key: string; label: ReactNode; value: ReactNode }[] = [
+    {
+      key: "total",
+      label: t("kpi.total"),
+      value: formatQuantity(lifetime?.actualDistanceM ?? null, "km", locale),
+    },
+    {
+      key: "trips",
+      label: t("kpi.trips"),
+      value: formatDecimal(lifetime ? String(lifetime.acceptedTrips) : null, locale),
+    },
+    {
+      key: "average",
+      label: t("kpi.average"),
+      value:
+        average.kind === "none" ? (
+          <>
+            <span aria-hidden="true">—</span>
+            <span className="visually-hidden">{t("kpi.noAverage")}</span>
+          </>
+        ) : (
+          formatQuantity(average.kind === "value" ? average.distanceM : null, "km", locale)
+        ),
+    },
+    {
+      key: "last30",
+      label: (
+        <>
+          {t("kpi.last30")}
+          {last30 && endsAt && (
+            <InfoHint label={t("kpi.last30Hint")}>
+              {t("kpi.last30Text", { end: formatUtc(endsAt, locale, timezone), timezone })}
+            </InfoHint>
+          )}
+        </>
+      ),
+      value: formatQuantity(last30?.actualDistanceM ?? null, "km", locale),
+    },
+  ];
+  return (
+    <section className="driver-kpis" aria-label={t("kpi.label")}>
+      <p className="driver-kpi-caption">{t("kpi.games")}</p>
       <dl>
-        {allTime}
         {items.map((item) => (
-          <div key={item.key} className="driver-kpi">
+          <div key={item.key} className="driver-kpi" data-kpi={item.key}>
             <dt>{item.label}</dt>
             <dd>
-              <span className="driver-kpi-value">{item.value ?? <Skeleton />}</span>
-              {item.sub && analytics && <span className="driver-kpi-sub">{item.sub}</span>}
+              <span className="driver-kpi-value">{item.value}</span>
             </dd>
           </div>
         ))}
       </dl>
-    );
-  }
-
-  return (
-    <section
-      ref={sectionRef}
-      tabIndex={-1}
-      className="driver-kpis"
-      aria-label={t("kpi.label")}
-      aria-busy={query.isPending}
-    >
-      {body}
     </section>
   );
 }
@@ -641,15 +616,22 @@ export function DriverTrips({
 
 type ChartView = "chart" | "table";
 
+/**
+ * `onRetry` belongs to the page: it may have to reread the reporting timezone first. The chart
+ * owns the statistics failure, setup and Retry states; Retry keeps focus on the chart heading.
+ */
 export function DistanceByMonth({
   query,
   locale,
+  onRetry,
 }: {
   query: QueryView<Analytics>;
   locale: Locale;
+  onRetry: () => void;
 }) {
   const { t } = useTranslation("drivers");
   const headingId = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const captionId = useId();
   const [view, setView] = useState<ChartView>("chart");
   const analytics = query.data;
@@ -667,10 +649,28 @@ export function DistanceByMonth({
   const peak = points.find((p) => isPeak(p.value));
 
   let body: ReactNode;
-  if (failure) {
+  if (failure === "setup") {
     body = (
       <div className="driver-chart-body driver-chart-empty">
-        <p>{t(failure === "setup" ? "kpi.setup" : "kpi.error")}</p>
+        <p>{t("chart.setup")}</p>
+      </div>
+    );
+  } else if (failure) {
+    body = (
+      <div className="driver-chart-body driver-chart-empty driver-block-error">
+        <p>{t("chart.error")}</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            // The button unmounts on success; keep focus on the chart heading.
+            headingRef.current?.focus();
+            onRetry();
+          }}
+        >
+          {t("chart.retry")}
+        </Button>
       </div>
     );
   } else if (!analytics) {
@@ -753,9 +753,11 @@ export function DistanceByMonth({
   }
 
   return (
-    <Card className="driver-chart" aria-labelledby={headingId}>
+    <Card className="driver-chart" aria-labelledby={headingId} aria-busy={query.isPending}>
       <div className="driver-card-head">
-        <h2 id={headingId}>{t("chart.title")}</h2>
+        <h2 id={headingId} ref={headingRef} tabIndex={-1}>
+          {t("chart.title")}
+        </h2>
         <SegmentedControl
           aria-label={t("chart.view")}
           value={view}

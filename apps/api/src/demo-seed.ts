@@ -25,7 +25,14 @@ import {
   tripHistory,
   trips,
 } from "@vtc/db/trips-schema";
-import { demoDataset, demoEpoch, demoId, demoMembers, games } from "./demo-dataset.js";
+import {
+  demoAssignmentEnd,
+  demoAssignmentStart,
+  demoDataset,
+  demoId,
+  demoMembers,
+  games,
+} from "./demo-dataset.js";
 import { createIdentity, type Identity } from "./modules/identity/service.js";
 import { activeLevels, hasConditions } from "./modules/qualifications/ladder.js";
 import { createAssignments } from "./modules/qualifications/promotion.js";
@@ -98,7 +105,9 @@ export async function seedDashboard(
     }
     if (!installed) {
       const levels = await activeLevels(unit, tx);
-      for (const member of adopted ? members.slice(1) : members) {
+      for (const [index, member] of members.entries()) {
+        // An adopted director keeps their own account and join date.
+        if (adopted && index === 0) continue;
         await identity.insertWithCredential(tx, {
           userId: member.id,
           email: member.email,
@@ -112,6 +121,10 @@ export async function seedDashboard(
             locale: "ru",
             displayTimezone: "Europe/Moscow",
             status: member.former ? "inactive" : "active",
+            // Joined with the earliest level admission, not at the seed instant.
+            joinedAt: games
+              .map((_, gameIndex) => demoAssignmentStart(now, index, gameIndex, member.rank))
+              .sort()[0],
           })
           .where(eq(membership.userId, member.id));
       }
@@ -140,7 +153,7 @@ export async function seedDashboard(
                 version: level.version + 1,
               })
               .where(eq(qualificationLevels.id, level.id));
-        for (const member of members) {
+        for (const [memberIndex, member] of members.entries()) {
           const [held] = await c
             .select({ id: qualificationAssignments.id })
             .from(qualificationAssignments)
@@ -160,8 +173,8 @@ export async function seedDashboard(
             userId: member.id,
             game,
             levelId,
-            assignedAt: demoEpoch,
-            endedAt: member.former ? demoEpoch : null,
+            assignedAt: demoAssignmentStart(now, memberIndex, games.indexOf(game), member.rank),
+            endedAt: member.former ? demoAssignmentEnd(now) : null,
             kind: "admission",
             actorId: null,
             comment: null,

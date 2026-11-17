@@ -838,6 +838,14 @@
             }
           ],
           "description": "reportingAt of the member's latest accepted canonical trip; null when none."
+        },
+        "last30Days": {
+          "$ref": "#/$defs/AnalyticsStage4Totals",
+          "description": "Accepted canonical trips and exact actual distance with reportingAt in the 30 days ending at last30DaysEndsAt, the directory's rule (VTC-160). Zero is a computed zero; absent, with last30DaysEndsAt, when accepted-trip facts are unavailable."
+        },
+        "last30DaysEndsAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Server-clock end of the profile's 30-day window (VTC-160)."
         }
       },
       "required": [

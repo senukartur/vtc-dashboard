@@ -664,6 +664,53 @@ test("without Trips the directory omits activity facts and rejects activity sort
   const profile = await get(`/api/v1/members/${ids.tie}`, driverCookie, plainApp);
   expect(profile.json().data).toHaveProperty("memberSince");
   expect(profile.json().data).not.toHaveProperty("lastAcceptedTripAt");
+  expect(profile.json().data).not.toHaveProperty("last30Days");
+  expect(profile.json().data).not.toHaveProperty("last30DaysEndsAt");
+});
+
+test("profiles carry the directory's last30Days and window for every member", async () => {
+  const compare = async () => {
+    // Without a status filter the directory lists active and former members.
+    const list = await page("limit=100");
+    const items = list.items;
+    expect(items.length).toBe(facts.size);
+    expect(items.some((item) => item.formerMember)).toBe(true);
+    for (const item of items) {
+      const response = await get(`/api/v1/members/${item.id}`);
+      expect(response.statusCode).toBe(200);
+      const data = response.json().data;
+      expect(data.last30Days, item.nickname).toEqual(item.last30Days);
+      expect(data.last30DaysEndsAt, item.nickname).toBe(list.windowEndsAt);
+    }
+    return items;
+  };
+  const first = await compare();
+  expect(first.find((item) => item.id === ids.tie)?.last30Days).toEqual({
+    acceptedTrips: 2,
+    actualDistanceM: "10.5",
+  });
+  // An hour later W - 30 days leaves both windows together.
+  clock = W + 3600000;
+  const later = await compare();
+  expect(later.find((item) => item.id === ids.tie)?.last30Days).toEqual({
+    acceptedTrips: 1,
+    actualDistanceM: "3",
+  });
+  expect((await get(`/api/v1/members/${ids.tie}`)).json().data.last30DaysEndsAt).toBe(
+    iso(W + 3600000),
+  );
+  // Only accepted canonical trips count, never rejected, pending or alias rows.
+  expect((await get(`/api/v1/members/${ids.excluded}`)).json().data.last30Days).toEqual({
+    acceptedTrips: 0,
+    actualDistanceM: "0",
+  });
+  // Trips without Qualifications still carries the window.
+  const tripsOnly = (await get(`/api/v1/members/${ids.tie}`, driverCookie, tripsOnlyApp)).json()
+    .data;
+  expect(tripsOnly).toMatchObject({
+    last30Days: { acceptedTrips: 1, actualDistanceM: "3" },
+    last30DaysEndsAt: iso(W + 3600000),
+  });
 });
 
 test("profiles expose memberSince and the same last accepted trip time as administration", async () => {

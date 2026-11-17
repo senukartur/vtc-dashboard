@@ -141,9 +141,10 @@ const profileFacts: Record<
 };
 
 /**
- * Profile with the live Stage 4 fields. `trips`: "on" (default) has lifetime totals and the last
- * accepted trip, "none" a member without accepted trips (zero totals, null last trip), "off" the
- * shape without the Trips module (both absent, never zero).
+ * Profile with the live Stage 4 fields. `trips`: "on" (default) has lifetime totals, the last
+ * accepted trip and the directory's 30-day totals with their window end (VTC-160), "none" a member
+ * without accepted trips (zero totals, null last trip), "off" the shape without the Trips module
+ * (all absent, never zero).
  */
 export function profileFixture(
   id: string,
@@ -160,9 +161,19 @@ export function profileFixture(
       qualifications: assignmentsOf(id),
       memberSince: facts.memberSince,
       ...(trips === "on"
-        ? { lifetimeTotals: facts.lifetimeTotals, lastAcceptedTripAt: facts.lastAcceptedTripAt }
+        ? {
+            lifetimeTotals: facts.lifetimeTotals,
+            lastAcceptedTripAt: facts.lastAcceptedTripAt,
+            last30Days: directoryLast30Days(id),
+            last30DaysEndsAt: directoryWindowEndsAt,
+          }
         : trips === "none"
-          ? { lifetimeTotals: { acceptedTrips: 0, actualDistanceM: "0" }, lastAcceptedTripAt: null }
+          ? {
+              lifetimeTotals: { acceptedTrips: 0, actualDistanceM: "0" },
+              lastAcceptedTripAt: null,
+              last30Days: { acceptedTrips: 0, actualDistanceM: "0" },
+              last30DaysEndsAt: directoryWindowEndsAt,
+            }
           : {}),
     },
     meta,
@@ -462,6 +473,7 @@ export function tripsFixture(
 export const directoryWindowEndsAt = "2026-11-14T12:00:00.000Z";
 
 type Code = (typeof codes)[number];
+export type DirectorySeed = Seed;
 type Seed = {
   id: string;
   nickname: string;
@@ -568,6 +580,12 @@ const formerSeeds: Seed[] = [
 /** The fictional directory population, in no particular order. */
 export const directoryMembers = { active: activeSeeds, former: formerSeeds };
 
+/** A member's directory 30-day totals, which the profile repeats for the same window. */
+export function directoryLast30Days(id: string): DTO["AnalyticsStage4Totals"] {
+  const item = [...activeSeeds, ...formerSeeds].find((entry) => entry.id === id);
+  return { acceptedTrips: item?.trips ?? 0, actualDistanceM: item?.km ?? "0" };
+}
+
 function levelOf(game: Game, code: Code | undefined) {
   if (!code) return null;
   const index = codes.indexOf(code);
@@ -580,7 +598,15 @@ export type DirectoryOptions = {
   empty?: boolean;
   /** Serve pages of at most this many rows, so the 18 members span several pages. */
   pageCap?: number;
+  /** A mutable copy of the members that access commands change (VTC-160). */
+  population?: { active: Seed[]; former: Seed[] };
 };
+
+/** A fresh, independently mutable copy of the directory members. */
+export function directoryPopulation(): { active: Seed[]; former: Seed[] } {
+  const copy = (item: Seed): Seed => ({ ...item, roles: [...item.roles] });
+  return { active: activeSeeds.map(copy), former: formerSeeds.map(copy) };
+}
 
 function entry(item: Seed, options: DirectoryOptions): DTO["MemberStage4DirectoryEntry"] {
   return {
@@ -608,12 +634,13 @@ function entry(item: Seed, options: DirectoryOptions): DTO["MemberStage4Director
 export function directoryCounts(
   options: DirectoryOptions = {},
 ): DTO["MemberStage4DirectoryCounts"] {
+  const { active, former } = options.population ?? { active: activeSeeds, former: formerSeeds };
   return {
-    active: activeSeeds.length,
-    former: formerSeeds.length,
+    active: active.length,
+    former: former.length,
     ...(options.tripsOff
       ? {}
-      : { droveLast30Days: activeSeeds.filter((item) => item.trips > 0).length }),
+      : { droveLast30Days: active.filter((item) => item.trips > 0).length }),
   };
 }
 
@@ -691,13 +718,14 @@ export function directoryResponse(
       return reject(409, "VERSION_CONFLICT");
     offset = position;
   }
+  const population = options.population ?? { active: activeSeeds, former: formerSeeds };
   const pool = options.empty
     ? []
     : status === "active"
-      ? activeSeeds
+      ? population.active
       : status === "former"
-        ? formerSeeds
-        : [...activeSeeds, ...formerSeeds];
+        ? population.former
+        : [...population.active, ...population.former];
   const needle = term?.trim().toLowerCase();
   const matches = pool.filter((item) => {
     if (needle && !item.nickname.toLowerCase().includes(needle)) return false;
@@ -726,6 +754,75 @@ export function directoryResponse(
       },
       meta,
     },
+  };
+}
+
+// Access panel (VTC-160): the Members page reads for one directory member. The email is a
+// fictional example.invalid address that the panel must never render.
+
+/** `GET /admin/members/{id}`: the administration view of a directory member at `version`. */
+export function directoryAdminMember(item: Seed, version: number): DTO["EnvelopeMemberAdmin"] {
+  return {
+    data: {
+      accessEpoch: 1,
+      email: `member-${item.id.slice(-3)}@example.invalid`,
+      identityEpoch: 1,
+      lastAcceptedTripAt: item.last,
+      profile: {
+        member: {
+          id: item.id,
+          nickname: item.nickname,
+          formerMember: !!item.former,
+          roles: item.roles,
+        },
+        qualifications: [],
+      },
+      status: item.former ? "inactive" : "active",
+      version,
+    },
+    meta,
+  };
+}
+
+/** `GET /members/{id}` for a directory member: the panel's "in the company since" line. */
+export function directoryProfile(item: Seed, options: DirectoryOptions = {}) {
+  const profile: DTO["EnvelopeMemberProfile"] = {
+    data: {
+      member: {
+        id: item.id,
+        nickname: item.nickname,
+        formerMember: !!item.former,
+        roles: item.roles,
+      },
+      qualifications: [],
+      memberSince: "2026-09-12T09:00:00.000Z",
+      ...(options.tripsOff
+        ? {}
+        : {
+            lastAcceptedTripAt: item.last,
+            last30Days: { acceptedTrips: item.trips, actualDistanceM: item.km },
+            last30DaysEndsAt: directoryWindowEndsAt,
+          }),
+    },
+    meta,
+  };
+  return profile;
+}
+
+/** `GET /admin/reinstatement-options`: the active ladders of both games. */
+export function reinstatementOptionsFixture(): DTO["EnvelopeReinstatementOptions"] {
+  return {
+    data: {
+      levels: (["ets2", "ats"] as const).flatMap((game) =>
+        codes.map((code, index) => ({
+          id: levelId(game, code),
+          game,
+          position: index + 1,
+          name: levelNames[game][index] ?? code,
+        })),
+      ),
+    },
+    meta,
   };
 }
 

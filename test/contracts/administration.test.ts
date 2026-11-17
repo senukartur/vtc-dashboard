@@ -495,6 +495,36 @@ test("member profiles add the latest join and last accepted trip", () => {
   expect(profile(legacy)).toBe(true);
 });
 
+test("member profiles add the directory's optional 30-day totals and window end", () => {
+  const profile = valid("MemberProfile");
+  const returned = stageFixture("getMember:stage-4-returned-member").response.data;
+  const quiet = stageFixture("getMember:stage-4-no-accepted-trip").response.data;
+  expect(returned.last30Days).toEqual({ acceptedTrips: 12, actualDistanceM: "3600000" });
+  // A computed zero, not an absent value.
+  expect(quiet.last30Days).toEqual({ acceptedTrips: 0, actualDistanceM: "0" });
+  // The window end is the directory's windowEndsAt for the same instant.
+  expect(quiet.last30DaysEndsAt).toBe(
+    stageFixture("listMembers:stage-4-sorted-filtered").response.data.windowEndsAt,
+  );
+  // Existing callers without the totals (Trips off) keep validating.
+  const { last30Days: _totals, last30DaysEndsAt: _end, ...withoutTotals } = returned;
+  expect(profile(withoutTotals)).toBe(true);
+  for (const data of [
+    { ...returned, last30Days: { acceptedTrips: -1, actualDistanceM: "0" } },
+    { ...returned, last30Days: { acceptedTrips: 1.5, actualDistanceM: "0" } },
+    { ...returned, last30Days: { acceptedTrips: 1 } },
+    { ...returned, last30Days: { acceptedTrips: 1, actualDistanceM: "-1" } },
+    { ...returned, last30Days: { ...returned.last30Days, month: 1 } },
+    { ...returned, last30Days: null },
+    { ...returned, last30DaysEndsAt: "2026-11-14" },
+    { ...returned, last30DaysEndsAt: null },
+    { ...returned, last30DaysStartsAt: "2026-10-15T12:00:00.000Z" },
+  ])
+    expect(profile(data), JSON.stringify(data)).toBe(false);
+  const schemas = stage4Spec.components.schemas;
+  expect(schemas.MemberProfile?.required).toEqual(["member", "qualifications"]);
+});
+
 test("the invitation list exposes current generations without any link secret", () => {
   const list = valid("InvitationStage4List");
   const active = stageFixture("listInvitations:stage-4-active").response.data;

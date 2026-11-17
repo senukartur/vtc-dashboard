@@ -155,7 +155,8 @@
   line-height: 1.6;
 }
 
-/* KPI strip: one bordered row; inset shadows draw dividers only between cells. */
+/* KPI strip (VTC-160): four all-games totals in one bordered row with a "both games" caption;
+   inset shadows draw dividers only between cells, and the cells wrap two by two on phones. */
 .driver-profile-page .driver-kpis {
   min-width: 0;
   overflow: hidden;
@@ -163,17 +164,20 @@
   border-radius: var(--radius);
   background: var(--surface);
 }
-.driver-profile-page .driver-kpis:focus {
-  outline: none;
-}
-.driver-profile-page .driver-kpis:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
+.driver-profile-page .driver-kpi-caption {
+  margin: 0;
+  padding: 8px 14px 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.45;
+  text-align: end;
 }
 .driver-profile-page .driver-kpis dl {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   margin: 0;
+  /* Hides the first row's top dividers under the caption. */
+  clip-path: inset(1px 0 0);
 }
 .driver-profile-page .driver-kpi {
   display: flex;
@@ -186,11 +190,19 @@
     0 -1px 0 var(--border);
 }
 .driver-profile-page .driver-kpi dt {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 18px;
   color: var(--muted);
   font-size: var(--font-small);
   line-height: 1.45;
   overflow-wrap: break-word;
 }
+.driver-profile-page .driver-kpi dt .drivers-hint-button {
+  margin-block: -4px;
+}
+
 .driver-profile-page .driver-kpi dd {
   display: flex;
   flex-direction: column;
@@ -206,11 +218,6 @@
   font-variant-numeric: tabular-nums;
   overflow-wrap: break-word;
 }
-.driver-profile-page .driver-kpi-sub {
-  color: var(--muted);
-  font-size: var(--font-badge);
-  overflow-wrap: break-word;
-}
 
 /* Static placeholders (no animation); the status line carries the loading announcement. */
 .driver-profile-page .driver-skeleton {
@@ -219,7 +226,6 @@
   border-radius: var(--radius-badge);
   background: var(--surface-active);
 }
-.driver-profile-page .driver-kpi .driver-skeleton,
 .driver-profile-page .driver-skeleton-inline {
   display: inline-block;
   width: 7em;
@@ -311,6 +317,16 @@
 .driver-profile-page .driver-chart .driver-card-head h2 {
   margin-right: auto;
 }
+.driver-profile-page .driver-chart .driver-card-head h2:focus {
+  outline: none;
+}
+.driver-profile-page .driver-chart .driver-card-head h2:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.driver-profile-page .driver-chart-empty.driver-block-error {
+  flex-direction: column;
+}
 .driver-profile-page .driver-timezone {
   margin-left: auto;
 }
@@ -324,10 +340,6 @@
 .driver-profile-page .driver-error p {
   margin: 0;
   color: var(--destructive);
-}
-.driver-profile-page .driver-kpis > .driver-block-note,
-.driver-profile-page .driver-kpis > .driver-block-error {
-  padding: 10px 14px;
 }
 .driver-profile-page .driver-error {
   justify-items: start;
