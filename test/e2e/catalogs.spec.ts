@@ -26,6 +26,41 @@ import { browserCase, expect, test } from "./support/fixtures.ts";
 import { evidenceId, example, id, mockTrips } from "./support/trip-ui.ts";
 
 const phone = (page: Page) => (page.viewportSize()?.width ?? 1280) < 760;
+
+for (const locale of ["ru", "en"] as const) {
+  test(
+    `common trailer groups expose one editable row and variant count in ${locale}`,
+    browserCase(["@functional", "@smoke-catalogs"]),
+    async ({ page }, info) => {
+      const c = catalogTranslations[locale];
+      const item = catalogItem(trailerRowId, "Fictional grouped transporter", locale, {
+        code: "_fiction_body_a",
+        commonTrailer: "trailer.fiction_common",
+        variantCount: 7,
+      });
+      await mockCatalogs(page, true, {
+        rows: { ets2: { ...defaultRows(locale), trailers: [item] } },
+      });
+      await open(page, locale, "?tab=trailers");
+      const row = rowOf(page, item.nameEn);
+      await expect(row).toHaveCount(1);
+      await expect(row.getByText("trailer.fiction_common", { exact: true })).toBeVisible();
+      await expect(
+        row.getByText(c.trailerVariants.replace("{{count}}", "7"), { exact: true }),
+      ).toBeVisible();
+      await capture(page, info, `common-trailer-${locale}`);
+      if (phone(page)) await row.getByRole("button").click();
+      await (phone(page) ? page.getByRole("dialog") : row)
+        .getByRole("button", { name: c.edit, exact: true })
+        .click();
+      const form = page.getByRole("dialog");
+      await expect(form.getByLabel(c.fieldCommonTrailer, { exact: true })).toHaveValue(
+        "trailer.fiction_common",
+      );
+      await expect(form.getByLabel(c.fieldCode, { exact: true })).toHaveValue("_fiction_body_a");
+    },
+  );
+}
 const tab = (page: Page, name: string) => page.getByRole("tab", { name: new RegExp(`^${name}`) });
 const rowOf = (page: Page, text: string) =>
   phone(page)

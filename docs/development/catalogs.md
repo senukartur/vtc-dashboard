@@ -23,6 +23,22 @@ Cities also have an optional `name_native`, the canonical name as the game map w
 
 **Couplings.** Trailers are identified by telemetry body type, not by trailer ID. A coupling takes its first trailer's type: `snapshot.trailers.items` index `0` `bodyType` is the one that resolves, other slots stay provenance, and a slot 0 body type that is unavailable stays unknown even if its `id` matches a row (no fallback). A coupling's other trailers are not checked against qualification limits.
 
+**Common trailers.** An optional byte-exact `commonTrailer` links body-type variants to their explicit game `trailer_def.trailer` unit, scoped by game. No name, token prefix or chassis/model filename establishes equivalence. Lists, selectors, totals and summary counters return one representative per group: a visible member before a hidden one, then the lowest row ID. Ungrouped rows remain separate. Search checks every member's body code and names as well as the common key. A representative retains its own source/name metadata; editing its names or hidden flag applies to the whole group. Its original body code and source change only on that member. Direct reads and existing selections by every original ID remain valid.
+
+Telemetry recognition stays an exact body-code lookup and preserves the original row ID in immutable trip facts. Qualification checks compare recognized IDs through their current common keys; a selected member permits every recognized member of that same game/group. Unknown body types remain unknown even if a model ID resembles the group. Every new decision retains its group mapping alongside the observed/allowed original IDs. Changing membership does not enqueue reassessment, rewrite a decision, or change existing credit. Future assessments and explicit new reviews use the updated grouping. Confirmed event trips keep the existing level-limit exemption.
+
+Trailer CSV/JSON imports accept the optional `common_trailer` column. A grouping-only file with `game,code,common_trailer` updates existing rows without replacing names or IDs; an unknown code without a name fails preview. Blank or absent common keys preserve membership on import; the form can clear a group's key to split its members back into separate rows. Original body codes are never deleted.
+
+Prepare a private grouping-only file from separately extracted definition roots:
+
+```powershell
+pnpm exec tsx scripts/catalogs/trailer-groups.ts --game ets2 --definitions .local/catalogs/extracted/def --out .local/catalogs/trailer-groups.csv
+```
+
+Repeat `--definitions` for additional archives. Only explicit unambiguous legacy `trailer_def` links are emitted; conflicting links, include-fragment definitions and obsolete cargo-only body tokens do not establish a group. The script never imports, guesses owned-trailer equivalence from shared chassis, or overwrites an existing output. Game-derived output must stay ignored under `.local/catalogs/`. Preview the file on the intended host; missing historical body rows are errors, not permission to create unnamed trailers.
+
+Migration `0036_trailer_groups` adds a nullable key and indexed group lookup without backfilling guessed membership or altering old references. Drain catalog/decision writers, apply through the locked migrator, deploy the compatible reader, then preview/apply reviewed game-derived grouping data. The old reader can still read the additive schema, but it lists/evaluates variants separately; reverting it also reverts grouping behavior for future checks. Existing immutable decisions survive either reader. No live migration or import occurs at startup.
+
 ## Maintenance filters and counts
 
 Each list accepts `hidden=only` to select rows by their own hidden flag, overriding `includeHidden`. The `untranslated=true` filter checks for a missing Russian name in both locales; it exists only on regions, cities, cargo and trailers, so DLCs and companies answer it with 422 and depots do not offer it. The companies list also accepts `logo=missing`, which selects companies without a logo row. These filters combine with the existing search and relation filters. Totals cover the full filtered result before pagination, and cursors bind the effective filters.

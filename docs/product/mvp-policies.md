@@ -22,6 +22,8 @@ The owner approved an explicit English-name fallback when a Russian translation 
 
 On 2026-11-12 the owner decided that DLCs, companies and therefore depots use only their canonical name: no Russian name, translation filter or fallback mark. A company option shows the name on the left and the code on the right, like the city picker, so same-name companies stay distinct.
 
+Body-type variants may share an explicitly verified common game trailer key. Catalogs and pickers show one entry per common trailer in each game; original body codes and row IDs remain recognizable. Selecting a grouped trailer permits its recognized variants for level checks. Grouping must not infer equivalence from identical names or chassis alone. Membership edits affect future checks, while completed decision snapshots and credited trips remain unchanged.
+
 ### Catalog source use basis
 
 On 2026-10-20 the owner selected closed, non-commercial use of game-derived catalog metadata for this VTC, from the owner-authorized game/DLC installations. A separate SCS permission reply is not a prerequisite for this selected delivery scope. This records the owner's project decision; it does not claim a provider permission grant or authorize public bulk redistribution of extracted definitions, label/localization corpora or game assets. Preserve attribution, exact private provenance and independent dataset review. Public Git contains original machinery, fictional fixtures and aggregate evidence. Production deployment and activation remain separate operational gates.

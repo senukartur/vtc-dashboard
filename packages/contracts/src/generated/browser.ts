@@ -3525,6 +3525,8 @@ export interface components {
             adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
             code: string;
+            /** @description Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized. */
+            commonTrailer?: string | null;
             /** @description Companies list only. Count linked same-game depots. */
             depotCount?: number;
             display: components["schemas"]["CatalogLabel"];
@@ -3546,6 +3548,8 @@ export interface components {
             steamAppId?: number | null;
             /** @description Last update to this catalog row. */
             updatedAt?: components["schemas"]["Timestamp"];
+            /** @description Number of stored body-type variants in this trailer group, including hidden variants. */
+            variantCount?: number;
         };
         CatalogItemList: {
             items: components["schemas"]["CatalogItem"][];
@@ -3557,6 +3561,8 @@ export interface components {
             adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
             code?: string;
+            /** @description Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized. */
+            commonTrailer?: string | null;
             dlcId?: string | null;
             hidden?: boolean;
             nameEn?: string;
@@ -3645,6 +3651,8 @@ export interface components {
         CatalogTrailerInput: {
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
             code: string;
+            /** @description Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized. */
+            commonTrailer?: string | null;
             dlcId?: string | null;
             /** @enum {string} */
             game: "ets2" | "ats";

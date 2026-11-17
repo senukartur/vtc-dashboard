@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 102 tables including the ledger and 36 migrations.
+// Fresh full-schema preparation now covers 102 tables including the ledger and 37 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -289,7 +289,8 @@ async function publishedPrefixFolder(
     | 32
     | 33
     | 34
-    | 35,
+    | 35
+    | 36,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -355,6 +356,8 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_NOTIFICATION_TOGGLE_RECOPY_PREFIX_REQUIRED");
   if (count === 35 && entries[34]?.tag !== "0034_notification_toggle_recopy")
     throw new Error("PUBLISHED_SIMPLE_QUALIFICATIONS_PREFIX_REQUIRED");
+  if (count === 36 && entries[35]?.tag !== "0035_simple_qualifications")
+    throw new Error("PUBLISHED_TRAILER_GROUPING_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -512,6 +515,10 @@ export async function notificationToggleRecopyPriorFolder(): Promise<string> {
 /** Every published migration through 0034, before the VTC-157 qualification simplification. */
 export async function simpleQualificationsPriorFolder(): Promise<string> {
   return publishedPrefixFolder(35);
+}
+
+export async function trailerGroupingPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(36);
 }
 
 /**

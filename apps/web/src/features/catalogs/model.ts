@@ -129,6 +129,7 @@ const importFieldKeys = new Map([
   ["name_en", "fieldNameEn"],
   ["name_ru", "fieldNameRu"],
   ["name_native", "fieldNameNative"],
+  ["common_trailer", "fieldCommonTrailer"],
   ["steam_app_id", "fieldSteam"],
   ["adr_class", "fieldAdr"],
   ["dlc_code", "fieldDlc"],
@@ -216,7 +217,7 @@ export const importColumns: Record<CatalogTab, readonly string[]> = {
   companies: ["game", "code", "name_en", "dlc_code"],
   depots: ["game", "company_code", "city_code", "dlc_code"],
   cargoes: ["game", "code", "name_en", "name_ru", "adr_class", "dlc_code"],
-  trailers: ["game", "code", "name_en", "name_ru", "dlc_code"],
+  trailers: ["game", "code", "name_en", "name_ru", "dlc_code", "common_trailer"],
 };
 export function templateCsv(list: CatalogTab) {
   return `${importColumns[list].join(",")}\r\n`;

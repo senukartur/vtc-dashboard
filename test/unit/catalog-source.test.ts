@@ -7,6 +7,27 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import { parseRegistries } from "../../scripts/catalogs/registry.mjs";
+import { commonTrailerGroups } from "../../scripts/catalogs/trailer-groups.ts";
+
+test("common trailer preparation uses explicit links and withholds ambiguous or fragmented definitions", () => {
+  const result = commonTrailerGroups([
+    "trailer_def: trailer_def.fiction_a { body_type: _fiction_a trailer: trailer.fiction_car }",
+    "trailer_def: trailer_def.fiction_b { body_type: _fiction_b trailer: trailer.fiction_car }",
+    "trailer_def: trailer_def.fiction_c { body_type: _fiction_van trailer: trailer.fiction_van }",
+    "trailer_def: trailer_def.ambiguous_a { body_type: _ambiguous trailer: trailer.fiction_car }",
+    "trailer_def: trailer_def.ambiguous_b { body_type: _ambiguous trailer: trailer.fiction_van }",
+    'trailer_def: trailer_def.fragment { body_type: _fragment trailer: trailer.fiction_car @include "other.sui" }',
+    "trailer_def: trailer_def.fragment_duplicate { body_type: _fragment trailer: trailer.fiction_car }",
+    "cargo_data: cargo_obsole.fiction { body_types[]: _obsolete }",
+    "# trailer_def: trailer_def.comment { body_type: _comment trailer: trailer.wrong }",
+  ]);
+  expect([...result.groups]).toEqual([
+    ["_fiction_a", "trailer.fiction_car"],
+    ["_fiction_b", "trailer.fiction_car"],
+    ["_fiction_van", "trailer.fiction_van"],
+  ]);
+  expect(result.ambiguous).toEqual(["_ambiguous", "_fragment"]);
+});
 
 const execFileAsync = promisify(execFile);
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");

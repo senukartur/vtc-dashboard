@@ -130,6 +130,111 @@ const auditCount = async (operation: string) => {
   return Number(rows[0]?.n);
 };
 
+test("common trailers page once, search every body code and retain exact hidden telemetry recognition", async () => {
+  const a = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_fiction_a",
+    nameEn: "Fictional transporter",
+  });
+  const b = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_fiction_b",
+    nameEn: "Fictional transporter",
+  });
+  const separate = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_fiction_van",
+    nameEn: "Fictional transporter",
+  });
+  const file = csv(
+    "game,code,common_trailer",
+    "ets2,_fiction_a,trailer.fiction_car",
+    "ets2,_fiction_b,trailer.fiction_car",
+  );
+  const preview = await catalogs.previewImport(director, "trailers", file);
+  expect(preview).toMatchObject({ errors: 0, changed: 2 });
+  await catalogs.applyImport(director, "trailers", file, newId(), preview.token as string);
+  const first = await catalogs.list(driver, "trailers", { game: "ets2", limit: 1 });
+  expect(first.total).toBe(2);
+  const second = await catalogs.list(driver, "trailers", {
+    game: "ets2",
+    limit: 1,
+    cursor: first.nextCursor as string,
+  });
+  expect(new Set([...first.items, ...second.items].map((item) => item.id)).size).toBe(2);
+  expect(second.nextCursor).toBeNull();
+  const group = (await catalogs.list(driver, "trailers", { game: "ets2", search: "_fiction_b" }))
+    .items[0];
+  expect(group).toMatchObject({ commonTrailer: "trailer.fiction_car", variantCount: 2 });
+  expect((await catalogs.summary(driver, "ets2")).lists.trailers.visible).toBe(2);
+  const original = await catalogs.get(driver, "trailers", b.id);
+  expect(original).toMatchObject({ id: b.id, code: "_fiction_b", nameEn: b.nameEn });
+  const pack = await catalogs.create(director, "dlcs", newId(), {
+    game: "ets2",
+    code: "fictional-pack",
+    nameEn: "Fictional pack",
+  });
+  await catalogs.patch(director, "trailers", b.id, newId(), { dlcId: pack.id });
+  expect((await catalogs.get(driver, "trailers", a.id)).dlcId).toBeNull();
+  await catalogs.create(director, "trailers", newId(), {
+    game: "ats",
+    code: a.code,
+    nameEn: a.nameEn,
+    commonTrailer: "trailer.fiction_car",
+  });
+  expect((await catalogs.list(driver, "trailers", { game: "ats" })).total).toBe(1);
+  await catalogs.patch(director, "trailers", group!.id, newId(), {
+    hidden: true,
+    nameEn: "Fictional grouped name",
+  });
+  expect(
+    (await catalogs.list(driver, "trailers", { game: "ets2" })).items.map((item) => item.id),
+  ).toEqual([separate.id]);
+  expect((await catalogs.list(driver, "trailers", { game: "ets2", hidden: "only" })).total).toBe(1);
+  await unit.run(async (tx) => {
+    const selections = await catalogs.selectionsInTransaction(
+      tx,
+      [a, b].map((row) => ({ kind: "trailer" as const, id: row.id })),
+    );
+    expect(selections.get(a.id)?.hidden).toBe(true);
+    expect(selections.get(b.id)?.hidden).toBe(true);
+    for (const row of [a, b])
+      expect(
+        await catalogs.resolveInTransaction(tx, {
+          game: "ets2",
+          kind: "trailer",
+          code: row.code,
+        }),
+      ).toMatchObject({ status: "resolved", id: row.id });
+    expect(
+      await catalogs.resolveInTransaction(tx, {
+        game: "ets2",
+        kind: "trailer",
+        code: "_FICTION_A",
+      }),
+    ).toMatchObject({ status: "unknown" });
+    const groups = await catalogs.trailerGroupsInTransaction(tx, "ets2", [a.id, b.id, separate.id]);
+    expect(groups[a.id]).toBe(groups[b.id]);
+    expect(groups[separate.id]).toBeUndefined();
+    expect(await catalogs.trailerGroupsInTransaction(tx, "ats", [a.id])).toEqual({});
+  });
+  const missing = await catalogs.previewImport(
+    director,
+    "trailers",
+    csv("game,code,common_trailer", "ets2,_not_on_host,trailer.fiction_car"),
+  );
+  expect(missing.errors).toBe(1);
+  expect(
+    (
+      await catalogs.previewImport(
+        director,
+        "trailers",
+        csv("game,code,common_trailer", "ets2,_fiction_a,invalid key"),
+      )
+    ).errors,
+  ).toBe(1);
+});
+
 test("codes round trip byte-exact through create and import, and search treats wildcards literally", async () => {
   const created = await catalogs.create(director, "trailers", newId(), {
     game: "ets2",

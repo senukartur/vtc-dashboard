@@ -37,6 +37,8 @@ export const itemSchema = z.strictObject({
   id: uuid,
   game,
   code: text.max(128),
+  commonTrailer: text.max(128).nullable().optional(),
+  variantCount: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
   nameEn: text.max(256),
   nameRu: z.string().max(256).nullable(),
   nameNative: text.max(256).nullable().optional(),
