@@ -43,6 +43,7 @@ import {
   engine,
   type IdentityConfig,
   prepareCredential,
+  signedSessionToken,
   validateIdentityConfig,
   verifySignInCredential,
 } from "./engine.js";
@@ -902,17 +903,22 @@ export function createIdentity(
     /**
      * Admits one browser read before module authentication. A signed-in session
      * spends its own member budget; anything else falls back to the source read
-     * limits. Before the source charge only Better Auth's cookie signature check
-     * runs, plus, for a server-signed token only, one indexed session lookup
-     * (deleting that one session when it has expired). A forged or missing cookie
-     * reaches no database work first. This is admission only: the module's own
-     * full authentication and authorization still run afterwards.
+     * limits. The session cookie signature is checked in process first. A missing,
+     * junk or forged session cookie (or only other cookies, such as the pre-session
+     * CSRF nonce) goes straight to the source charge: one transaction. Only a
+     * server-signed token opens a transaction for one indexed session lookup
+     * (deleting that one session when it has expired) and, when the session is live,
+     * the member charge in the same transaction. A signed but logged-out or expired
+     * token then falls back to the source charge in a second transaction. This is
+     * admission only: the module's own full authentication and authorization still
+     * run afterwards.
      */
     async admitRead(source: string, cookie: string | undefined): Promise<void> {
-      if (cookie) {
+      if (cookie && signedSessionToken(config, cookie) !== null) {
         const denied = await run(async (tx) => {
           // Session row (only an expired one is deleted) before the limits row;
           // no path locks them in reverse order. No company/member lock here.
+          // Better Auth repeats the signature check and decides whether the session is live.
           const found = await engine(client(tx), config).api.getSession({
             headers: new Headers({ cookie }),
             query: { disableRefresh: true },

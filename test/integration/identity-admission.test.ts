@@ -12,6 +12,7 @@ import {
   beforeAll as vitestBeforeAll,
 } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
+import { csrfProtection } from "../../apps/api/src/modules/identity/http.ts";
 import * as authEngine from "../../apps/api/src/modules/identity/engine.ts";
 import {
   type CredentialProof,
@@ -44,6 +45,7 @@ const diagnostic = identityDiagnostics("admission");
 let control: Connection;
 let unit: UnitOfWork;
 let activeTransactions = 0;
+let transactions = 0;
 let instant = Date.now();
 const time = () => new Date(instant);
 const tracked: UnitOfWork = {
@@ -51,6 +53,7 @@ const tracked: UnitOfWork = {
   close: async () => {},
   async run(command) {
     activeTransactions++;
+    transactions++;
     try {
       return await unit.run(command);
     } finally {
@@ -169,6 +172,21 @@ async function limitRows(pattern: string) {
     ),
   );
   return rows.map((row) => ({ bucket: String(row.bucket), count: Number(row.count) }));
+}
+// Re-signs a member's real session token with a foreign secret.
+function forgeSession(cookie: string) {
+  const name = "vtc_dev_session",
+    value = cookie
+      .split("; ")
+      .find((pair) => pair.startsWith(`${name}=`))
+      ?.slice(name.length + 1);
+  const signed = decodeURIComponent(value ?? ""),
+    token = signed.slice(0, Math.max(0, signed.lastIndexOf(".")));
+  expect(token.length).toBeGreaterThan(0);
+  const signature = createHmac("sha256", randomBytes(32).toString("hex"))
+    .update(token)
+    .digest("base64");
+  return `${name}=${encodeURIComponent(`${token}.${signature}`)}`;
 }
 async function sessionCount(id: string) {
   const [rows] = await safe(
@@ -441,19 +459,7 @@ test("missing, forged, logged-out and expired session cookies fall back to the s
   const forgedMember = await addMember(),
     loggedOut = await addMember(),
     expired = await addMember();
-  // Re-sign the member's real session token with a foreign secret.
-  const name = "vtc_dev_session",
-    value = forgedMember.cookie
-      .split("; ")
-      .find((pair) => pair.startsWith(`${name}=`))
-      ?.slice(name.length + 1);
-  const signed = decodeURIComponent(value ?? ""),
-    token = signed.slice(0, Math.max(0, signed.lastIndexOf(".")));
-  expect(token.length).toBeGreaterThan(0);
-  const forgedSignature = createHmac("sha256", randomBytes(32).toString("hex"))
-    .update(token)
-    .digest("base64");
-  const forged = `${name}=${encodeURIComponent(`${token}.${forgedSignature}`)}`;
+  const forged = forgeSession(forgedMember.cookie);
   await safe(identity().logout(loggedOut.actor, new Headers({ cookie: loggedOut.cookie })));
   await safe(
     control.query("UPDATE identity_sessions SET expires_at = ? WHERE user_id = ?", [
@@ -479,6 +485,57 @@ test("missing, forged, logged-out and expired session cookies fall back to the s
       retryAfter: 40,
     });
   expect(await limitRows("global:read")).toEqual([{ bucket: "global:read", count: 40 }]);
+});
+test("only a validly signed session cookie opens a session lookup transaction before the read charge", async () => {
+  const live = await addMember(),
+    loggedOut = await addMember(),
+    expired = await addMember();
+  await safe(identity().logout(loggedOut.actor, new Headers({ cookie: loggedOut.cookie })));
+  await safe(
+    control.query("UPDATE identity_sessions SET expires_at = ? WHERE user_id = ?", [
+      new Date("2001-01-01T00:00:00.000Z"),
+      expired.id,
+    ]),
+  );
+  // The anonymous pre-session CSRF nonce cookie exactly as /api/v1/auth/csrf issues it.
+  const nonce = csrfProtection(config).issue({}).cookie.split(";")[0] as string;
+  expect(nonce).toMatch(/^vtc_dev_csrf=./);
+  const owner = identity(),
+    source = "synthetic-transaction-read-source";
+  alignWindow(10000);
+  async function counted(cookie: string | undefined) {
+    const before = transactions;
+    await safe(owner.admitRead(source, cookie));
+    return transactions - before;
+  }
+  // No validly signed session token: the source charge is the only transaction.
+  for (const cookie of [
+    undefined,
+    "",
+    "synthetic-unrelated=1",
+    "vtc_dev_session=synthetic-junk",
+    `vtc_dev_session=synthetic-junk.${"A".repeat(43)}=`,
+    forgeSession(live.cookie),
+    nonce,
+    `${nonce}; ${forgeSession(live.cookie)}`,
+  ])
+    expect(await counted(cookie), String(cookie)).toBe(1);
+  expect(await limitRows("member:read:%")).toEqual([]);
+  // A live signed session: one transaction for the lookup and the member charge.
+  expect(await counted(live.cookie)).toBe(1);
+  expect(await counted(`${nonce}; ${live.cookie}`)).toBe(1);
+  expect(await limitRows("member:read:%")).toEqual([
+    { bucket: `member:read:${memberSlot(live.id)}`, count: 2 },
+  ]);
+  // Signed but no longer live: the lookup finds nothing, then the source charge runs.
+  expect(await counted(loggedOut.cookie)).toBe(2);
+  expect(await counted(expired.cookie)).toBe(2);
+  expect(await sessionCount(expired.id)).toBe(0);
+  expect(await counted(expired.cookie)).toBe(2);
+  expect(await limitRows("source:read:%")).toEqual([
+    { bucket: expect.stringMatching(/^source:read:\d+$/), count: 11 },
+  ]);
+  expect(await limitRows("global:read")).toEqual([{ bucket: "global:read", count: 11 }]);
 });
 test("member reads pass over an exhausted source and global read budget until their own budget ends, before authentication", async () => {
   const admin = await director(),

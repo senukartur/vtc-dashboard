@@ -1,6 +1,11 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
 import { afterAll, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { type AppOptions, createApp } from "../../apps/api/src/app.ts";
+import {
+  sessionCookieName,
+  signedSessionToken,
+} from "../../apps/api/src/modules/identity/engine.ts";
 import { type Identity, identityError } from "../../apps/api/src/modules/identity/service.ts";
 
 // Admission routing only: every service is a fake whose operations fail, and
@@ -134,4 +139,62 @@ test.each([
   expect(rateLimit.mock.calls.length).toBeGreaterThan(0);
   expect(rateLimit.mock.calls.every(([category]) => category === "command")).toBe(true);
   expect(admitRead).not.toHaveBeenCalled();
+});
+
+// The API package's own better-call, which Better Auth uses to sign and read the cookie.
+const betterCall = createRequire(new URL("../../apps/api/package.json", import.meta.url))(
+  "better-call",
+);
+async function libraryToken(header: string | undefined): Promise<string | null> {
+  const context = await betterCall.createInternalContext(
+    { headers: new Headers(header === undefined ? {} : { cookie: header }) },
+    { options: {}, path: "/synthetic" },
+  );
+  const value: unknown = await context.getSignedCookie(sessionCookieName(config), config.secret);
+  return typeof value === "string" ? value : null;
+}
+
+test("the in-process session signature check matches better-call for issued and hostile cookies", async () => {
+  expect(sessionCookieName(config)).toBe("vtc_dev_session");
+  expect(sessionCookieName({ ...config, origin: "https://dashboard.example.invalid" })).toBe(
+    "__Host-vtc_session",
+  );
+  const name = sessionCookieName(config),
+    token = "SyntheticSessionToken0123456789ab";
+  const issue = async (value: string, secret = config.secret) =>
+    ((await betterCall.serializeSignedCookie(name, value, secret)) as string).split(
+      ";",
+    )[0] as string;
+  const issued = await issue(token);
+  const raw = decodeURIComponent(issued.slice(name.length + 1));
+  const signature = raw.slice(raw.lastIndexOf(".") + 1);
+  const cases = [
+    undefined,
+    "",
+    "synthetic-unrelated=1",
+    issued,
+    `synthetic-unrelated=1; ${issued}`,
+    `  ${issued}  `,
+    `${issued}; ${name}=synthetic-junk`,
+    `${name}=synthetic-junk; ${issued}`,
+    `${name}="${raw}"`,
+    `${name}=${raw}`,
+    `__Host-vtc_session=${encodeURIComponent(raw)}`,
+    await issue(token, randomBytes(32).toString("hex")),
+    await issue("Synthetic.dotted.token"),
+    `${name}=${encodeURIComponent(`.${signature}`)}`,
+    `${name}=${encodeURIComponent(`${token}.${signature.slice(0, -1)}`)}`,
+    `${name}=${encodeURIComponent(`${token}.${signature.slice(0, -2)}==`)}`,
+    `${name}=${encodeURIComponent(`${token}.${"*".repeat(43)}=`)}`,
+    `${name}=${encodeURIComponent(`${token}x.${signature}`)}`,
+    `${name}=${token}.${createHmac("sha256", config.secret).update(token).digest("base64url")}`,
+    `${name}=%E0%A4%A`,
+  ];
+  for (const header of cases)
+    expect(signedSessionToken(config, header), String(header)).toBe(await libraryToken(header));
+  // Sanity: the library itself accepts the issued forms and the dotted token.
+  expect(signedSessionToken(config, issued)).toBe(token);
+  expect(signedSessionToken(config, `${name}=${raw}`)).toBe(token);
+  expect(signedSessionToken(config, cases[12])).toBe("Synthetic.dotted.token");
+  expect(signedSessionToken(config, cases[11])).toBeNull();
 });

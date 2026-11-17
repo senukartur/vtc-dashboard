@@ -17,6 +17,7 @@ function client() {
 }
 afterEach(() => {
   for (const value of clients.splice(0)) value.clear();
+  vi.useRealTimers();
 });
 
 test("the shared helper recognizes only rate limits and only a 1-60 second wait", () => {
