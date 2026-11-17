@@ -577,9 +577,18 @@ test(
       `/account/review/${tripPageId}`,
     );
     await expect(page.getByRole("link", { name: "Fix the report", exact: true })).toHaveCount(0);
-    await expect(status(page)).toHaveText("✕Rejected");
+    // Staff read the same status and credit as the owner; only the owner can act on the fix.
+    await expect(status(page)).toHaveText("!Needs fixes");
     await expect(page.locator(".trip-detail-meta")).toContainText("Driver: Fictional Other Driver");
-    await expect(tile(page, "What next")).toContainText("Not counted");
+    await expect(tile(page, "What next")).toContainText("Waiting for the driver's fix");
+    await expect(tile(page, "What next")).toContainText(
+      "The report was returned to the driver for fixes.",
+    );
+    await expect(tile(page, "What next")).not.toHaveAttribute("data-attention", "true");
+    await expect(tile(page, "Credited")).toContainText("Not yet");
+    await expect(
+      region(page, "Completion screenshots").getByText(retentionNotice, { exact: true }),
+    ).toBeVisible();
     const technical = page.locator("details").filter({
       has: page.locator("summary", { hasText: "Technical details" }),
     });

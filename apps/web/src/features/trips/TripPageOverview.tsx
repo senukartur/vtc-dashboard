@@ -133,19 +133,19 @@ export function TripTiles({
   summary,
   facts,
   next,
-  revisable,
+  fixPending,
 }: {
   summary: DTO["TripSummary"];
   facts: DTO["EffectiveTripFacts"] | null | undefined;
   next: NextStep | null;
-  /** The owner can still revise a rejected report, so it is not counted yet. */
-  revisable: boolean;
+  /** A rejected report awaits its driver's fix (`awaitingFix`), so it is not counted yet. */
+  fixPending: boolean;
 }) {
   const { t } = useTranslation("trips"),
     { locale } = useTripDisplay(),
     when = useWhen(),
     distance = distanceNote(summary, facts),
-    credit = creditState(summary, revisable),
+    credit = creditState(summary, fixPending),
     distanceNotes = [
       distance.sourceKey && t(distance.sourceKey),
       distance.noTelemetry && t("distanceNoTelemetry"),

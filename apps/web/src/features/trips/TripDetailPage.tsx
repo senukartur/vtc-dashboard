@@ -24,7 +24,13 @@ import {
 } from "./TripPageSections.js";
 import { TripTechnicalDetails } from "./TripTechnicalDetails.js";
 import { type DTO, validId } from "./transport.js";
-import { nextStep, privateOf, revisableReportId, tripStatus } from "./trip-page-model.js";
+import {
+  awaitingFix,
+  nextStep,
+  privateOf,
+  revisableReportId,
+  tripStatus,
+} from "./trip-page-model.js";
 import "./trips.css";
 /**
  * Trip page (VTC-158): header with status and actions, summary tiles, the trip facts, screenshots
@@ -50,9 +56,11 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
     staff = !!session.self?.capabilities.includes("trips.review"),
     owner = !!summary && summary.owner.id === selfId,
     submitOwn = owner && !!session.self?.capabilities.includes("trips.submit_own"),
+    // Actions stay owner-gated; status, credit and the next step read the trip data alike for all.
     reportId = revisableReportId(view, selfId),
-    status = summary ? tripStatus(summary, reportId !== null) : null,
-    next = nextStep(view, { owner, staff, revisable: reportId !== null });
+    fixPending = awaitingFix(view),
+    status = summary ? tripStatus(summary, fixPending) : null,
+    next = nextStep(view, { owner, staff });
   if (review && !staff)
     return (
       <Card>
@@ -101,7 +109,7 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
             summary={summary}
             facts={own?.effectiveFacts}
             next={next}
-            revisable={reportId !== null}
+            fixPending={fixPending}
           />
           <div className="trip-detail-layout">
             <div className="trip-detail-main">

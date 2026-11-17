@@ -3,6 +3,7 @@ import { tripTranslations } from "../../apps/web/src/features/trips/translations
 import { type DTO, schema } from "../../apps/web/src/features/trips/transport.ts";
 import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import {
+  awaitingFix,
   canRevise,
   creditState,
   damageValue,
@@ -134,7 +135,7 @@ const decision = (
   ...extra,
 });
 
-test("trip status names every decision and outcome, and a returned report only when revisable", () => {
+test("trip status names every decision and outcome, and a returned report only when awaiting a fix", () => {
   expect(tripStatus({ decision: "accepted", outcome: "delivered" }, false)).toBe("accepted");
   expect(tripStatus({ decision: "pending_review", outcome: "delivered" }, true)).toBe(
     "pending_review",
@@ -197,7 +198,7 @@ test("only the owner may revise a report-backed revision that is not accepted", 
 
 test("the next step serves the author, staff and nobody else, with the latest decision reason", () => {
   const returned = needsFixManual();
-  const author = nextStep(returned.data, { owner: true, staff: false, revisable: true });
+  const author = nextStep(returned.data, { owner: true, staff: false });
   expect(author).toMatchObject({
     titleKey: "next_fix",
     attention: true,
@@ -208,63 +209,95 @@ test("the next step serves the author, staff and nobody else, with the latest de
   });
   // The newest decision wins whatever the array order.
   privateView(returned).decisions.reverse();
-  expect(nextStep(returned.data, { owner: true, staff: false, revisable: true })?.reason).toBe(
-    needsFixReason,
-  );
-  expect(nextStep(returned.data, { owner: false, staff: false, revisable: false })).toBeNull();
-  expect(nextStep(otherSummary().data, { owner: false, staff: true, revisable: false })).toBeNull();
-  expect(nextStep(undefined, { owner: true, staff: true, revisable: false })).toBeNull();
-  const staffRejected = nextStep(asOtherMember(needsFixManual()).data, {
-    owner: false,
-    staff: true,
-    revisable: false,
+  expect(nextStep(returned.data, { owner: true, staff: false })?.reason).toBe(needsFixReason);
+  expect(nextStep(returned.data, { owner: false, staff: false })).toBeNull();
+  expect(nextStep(otherSummary().data, { owner: false, staff: true })).toBeNull();
+  expect(nextStep(undefined, { owner: true, staff: true })).toBeNull();
+  // Staff read a returned report as waiting for the driver, with the same decision details.
+  expect(
+    nextStep(asOtherMember(needsFixManual()).data, { owner: false, staff: true }),
+  ).toMatchObject({
+    titleKey: "next_fix_staff",
+    noteKey: "next_fix_staff_note",
+    attention: false,
+    held: false,
+    reviewer: "Fictional Stage Four Dispatcher",
+    reason: needsFixReason,
   });
-  expect(staffRejected).toMatchObject({ titleKey: "next_rejected", attention: false, held: false });
+  const legacyRejected = asOtherMember(needsFixManual());
+  privateView(legacyRejected).manualRevision = legacyRevision();
+  expect(nextStep(legacyRejected.data, { owner: false, staff: true })).toMatchObject({
+    titleKey: "next_rejected",
+    attention: false,
+  });
 
   const pending = pendingManual();
-  expect(nextStep(pending.data, { owner: true, staff: false, revisable: true })).toMatchObject({
+  expect(nextStep(pending.data, { owner: true, staff: false })).toMatchObject({
     titleKey: "next_none",
     noteKey: "next_pending_note",
     attention: false,
     held: true,
     reasonKeys: ["code_manual_review_required", "reasonOther"],
   });
-  expect(nextStep(pending.data, { owner: false, staff: true, revisable: false })).toMatchObject({
+  expect(nextStep(pending.data, { owner: false, staff: true })).toMatchObject({
     titleKey: "next_pending_staff",
     attention: false,
   });
   // A staff owner is the author first.
-  expect(nextStep(pending.data, { owner: true, staff: true, revisable: true })?.titleKey).toBe(
+  expect(nextStep(pending.data, { owner: true, staff: true })?.titleKey).toBe("next_none");
+  privateView(pending).pendingProposalId = "41500000-0000-4000-8000-000000000390";
+  expect(nextStep(pending.data, { owner: true, staff: false })?.titleKey).toBe("next_correction");
+  expect(nextStep(reconciledAccepted().data, { owner: true, staff: false })?.titleKey).toBe(
     "next_none",
   );
-  privateView(pending).pendingProposalId = "41500000-0000-4000-8000-000000000390";
-  expect(nextStep(pending.data, { owner: true, staff: false, revisable: true })?.titleKey).toBe(
-    "next_correction",
-  );
-  expect(
-    nextStep(reconciledAccepted().data, { owner: true, staff: false, revisable: false })?.titleKey,
-  ).toBe("next_none");
-  expect(
-    nextStep(openTelemetry().data, { owner: true, staff: false, revisable: false })?.titleKey,
-  ).toBe("next_open");
+  expect(nextStep(openTelemetry().data, { owner: true, staff: false })?.titleKey).toBe("next_open");
   const cancelled = openTelemetry();
   privateView(cancelled).summary.outcome = "cancelled";
-  expect(nextStep(cancelled.data, { owner: true, staff: false, revisable: false })?.titleKey).toBe(
-    "next_cancelled",
-  );
+  expect(nextStep(cancelled.data, { owner: true, staff: false })?.titleKey).toBe("next_cancelled");
   const unassessed = openTelemetry();
   privateView(unassessed).summary.outcome = "delivered";
-  expect(nextStep(unassessed.data, { owner: true, staff: false, revisable: false })?.titleKey).toBe(
+  expect(nextStep(unassessed.data, { owner: true, staff: false })?.titleKey).toBe(
     "next_unassessed",
   );
   for (const view of [needsFixManual(), pendingManual(), openTelemetry(), reconciledAccepted()])
     for (const flags of [
-      { owner: true, staff: false, revisable: canRevise(view.data, fixtureId) },
-      { owner: false, staff: true, revisable: false },
+      { owner: true, staff: false },
+      { owner: false, staff: true },
     ]) {
       const step = nextStep(view.data, flags);
       expect(step?.attention).toBe(step?.titleKey === "next_fix");
     }
+});
+
+test("staff and the owner read one status, credit and history for a report awaiting a fix", () => {
+  const envelope = asOtherMember(needsFixManual());
+  const staffView = envelope.data;
+  const own = privateView(envelope);
+  expect(awaitingFix(staffView)).toBe(true);
+  // Only the owner may act on it.
+  expect(canRevise(staffView, fixtureId)).toBe(false);
+  expect(canRevise(staffView, fixtureReviewer.id)).toBe(false);
+  expect(canRevise(staffView, otherOwnerId)).toBe(true);
+  expect(tripStatus(own.summary, awaitingFix(staffView))).toBe("needs_fix");
+  expect(creditState(own.summary, awaitingFix(staffView)).valueKey).toBe("creditedNotYet");
+  expect(nextStep(staffView, { owner: false, staff: true })).toMatchObject({
+    titleKey: "next_fix_staff",
+    attention: false,
+  });
+  // History agrees: the latest decision returned the report for fixes.
+  expect(tripHistory(own).map((entry) => entry.kind)).toContain("returned");
+
+  // No report behind the trip, a legacy revision, or a decision other than rejection.
+  expect(awaitingFix(returnedTrip().data)).toBe(false);
+  const legacy = needsFixManual();
+  privateView(legacy).manualRevision = legacyRevision();
+  expect(awaitingFix(legacy.data)).toBe(false);
+  const accepted = needsFixManual();
+  privateView(accepted).summary.decision = "accepted";
+  expect(awaitingFix(accepted.data)).toBe(false);
+  expect(awaitingFix(pendingManual().data)).toBe(false);
+  expect(awaitingFix(otherSummary().data)).toBe(false);
+  expect(awaitingFix(undefined)).toBe(false);
 });
 
 test("credit follows acceptance with the reporting basis, never a raw reporting instant", () => {

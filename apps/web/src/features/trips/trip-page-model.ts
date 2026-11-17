@@ -41,6 +41,18 @@ export function canRevise(view: DTO["TripView"] | undefined, selfId: string | un
   return revisableReportId(view, selfId) !== null;
 }
 
+/**
+ * The trip waits for its driver's fix: a rejected private view whose current revision is
+ * report-backed. It depends on the trip data only, so every viewer reads the same status, credit and
+ * history; only the owner may act on it (`canRevise`).
+ */
+export function awaitingFix(view: DTO["TripView"] | undefined): boolean {
+  const own = privateOf(view);
+  if (own?.summary.decision !== "rejected") return false;
+  const revision = own.manualRevision;
+  return !!revision && "reportId" in revision;
+}
+
 export type TripStatus =
   | "accepted"
   | "pending_review"
@@ -50,14 +62,14 @@ export type TripStatus =
   | "unassessed"
   | "cancelled";
 
-/** One page status from the company decision and the source outcome. */
+/** One page status from the company decision, the source outcome and `awaitingFix`. */
 export function tripStatus(
   { decision, outcome }: Pick<Summary, "decision" | "outcome">,
-  revisable: boolean,
+  fixPending: boolean,
 ): TripStatus {
   if (decision === "accepted") return "accepted";
   if (decision === "pending_review") return "pending_review";
-  if (decision === "rejected") return revisable ? "needs_fix" : "rejected";
+  if (decision === "rejected") return fixPending ? "needs_fix" : "rejected";
   if (outcome === "open") return "in_progress";
   if (outcome === "cancelled") return "cancelled";
   return "unassessed";
@@ -111,14 +123,17 @@ export type NextStep = {
   held: boolean;
 };
 
-/** What the owner or staff should do next; null for other members and company summaries. */
+/**
+ * What the owner or staff should do next; null for other members and company summaries. A trip
+ * awaiting a fix asks the owner to act and tells staff it waits for the driver.
+ */
 export function nextStep(
   view: DTO["TripView"] | undefined,
-  { owner, staff, revisable }: { owner: boolean; staff: boolean; revisable: boolean },
+  { owner, staff }: { owner: boolean; staff: boolean },
 ): NextStep | null {
   const own = privateOf(view);
   if (!own || (!owner && !staff)) return null;
-  const status = tripStatus(own.summary, revisable);
+  const status = tripStatus(own.summary, awaitingFix(own));
   const step = (
     titleKey: TripKey,
     noteKey: TripKey,
@@ -144,7 +159,9 @@ export function nextStep(
   if (own.pendingProposalId) return step("next_correction", "next_correction_note");
   switch (status) {
     case "needs_fix":
-      return step("next_fix", "next_fix_note", { attention: true, ...decided() });
+      return owner
+        ? step("next_fix", "next_fix_note", { attention: true, ...decided() })
+        : step("next_fix_staff", "next_fix_staff_note", decided());
     case "pending_review":
       return staff && !owner
         ? step("next_pending_staff", "next_pending_staff_note", {
@@ -179,11 +196,11 @@ export type CreditState = {
 
 /**
  * Whether the trip counts in company totals; the reporting time replaces a raw "instant" chip. A
- * rejected report its owner can still revise is not counted yet rather than not at all.
+ * rejected report awaiting its driver's fix (`awaitingFix`) is not counted yet rather than not at all.
  */
 export function creditState(
   summary: Pick<Summary, "decision" | "outcome" | "reportingAt" | "reportingBasis">,
-  revisable = false,
+  fixPending = false,
 ): CreditState {
   if (summary.decision === "accepted")
     return {
@@ -192,7 +209,7 @@ export function creditState(
       at: summary.reportingAt,
       basisKey: `creditedBasis_${summary.reportingBasis ?? "unknown"}`,
     };
-  if ((summary.decision === "rejected" && !revisable) || summary.outcome === "cancelled")
+  if ((summary.decision === "rejected" && !fixPending) || summary.outcome === "cancelled")
     return { valueKey: "creditedNo", noteKey: "creditedRejectedNote", at: null, basisKey: null };
   return {
     valueKey: "creditedNotYet",
