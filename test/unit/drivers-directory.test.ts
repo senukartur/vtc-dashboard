@@ -17,6 +17,7 @@ import {
   directoryFilterKey,
   directoryPath,
   driverAccessHref,
+  isManagedAccess,
   effectiveSort,
   filtersActive,
   headerParts,
@@ -425,6 +426,17 @@ describe("access panel state and commands", () => {
     );
     const parsed = url(driverAccessHref({ id, formerMember: true }).split("?")[1] ?? "");
     expect(parsed).toMatchObject({ tab: "former", access: id });
+  });
+
+  it("honours the panel's history marker only for the same viewer and session generation", () => {
+    const viewer = "41000000-0000-4000-8000-000000000017";
+    const marker = { memberId: id, viewerId: viewer, generation: 2 };
+    expect(isManagedAccess(marker, viewer, 2)).toBe(true);
+    expect(isManagedAccess(marker, "41000000-0000-4000-8000-000000000018", 2)).toBe(false);
+    expect(isManagedAccess(marker, viewer, 3)).toBe(false);
+    expect(isManagedAccess(marker, null, 2)).toBe(false);
+    for (const value of [id, null, undefined, { memberId: 1, viewerId: viewer, generation: 2 }])
+      expect(isManagedAccess(value, viewer, 2)).toBe(false);
   });
 
   it("sends exactly one Members page command per save", () => {

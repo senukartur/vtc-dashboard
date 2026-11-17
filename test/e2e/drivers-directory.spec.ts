@@ -917,6 +917,7 @@ test.describe("Drivers access panel", () => {
       );
       expect(adminReads(state)).toEqual([`/admin/members/${betaId}`]);
       const choice = membershipChoice(page, "BetaTrainee");
+      await expect(choice).toHaveAccessibleDescription("ETS2 and ATS levels do not change.");
       await expect(choice.getByRole("button", { name: "Trainee" })).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -1264,6 +1265,9 @@ test.describe("Drivers access panel", () => {
       const remove = oscar.getByRole("button", { name: "Remove from the company…" });
       await expect(remove).toBeDisabled();
       await expect(remove).toHaveAccessibleDescription(/^The serving Director's membership/);
+      await expect(membershipChoice(page, "OscarTrail")).toHaveAccessibleDescription(
+        /^The serving Director's membership/,
+      );
       for (const button of await membershipChoice(page, "OscarTrail").getByRole("button").all())
         await expect(button).toBeDisabled();
       await expect(oscar.getByRole("button", { name: "Save" })).toHaveCount(0);

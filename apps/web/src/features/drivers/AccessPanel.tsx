@@ -322,13 +322,19 @@ function MembershipChoice({
 }) {
   const { t } = useTranslation("drivers");
   const labelId = useId();
+  // The segmented control's named fieldset spreads its naming attributes, so the description
+  // (the help or the protected-Director note) is announced with the Trainee and Driver buttons.
+  const naming = {
+    "aria-labelledby": labelId,
+    ...(describedBy ? { "aria-describedby": describedBy } : {}),
+  } as { "aria-labelledby": string };
   return (
-    <div ref={group} className="drivers-access-choice" aria-describedby={describedBy}>
+    <div ref={group} className="drivers-access-choice">
       <span id={labelId} className="drivers-access-label">
         {t("access.membership")}
       </span>
       <SegmentedControl<Membership | "none">
-        aria-labelledby={labelId}
+        {...naming}
         value={value ?? "none"}
         onValueChange={(next) => {
           if (next !== "none") onChange(next);

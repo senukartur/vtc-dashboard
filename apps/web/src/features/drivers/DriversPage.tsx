@@ -32,6 +32,7 @@ import {
   effectiveSort,
   filtersActive,
   headerParts,
+  isManagedAccess,
   parseDirectoryUrl,
   type SortOrder,
   sortParams,
@@ -127,19 +128,25 @@ function DriversDirectory() {
 
   // The access panel opens only with members.manage. Once open, a lost capability (a 403 that
   // refreshed the session) keeps the panel to explain it instead of closing it silently. The
-  // history entry remembers the member opened with the capability, since the session refresh can
-  // remount this page.
+  // history entry remembers the member opened with the capability, for this viewer and session
+  // generation only, since the session refresh can remount this page.
   const location = useLocation();
-  const managed = (location.state as { managedAccess?: unknown } | null)?.managedAccess;
+  const viewerId = session.self?.member.id ?? null;
+  const generation = session.generation;
+  const marker = (location.state as { managedAccess?: unknown } | null)?.managedAccess;
+  const managed = isManagedAccess(marker, viewerId, generation) ? marker.memberId : null;
   const accessId = url.access && (canManage || managed === url.access) ? url.access : null;
   useEffect(() => {
-    if (!canManage || !url.access || managed === url.access) return;
+    if (!canManage || !url.access || !viewerId || managed === url.access) return;
     const state = location.state;
     setParams(new URLSearchParams(window.location.search), {
       replace: true,
-      state: { ...(state && typeof state === "object" ? state : {}), managedAccess: url.access },
+      state: {
+        ...(state && typeof state === "object" ? state : {}),
+        managedAccess: { memberId: url.access, viewerId, generation },
+      },
     });
-  }, [canManage, url.access, managed, location.state, setParams]);
+  }, [canManage, url.access, viewerId, generation, managed, location.state, setParams]);
   const now = useMinuteNow();
 
   const searchRef = useRef<HTMLInputElement>(null);

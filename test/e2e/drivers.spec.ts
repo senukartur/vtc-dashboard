@@ -347,6 +347,8 @@ test.describe("Compact driver profile", () => {
         "false",
       );
       await expect(tripsCard(page).getByRole("row")).toHaveCount(3);
+      // The chart follows the game filter: the ATS-only October peak, not the all-games one.
+      await expect(chartCard(page).getByText("Highest: October 2026, 880 km")).toBeVisible();
       await expect(kpiValues(page)).toHaveText(alphaKpis);
       expect(profileRequests(state).slice(before).sort()).toEqual(
         [
@@ -451,6 +453,8 @@ test.describe("Compact driver profile", () => {
         ).toBeVisible();
       await expect(page.locator("header.driver-header .driver-level-chip")).toHaveCount(0);
       await expect(kpiValues(page)).toHaveText(["21,400 km", "87", "246 km", "0 km"]);
+      // The member's analytics reach the chart.
+      await expect(chartCard(page).getByText("Highest: October 2026, 4,000 km")).toBeVisible();
       await expect(tripsCard(page).getByText("No accepted trips yet.")).toBeVisible();
       const paths = profileRequests(state);
       expect(paths.filter((path) => path.includes("qualification"))).toEqual([]);
@@ -850,9 +854,13 @@ test.describe("Driver profile reporting-timezone window", () => {
         expect(analyticsRequests(state)).toEqual([novemberWindow]);
         expect(state.unexpected).toEqual([]);
 
+        const november = chartCard(page).getByRole("row").last().getByRole("cell");
+        await expect(november).toHaveText(["1,482 km", "5"]);
         await gameGroup(page).getByRole("button", { name: "ATS", exact: true }).click();
         await expect.poll(() => analyticsRequests(state).length).toBe(2);
         await expect(await lastMonth(page)).toHaveText("November 2026");
+        // The table shows the ATS-only month, not the cached all-games one.
+        await expect(november).toHaveText(["292 km", "1"]);
         expect(analyticsRequests(state)).toEqual([
           novemberWindow,
           windowOf("2025-12-01", "2026-12-01", "ats"),

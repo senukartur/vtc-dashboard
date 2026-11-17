@@ -208,6 +208,21 @@ export function headerParts(
     : { active: counts.active, drove: counts.droveLast30Days };
 }
 
+/** The access panel marker of a history entry, honoured only for the same viewer and session. */
+export function isManagedAccess(
+  value: unknown,
+  viewerId: string | null,
+  generation: number,
+): value is { memberId: string } {
+  if (!value || typeof value !== "object" || !viewerId) return false;
+  const marker = value as Record<string, unknown>;
+  return (
+    typeof marker.memberId === "string" &&
+    marker.viewerId === viewerId &&
+    marker.generation === generation
+  );
+}
+
 /** The directory with this member's access panel open, on Left for a former member. */
 export function driverAccessHref(member: { id: string; formerMember: boolean }) {
   return `/account/drivers?${new URLSearchParams({
