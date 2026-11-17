@@ -85,6 +85,15 @@ const reviewCard = (page: Page) =>
   page.getByRole("region", { name: /^(Review Queue|Очередь проверки)$/ });
 const attentionCard = (page: Page) =>
   page.getByRole("region", { name: /^(Needs attention|Дела)$/ });
+const kpis = (page: Page) =>
+  page.getByRole("region", { name: /^(Key metrics|Ключевые показатели)$/ });
+const routesCard = (page: Page) =>
+  page.getByRole("region", { name: /^(Popular routes|Популярные маршруты)$/ });
+const cargoCard = (page: Page) =>
+  page.getByRole("region", { name: /^(Frequent cargo|Частые грузы)$/ });
+const sourceCard = (page: Page) =>
+  page.getByRole("region", { name: /^(How trips arrived|Как пришли рейсы)$/ });
+const breakdownItems = (card: Locator) => card.locator(".dashboard-breakdown-list > li");
 const responseGroup = (page: Page) =>
   eventCard(page).getByRole("group", { name: /^(Your response|Ваш ответ)$/ });
 const going = (page: Page) => responseGroup(page).getByRole("button", { name: /^(Going|Поеду)$/ });
@@ -397,10 +406,13 @@ async function open(
   await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
   return state;
 }
-/** Both blocks loaded with data, the own response ready. */
+/** Both blocks and the trip breakdowns loaded with data, the own response ready. */
 async function settled(page: Page, respond = true) {
   await expect(eventCard(page).getByRole("heading", { level: 3 })).toHaveText(upcomingEvent.title);
   await expect(tripsCard(page).getByRole("listitem")).toHaveCount(5);
+  for (const card of [routesCard(page), cargoCard(page)])
+    await expect(breakdownItems(card)).toHaveCount(5);
+  await expect(sourceCard(page).locator(".dashboard-source-legend li")).toHaveCount(2);
   if (respond) await expect(going(page)).toHaveAttribute("aria-pressed", "false");
   await page.evaluate(() => document.fonts.ready);
 }
@@ -469,6 +481,68 @@ for (const locale of ["en", "ru"] as const) {
   );
 }
 
+const statsText = {
+  en: {
+    place: "14 of 15",
+    placeTotals: "37,400 km · trips: 4",
+    you: "Fictional Yukon Member · you",
+    route: "ETS2Munich · München → Warszawa8 trips",
+    other: "Other routes8 trips",
+    telemetry: /^Telemetry32 trips76%$/,
+    note: "Manual reports count after review in Dispatch.",
+  },
+  ru: {
+    place: "14 из 15",
+    placeTotals: /^37\s400 км · рейсы: 4$/,
+    you: "Fictional Yukon Member · вы",
+    route: "ETS2Мюнхен · München → Варшава8 рейсов",
+    other: "Другие маршруты8 рейсов",
+    telemetry: /^Телеметрия32 рейса76\s%$/,
+    note: "Ручные отчёты попадают в статистику после проверки в Диспетчерской.",
+  },
+} as const;
+
+for (const locale of ["en", "ru"] as const) {
+  test(
+    `S1 shows the place, active counts and trip breakdowns (${locale})`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await open(page, (state) => {
+        state.leaderboardViewer = "offPage";
+      });
+      await inLocale(page, locale);
+      const t = statsText[locale];
+      const metrics = kpis(page);
+      await expect(metrics.locator("dd.dashboard-kpi-sub")).toHaveCount(4);
+      await expect(metrics.locator("dd.dashboard-kpi-value").nth(3)).toHaveText(t.place);
+      // Active drivers equal the ranked members behind the place.
+      await expect(metrics.locator("dd.dashboard-kpi-value").nth(2)).toHaveText("15");
+      await expect(metrics.locator("dd.dashboard-kpi-sub").nth(3)).toHaveText(t.placeTotals);
+      const own = leaderboardCard(page).locator(".dashboard-leaderboard-self tr");
+      await expect(own.locator("td").nth(1)).toHaveText(t.you);
+      await expect(breakdownItems(routesCard(page)).nth(1)).toHaveText(t.route);
+      await expect(routesCard(page).locator(".dashboard-breakdown-extra li").first()).toHaveText(
+        t.other,
+      );
+      await expect(sourceCard(page).locator(".dashboard-source-legend li").first()).toHaveText(
+        t.telemetry,
+      );
+      await expect(sourceCard(page)).toContainText(t.note);
+
+      await noOverflow(page);
+      const cards = [routesCard(page), cargoCard(page), sourceCard(page)];
+      for (const root of [metrics, leaderboardCard(page), ...cards]) {
+        expect(await brokenWords(root)).toEqual([]);
+        expect(await liveRegions(root)).toBe(0);
+      }
+      for (const card of cards) await expect(card).toHaveAttribute("aria-busy", "false");
+      for (const dd of await metrics.getByRole("definition").all())
+        expect(await dd.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+      await capture(page, info, `stats-${locale}`);
+    },
+  );
+}
+
 test(
   "B2 keeps the first desktop screen and places both blocks",
   browserCase(["@layout"]),
@@ -481,6 +555,11 @@ test(
       const leaderboard = await box(leaderboardCard(page));
       const event = await box(eventCard(page));
       const trips = await box(tripsCard(page));
+      const breakdowns = await box(page.locator(".dashboard-breakdowns"));
+      const [routes, cargo, source] = await Promise.all(
+        [routesCard(page), cargoCard(page), sourceCard(page)].map((card) => box(card)),
+      );
+      if (!routes || !cargo || !source) throw new Error("BREAKDOWNS_NOT_RENDERED");
       if (info.project.name === "desktop-chromium") {
         expect(await page.evaluate(() => scrollY)).toBe(0);
         // 4px spare below the 800px fold for wider Linux fonts.
@@ -504,11 +583,29 @@ test(
         expect(Math.abs(trips.x - grid.x)).toBeLessThanOrEqual(2);
         expect(Math.abs(trips.width - grid.width)).toBeLessThanOrEqual(2);
         expect(event.x).toBeGreaterThan(leaderboard.x);
+        // The breakdowns: one full-width row of three cards after the leaderboard and the side
+        // column and before the recent trips, below the first screen.
+        const side = await box(page.locator(".dashboard-side"));
+        expect(breakdowns.y).toBeGreaterThanOrEqual(leaderboard.y + leaderboard.height - 0.5);
+        expect(breakdowns.y).toBeGreaterThanOrEqual(side.y + side.height - 0.5);
+        expect(trips.y).toBeGreaterThanOrEqual(breakdowns.y + breakdowns.height - 0.5);
+        expect(Math.abs(breakdowns.x - grid.x)).toBeLessThanOrEqual(2);
+        expect(Math.abs(breakdowns.width - grid.width)).toBeLessThanOrEqual(2);
+        for (const card of [routes, cargo, source])
+          expect(Math.abs(card.y - breakdowns.y)).toBeLessThanOrEqual(1);
+        expect(routes.x).toBeLessThan(cargo.x);
+        expect(cargo.x).toBeLessThan(source.x);
       } else {
         expect(chart.y).toBeLessThan(qualification.y);
         expect(qualification.y).toBeLessThan(leaderboard.y);
         expect(leaderboard.y).toBeLessThan(event.y);
-        expect(event.y).toBeLessThan(trips.y);
+        expect(event.y).toBeLessThan(breakdowns.y);
+        expect(breakdowns.y + breakdowns.height).toBeLessThanOrEqual(trips.y + 0.5);
+        // DOM order: routes, cargo, then the source split, also when the row wraps.
+        const before = (a: typeof routes, b: typeof routes) =>
+          a.y < b.y - 0.5 || (Math.abs(a.y - b.y) <= 0.5 && a.x < b.x);
+        expect(before(routes, cargo)).toBe(true);
+        expect(before(cargo, source)).toBe(true);
       }
       await capture(page, info, `blocks-layout-${locale}`);
     }
@@ -919,11 +1016,14 @@ test(
 
     state.failures.companyTrips = 503;
     state.failures.myResponse = 503;
+    state.failures.breakdownRoute = 503;
     await page.reload();
     await expect(tripsCard(page).getByRole("button")).toHaveCount(1);
     await expect(eventCard(page).getByRole("button")).toHaveCount(1);
+    await expect(routesCard(page).getByRole("button")).toHaveCount(1);
     expect(await smallTargets(eventCard(page), min)).toEqual([]);
     expect(await smallTargets(tripsCard(page), min)).toEqual([]);
+    expect(await smallTargets(routesCard(page), min)).toEqual([]);
   },
 );
 

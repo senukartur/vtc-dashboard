@@ -6,7 +6,7 @@ import {
   refreshWorkspaceSummary,
   workspaceSummaryKey,
 } from "../../apps/web/src/app/workspace-summary-cache.ts";
-import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
+import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { AccountFailure } from "../../apps/web/src/features/account/transport.ts";
 import { dashboardTranslations } from "../../apps/web/src/features/dashboard/translations.ts";
 import {
@@ -15,9 +15,21 @@ import {
   schema,
 } from "../../apps/web/src/features/dashboard/transport.ts";
 import {
+  activeDriversView,
+  analyticsPath,
+  BREAKDOWN_LIMIT,
   blockView,
+  breakdownEmpty,
+  breakdownPath,
+  breakdownRows,
   type Countdown,
   countdown,
+  formatPercent,
+  gameSplit,
+  LEADERBOARD_LIMIT,
+  leaderboardPath,
+  leaderboardRows,
+  placeView,
   type QueryView,
   RECENT_TRIPS_LIMIT,
   recentTripRow,
@@ -25,12 +37,23 @@ import {
   responsePressed,
   retainsError,
   rsvpView,
+  sourceShares,
+  tripsKey,
   untilAnchored,
   visibleActionSections,
 } from "../../apps/web/src/features/dashboard/view-model.ts";
 import { formatQuantity } from "../../apps/web/src/shared/formatting.ts";
 import {
+  analyticsWithoutStage4,
+  type BreakdownDimension,
+  leaderboardWithoutStage4,
+  makeAllTimeAnalyticsFixture,
+  makeAnalyticsFixture,
+  makeBreakdownFixture,
   makeCompanyStatsFixture,
+  makeFilteredAnalyticsFixture,
+  makeLeaderboardFixture,
+  makeMemberAnalyticsFixture,
   makeOptionalEventFixture,
   makeRecentTripsFixture,
   makeResponseCountsFixture,
@@ -40,6 +63,7 @@ import {
   recentTripItems,
   recentTrips,
   upcomingEvent,
+  withActiveDrivers,
 } from "../e2e/support/dashboard-fixtures.ts";
 
 const MINUTE = 60_000;
@@ -581,5 +605,430 @@ describe("overview block fixtures", () => {
     expect(Date.parse(nextUpcomingEvent.startsAt)).toBeGreaterThan(
       Date.parse(upcomingEvent.startsAt),
     );
+  });
+});
+
+describe("overview statistics paths", () => {
+  const range = { fromDate: "2026-11-01", toDateExclusive: "2026-12-01" };
+  const allTime = { period: "all_time" } as const;
+
+  it("asks for company analytics with dates or, for all time, months without dates", () => {
+    expect(analyticsPath(range, { granularity: "day" })).toBe(
+      "/analytics/company?fromDate=2026-11-01&toDateExclusive=2026-12-01&granularity=day",
+    );
+    expect(analyticsPath(range, { granularity: "month", game: "ats" })).toBe(
+      "/analytics/company?fromDate=2026-11-01&toDateExclusive=2026-12-01&granularity=month&game=ats",
+    );
+    expect(analyticsPath(allTime, { granularity: "day" })).toBe(
+      "/analytics/company?period=all_time&granularity=month",
+    );
+    expect(analyticsPath(allTime, { granularity: "day", game: "ets2" })).toBe(
+      "/analytics/company?period=all_time&granularity=month&game=ets2",
+    );
+  });
+
+  it("asks for the top ten of the leaderboard", () => {
+    expect(LEADERBOARD_LIMIT).toBe(10);
+    expect(leaderboardPath(range)).toBe(
+      "/analytics/leaderboard?fromDate=2026-11-01&toDateExclusive=2026-12-01&limit=10",
+    );
+    expect(leaderboardPath(allTime, "ats")).toBe(
+      "/analytics/leaderboard?period=all_time&limit=10&game=ats",
+    );
+  });
+
+  it("asks for five routes or cargo and the source split without a limit", () => {
+    expect(BREAKDOWN_LIMIT).toBe(5);
+    expect(breakdownPath("route", range, { locale: "ru" })).toBe(
+      "/analytics/company/breakdown?dimension=route&fromDate=2026-11-01&toDateExclusive=2026-12-01&locale=ru&limit=5",
+    );
+    expect(breakdownPath("cargo", allTime, { game: "ets2", locale: "en" })).toBe(
+      "/analytics/company/breakdown?dimension=cargo&period=all_time&game=ets2&locale=en&limit=5",
+    );
+    expect(breakdownPath("source", allTime, { locale: "en" })).toBe(
+      "/analytics/company/breakdown?dimension=source&period=all_time&locale=en",
+    );
+    for (const dimension of ["route", "cargo", "source"] as const)
+      expect(breakdownPath(dimension, allTime, { locale: "ru" })).not.toMatch(
+        /fromDate|toDateExclusive|granularity/,
+      );
+  });
+});
+
+describe("overview KPI and place views", () => {
+  const leaderboard = (options: Parameters<typeof makeLeaderboardFixture>[0]) =>
+    makeLeaderboardFixture(options).data;
+
+  it("shows the place among ranked members, not ranked, or unavailable", () => {
+    expect(placeView(undefined, false)).toEqual({ kind: "loading" });
+    expect(placeView(undefined, true)).toEqual({ kind: "unavailable" });
+    expect(placeView(leaderboard({ viewer: "absent" }), false)).toEqual({ kind: "unavailable" });
+    expect(placeView(leaderboard({ viewer: "unranked" }), false)).toEqual({ kind: "notRanked" });
+    // Data wins over a failed background refresh.
+    expect(placeView(leaderboard({ viewer: "unranked" }), true)).toEqual({ kind: "notRanked" });
+    expect(placeView(leaderboard({ viewer: "offPage" }), false)).toEqual({
+      kind: "ranked",
+      position: 14,
+      ranked: 15,
+      acceptedTrips: 4,
+      actualDistanceM: "37400000",
+    });
+    const { rankedMembers: _ranked, ...withoutCount } = leaderboard({ viewer: "onPage" });
+    expect(placeView(withoutCount, false)).toEqual({
+      kind: "ranked",
+      position: 3,
+      ranked: undefined,
+      acceptedTrips: 15,
+      actualDistanceM: "39600000",
+    });
+  });
+
+  it("keeps active drivers and members separate and unavailable when absent", () => {
+    expect(activeDriversView(makeAnalyticsFixture().data)).toEqual({ drivers: 2, members: 5 });
+    expect(activeDriversView(makeAllTimeAnalyticsFixture().data)).toEqual({
+      drivers: 9,
+      members: 5,
+    });
+    expect(activeDriversView(makeAnalyticsFixture(true).data)).toEqual({ drivers: 0, members: 5 });
+    expect(activeDriversView(analyticsWithoutStage4(makeAnalyticsFixture()).data)).toEqual({
+      drivers: null,
+      members: null,
+    });
+  });
+
+  it("splits the totals by game only when both games are returned", () => {
+    const split = gameSplit(makeAnalyticsFixture().data);
+    expect(split?.ets2).toEqual({ game: "ets2", acceptedTrips: 20, actualDistanceM: "61430000" });
+    expect(split?.ats).toEqual({ game: "ats", acceptedTrips: 22, actualDistanceM: "64000000" });
+    const ets2 = makeFilteredAnalyticsFixture(new URLSearchParams({ game: "ets2" })).data;
+    expect(gameSplit(ets2)).toBeNull();
+    expect(gameSplit(analyticsWithoutStage4(makeAnalyticsFixture()).data)).toBeNull();
+  });
+});
+
+describe("leaderboard rows", () => {
+  it("marks the viewer on the page and adds no extra row", () => {
+    const { rows, offPage } = leaderboardRows(
+      makeLeaderboardFixture({ viewer: "onPage" }).data,
+      fixtureId,
+    );
+    expect(rows.map((row) => [row.rank, row.self])).toEqual([
+      [1, false],
+      [2, false],
+      [3, true],
+    ]);
+    expect(offPage).toBeNull();
+  });
+
+  it("returns the viewer below the top ten separately", () => {
+    const { rows, offPage } = leaderboardRows(
+      makeLeaderboardFixture({ viewer: "offPage" }).data,
+      fixtureId,
+    );
+    expect(rows).toHaveLength(10);
+    expect(rows.some((row) => row.self)).toBe(false);
+    expect(offPage).toEqual({ position: 14, acceptedTrips: 4, actualDistanceM: "37400000" });
+  });
+
+  it("adds nothing for a viewer without a place or without Stage 4 data", () => {
+    for (const viewer of ["unranked", "absent"] as const) {
+      const { rows, offPage } = leaderboardRows(makeLeaderboardFixture({ viewer }).data, fixtureId);
+      expect(rows.map((row) => row.rank)).toEqual([1, 2]);
+      expect(offPage).toBeNull();
+    }
+  });
+
+  it("uses the server position and falls back to the list order", () => {
+    const data = makeLeaderboardFixture({ size: 3 }).data;
+    const shifted = {
+      ...data,
+      items: data.items.map((item, index) => ({ ...item, position: index + 4 })),
+    };
+    expect(leaderboardRows(shifted, undefined).rows.map((row) => row.rank)).toEqual([4, 5, 6]);
+    const unnumbered = leaderboardWithoutStage4(makeLeaderboardFixture({ size: 3 })).data;
+    expect(leaderboardRows(unnumbered, undefined).rows.map((row) => row.rank)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("trip breakdown views", () => {
+  const breakdown = (dimension: BreakdownDimension, extra: Record<string, string> = {}) =>
+    makeBreakdownFixture(
+      new URLSearchParams({
+        dimension,
+        fromDate: "2026-10-01",
+        toDateExclusive: "2026-11-01",
+        ...extra,
+      }),
+    ).data;
+
+  it("ranks routes with chips for all games, fallbacks and bar widths", () => {
+    const data = breakdown("route", { locale: "ru" });
+    if (data.dimension !== "route") throw new Error("ROUTE_EXPECTED");
+    const view = breakdownRows(data);
+    expect(view.chips).toBe(true);
+    expect(view.rows.map((row) => [row.game, row.acceptedTrips])).toEqual([
+      ["ats", 9],
+      ["ets2", 8],
+      ["ats", 6],
+      ["ets2", 5],
+      ["ets2", 3],
+    ]);
+    expect(view.rows.map((row) => row.barPercent)).toEqual(
+      [9, 8, 6, 5, 3].map((trips) => (trips / 9) * 100),
+    );
+    // Only Wien lacks a Russian name.
+    expect(view.rows.map((row) => row.fallback)).toEqual([false, false, false, true, false]);
+    expect(view.rows[1]?.labels.map(({ role, label }) => [role, label.label])).toEqual([
+      ["origin", "Мюнхен"],
+      ["destination", "Варшава"],
+    ]);
+    expect(view.remainder).toBe(8);
+    expect(view.undetermined).toBe(3);
+    expect(new Set(view.rows.map((row) => row.key)).size).toBe(5);
+  });
+
+  it("omits chips for one game and the remainder and undetermined rows at zero", () => {
+    const data = breakdown("cargo", { game: "ats", locale: "en" });
+    if (data.dimension !== "cargo") throw new Error("CARGO_EXPECTED");
+    const view = breakdownRows(data);
+    expect(view.chips).toBe(false);
+    expect(view.rows.map((row) => row.labels.map(({ label }) => label.label))).toEqual([
+      ["Lumber"],
+      ["Gravel"],
+    ]);
+    expect([view.remainder, view.undetermined]).toEqual([4, 2]);
+    const zero = { acceptedTrips: 0, actualDistanceM: "0" };
+    const bare = breakdownRows({ ...data, remainder: zero, undetermined: zero });
+    expect([bare.remainder, bare.undetermined]).toEqual([null, null]);
+  });
+
+  it("is empty only for a zero total, not for undetermined trips alone", () => {
+    const empty = makeBreakdownFixture(new URLSearchParams({ dimension: "route" }), true).data;
+    expect(breakdownEmpty(empty)).toBe(true);
+    // The unrecognized fixture: every trip undetermined, no ranked items and no remainder.
+    const onlyUndetermined = makeBreakdownFixture(
+      new URLSearchParams({ dimension: "route" }),
+      false,
+      true,
+    ).data;
+    if (onlyUndetermined.dimension !== "route") throw new Error("ROUTE_EXPECTED");
+    expect(breakdownEmpty(onlyUndetermined)).toBe(false);
+    expect(breakdownRows(onlyUndetermined)).toEqual({
+      rows: [],
+      chips: true,
+      remainder: null,
+      undetermined: 42,
+    });
+  });
+
+  it("adds the undetermined part of the source fixture with its count and share", () => {
+    const data = makeBreakdownFixture(
+      new URLSearchParams({ dimension: "source" }),
+      false,
+      true,
+    ).data;
+    if (data.dimension !== "source") throw new Error("SOURCE_EXPECTED");
+    // 29, 10 and 3 of 42, rounded per part.
+    expect(sourceShares(data)).toEqual([
+      { source: "ets2telemetry", acceptedTrips: 29, percent: 69 },
+      { source: "manual", acceptedTrips: 10, percent: 24 },
+      { source: "undetermined", acceptedTrips: 3, percent: 7 },
+    ]);
+  });
+
+  it("shares the source split per part and adds undetermined trips only when present", () => {
+    const data = breakdown("source");
+    if (data.dimension !== "source") throw new Error("SOURCE_EXPECTED");
+    // 32 and 10 of 42, rounded per part.
+    expect(sourceShares(data)).toEqual([
+      { source: "ets2telemetry", acceptedTrips: 32, percent: 76 },
+      { source: "manual", acceptedTrips: 10, percent: 24 },
+    ]);
+    const thirds = {
+      ...data,
+      totals: { acceptedTrips: 3, actualDistanceM: "3" },
+      items: [
+        { source: "ets2telemetry" as const, acceptedTrips: 1, actualDistanceM: "1" },
+        { source: "manual" as const, acceptedTrips: 1, actualDistanceM: "1" },
+      ],
+      undetermined: { acceptedTrips: 1, actualDistanceM: "1" },
+    };
+    expect(sourceShares(thirds).map((part) => [part.source, part.percent])).toEqual([
+      ["ets2telemetry", 33],
+      ["manual", 33],
+      ["undetermined", 33],
+    ]);
+    const telemetryOnly = {
+      ...data,
+      totals: { acceptedTrips: 5, actualDistanceM: "5" },
+      items: [
+        { source: "ets2telemetry" as const, acceptedTrips: 5, actualDistanceM: "5" },
+        { source: "manual" as const, acceptedTrips: 0, actualDistanceM: "0" },
+      ],
+    };
+    expect(sourceShares(telemetryOnly).map((part) => part.percent)).toEqual([100, 0]);
+    const empty = makeBreakdownFixture(new URLSearchParams({ dimension: "source" }), true).data;
+    if (empty.dimension !== "source") throw new Error("SOURCE_EXPECTED");
+    expect(sourceShares(empty)).toEqual([]);
+    expect(formatPercent(76, "en")).toBe("76%");
+    expect(formatPercent(76, "ru")).toMatch(/^76\s%$/);
+  });
+
+  it("chooses the plural form of a trip count", () => {
+    expect([1, 2, 5, 21].map((count) => tripsKey(count, "en"))).toEqual([
+      "tripsOne",
+      "tripsOther",
+      "tripsOther",
+      "tripsOther",
+    ]);
+    expect([1, 2, 5, 11, 21, 22, 25, 111].map((count) => tripsKey(count, "ru"))).toEqual([
+      "tripsOne",
+      "tripsFew",
+      "tripsMany",
+      "tripsMany",
+      "tripsOne",
+      "tripsFew",
+      "tripsMany",
+      "tripsMany",
+    ]);
+  });
+});
+
+describe("overview statistics translations", () => {
+  const { en, ru } = dashboardTranslations;
+
+  it("keeps the new RU and EN keys and placeholders identical", () => {
+    expect(keys(en.breakdowns)).toEqual(keys(ru.breakdowns));
+    for (const section of ["breakdowns", "metrics", "leaderboard", "filters"] as const)
+      for (const [key, text] of Object.entries(en[section]))
+        expect(placeholders(ru[section][key as keyof (typeof ru)[typeof section]]), key).toEqual(
+          placeholders(text),
+        );
+    for (const key of [
+      "myPlace",
+      "placeOf",
+      "placeTotals",
+      "notRanked",
+      "noTrips",
+      "activeMembers",
+    ])
+      expect(keys(en.metrics)).toContain(key);
+    for (const key of ["tripsOne", "tripsFew", "tripsMany", "tripsOther"] as const) {
+      expect(placeholders(en.breakdowns[key])).toEqual(["trips"]);
+      expect(placeholders(ru.breakdowns[key])).toEqual(["trips"]);
+    }
+    // No i18next plural suffixes, which would differ between the languages.
+    expect(keys(en).filter((key) => /_(one|few|many|other|zero)$/.test(key))).toEqual([]);
+    expect([en.leaderboard.you, ru.leaderboard.you]).toEqual(["you", "вы"]);
+    expect([en.metrics.placeOf, ru.metrics.placeOf]).toEqual([
+      "{{position}} of {{ranked}}",
+      "{{position}} из {{ranked}}",
+    ]);
+  });
+});
+
+describe("overview statistics fixtures", () => {
+  it("parse with the browser runtime schemas", () => {
+    const company = schema("AnalyticsStage4CompanyEnvelope");
+    for (const fixture of [
+      makeAnalyticsFixture(),
+      makeAnalyticsFixture(true),
+      makeAllTimeAnalyticsFixture(),
+      makeAllTimeAnalyticsFixture("ats"),
+      makeAllTimeAnalyticsFixture(undefined, true),
+      makeFilteredAnalyticsFixture(new URLSearchParams({ game: "ets2", granularity: "month" })),
+      makeFilteredAnalyticsFixture(new URLSearchParams({ period: "all_time", game: "ats" })),
+      analyticsWithoutStage4(makeAnalyticsFixture()),
+    ])
+      expect(company.safeParse(fixture).success).toBe(true);
+    expect(schema("EnvelopeAnalytics").safeParse(makeMemberAnalyticsFixture()).success).toBe(true);
+    // The member analytics shape is closed: Stage 4 aggregates do not belong there.
+    expect(schema("EnvelopeAnalytics").safeParse(makeAnalyticsFixture()).success).toBe(false);
+
+    const board = schema("EnvelopeListLeaderboardEntry");
+    for (const viewer of ["unranked", "onPage", "offPage", "absent"] as const)
+      for (const period of ["range", "all_time"])
+        expect(
+          board.safeParse(
+            makeLeaderboardFixture({ viewer, search: new URLSearchParams({ period }) }),
+          ).success,
+        ).toBe(true);
+    expect(board.safeParse(makeLeaderboardFixture({ empty: true })).success).toBe(true);
+
+    const breakdowns = schema("AnalyticsStage4BreakdownEnvelope");
+    for (const dimension of ["route", "cargo", "source"] as const)
+      for (const locale of ["en", "ru"])
+        for (const game of [undefined, "ets2", "ats"])
+          for (const period of [undefined, "all_time"])
+            for (const [empty, unrecognized] of [
+              [false, false],
+              [true, false],
+              [false, true],
+            ] as const) {
+              const search = new URLSearchParams({
+                dimension,
+                locale,
+                ...(game ? { game } : {}),
+                ...(period ? { period } : {}),
+              });
+              const fixture = makeBreakdownFixture(search, empty, unrecognized);
+              expect(breakdowns.safeParse(fixture).success, search.toString()).toBe(true);
+              // Items, remainder and undetermined add up to the totals.
+              const { items, remainder, undetermined, totals } = fixture.data;
+              const listed = (items as { acceptedTrips: number }[]).reduce(
+                (total, item) => total + item.acceptedTrips,
+                0,
+              );
+              expect(listed + remainder.acceptedTrips + undetermined.acceptedTrips).toBe(
+                totals.acceptedTrips,
+              );
+            }
+    // The breakdown totals agree with the analytics totals for the same filters, also when
+    // trips are unrecognized.
+    for (const game of ["ets2", "ats"] as const)
+      for (const dimension of ["route", "cargo", "source"] as const)
+        for (const unrecognized of [false, true])
+          expect(
+            makeBreakdownFixture(new URLSearchParams({ dimension, game }), false, unrecognized).data
+              .totals.acceptedTrips,
+          ).toBe(makeFilteredAnalyticsFixture(new URLSearchParams({ game })).data.acceptedTrips);
+  });
+
+  it("keep active drivers equal to the ranked members when asked", () => {
+    const board = makeLeaderboardFixture({ viewer: "offPage" });
+    const analytics = withActiveDrivers(makeAnalyticsFixture(), board.data.rankedMembers);
+    expect(analytics.data.activeDrivers).toBe(15);
+    expect(board.data.rankedMembers).toBe(15);
+    const allTime = new URLSearchParams({ period: "all_time" });
+    expect(
+      withActiveDrivers(
+        makeAllTimeAnalyticsFixture(),
+        makeLeaderboardFixture({ viewer: "offPage", search: allTime }).data.rankedMembers,
+      ).data.activeDrivers,
+    ).toBe(15);
+    // A computed zero and an API without Stage 4 fields stay as they are.
+    expect(withActiveDrivers(makeAnalyticsFixture(true), 15).data.activeDrivers).toBe(0);
+    const bare = analyticsWithoutStage4(makeAnalyticsFixture());
+    expect("activeDrivers" in withActiveDrivers(bare, 15).data).toBe(false);
+  });
+
+  it("cover the catalog label cases and reject a body for another dimension", () => {
+    const ru = makeBreakdownFixture(new URLSearchParams({ dimension: "route", locale: "ru" })).data;
+    if (ru.dimension !== "route") throw new Error("ROUTE_EXPECTED");
+    const labels = ru.items.flatMap((item) => [item.origin, item.destination]);
+    expect(labels.filter((label) => label.englishFallback).map((label) => label.label)).toEqual([
+      "Wien",
+    ]);
+    expect(labels.some((label) => label.hidden)).toBe(true);
+    expect(labels.find((label) => label.nameNative)?.nameNative).toBe("München");
+    const en = makeBreakdownFixture(new URLSearchParams({ dimension: "route", locale: "en" })).data;
+    if (en.dimension !== "route") throw new Error("ROUTE_EXPECTED");
+    expect(en.items.flatMap((item) => [item.origin.entityId, item.destination.entityId])).toEqual(
+      labels.map((label) => label.entityId),
+    );
+    // A route body that claims to be the source split fails the discriminated union.
+    const route = makeBreakdownFixture(new URLSearchParams({ dimension: "route" }));
+    const wrong = { ...route, data: { ...route.data, dimension: "source" } };
+    expect(schema("AnalyticsStage4BreakdownEnvelope").safeParse(wrong).success).toBe(false);
   });
 });

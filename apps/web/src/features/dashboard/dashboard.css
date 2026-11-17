@@ -1,5 +1,12 @@
-/* Compact overview dashboard. Scoped to the page and built from shared tokens only. */
+/* Compact overview dashboard. Scoped to the page and built from shared tokens, plus the source
+   split hues (VTC-148). Telemetry and manual are the two categorical hues, validated against
+   --surface with the dataviz palette check (about 4.8:1 and 4.5:1). Undetermined is an
+   intentional neutral for "Source not recognized", not a third category: it fails only the
+   check's chroma floor, by design, and its legend row always carries the text name. */
 .dashboard-page {
+  --dashboard-source-telemetry: #3987e5;
+  --dashboard-source-manual: #d95926;
+  --dashboard-source-undetermined: #64748b;
   display: flex;
   flex-direction: column;
   gap: var(--space);
@@ -51,6 +58,9 @@
 
 /* KPI strip: one bordered row; inset shadows draw dividers only between cells, so a wrapped
    row never shows a coloured empty cell. */
+.dashboard-page .dashboard-kpis {
+  container: dashboard-kpis / inline-size;
+}
 .dashboard-page .dashboard-kpis dl {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -60,12 +70,15 @@
   border-radius: var(--radius);
   background: var(--surface);
 }
+/* Label, value and an optional sub-line (game split, members, own totals). The tile keeps the
+   sub-line's height while loading, so the strip does not grow when the data arrives. */
 .dashboard-page .dashboard-kpi {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
-  padding: 10px 14px;
+  min-height: 68px;
+  padding: 6px 14px;
   box-shadow:
     -1px 0 0 var(--border),
     0 -1px 0 var(--border);
@@ -73,17 +86,39 @@
 .dashboard-page .dashboard-kpi dt {
   color: var(--muted);
   font-size: var(--font-small);
-  line-height: 1.45;
+  line-height: 1.3;
 }
 .dashboard-page .dashboard-kpi dd {
-  min-height: 26px;
   margin: 0;
+}
+.dashboard-page .dashboard-kpi-value {
+  min-height: 24px;
   color: var(--foreground);
   font-size: 20px;
   font-weight: 600;
-  line-height: 1.3;
+  line-height: 1.2;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+.dashboard-page .dashboard-kpi-sub {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+.dashboard-page .dashboard-kpi-part {
+  display: inline-block;
+}
+/* Narrow tiles wrap a sub-line to at most two lines; the sub-line and its loading reserve both
+   keep that height, so the strip does not grow when the data arrives. */
+.dashboard-page .dashboard-kpi-sub-reserve {
+  min-height: calc(var(--font-small) * 1.3);
+}
+@container dashboard-kpis (max-width: 899px) {
+  .dashboard-page .dashboard-kpi-sub,
+  .dashboard-page .dashboard-kpi-sub-reserve {
+    min-height: calc(var(--font-small) * 2.6);
+  }
 }
 
 /* Static placeholders (no animation); the status line carries the loading announcement. */
@@ -329,6 +364,19 @@
   color: var(--foreground);
   text-decoration: underline;
 }
+/* The viewer's own row: a visible "· you" mark, the tint only supports it. */
+.dashboard-page .dashboard-leaderboard .dashboard-own-row td {
+  background: var(--accent-soft);
+}
+.dashboard-page .dashboard-you {
+  color: var(--secondary);
+  font-size: var(--font-small);
+  white-space: nowrap;
+}
+/* The own place below the top ten, set apart from it. */
+.dashboard-page .dashboard-leaderboard .dashboard-leaderboard-self td {
+  border-top: 2px solid var(--border-strong);
+}
 .dashboard-page .dashboard-empty {
   padding-block: 8px;
   color: var(--muted);
@@ -488,6 +536,111 @@
 }
 .dashboard-page .dashboard-reason {
   min-height: 64px;
+}
+
+/* Trip breakdowns: a full-width row of three cards below the leaderboard and the side column. */
+.dashboard-page .dashboard-breakdowns {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  gap: var(--space);
+  align-items: start;
+  min-width: 0;
+}
+.dashboard-page .dashboard-breakdown-list,
+.dashboard-page .dashboard-breakdown-extra,
+.dashboard-page .dashboard-source-legend {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dashboard-page .dashboard-breakdown-row {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.dashboard-page .dashboard-breakdown-line {
+  display: flex;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  line-height: 1.4;
+}
+/* Whole-word wrapping: long catalog names wrap, never truncate. */
+.dashboard-page .dashboard-breakdown-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.dashboard-page .dashboard-breakdown-count,
+.dashboard-page .dashboard-source-share {
+  flex: none;
+  color: var(--secondary);
+  font-size: var(--font-small);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.dashboard-page .dashboard-breakdown-count {
+  margin-left: auto;
+}
+.dashboard-page .dashboard-source-share {
+  min-width: 3.2em;
+  text-align: right;
+}
+/* Decorative single-series bar: one hue, square at the baseline, rounded data end. --chart is
+   below 3:1 on --surface (about 2.2:1); the exact count is printed beside every bar. */
+.dashboard-page .dashboard-breakdown-bar {
+  display: block;
+  height: 6px;
+}
+.dashboard-page .dashboard-breakdown-bar > span {
+  display: block;
+  min-width: 2px;
+  height: 100%;
+  border-radius: 0 3px 3px 0;
+  background: var(--chart);
+}
+.dashboard-page .dashboard-breakdown-extra {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+}
+/* Only unrecognized trips: no ranked list above, so no separator either. */
+.dashboard-page .dashboard-card-head + .dashboard-breakdown-extra {
+  padding-top: 0;
+  border-top: 0;
+}
+/* Thin segmented bar: one whole, 2px surface gaps, rounded ends; a zero part draws nothing. */
+.dashboard-page .dashboard-source-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+.dashboard-page .dashboard-source-bar > span {
+  flex: 1 1 0;
+  min-width: 2px;
+}
+.dashboard-page .dashboard-source-swatch {
+  flex: none;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.dashboard-page .dashboard-source-ets2telemetry {
+  background: var(--dashboard-source-telemetry);
+}
+.dashboard-page .dashboard-source-manual {
+  background: var(--dashboard-source-manual);
+}
+.dashboard-page .dashboard-source-undetermined {
+  /* Neutral grey: an unrecognized share, named in its legend row. */
+  background: var(--dashboard-source-undetermined);
 }
 
 /* Recent company trips: a full-width third row, below the first desktop screen. */

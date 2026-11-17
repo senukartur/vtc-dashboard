@@ -1,4 +1,5 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { computePeriodDates } from "../../apps/web/src/features/dashboard/model.ts";
 import { formatQuantity } from "../../apps/web/src/shared/formatting.ts";
 import {
@@ -13,6 +14,9 @@ import { switchLanguage } from "./support/locale.ts";
 
 const kpis = (page: Page) =>
   page.getByRole("region", { name: /^(Key metrics|Ключевые показатели)$/ });
+/** The value of each KPI tile; a tile may add a sub-line as a second definition. */
+const kpiValues = (page: Page) => kpis(page).locator("dd.dashboard-kpi-value");
+const kpiSubs = (page: Page) => kpis(page).locator("dd.dashboard-kpi-sub");
 const chartCard = (page: Page) =>
   page.getByRole("region", { name: /^(Distance Dynamics|Динамика пробега)$/ });
 const leaderboardCard = (page: Page) =>
@@ -25,6 +29,15 @@ const reviewCard = (page: Page) =>
   page.getByRole("region", { name: /^(Review Queue|Очередь проверки)$/ });
 const recentTripsCard = (page: Page) =>
   page.getByRole("region", { name: /^(Recent company trips|Последние рейсы компании)$/ });
+const routesCard = (page: Page) =>
+  page.getByRole("region", { name: /^(Popular routes|Популярные маршруты)$/ });
+const cargoCard = (page: Page) =>
+  page.getByRole("region", { name: /^(Frequent cargo|Частые грузы)$/ });
+const sourceCard = (page: Page) =>
+  page.getByRole("region", { name: /^(How trips arrived|Как пришли рейсы)$/ });
+/** Ranked route or cargo rows of a breakdown card. */
+const breakdownItems = (card: Locator) => card.locator(".dashboard-breakdown-list > li");
+const breakdownApi = "/api/v1/analytics/company/breakdown";
 const responseGroup = (page: Page) =>
   eventCard(page).getByRole("group", { name: /^(Your response|Ваш ответ)$/ });
 const gameGroup = (page: Page) => page.getByRole("group", { name: /^(Game|Игра)$/ });
@@ -48,6 +61,11 @@ const dashboardOnlyPaths = [
 ];
 function requestsTo(state: DashboardMockState, prefix: string) {
   return state.requests.filter((url) => url.pathname.startsWith(prefix)).map(String);
+}
+function breakdownRequests(state: DashboardMockState, dimension: string) {
+  return state.requests.filter(
+    (url) => url.pathname === breakdownApi && url.searchParams.get("dimension") === dimension,
+  );
 }
 function lastRequest(state: DashboardMockState, path: string) {
   return state.requests.filter((url) => url.pathname === path).at(-1);
@@ -119,8 +137,15 @@ test.describe("Company Dashboard E2E", () => {
         "Actual distance",
         "Accepted trips",
         "Active drivers",
+        "My place",
       ]);
-      await expect(metrics.getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
+      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2", "Not ranked"]);
+      await expect(metrics.locator("dd.dashboard-kpi-sub")).toHaveText([
+        "ETS2 61,430 km · ATS 64,000 km",
+        "ETS2 20 · ATS 22",
+        "Active members: 5",
+        "No accepted trips for the period",
+      ]);
 
       await expect(
         chartCard(page).getByRole("heading", { name: "Distance Dynamics", exact: true }),
@@ -208,10 +233,16 @@ test.describe("Company Dashboard E2E", () => {
         0n,
       );
       expect(bucketSum).toBe(BigInt(fixture.actualDistanceM));
-      await expect(kpis(page).getByRole("definition")).toHaveText([
+      await expect(kpiValues(page)).toHaveText([
         formatQuantity(fixture.actualDistanceM, "km", "en"),
         String(fixture.acceptedTrips),
         "2",
+        "Not ranked",
+      ]);
+      // One game: no game split under the totals.
+      await expect(kpis(page).locator("dd.dashboard-kpi-sub")).toHaveText([
+        "Active members: 5",
+        "No accepted trips for the period",
       ]);
 
       const chart = chartCard(page);
@@ -280,7 +311,7 @@ test.describe("Company Dashboard E2E", () => {
       // Reads outside the gate still run: the shell chip's nearest event and the level names.
       await expect.poll(() => requestsTo(state, "/api/v1/me/upcoming-event").length).toBe(1);
       await expect.poll(() => requestsTo(state, "/api/v1/qualification-levels").length).toBe(2);
-      for (const path of [...periodPaths, ...secondaryPaths])
+      for (const path of [...periodPaths, ...secondaryPaths, breakdownApi])
         expect(requestsTo(state, path)).toEqual([]);
       await expect(loadingStatus(page)).toHaveCount(1);
       for (const button of await gameGroup(page).getByRole("button").all())
@@ -307,6 +338,14 @@ test.describe("Company Dashboard E2E", () => {
       const firstSecondary = Math.min(...secondaryPaths.map(firstIndex));
       expect(lastPeriod).toBeGreaterThanOrEqual(0);
       expect(firstSecondary).toBeGreaterThan(lastPeriod);
+      // The breakdowns follow too, once per dimension and already with the zone's dates.
+      for (const dimension of ["route", "cargo", "source"] as const)
+        await expect.poll(() => breakdownRequests(state, dimension).length).toBe(1);
+      expect(firstIndex(breakdownApi)).toBeGreaterThan(lastPeriod);
+      for (const url of requestsTo(state, breakdownApi).map((href) => new URL(href))) {
+        expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
+        expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+      }
     },
   );
 
@@ -414,6 +453,20 @@ test.describe("Company Dashboard E2E", () => {
       for (const path of periodPaths)
         expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
       for (const url of after) {
+        expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
+        expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+      }
+      // The new zone's keys fetch the breakdowns once each, never the old dates again.
+      const breakdownsAfter = () =>
+        state.requests.slice(before).filter((url) => url.pathname === breakdownApi);
+      await expect.poll(() => breakdownsAfter().length).toBe(3);
+      await page.waitForTimeout(300);
+      expect(breakdownsAfter().map((url) => url.searchParams.get("dimension"))).toEqual([
+        "route",
+        "cargo",
+        "source",
+      ]);
+      for (const url of breakdownsAfter()) {
         expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
         expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
       }
@@ -634,9 +687,16 @@ test.describe("Company Dashboard E2E", () => {
         "Пройденное расстояние",
         "Подтвержденные рейсы",
         "Активные водители",
+        "Моё место",
       ]);
-      await expect(kpis(page).getByRole("definition").first()).toHaveText(
+      await expect(kpiValues(page)).toHaveText([
         formatQuantity("125430000", "km", "ru"),
+        "42",
+        "2",
+        "Без места",
+      ]);
+      await expect(kpis(page).locator("dd.dashboard-kpi-sub").nth(2)).toHaveText(
+        "Участников в составе: 5",
       );
       await expect(
         page.getByRole("heading", { name: "Таблица лидеров", exact: true }),
@@ -650,7 +710,7 @@ test.describe("Company Dashboard E2E", () => {
         page.getByRole("heading", { name: "Company Overview", exact: true }),
       ).toBeVisible();
       await expect(kpis(page).getByRole("term").first()).toHaveText("Actual distance");
-      await expect(kpis(page).getByRole("definition").first()).toHaveText("125,430 km");
+      await expect(kpiValues(page).first()).toHaveText("125,430 km");
     },
   );
 
@@ -690,9 +750,9 @@ test.describe("Company Dashboard E2E", () => {
         }
 
         const tops = await Promise.all(
-          (await kpis(page).getByRole("definition").all()).map(async (dd) => (await box(dd)).y),
+          (await kpiValues(page).all()).map(async (dd) => (await box(dd)).y),
         );
-        expect(tops).toHaveLength(3);
+        expect(tops).toHaveLength(4);
         for (const top of tops) expect(Math.abs(top - (tops[0] ?? 0))).toBeLessThanOrEqual(1);
 
         const title = await box(page.getByRole("heading", { level: 1 }));
@@ -844,8 +904,10 @@ test.describe("Company Dashboard E2E", () => {
       await expect(leaderboard.getByText("Could not load the leaderboard")).toBeVisible();
       await expect(leaderboard.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
       await expect(leaderboard.getByText("No confirmed trips in this period yet")).toHaveCount(0);
-      await expect(kpis(page).getByRole("definition").nth(2)).toHaveText("Unavailable");
-      await expect(kpis(page).getByRole("definition").first()).toHaveText("0 km");
+      // The place comes from the failed leaderboard; active drivers come from analytics.
+      await expect(kpiValues(page).nth(3)).toHaveText("Unavailable");
+      await expect(kpiValues(page).nth(2)).toHaveText("0");
+      await expect(kpiValues(page).first()).toHaveText("0 km");
       await expect(page.getByText("Company starting from zero")).toHaveCount(0);
 
       delete state.failures.leaderboard;
@@ -870,7 +932,7 @@ test.describe("Company Dashboard E2E", () => {
       const state = await mockDashboardRoutes(page);
       await page.goto("/account/dashboard");
       await loaded(page);
-      await expect(kpis(page).getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
+      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2", "Not ranked"]);
       const initial = ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"].map(
         (path) => lastRequest(state, path)?.href ?? "",
       );
@@ -894,7 +956,7 @@ test.describe("Company Dashboard E2E", () => {
       // Retained data has no visible change to wait for; give the failed responses time to settle.
       await page.waitForTimeout(500);
 
-      await expect(kpis(page).getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
+      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "2", "Not ranked"]);
       await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
       await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
       await expect(page.getByRole("alert")).toHaveCount(0);
@@ -1086,7 +1148,7 @@ test.describe("Company Dashboard E2E", () => {
   );
 
   test(
-    "counts drivers beyond the widget and shows the exact review queue count",
+    "counts active drivers from analytics and shows the exact review queue count",
     browserCase(["@functional"]),
     async ({ page }) => {
       const state = await mockDashboardRoutes(page, { leaderboardSize: 12 });
@@ -1094,9 +1156,11 @@ test.describe("Company Dashboard E2E", () => {
       state.summary = { ...state.summary, reviewQueue: { count: 12, oldestAgeSeconds: 7200 } };
       await page.goto("/account/dashboard");
       await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(10);
-      await expect(kpis(page).getByRole("definition").nth(2)).toHaveText("12");
+      // Active drivers come from analytics, never from counting leaderboard rows.
+      await expect(kpiValues(page).nth(2)).toHaveText("2");
+      await expect(kpis(page)).not.toContainText("+");
       expect(lastRequest(state, "/api/v1/analytics/leaderboard")?.searchParams.get("limit")).toBe(
-        "100",
+        "10",
       );
       await expect(reviewCard(page)).toContainText("Awaiting your decision: 12");
       await expect(reviewCard(page)).not.toContainText("+");
@@ -1106,13 +1170,460 @@ test.describe("Company Dashboard E2E", () => {
   );
 
   test(
-    "shows a lower bound when more drivers exist than one leaderboard page",
+    "marks the viewer's place in the leaderboard and the KPIs",
     browserCase(["@functional"]),
     async ({ page }) => {
-      await mockDashboardRoutes(page, { leaderboardSize: 100, leaderboardNextCursor: true });
+      const state = await mockDashboardRoutes(page, { leaderboardViewer: "offPage" });
       await page.goto("/account/dashboard");
-      await expect(kpis(page).getByRole("definition").nth(2)).toHaveText("100+");
-      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(10);
+      await loaded(page);
+      const board = leaderboardCard(page);
+      await expect(board.locator("tbody").first().locator("tr")).toHaveCount(10);
+      await expect(board).not.toContainText("Fictional Driver 011");
+      // Below the top ten the own place follows in a separate row.
+      const own = board.locator(".dashboard-leaderboard-self tr");
+      await expect(own).toHaveCount(1);
+      await expect(own.locator("td")).toHaveText([
+        "14",
+        "Fictional Yukon Member · you",
+        "4",
+        "37,400 km",
+      ]);
+      await expect(own.getByRole("link")).toHaveAttribute("href", `/account/drivers/${fixtureId}`);
+      await expect(kpiValues(page).nth(3)).toHaveText("14 of 15");
+      await expect(kpiValues(page).nth(2)).toHaveText("15");
+      await expect(kpiSubs(page).nth(3)).toHaveText("37,400 km · trips: 4");
+      expect(lastRequest(state, "/api/v1/analytics/leaderboard")?.searchParams.get("limit")).toBe(
+        "10",
+      );
+      await switchLanguage(page, "ru");
+      await expect(kpiValues(page).nth(3)).toHaveText("14 из 15");
+      await expect(kpiSubs(page).nth(3)).toHaveText(
+        `${formatQuantity("37400000", "km", "ru")} · рейсы: 4`,
+      );
+      await expect(own.locator("td").nth(1)).toHaveText("Fictional Yukon Member · вы");
+      await switchLanguage(page, "en");
+
+      // On the shown page the own row is marked and nothing is appended.
+      state.leaderboardViewer = "onPage";
+      await page.reload();
+      await loaded(page);
+      await expect(board.locator("tbody tr")).toHaveCount(3);
+      await expect(board.locator(".dashboard-leaderboard-self")).toHaveCount(0);
+      await expect(board.locator("tbody tr").nth(2).locator("td").nth(1)).toHaveText(
+        "Fictional Yukon Member · you",
+      );
+      await expect(board.getByText("· you")).toHaveCount(1);
+      await expect(kpiValues(page).nth(3)).toHaveText("3 of 3");
+      await expect(kpiValues(page).nth(2)).toHaveText("3");
+    },
+  );
+
+  test(
+    "shows a viewer without a place and unavailable Stage 4 values, never zero",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      await expect(kpiValues(page).nth(3)).toHaveText("Not ranked");
+      await expect(kpiSubs(page).nth(3)).toHaveText("No accepted trips for the period");
+      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
+      await expect(leaderboardCard(page).locator(".dashboard-leaderboard-self")).toHaveCount(0);
+      await expect(leaderboardCard(page)).not.toContainText("you");
+
+      // An API without the Stage 4 fields: active drivers and the place are unavailable.
+      state.stage4 = false;
+      await page.reload();
+      await loaded(page);
+      await expect(kpiValues(page)).toHaveText(["125,430 km", "42", "Unavailable", "Unavailable"]);
+      await expect(kpiSubs(page)).toHaveCount(0);
+      await expect(leaderboardCard(page).locator("tbody tr td:first-child")).toHaveText(["1", "2"]);
+      await switchLanguage(page, "ru");
+      await expect(kpiValues(page).nth(2)).toHaveText("Недоступно");
+      await expect(kpiValues(page).nth(3)).toHaveText("Недоступно");
+    },
+  );
+
+  test(
+    "reports all time in whole months without dates",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      const state = await mockDashboardRoutes(page, {
+        filterAware: true,
+        leaderboardViewer: "offPage",
+      });
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      await expect(breakdownItems(routesCard(page))).toHaveCount(5);
+      const interval = chartCard(page).getByRole("group", { name: "Interval", exact: true });
+      await expect(interval).toBeVisible();
+
+      const before = state.requests.length;
+      await periodSelect(page).selectOption("allTime");
+      await expect(periodSelect(page)).toHaveValue("allTime");
+      await expect(periodSelect(page).locator("option:checked")).toHaveText("All time");
+      // Active drivers equal the ranked members of the same period, as the API guarantees.
+      await expect(kpiValues(page)).toHaveText(["1,505,160 km", "504", "15", "14 of 15"]);
+      await expect(kpiSubs(page)).toHaveText([
+        "ETS2 737,160 km · ATS 768,000 km",
+        "ETS2 240 · ATS 264",
+        "Active members: 5",
+        "448,800 km · trips: 48",
+      ]);
+      await expect(interval).toHaveCount(0);
+      await expect(leaderboardCard(page).locator("tbody tr").first()).toContainText("288");
+      await expect(breakdownItems(routesCard(page)).first()).toContainText("108 trips");
+      await expect(breakdownItems(cargoCard(page)).first()).toContainText("120 trips");
+      await expect(sourceCard(page).locator(".dashboard-source-legend li").first()).toContainText(
+        "384 trips",
+      );
+
+      const after = state.requests.slice(before);
+      const allTimeRequests = (path: string) => after.filter((url) => url.pathname === path);
+      const [analytics, ...extraAnalytics] = allTimeRequests("/api/v1/analytics/company");
+      expect(extraAnalytics).toEqual([]);
+      expect(analytics?.search).toBe("?period=all_time&granularity=month");
+      const [leaderboard, ...extraLeaderboard] = allTimeRequests("/api/v1/analytics/leaderboard");
+      expect(extraLeaderboard).toEqual([]);
+      expect(leaderboard?.search).toBe("?period=all_time&limit=10");
+      const breakdowns = allTimeRequests(breakdownApi);
+      expect(breakdowns.map((url) => url.searchParams.get("dimension"))).toEqual([
+        "route",
+        "cargo",
+        "source",
+      ]);
+      for (const url of breakdowns) {
+        expect(url.searchParams.get("period")).toBe("all_time");
+        expect(url.searchParams.has("fromDate")).toBe(false);
+        expect(url.searchParams.has("toDateExclusive")).toBe(false);
+      }
+      expect(state.rejected).toEqual([]);
+
+      // Month buckets, also in the exact table.
+      const chart = chartCard(page);
+      await chart.getByRole("button", { name: "Table", exact: true }).click();
+      const rows = chart.locator("tbody tr");
+      await expect(rows).toHaveCount(12);
+      await expect(rows.first().getByRole("rowheader")).toContainText("2025-12-01");
+      await expect(rows.last().getByRole("rowheader")).toContainText("2026-11-01");
+      await expect(rows.first()).toContainText("125,430 km");
+
+      // A dated period restores the interval control, the kept daily interval and the dates.
+      const restored = state.requests.length;
+      await periodSelect(page).selectOption("lastMonth");
+      await expect(interval).toBeVisible();
+      await expect(interval.getByRole("button", { name: "Daily", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await loaded(page);
+      await expect(kpiValues(page).first()).toHaveText("125,430 km");
+      await expect(breakdownItems(routesCard(page)).first()).toContainText("9 trips");
+      await expect(breakdownItems(cargoCard(page)).first()).toContainText("10 trips");
+      await expect(sourceCard(page).locator(".dashboard-source-legend li").first()).toContainText(
+        "32 trips",
+      );
+      const dated = state.requests.slice(restored);
+      for (const path of [...periodPaths, breakdownApi]) {
+        const requests = dated.filter((url) => url.pathname === path);
+        expect(requests).toHaveLength(path === breakdownApi ? 3 : 1);
+        for (const url of requests) {
+          expect(url.searchParams.get("fromDate")).toBe("2026-10-01");
+          expect(url.searchParams.get("toDateExclusive")).toBe("2026-11-01");
+          expect(url.searchParams.has("period")).toBe(false);
+        }
+      }
+      expect(lastRequest(state, "/api/v1/analytics/company")?.searchParams.get("granularity")).toBe(
+        "day",
+      );
+      expect(state.rejected).toEqual([]);
+    },
+  );
+
+  test(
+    "rereads all time after a failed timezone on Retry",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      const state = await mockDashboardRoutes(page, {
+        filterAware: true,
+        failures: { stats: 503, analytics: 503 },
+      });
+      await page.goto("/account/dashboard");
+      const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
+      await expect(alert).toBeVisible();
+      await periodSelect(page).selectOption("allTime");
+      await expect
+        .poll(() =>
+          state.requests.filter(
+            (url) =>
+              url.pathname === "/api/v1/analytics/company" &&
+              url.searchParams.get("period") === "all_time",
+          ),
+        )
+        .toHaveLength(1);
+      await expect(alert).toBeVisible();
+
+      // The zone changes from the UTC fallback to Moscow, but all time has no dates: Retry must
+      // still refetch every all-time read, once.
+      delete state.failures.stats;
+      delete state.failures.analytics;
+      state.hold("stats");
+      const before = state.requests.length;
+      await alert.getByRole("button", { name: "Retry", exact: true }).click();
+      await expect.poll(() => requestsTo(state, statsPath).length).toBe(2);
+      state.release("stats");
+      await expect(kpiValues(page).first()).toHaveText("1,505,160 km");
+      await expect(breakdownItems(routesCard(page))).toHaveCount(5);
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      const reads = (path: string, dimension: string | null) =>
+        state.requests
+          .slice(before)
+          .filter(
+            (url) =>
+              url.pathname === path &&
+              (dimension === null || url.searchParams.get("dimension") === dimension),
+          )
+          .map((url) => url.searchParams.get("period"));
+      const all = [
+        ["/api/v1/analytics/company", null],
+        ["/api/v1/analytics/leaderboard", null],
+        [breakdownApi, "route"],
+        [breakdownApi, "cargo"],
+        [breakdownApi, "source"],
+      ] as const;
+      for (const [path, dimension] of all)
+        await expect.poll(() => reads(path, dimension)).toEqual(["all_time"]);
+      // Exactly once: nothing follows.
+      await page.waitForTimeout(300);
+      for (const [path, dimension] of all) expect(reads(path, dimension)).toEqual(["all_time"]);
+      expect(state.rejected).toEqual([]);
+    },
+  );
+
+  test(
+    "requests the breakdowns per dimension, game and language",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      const state = await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      const routes = routesCard(page);
+      const cargo = cargoCard(page);
+      const source = sourceCard(page);
+      await expect(breakdownItems(routes)).toHaveCount(5);
+      await expect(breakdownItems(cargo)).toHaveCount(5);
+      await expect(source.locator(".dashboard-source-legend li")).toHaveCount(2);
+      for (const dimension of ["route", "cargo", "source"] as const) {
+        const [url, ...extra] = breakdownRequests(state, dimension);
+        expect(extra).toEqual([]);
+        expect(url?.searchParams.get("locale")).toBe("en");
+        expect(url?.searchParams.get("fromDate")).toBe("2026-11-01");
+        expect(url?.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+        expect(url?.searchParams.get("limit")).toBe(dimension === "source" ? null : "5");
+        expect(url?.searchParams.has("game")).toBe(false);
+      }
+
+      // Ranked items with game chips for all games, exact counts, remainder and undetermined.
+      await expect(breakdownItems(routes)).toHaveText([
+        "ATSSeattle → Portland9 trips",
+        "ETS2Munich · München → Warszawa8 trips",
+        "ATSPhoenix → Seattle6 trips",
+        "ETS2Praha → Wien5 trips",
+        "ETS2Saint Petersburg → Nizhny Novgorod3 trips",
+      ]);
+      await expect(routes.locator(".dashboard-breakdown-extra li")).toHaveText([
+        "Other routes8 trips",
+        "City not recognized3 trips",
+      ]);
+      await expect(routes.locator(".dashboard-breakdown-bar")).toHaveCount(5);
+      await expect(breakdownItems(cargo)).toHaveText([
+        "ATSLumber10 trips",
+        "ETS2Medical Vaccines7 trips",
+        "ATSGravel6 trips",
+        "ETS2Steel Coils5 trips",
+        "ETS2Fresh Fish4 trips",
+      ]);
+      await expect(cargo.locator(".dashboard-breakdown-extra li")).toHaveText([
+        "Other cargo6 trips",
+        "Cargo not recognized4 trips",
+      ]);
+      await expect(source.locator(".dashboard-source-legend li")).toHaveText([
+        "Telemetry32 trips76%",
+        "Manual reports10 trips24%",
+      ]);
+      await expect(source.locator(".dashboard-source-bar > span")).toHaveCount(2);
+      await expect(source).toContainText("Manual reports count after review in Dispatch.");
+      for (const card of [routes, cargo, source])
+        await expect(card).not.toContainText(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+      await expect(page.locator(".dashboard-breakdowns [aria-busy='true']")).toHaveCount(0);
+
+      // Russian labels for the interface language, with the English-fallback marker.
+      await switchLanguage(page, "ru");
+      await expect(breakdownItems(routes).nth(3)).toHaveText(
+        "ETS2Прага → Wien · Показано на английском5 рейсов",
+      );
+      await expect(breakdownItems(routes).nth(1)).toHaveText(
+        "ETS2Мюнхен · München → Варшава8 рейсов",
+      );
+      await expect(breakdownItems(routes).nth(4)).toContainText("3 рейса");
+      await expect(breakdownItems(cargo).nth(2)).toHaveText(
+        "ATSGravel · Показано на английском6 рейсов",
+      );
+      await expect(source.locator(".dashboard-source-legend li").first()).toHaveText(
+        /^Телеметрия32 рейса76\s%$/,
+      );
+      await expect(source).toContainText(
+        "Ручные отчёты попадают в статистику после проверки в Диспетчерской.",
+      );
+      for (const dimension of ["route", "cargo", "source"] as const)
+        await expect
+          .poll(
+            () =>
+              breakdownRequests(state, dimension).filter(
+                (url) => url.searchParams.get("locale") === "ru",
+              ).length,
+          )
+          .toBe(1);
+
+      // One game: requests with the game, no chips.
+      await gameGroup(page).getByRole("button", { name: "ETS2", exact: true }).click();
+      await expect(breakdownItems(routes)).toHaveCount(3);
+      await expect(routes.locator(".dashboard-game")).toHaveCount(0);
+      await expect(cargo.locator(".dashboard-game")).toHaveCount(0);
+      await expect(source.locator(".dashboard-source-legend li")).toHaveText([
+        /^Телеметрия17 рейсов85\s%$/,
+        /^Ручные отчёты3 рейса15\s%$/,
+      ]);
+      await expect(breakdownItems(cargo)).toHaveCount(3);
+      for (const dimension of ["route", "cargo", "source"] as const)
+        expect(
+          breakdownRequests(state, dimension).filter(
+            (url) => url.searchParams.get("game") === "ets2",
+          ),
+        ).toHaveLength(1);
+      expect(state.rejected).toEqual([]);
+    },
+  );
+
+  test(
+    "shows empty breakdowns without bars or shares",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDashboardRoutes(page);
+      state.emptyBreakdowns = true;
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      for (const card of [routesCard(page), cargoCard(page), sourceCard(page)]) {
+        await expect(
+          card.getByText("No accepted trips in the selected period", { exact: true }),
+        ).toBeVisible();
+        await expect(card).not.toContainText(/0\s?%/);
+        await expect(card.getByRole("button")).toHaveCount(0);
+        await expect(card).toHaveAttribute("aria-busy", "false");
+      }
+      await expect(page.locator(".dashboard-source-bar, .dashboard-breakdown-bar")).toHaveCount(0);
+      await expect(kpiValues(page).first()).toHaveText("125,430 km");
+      await switchLanguage(page, "ru");
+      await expect(
+        sourceCard(page).getByText("За выбранный период нет принятых рейсов", { exact: true }),
+      ).toBeVisible();
+    },
+  );
+
+  test(
+    "shows unrecognized trips without an empty list and as a third source part",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDashboardRoutes(page);
+      state.unrecognizedBreakdowns = true;
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      // Every route and cargo trip is unrecognized: no ranked list, bars or empty state.
+      for (const [card, text] of [
+        [routesCard(page), "City not recognized42 trips"],
+        [cargoCard(page), "Cargo not recognized42 trips"],
+      ] as const) {
+        await expect(card.locator(".dashboard-breakdown-extra li")).toHaveText([text]);
+        await expect(card.locator(".dashboard-breakdown-list")).toHaveCount(0);
+        await expect(card.locator("ol, .dashboard-breakdown-bar")).toHaveCount(0);
+        await expect(card.locator(".dashboard-empty")).toHaveCount(0);
+      }
+      // The neutral third part follows telemetry and manual reports, with its count and share.
+      const source = sourceCard(page);
+      await expect(source.locator(".dashboard-source-legend li")).toHaveText([
+        "Telemetry29 trips69%",
+        "Manual reports10 trips24%",
+        "Source not recognized3 trips7%",
+      ]);
+      await expect(source.locator(".dashboard-source-bar > span")).toHaveClass([
+        "dashboard-source-ets2telemetry",
+        "dashboard-source-manual",
+        "dashboard-source-undetermined",
+      ]);
+      await switchLanguage(page, "ru");
+      await expect(source.locator(".dashboard-source-legend li").last()).toHaveText(
+        /^Источник не определён3 рейса7\s%$/,
+      );
+      await expect(routesCard(page).locator(".dashboard-breakdown-extra li")).toHaveText(
+        "Город не распознан42 рейса",
+      );
+      expect(state.rejected).toEqual([]);
+    },
+  );
+
+  test(
+    "keeps a failing or loading breakdown inside its card",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDashboardRoutes(page, { failures: { breakdownRoute: 503 } });
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      const routes = routesCard(page);
+      await expect(
+        routes.getByText("Could not load popular routes", { exact: true }),
+      ).toBeVisible();
+      await expect(breakdownItems(cargoCard(page))).toHaveCount(5);
+      await expect(sourceCard(page).locator(".dashboard-source-legend li")).toHaveCount(2);
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(kpiValues(page).first()).toHaveText("125,430 km");
+      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
+
+      // A failed Retry keeps focus on Retry; a successful one hands it to the heading.
+      const retry = routes.getByRole("button", { name: "Retry", exact: true });
+      const reads = breakdownRequests(state, "route").length;
+      await retry.focus();
+      await page.keyboard.press("Enter");
+      await expect.poll(() => breakdownRequests(state, "route").length).toBe(reads + 1);
+      await page.waitForTimeout(300);
+      await expect(retry).toBeFocused();
+      delete state.failures.breakdownRoute;
+      await page.keyboard.press("Enter");
+      await expect(breakdownItems(routes)).toHaveCount(5);
+      await expect(routes.getByRole("heading", { level: 2 })).toBeFocused();
+
+      // A held card is busy on its own while the others and the page status line are idle.
+      state.hold("breakdownCargo");
+      await page.reload();
+      await loaded(page);
+      await expect(cargoCard(page)).toHaveAttribute("aria-busy", "true");
+      await expect(cargoCard(page).locator(".dashboard-skeleton")).toHaveCount(5);
+      await expect(breakdownItems(routesCard(page))).toHaveCount(5);
+      await expect(sourceCard(page)).toHaveAttribute("aria-busy", "false");
+      await expect(loadingStatus(page)).toHaveCount(0);
+      state.release("breakdownCargo");
+      await expect(breakdownItems(cargoCard(page))).toHaveCount(5);
+      await expect(cargoCard(page)).toHaveAttribute("aria-busy", "false");
+
+      state.failures.breakdownSource = 403;
+      await page.reload();
+      await loaded(page);
+      await expect(
+        sourceCard(page).getByText("No access to trip statistics", { exact: true }),
+      ).toBeVisible();
+      await expect(sourceCard(page).getByRole("button")).toHaveCount(0);
     },
   );
 });
