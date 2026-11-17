@@ -108,7 +108,9 @@ export async function registerIdentityRoutes(
               : "command";
     // Admission precedes parsing, authentication and every locked identity read.
     // request.ip uses the socket unless the exact configured ingress peer is hop zero.
-    await identity.rateLimit(category, request.ip);
+    // Signed-in reads spend a per-member budget; other reads use the source budget.
+    if (category === "read") await identity.admitRead(request.ip, request.headers.cookie);
+    else await identity.rateLimit(category, request.ip);
   });
   app.addHook("preValidation", async (request) => {
     const route = request.routeOptions.url;

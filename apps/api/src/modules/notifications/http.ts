@@ -34,8 +34,11 @@ export async function registerNotificationRoutes(
   app.addHook("onRequest", async (r) => {
     const p = r.routeOptions.url;
     if (!p || !owned(p)) return;
-    if (!p.startsWith("/api/v1/me/"))
-      await identity.rateLimit(r.method === "GET" ? "read" : "command", r.ip);
+    // Identity already admits /me routes.
+    if (!p.startsWith("/api/v1/me/")) {
+      if (r.method === "GET") await identity.admitRead(r.ip, r.headers.cookie);
+      else await identity.rateLimit("command", r.ip);
+    }
     const a = await actor(r);
     await service.authorize(a);
     if (r.method !== "GET") csrf.check(r, a);

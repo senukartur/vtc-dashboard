@@ -91,6 +91,9 @@ async function safe<T>(work: Promise<T>): Promise<T> {
     throw Object.assign(new Error("SYNTHETIC_ADMISSION_OPERATION_FAILED"), {
       statusCode:
         error && typeof error === "object" && "statusCode" in error ? error.statusCode : 500,
+      ...(error && typeof error === "object" && "retryAfter" in error
+        ? { retryAfter: error.retryAfter }
+        : {}),
     });
   }
 }
@@ -151,6 +154,21 @@ async function director() {
     ),
   );
   return signIn(String(rows[0]?.email));
+}
+// Moves the synthetic clock to `offset` ms into the next fixed minute.
+function alignWindow(offset: number) {
+  instant = (Math.floor(instant / 60000) + 1) * 60000 + offset;
+}
+const memberSlot = (userId: string) =>
+  createHmac("sha256", config.secret).update(`member-read:${userId}`).digest().readUInt16BE(0);
+async function limitRows(pattern: string) {
+  const [rows] = await safe(
+    control.query<RowDataPacket[]>(
+      "SELECT bucket,count FROM identity_limits WHERE bucket LIKE ? ORDER BY bucket",
+      [pattern],
+    ),
+  );
+  return rows.map((row) => ({ bucket: String(row.bucket), count: Number(row.count) }));
 }
 async function sessionCount(id: string) {
   const [rows] = await safe(
@@ -380,8 +398,140 @@ test("non-read source categories and actor namespaces retain twenty admissions i
   expect(rows.every((r) => Number(r.count) === 20)).toBe(true);
 });
 
+test("a signed-in member spends one per-account read budget across racing services and windows, separate from others", async () => {
+  const member = await addMember(),
+    other = await addMember();
+  expect(memberSlot(other.id)).not.toBe(memberSlot(member.id));
+  const owner = identity(),
+    source = "synthetic-member-read-source";
+  alignWindow(15200);
+  for (let i = 0; i < 239; i++) await safe(owner.admitRead(source, member.cookie));
+  const results = await Promise.allSettled(
+    Array.from({ length: 3 }, () => safe(identity().admitRead(source, member.cookie))),
+  );
+  expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  expect(results.filter((r) => r.status === "rejected")).toHaveLength(2);
+  for (const result of results)
+    if (result.status === "rejected")
+      expect(result.reason).toMatchObject({ statusCode: 429, retryAfter: 45 });
+  await expect(safe(identity().admitRead(source, member.cookie))).rejects.toMatchObject({
+    statusCode: 429,
+    retryAfter: 45,
+  });
+  expect(await limitRows("member:read:%")).toEqual([
+    { bucket: `member:read:${memberSlot(member.id)}`, count: 241 },
+  ]);
+  // Member reads never touch the source slot or any global read row.
+  expect(await limitRows("source:read:%")).toEqual([]);
+  expect(await limitRows("global:read")).toEqual([]);
+  // Another member and an anonymous reader from the same source are unaffected.
+  await safe(identity().admitRead(source, other.cookie));
+  await safe(identity().admitRead(source, undefined));
+  expect(await limitRows("member:read:%")).toHaveLength(2);
+  expect(await limitRows("source:read:%")).toEqual([
+    { bucket: expect.stringMatching(/^source:read:\d+$/), count: 1 },
+  ]);
+  instant += 60000;
+  await safe(identity().admitRead(source, member.cookie));
+  expect(await limitRows(`member:read:${memberSlot(member.id)}`)).toEqual([
+    { bucket: `member:read:${memberSlot(member.id)}`, count: 1 },
+  ]);
+}, 120000);
+test("missing, forged, logged-out and expired session cookies fall back to the source and global read limits", async () => {
+  const forgedMember = await addMember(),
+    loggedOut = await addMember(),
+    expired = await addMember();
+  // Re-sign the member's real session token with a foreign secret.
+  const name = "vtc_dev_session",
+    value = forgedMember.cookie
+      .split("; ")
+      .find((pair) => pair.startsWith(`${name}=`))
+      ?.slice(name.length + 1);
+  const signed = decodeURIComponent(value ?? ""),
+    token = signed.slice(0, Math.max(0, signed.lastIndexOf(".")));
+  expect(token.length).toBeGreaterThan(0);
+  const forgedSignature = createHmac("sha256", randomBytes(32).toString("hex"))
+    .update(token)
+    .digest("base64");
+  const forged = `${name}=${encodeURIComponent(`${token}.${forgedSignature}`)}`;
+  await safe(identity().logout(loggedOut.actor, new Headers({ cookie: loggedOut.cookie })));
+  await safe(
+    control.query("UPDATE identity_sessions SET expires_at = ? WHERE user_id = ?", [
+      new Date("2001-01-01T00:00:00.000Z"),
+      expired.id,
+    ]),
+  );
+  const owner = identity(),
+    source = "synthetic-anonymous-read-source";
+  alignWindow(20500);
+  for (const cookie of [undefined, forged, loggedOut.cookie, expired.cookie])
+    for (let i = 0; i < 10; i++) await safe(owner.admitRead(source, cookie));
+  // Better Auth deletes the expired session it found; the member keeps no live session.
+  expect(await sessionCount(expired.id)).toBe(0);
+  expect(await limitRows("member:read:%")).toEqual([]);
+  expect(await limitRows("global:read")).toEqual([{ bucket: "global:read", count: 40 }]);
+  expect(await limitRows("source:read:%")).toEqual([
+    { bucket: expect.stringMatching(/^source:read:\d+$/), count: 40 },
+  ]);
+  for (const cookie of [undefined, forged, loggedOut.cookie, expired.cookie])
+    await expect(safe(identity().admitRead(source, cookie))).rejects.toMatchObject({
+      statusCode: 429,
+      retryAfter: 40,
+    });
+  expect(await limitRows("global:read")).toEqual([{ bucket: "global:read", count: 40 }]);
+});
+test("member reads pass over an exhausted source and global read budget until their own budget ends, before authentication", async () => {
+  const admin = await director(),
+    owner = identity();
+  alignWindow(30000);
+  for (let n = 0; n < 40; n++) await safe(owner.rateLimit("read", "127.0.0.1"));
+  const used = new Set([createHmac("sha256", config.secret).update("127.0.0.1").digest()[0]]);
+  for (let i = 0; used.size < 5; i++) {
+    const source = `synthetic-global-read-${i}`,
+      key = createHmac("sha256", config.secret).update(source).digest()[0];
+    if (used.has(key)) continue;
+    used.add(key);
+    for (let n = 0; n < 40; n++) await safe(owner.rateLimit("read", source));
+  }
+  expect(await limitRows("global:read")).toEqual([{ bucket: "global:read", count: 200 }]);
+  const app = await createApp({ checkReadiness: async () => true, identity: owner });
+  try {
+    const urls = [
+      "/api/v1/me",
+      "/api/v1/me/email-change",
+      "/api/v1/members",
+      `/api/v1/members/${admin.actor.userId}`,
+    ];
+    for (let i = 0; i < 60; i++) {
+      const url = urls[i % urls.length] as string;
+      const response = await app.inject({ url, headers: { cookie: admin.cookie } });
+      expect(response.statusCode, `${url} ${i}`).toBe(200);
+    }
+    const anonymous = await app.inject({ url: "/api/v1/me" });
+    expect(anonymous.statusCode).toBe(429);
+    expect(anonymous.headers["retry-after"]).toBe("30");
+    for (let i = 60; i < 240; i++) await safe(owner.admitRead("198.51.100.23", admin.cookie));
+    const spies = (["authenticate", "current"] as const).map((method) =>
+      vi.spyOn(owner, method).mockImplementation(async () => {
+        throw new Error("SYNTHETIC_DENIED_WORK_REACHED");
+      }),
+    );
+    try {
+      const denied = await app.inject({ url: "/api/v1/me", headers: { cookie: admin.cookie } });
+      expect(denied.statusCode).toBe(429);
+      expect(denied.headers["retry-after"]).toBe("30");
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  } finally {
+    await app.close();
+  }
+}, 120000);
+
 test("every owned route rejects a denied socket source before actor/current/crypto or command work, ignoring forwarded addresses", async () => {
   const owner = identity();
+  alignWindow(15200);
   for (const category of ["csrf", "login", "challenge", "command", "read"] as const)
     for (let n = 0; n < (category === "read" ? 40 : 20); n++)
       await safe(owner.rateLimit(category, "127.0.0.1"));
@@ -433,7 +583,10 @@ test("every owned route rejects a denied socket source before actor/current/cryp
         },
       });
       expect(response.statusCode).toBe(429);
-      expect(response.headers["retry-after"]).toBe("60");
+      // Reads report the exact rest of their fixed minute; other categories keep 60.
+      expect(response.headers["retry-after"]).toBe(
+        method === "GET" && url !== "/api/v1/auth/csrf" ? "45" : "60",
+      );
     }
     for (const spy of spies) expect(spy.mock.calls.length).toBe(0);
     expect(crypto.mock.calls.length).toBe(0);

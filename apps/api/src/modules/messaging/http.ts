@@ -13,8 +13,9 @@ export async function registerMessagingRoutes(
     csrf = csrfProtection(identity.config);
   const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
   app.addHook("onRequest", async (request) => {
-    if (request.routeOptions.url === path || request.routeOptions.url === `${path}/resends`)
-      await identity.rateLimit(request.method === "GET" ? "read" : "command", request.ip);
+    if (request.routeOptions.url !== path && request.routeOptions.url !== `${path}/resends`) return;
+    if (request.method === "GET") await identity.admitRead(request.ip, request.headers.cookie);
+    else await identity.rateLimit("command", request.ip);
   });
   app.addHook("preValidation", async (request) => {
     if (request.routeOptions.url === `${path}/resends` && request.body !== undefined)

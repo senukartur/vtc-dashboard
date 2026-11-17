@@ -51,7 +51,8 @@ export async function registerReconciliationRoutes(
     return Number(match.slice(2, -1));
   }
   app.addHook("onRequest", async (r) => {
-    await identity.rateLimit(r.method === "GET" ? "read" : "command", r.ip);
+    if (r.method === "GET") await identity.admitRead(r.ip, r.headers.cookie);
+    else await identity.rateLimit("command", r.ip);
     const current = await actor(r);
     await service.authorize(current);
     if (r.method !== "GET") {

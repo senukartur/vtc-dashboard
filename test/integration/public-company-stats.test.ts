@@ -466,7 +466,7 @@ test("I8: unknown query parameters are rejected as no-store 422", async () => {
   expectNoStoreError(await get(`${path}?foo=1`), 422, "INVALID_PAYLOAD");
 });
 
-test("I7: the public read limit returns 429 with Retry-After and no-store", async () => {
+test("I7: the public read limit returns 429 with the exact Retry-After and no-store", async () => {
   identityNow = new Date("2030-01-01T00:00:30.000Z");
   try {
     for (let i = 0; i < 40; i++) {
@@ -475,7 +475,8 @@ test("I7: the public read limit returns 429 with Retry-After and no-store", asyn
     }
     const limited = await get(path, {}, "198.51.100.7");
     expectNoStoreError(limited, 429, "RATE_LIMITED");
-    expect(limited.headers["retry-after"]).toBe("60");
+    // Read limits report the exact wait until their fixed minute ends.
+    expect(limited.headers["retry-after"]).toBe("30");
   } finally {
     identityNow = null;
   }
