@@ -154,6 +154,37 @@ function failAfterInsert(tableName: string): UnitOfWork {
     },
   };
 }
+/** Records the table of every `select().from(table)` read made through the unit. */
+function recordReads(tables: string[]): UnitOfWork {
+  return {
+    run: (command) => unit.run(command),
+    close: async () => {},
+    client(tx) {
+      const original = unit.client(tx);
+      return new Proxy(original, {
+        get(target, property) {
+          const value = Reflect.get(target, property);
+          if (property === "select" && typeof value === "function")
+            return (...args: unknown[]) => {
+              const builder = Reflect.apply(value, target, args) as object;
+              return new Proxy(builder, {
+                get(inner, key) {
+                  const method = Reflect.get(inner, key);
+                  if (key === "from" && typeof method === "function")
+                    return (table: Parameters<typeof getTableName>[0], ...rest: unknown[]) => {
+                      tables.push(getTableName(table));
+                      return Reflect.apply(method, inner, [table, ...rest]);
+                    };
+                  return typeof method === "function" ? method.bind(inner) : method;
+                },
+              });
+            };
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    },
+  };
+}
 const input = (patch: Partial<ApplicationInput> = {}): ApplicationInput => ({
   nickname: "Fictional Applicant",
   email: `${newId()}@example.invalid`,
@@ -340,7 +371,9 @@ test("a /profiles/ submission commits its check row and first job, and the worke
   const list = await admissions.list(director);
   const listed = list.items.find((item) => item.id === app.id);
   expect(listed).toBeDefined();
-  expect(listed).not.toHaveProperty("truckersmpCheck");
+  expect(listed?.truckersmpCheck).toEqual(
+    (await admissions.detail(director, app.id)).truckersmpCheck,
+  );
   expect(listed?.fields).toMatchObject({ referralSource: "other" });
   expect((await admissions.list(director, { historyId: app.id })).items[0]).not.toHaveProperty(
     "truckersmpCheck",
@@ -396,6 +429,81 @@ test("not found, no VTC, staff accounts without a ban count and vanity links sta
   expect(await status(admissions.recheckTruckers(director, vanity.id, newId()))).toBe(409);
   expect(await count("admissions_command_results")).toBe(receipts);
   expect(await check(vanity.id)).toBeUndefined();
+});
+
+test("the queue list carries each application's check in one batched read; history omits it", async () => {
+  const submit = (n: number, nickname: string, owner = admissions) =>
+    submitted(owner, input({ nickname, steamProfileUrl: profileUrl(n) }));
+  respond = async () => player({ vtc: { inVtc: false, id: null, name: null, tag: null } });
+  const clean = await submit(20, "Fictional Clean Applicant");
+  await work();
+  respond = async () => player({}, { any: true, count: 1 });
+  const banned = await submit(21, "Fictional Banned Applicant");
+  await work();
+  respond = async () => ({ found: false, profile: null, bans: null });
+  const absent = await submit(22, "Fictional Absent Applicant");
+  await work();
+  respond = fail("invalid_response");
+  const broken = await submit(23, "Fictional Failed Applicant");
+  await work();
+  const vanity = await submitted(
+    admissions,
+    input({
+      nickname: "Fictional Vanity Applicant",
+      steamProfileUrl: "https://steamcommunity.com/id/fictional-list-applicant",
+    }),
+  );
+  const unrequested = await submit(24, "Fictional Unrequested Applicant", harness({}, unit, null));
+  const running = await submit(25, "Fictional Running Applicant");
+  for (const app of [vanity, unrequested]) expect(await check(app.id)).toBeUndefined();
+  const mine = [clean, banned, absent, broken, vanity, unrequested, running].map((app) => app.id);
+
+  const tables: string[] = [],
+    observed = harness({}, recordReads(tables));
+  const listed = new Map<string, unknown>();
+  let cursor: string | undefined,
+    pages = 0;
+  do {
+    tables.length = 0;
+    const page = await observed.list(director, { limit: 100, ...(cursor ? { cursor } : {}) });
+    pages++;
+    expect(tables.filter((table) => table === "admissions_truckers_checks")).toHaveLength(1);
+    for (const item of page.items) {
+      expect(item).toHaveProperty("truckersmpCheck");
+      listed.set(item.id, item.truckersmpCheck);
+    }
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor && !mine.every((id) => listed.has(id)));
+  expect(pages).toBeGreaterThan(0);
+  for (const id of mine)
+    expect(listed.get(id), id).toEqual((await admissions.detail(director, id)).truckersmpCheck);
+  expect(listed.get(clean.id)).toMatchObject({
+    state: "completed",
+    found: true,
+    bans: { any: false, count: 0 },
+    vtc: { inVtc: false },
+  });
+  expect(listed.get(banned.id)).toMatchObject({
+    state: "completed",
+    bans: { any: true, count: 1 },
+  });
+  expect(listed.get(absent.id)).toMatchObject({ state: "completed", found: false });
+  expect(listed.get(broken.id)).toMatchObject({ state: "failed", failure: "invalid_response" });
+  expect(listed.get(vanity.id)).toMatchObject({
+    state: "not_checked",
+    notCheckedReason: "steam_vanity_url",
+  });
+  expect(listed.get(unrequested.id)).toMatchObject({
+    state: "not_checked",
+    notCheckedReason: "not_requested",
+  });
+  expect(listed.get(running.id)).toMatchObject({ state: "checking", found: null });
+
+  tables.length = 0;
+  const history = await observed.list(director, { historyId: clean.id });
+  expect(history.items.length).toBeGreaterThan(0);
+  for (const item of history.items) expect(item).not.toHaveProperty("truckersmpCheck");
+  expect(tables).not.toContain("admissions_truckers_checks");
 });
 
 test("submission rolls back the application, check and job together when either check write fails", async () => {
@@ -684,7 +792,11 @@ test("recheck over HTTP needs applications.manage, CSRF, a UUID key and no body,
       headers: { cookie: directorCookie },
     });
     expect(listed.statusCode).toBe(200);
-    for (const item of listed.json().data.items) expect(item).not.toHaveProperty("truckersmpCheck");
+    // The queue list carries every check and passes the response schema; this one matches the detail.
+    for (const item of listed.json().data.items) expect(item).toHaveProperty("truckersmpCheck");
+    expect(
+      listed.json().data.items.find((item: { id: string }) => item.id === app.id)?.truckersmpCheck,
+    ).toMatchObject({ state: "completed", found: true });
     // A completed check starts generation 3 on a fresh key.
     const again = await server.inject({
       method: "POST",
