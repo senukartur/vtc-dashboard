@@ -159,6 +159,8 @@ test(
       await page.keyboard.press(key);
       await expect(content).toBeVisible();
       await expect(content).toContainText("A level decides which trips the company credits.");
+      // Focus moves into the explanation, so a screen reader reads it.
+      await expect(content).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(content).toHaveCount(0);
       await expect(trigger).toBeFocused();
@@ -170,15 +172,19 @@ test(
   "an info tip shows on hover over an opaque surface, and a click keeps it open",
   browserCase(["@functional"]),
   async ({ page }) => {
+    await page.clock.install();
     await open(page, false);
     const trigger = page.getByRole("button", { name: "How qualifications work", exact: true });
     const content = page.locator(".info-tip-content");
     await trigger.hover();
     await expect(content).toBeVisible();
     // The page behind must not show through the explanation.
-    expect(await content.evaluate((node) => getComputedStyle(node).backgroundColor)).toBe(
-      "rgb(18, 26, 41)",
-    );
+    const surface = await content.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { background: style.backgroundColor, border: style.borderTopStyle };
+    });
+    expect(surface.background).not.toBe("rgba(0, 0, 0, 0)");
+    expect(surface.border).toBe("solid");
     await content.hover();
     await expect(content).toBeVisible();
     await page.mouse.move(0, 0);
@@ -187,11 +193,34 @@ test(
     await trigger.hover();
     await trigger.click();
     await page.mouse.move(0, 0);
-    // Longer than the hover close delay, so a hover-only tip would be gone by now.
-    await page.waitForTimeout(400);
+    // Well past the hover close delay: only a pinned tip is still shown.
+    await page.clock.runFor(1000);
     await expect(content).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(content).toHaveCount(0);
+  },
+);
+
+test(
+  "a hover preview leaves keyboard focus where it was",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await open(page, true, "/account/qualifications/new?game=ets2");
+    const name = page.getByLabel("Name", { exact: true });
+    const content = page.locator(".info-tip-content");
+    await name.focus();
+    await page.getByRole("button", { name: "About trip limits", exact: true }).hover();
+    await expect(content).toBeVisible();
+    // Straight on to a neighbouring tip: the first one closing must not close the second.
+    const distance = page.getByRole("button", { name: "About trip distance", exact: true });
+    await distance.hover();
+    await expect(content).toHaveCount(1);
+    await expect(content).toContainText("The actual distance counts");
+    await page.mouse.move(0, 0);
+    await expect(content).toHaveCount(0);
+    await expect(name).toBeFocused();
+    await page.keyboard.type("Fictional");
+    await expect(name).toHaveValue("Fictional");
   },
 );
 

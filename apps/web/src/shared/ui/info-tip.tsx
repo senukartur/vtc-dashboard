@@ -21,6 +21,8 @@ export function InfoTip({
   const [open, setOpen] = useState(false);
   // A click turns a hover preview into an explanation that stays until Escape or an outside click.
   const pinned = useRef(false);
+  // A hover preview never takes focus, so its close must not move focus onto the button either.
+  const hoverClosed = useRef(false);
   const closeTimer = useRef<number | undefined>(undefined);
   const cancelClose = () => window.clearTimeout(closeTimer.current);
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
@@ -33,7 +35,10 @@ export function InfoTip({
   const hoverEnd = (event: PointerEvent) => {
     if (event.pointerType !== "mouse" || pinned.current) return;
     cancelClose();
-    closeTimer.current = window.setTimeout(() => setOpen(false), CLOSE_DELAY_MS);
+    closeTimer.current = window.setTimeout(() => {
+      hoverClosed.current = true;
+      setOpen(false);
+    }, CLOSE_DELAY_MS);
   };
 
   return (
@@ -42,6 +47,7 @@ export function InfoTip({
       onOpenChange={(next) => {
         cancelClose();
         pinned.current = next;
+        hoverClosed.current = false;
         setOpen(next);
       }}
     >
@@ -79,8 +85,14 @@ export function InfoTip({
         className="info-tip-content"
         onPointerEnter={hoverStart}
         onPointerLeave={hoverEnd}
-        // The text has nothing to operate, so focus stays on the button while it is shown.
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        // Keyboard and tap opens move focus into the text so a screen reader reads it; hover leaves focus alone.
+        onOpenAutoFocus={(event) => {
+          if (!pinned.current) event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          if (hoverClosed.current) event.preventDefault();
+          hoverClosed.current = false;
+        }}
       >
         {title && <strong>{title}</strong>}
         {children}
