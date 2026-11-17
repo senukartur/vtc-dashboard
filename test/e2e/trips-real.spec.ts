@@ -1000,9 +1000,10 @@ test(
       });
       expect(trip.manualRevision?.fields).not.toHaveProperty("destinationCompanyId");
       expect(trip.evidence[0]?.state).toBe("ready");
-      await expect(
-        page.getByRole("region", { name: "Driver-reported reference facts" }),
-      ).toContainText("Fictional North Depot");
+      // The trip block of the author page names the reported company.
+      await expect(page.getByRole("region", { name: "Trip", exact: true })).toContainText(
+        "Fictional North Depot",
+      );
     } finally {
       await fixture.close();
     }
