@@ -10,18 +10,21 @@ import { mockTrips } from "./support/trip-ui.ts";
 
 // A read limited by the server waits for its Retry-After, retries once, then shows a
 // clear "too many requests" state. Every response here is a fictional mock.
-const limitedResponse = (route: Route) =>
+const limitedResponse = (route: Route, seconds: string) =>
   route.fulfill({
     status: 429,
-    headers: { "Retry-After": "1" },
+    headers: { "Retry-After": seconds },
     json: {
       error: { code: "RATE_LIMITED", messageKey: "errors.rate_limited", retryable: false },
       meta: { requestId: "synthetic-rate-limit" },
     },
   });
 
-/** Answers the next `times` GETs matching `path` with 429; later ones reach the mocks. */
-async function limit(page: Page, path: RegExp, times: number) {
+/**
+ * Answers the next `times` GETs matching `path` with 429 and `Retry-After: seconds`; later ones
+ * reach the mocks.
+ */
+async function limit(page: Page, path: RegExp, times: number, seconds = "1") {
   const state = { requests: 0, remaining: times };
   await page.route(
     (url) => path.test(url.pathname),
@@ -30,7 +33,7 @@ async function limit(page: Page, path: RegExp, times: number) {
       state.requests++;
       if (state.remaining <= 0) return route.fallback();
       state.remaining--;
-      return limitedResponse(route);
+      return limitedResponse(route, seconds);
     },
   );
   return state;
@@ -226,24 +229,34 @@ test(
   browserCase(["@functional"]),
   async ({ page }) => {
     await mockDashboardRoutes(page);
+    // A 3-second wait for the month reads, so the held-error checks below fit inside it.
     const member = await limit(
       page,
       new RegExp(`^/api/v1/members/${fixtureId}/analytics$`),
       Number.POSITIVE_INFINITY,
+      "3",
     );
     const trips = await limit(page, /^\/api\/v1\/trips$/, Number.POSITIVE_INFINITY);
     const event = await limit(page, /^\/api\/v1\/me\/upcoming-event$/, Number.POSITIVE_INFINITY);
     await open(page, "en", "/account/dashboard");
     await expect(title(page)).toHaveText("My overview");
+    const monthNotice = "Too many requests Wait 3 s, then try again.";
     const generic = {
       "My November": "Could not load your month statistics",
       "My daily distance": "Could not load your month statistics",
       "Recent trips": "Could not load your recent trips",
       "Upcoming Event": "Could not load the upcoming event",
     };
-    for (const [name, text] of Object.entries(generic)) {
+    const expected: Record<keyof typeof generic, string> = {
+      "My November": monthNotice,
+      "My daily distance": monthNotice,
+      "Recent trips": notice.en,
+      "Upcoming Event": notice.en,
+    };
+    for (const [name, text] of Object.entries(generic) as [keyof typeof generic, string][]) {
       const block = region(page, name);
-      await expect(noticeIn(block)).toHaveText(notice.en);
+      // The month reads fail only after their 3-second wait and one retry.
+      await expect(noticeIn(block)).toHaveText(expected[name], { timeout: 10000 });
       await expect(block.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
       await expect(block.getByText(text)).toHaveCount(0);
     }
@@ -266,14 +279,15 @@ test(
     expect(await noticeIn(card).count()).toBe(1);
     // Still inside the Retry-After wait: neither read has been retried yet.
     expect(member.requests).toBe(before + 2);
-    // A second press during the wait reuses the reads in flight and keeps the notice.
+    // A second press during the wait starts no request (TanStack continues the in-flight
+    // retryer of a query without data) and keeps the notice.
     await page.keyboard.press("Enter");
     expect(await card.getByText(generic["My November"]).count()).toBe(0);
     expect(await noticeIn(card).count()).toBe(1);
     expect(member.requests).toBe(before + 2);
-    await expect.poll(() => member.requests).toBe(before + 4);
+    await expect.poll(() => member.requests, { timeout: 10000 }).toBe(before + 4);
     await expect(retry).toBeFocused();
-    await expect(noticeIn(card)).toHaveText(notice.en);
+    await expect(noticeIn(card)).toHaveText(monthNotice);
 
     member.remaining = 0;
     await page.keyboard.press("Enter");
