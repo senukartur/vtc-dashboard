@@ -112,6 +112,15 @@
   background: var(--accent-soft);
   color: var(--focus);
 }
+.driver-profile-page .driver-membership {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.driver-profile-page .driver-access {
+  flex-shrink: 0;
+}
 .driver-profile-page .driver-chips {
   display: flex;
   flex-wrap: wrap;

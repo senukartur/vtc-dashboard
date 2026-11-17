@@ -18,6 +18,7 @@ import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { progressPercent } from "../dashboard/model.js";
 import type { QueryView } from "../dashboard/view-model.js";
 import { tripListTimestamp } from "../trips/list-model.js";
+import { accessHref } from "./directory-model.js";
 import {
   type Assignment,
   driverTripFilters,
@@ -26,6 +27,7 @@ import {
   type GameFilter,
   initial,
   type Level,
+  membershipLine,
   ladderFor,
   monthLabel,
   nextLevel,
@@ -79,6 +81,9 @@ export function ProfileHeader({
   profile,
   pending,
   isSelf,
+  canManage,
+  locale,
+  displayTimezone,
   assignments,
   levels,
   game,
@@ -88,6 +93,10 @@ export function ProfileHeader({
   profile: MemberProfile | undefined;
   pending: boolean;
   isSelf: boolean;
+  /** members.manage: links to the Members administration page for this member. */
+  canManage: boolean;
+  locale: Locale;
+  displayTimezone: string;
   assignments: Record<Game, Assignment | null>;
   levels: Record<Game, LevelsState>;
   game: GameFilter;
@@ -96,6 +105,7 @@ export function ProfileHeader({
 }) {
   const { t } = useTranslation("drivers");
   const member = profile?.member;
+  const since = profile ? membershipLine(profile, locale, displayTimezone, t) : null;
   const chips = member
     ? (["ets2", "ats"] as const).flatMap((g) => {
         const assignment = assignments[g];
@@ -142,6 +152,7 @@ export function ProfileHeader({
             </>
           )}
         </div>
+        {since && <p className="driver-membership">{since}</p>}
         {chips.length > 0 && (
           <p className="driver-chips">
             {chips.map((chip) => (
@@ -152,6 +163,11 @@ export function ProfileHeader({
           </p>
         )}
       </div>
+      {member && canManage && (
+        <Button asChild variant="outline" className="driver-access">
+          <Link to={accessHref(member)}>{t("profile.access")}</Link>
+        </Button>
+      )}
       {member && (
         <SegmentedControl
           className="driver-game-filter"
@@ -169,13 +185,19 @@ export function ProfileHeader({
   );
 }
 
-/** `onRetry` belongs to the page: it may have to reread the reporting timezone first. */
+/**
+ * `onRetry` belongs to the page: it may have to reread the reporting timezone first. The all-time
+ * item comes from the profile (all games, exact), so it stays when the analytics read fails;
+ * absent totals read "Unavailable", never 0.
+ */
 export function DriverKpis({
   query,
+  lifetime,
   locale,
   onRetry,
 }: {
   query: QueryView<Analytics>;
+  lifetime: DTO["LifetimeTripTotals"] | undefined;
   locale: Locale;
   onRetry: () => void;
 }) {
@@ -183,27 +205,50 @@ export function DriverKpis({
   const sectionRef = useRef<HTMLElement>(null);
   const analytics = query.data;
   const failure = !analytics && query.isError ? failureView(query.error) : null;
+  const allTime = (
+    <div className="driver-kpi driver-kpi-all">
+      <dt>{t("kpi.allTime")}</dt>
+      <dd>
+        <span className="driver-kpi-value">
+          {formatQuantity(lifetime?.actualDistanceM ?? null, "km", locale)}
+        </span>
+        {lifetime && (
+          <span className="driver-kpi-sub">
+            {t("kpi.allTimeSub", { trips: formatDecimal(String(lifetime.acceptedTrips), locale) })}
+          </span>
+        )}
+      </dd>
+    </div>
+  );
 
   let body: ReactNode;
   if (failure === "setup") {
-    body = <p className="driver-block-note">{t("kpi.setup")}</p>;
+    body = (
+      <>
+        <dl>{allTime}</dl>
+        <p className="driver-block-note">{t("kpi.setup")}</p>
+      </>
+    );
   } else if (failure) {
     body = (
-      <div className="driver-block-error">
-        <p>{t("kpi.error")}</p>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            // The button unmounts on success; keep focus inside the statistics region.
-            sectionRef.current?.focus();
-            onRetry();
-          }}
-        >
-          {t("kpi.retry")}
-        </Button>
-      </div>
+      <>
+        <dl>{allTime}</dl>
+        <div className="driver-block-error">
+          <p>{t("kpi.error")}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              // The button unmounts on success; keep focus inside the statistics region.
+              sectionRef.current?.focus();
+              onRetry();
+            }}
+          >
+            {t("kpi.retry")}
+          </Button>
+        </div>
+      </>
     );
   } else {
     const month = analytics?.buckets.at(-1);
@@ -238,6 +283,7 @@ export function DriverKpis({
     ];
     body = (
       <dl>
+        {allTime}
         {items.map((item) => (
           <div key={item.key} className="driver-kpi">
             <dt>{item.label}</dt>
@@ -457,7 +503,6 @@ export function DriverTrips({
   isSelf,
   game,
   member,
-  lifetime,
   locale,
   displayTimezone,
 }: {
@@ -465,7 +510,6 @@ export function DriverTrips({
   isSelf: boolean;
   game: Game | undefined;
   member: DTO["MemberSummary"];
-  lifetime: DTO["LifetimeTripTotals"] | undefined;
   locale: Locale;
   displayTimezone: string;
 }) {
@@ -582,14 +626,6 @@ export function DriverTrips({
         <h2 id={headingId} ref={headingRef} tabIndex={-1}>
           {t("trips.title")}
         </h2>
-        {lifetime && (
-          <span className="driver-muted">
-            {t("trips.lifetime", {
-              trips: formatDecimal(String(lifetime.acceptedTrips), locale),
-              distance: formatQuantity(lifetime.actualDistanceM, "km", locale),
-            })}
-          </span>
-        )}
         <span className="driver-muted driver-timezone">
           {t("trips.timezone", { timezone: displayTimezone })}
         </span>

@@ -98,14 +98,57 @@ export function assignmentsOf(id: string): DTO["Assignment"][] {
   return [];
 }
 
-export function profileFixture(id: string): DTO["EnvelopeMemberProfile"] {
-  const lifetimeTotals =
-    id === alphaId ? { acceptedTrips: 253, actualDistanceM: "64585250" } : undefined;
+/** Stage 4 profile facts per fictional member: latest join and accepted-trip totals. */
+const profileFacts: Record<
+  string,
+  { memberSince: string; lastAcceptedTripAt: string; lifetimeTotals: DTO["LifetimeTripTotals"] }
+> = {
+  [selfId]: {
+    memberSince: "2026-09-01T12:00:00.000Z",
+    lastAcceptedTripAt: "2026-11-13T12:00:00.000Z",
+    lifetimeTotals: { acceptedTrips: 2, actualDistanceM: "623000" },
+  },
+  [alphaId]: {
+    memberSince: "2026-03-12T09:00:00.000Z",
+    lastAcceptedTripAt: "2026-11-14T16:20:00.000Z",
+    lifetimeTotals: { acceptedTrips: 253, actualDistanceM: "64585250" },
+  },
+  [betaId]: {
+    memberSince: "2026-10-05T18:00:00.000Z",
+    lastAcceptedTripAt: "2026-11-14T10:05:00.000Z",
+    lifetimeTotals: { acceptedTrips: 1, actualDistanceM: "351000" },
+  },
+  [formerId]: {
+    memberSince: "2025-06-01T10:00:00.000Z",
+    lastAcceptedTripAt: "2026-02-10T20:30:00.000Z",
+    lifetimeTotals: { acceptedTrips: 87, actualDistanceM: "21400000" },
+  },
+};
+
+/**
+ * Profile with the live Stage 4 fields. `trips`: "on" (default) has lifetime totals and the last
+ * accepted trip, "none" a member without accepted trips (zero totals, null last trip), "off" the
+ * shape without the Trips module (both absent, never zero).
+ */
+export function profileFixture(
+  id: string,
+  trips: "on" | "none" | "off" = "on",
+): DTO["EnvelopeMemberProfile"] {
+  const facts = profileFacts[id] ?? {
+    memberSince: "2026-01-20T08:00:00.000Z",
+    lastAcceptedTripAt: "2026-11-11T19:00:00.000Z",
+    lifetimeTotals: { acceptedTrips: 12, actualDistanceM: "9800000" },
+  };
   return {
     data: {
       member: member(id),
       qualifications: assignmentsOf(id),
-      ...(lifetimeTotals ? { lifetimeTotals } : {}),
+      memberSince: facts.memberSince,
+      ...(trips === "on"
+        ? { lifetimeTotals: facts.lifetimeTotals, lastAcceptedTripAt: facts.lastAcceptedTripAt }
+        : trips === "none"
+          ? { lifetimeTotals: { acceptedTrips: 0, actualDistanceM: "0" }, lastAcceptedTripAt: null }
+          : {}),
     },
     meta,
   };
@@ -398,6 +441,320 @@ export function tripsFixture(
       items: matches.slice(0, limit),
       total: matches.length,
       nextCursor: options.nextCursor || matches.length > limit ? "NONFUNCTIONAL_CURSOR" : null,
+    },
+    meta,
+  };
+}
+
+// Drivers directory (VTC-145): a server-like listMembers over 18 active and 4 former fictional
+// members, with filter-bound cursors and the Trips-off and Qualifications-off shapes.
+
+export const directoryWindowEndsAt = "2026-11-14T12:00:00.000Z";
+
+type Code = (typeof codes)[number];
+type Seed = {
+  id: string;
+  nickname: string;
+  roles: DTO["MemberStage4DirectoryEntry"]["roles"];
+  former?: boolean;
+  trips: number;
+  km: string;
+  last: string | null;
+  ets2?: Code;
+  ats?: Code;
+};
+
+const seedId = (n: number) => `41000000-0000-4000-8000-000000000${String(200 + n)}`;
+function seed(
+  id: string,
+  nickname: string,
+  roles: Seed["roles"],
+  activity: [number, string, string | null],
+  levels: { ets2?: Code; ats?: Code } = {},
+): Seed {
+  const [trips, km, last] = activity;
+  return { id, nickname, roles, trips, km, last, ...levels };
+}
+const activeSeeds: Seed[] = [
+  seed(selfId, "Fictional Yukon Member", ["trainee"], [2, "623000", "2026-11-13T12:00:00.000Z"], {
+    ets2: "trainee",
+  }),
+  seed(
+    alphaId,
+    "AlphaHauler",
+    ["driver", "dispatcher"],
+    [14, "4210000", "2026-11-14T16:20:00.000Z"],
+    { ets2: "driver_ii", ats: "driver_iii" },
+  ),
+  seed(betaId, "BetaTrainee", ["trainee"], [1, "351000", "2026-11-14T10:05:00.000Z"], {
+    ets2: "trainee",
+  }),
+  seed(topId, "DeltaVeteran", ["driver"], [6, "1650000", "2026-11-11T19:00:00.000Z"], {
+    ets2: "driver_i",
+  }),
+  seed(seedId(1), "EchoRunner", ["driver"], [9, "3150000", "2026-11-13T09:30:00.000Z"], {
+    ets2: "driver_ii",
+    ats: "driver_ii",
+  }),
+  seed(seedId(2), "FoxtrotLane", ["driver"], [0, "0", null], { ets2: "driver_iii" }),
+  seed(seedId(3), "GolfCarrier", ["driver"], [0, "0", "2026-09-02T18:00:00.000Z"], {
+    ats: "driver_iii",
+  }),
+  seed(seedId(4), "HotelTransit", ["driver"], [4, "1020000", "2026-11-09T07:45:00.000Z"], {
+    ets2: "driver_iii",
+    ats: "driver_i",
+  }),
+  seed(seedId(5), "IndiaCargo", ["trainee"], [3, "765000", "2026-11-08T21:00:00.000Z"], {
+    ets2: "trainee",
+  }),
+  seed(seedId(6), "JulietRoute", ["driver"], [11, "3980000", "2026-11-12T08:15:00.000Z"], {
+    ets2: "driver_i",
+    ats: "driver_ii",
+  }),
+  seed(seedId(7), "KiloFreight", ["driver"], [5, "1410000", "2026-11-10T13:30:00.000Z"], {
+    ets2: "driver_ii",
+  }),
+  seed(
+    seedId(8),
+    "LimaConvoy",
+    ["driver", "dispatcher"],
+    [7, "2050000", "2026-11-11T11:00:00.000Z"],
+    { ets2: "driver_iii" },
+  ),
+  seed(seedId(9), "MikeHauler", ["driver"], [2, "540000", "2026-10-30T17:20:00.000Z"]),
+  seed(seedId(10), "NovemberRig", ["trainee"], [0, "0", null]),
+  seed(
+    seedId(11),
+    "OscarTrail",
+    ["director", "driver"],
+    [8, "2630000", "2026-11-12T19:40:00.000Z"],
+    { ets2: "driver_i", ats: "driver_i" },
+  ),
+  seed(
+    seedId(12),
+    "PapaLogistics",
+    ["deputy_director", "driver"],
+    [10, "3320000", "2026-11-13T15:10:00.000Z"],
+    { ets2: "driver_ii", ats: "driver_iii" },
+  ),
+  seed(seedId(13), "QuebecMile", ["driver"], [1, "298000", "2026-11-01T06:00:00.000Z"], {
+    ats: "trainee",
+  }),
+  seed(
+    seedId(14),
+    "Romeo Long Distance Hauler of the Northern Routes",
+    ["driver"],
+    [12, "4480000", "2026-11-14T08:00:00.000Z"],
+    { ets2: "driver_ii", ats: "driver_ii" },
+  ),
+];
+const formerSeeds: Seed[] = [
+  seed(formerId, "GammaRetired", [], [0, "0", "2026-02-10T20:30:00.000Z"]),
+  seed(seedId(15), "SierraPast", [], [1, "420000", "2026-11-02T16:45:00.000Z"]),
+  seed(seedId(16), "TangoEarlier", [], [0, "0", null]),
+  seed(seedId(17), "UniformGone", [], [0, "0", "2026-06-18T10:00:00.000Z"]),
+].map((item) => ({ ...item, former: true }));
+
+/** The fictional directory population, in no particular order. */
+export const directoryMembers = { active: activeSeeds, former: formerSeeds };
+
+function levelOf(game: Game, code: Code | undefined) {
+  if (!code) return null;
+  const index = codes.indexOf(code);
+  return { id: levelId(game, code), name: levelNames[game][index] ?? code, position: index + 1 };
+}
+
+export type DirectoryOptions = {
+  tripsOff?: boolean;
+  qualificationsOff?: boolean;
+  empty?: boolean;
+  /** Serve pages of at most this many rows, so the 18 members span several pages. */
+  pageCap?: number;
+};
+
+function entry(item: Seed, options: DirectoryOptions): DTO["MemberStage4DirectoryEntry"] {
+  return {
+    id: item.id,
+    nickname: item.nickname,
+    formerMember: !!item.former,
+    roles: item.roles,
+    ...(options.tripsOff
+      ? {}
+      : {
+          last30Days: { acceptedTrips: item.trips, actualDistanceM: item.km },
+          lastAcceptedTripAt: item.last,
+        }),
+    ...(options.qualificationsOff
+      ? {}
+      : {
+          levels: item.former
+            ? { ets2: null, ats: null }
+            : { ets2: levelOf("ets2", item.ets2), ats: levelOf("ats", item.ats) },
+        }),
+  };
+}
+
+/** Company-wide counters: constant under every filter, tab and cursor. */
+export function directoryCounts(
+  options: DirectoryOptions = {},
+): DTO["MemberStage4DirectoryCounts"] {
+  return {
+    active: activeSeeds.length,
+    former: formerSeeds.length,
+    ...(options.tripsOff
+      ? {}
+      : { droveLast30Days: activeSeeds.filter((item) => item.trips > 0).length }),
+  };
+}
+
+export type DirectoryResult =
+  | { status: 200; body: DTO["MemberStage4DirectoryListEnvelope"] }
+  | { status: 409 | 422; body: { error: { code: string } } };
+
+const sortKeys = ["nickname", "distance30d", "trips30d", "lastTrip"];
+const reject = (status: 409 | 422, code: string): DirectoryResult => ({
+  status,
+  body: { error: { code } },
+});
+
+/** The cursor binding: every parameter except the cursor and the page size. */
+function binding(search: URLSearchParams) {
+  const bound = new URLSearchParams(search);
+  bound.delete("cursor");
+  bound.delete("limit");
+  bound.sort();
+  return bound.toString();
+}
+
+function compareBy(sort: string | null, direction: 1 | -1) {
+  return (a: Seed, b: Seed) => {
+    if (sort === "lastTrip" && (a.last === null || b.last === null))
+      return a.last === b.last ? 0 : a.last === null ? 1 : -1;
+    const value =
+      sort === "nickname"
+        ? a.nickname.toLowerCase().localeCompare(b.nickname.toLowerCase())
+        : sort === "distance30d"
+          ? Number(a.km) - Number(b.km)
+          : sort === "trips30d"
+            ? a.trips - b.trips
+            : sort === "lastTrip"
+              ? (a.last ?? "").localeCompare(b.last ?? "")
+              : 0;
+    return value * direction;
+  };
+}
+
+/** Server-like `GET /members`: validation (422), filter-bound cursors (409), sort and page. */
+export function directoryResponse(
+  search: URLSearchParams,
+  options: DirectoryOptions = {},
+): DirectoryResult {
+  const status = search.get("status");
+  const sort = search.get("sort");
+  const order = search.get("order");
+  const role = search.get("role");
+  const term = search.get("search");
+  if (status && status !== "active" && status !== "former") return reject(422, "VALIDATION");
+  if (sort && !sortKeys.includes(sort)) return reject(422, "VALIDATION");
+  if (order && (!sort || (order !== "asc" && order !== "desc"))) return reject(422, "VALIDATION");
+  if (term !== null && (!term.trim() || Array.from(term.trim()).length > 128))
+    return reject(422, "VALIDATION");
+  if (options.tripsOff && sort && sort !== "nickname") return reject(422, "TRIPS_UNAVAILABLE");
+  for (const game of ["ets2", "ats"] as const) {
+    const value = search.get(`${game}Level`);
+    if (value === null) continue;
+    if (options.qualificationsOff) return reject(422, "QUALIFICATIONS_UNAVAILABLE");
+    if (!codes.some((code) => levelId(game, code) === value)) return reject(422, "UNKNOWN_LEVEL");
+  }
+  const limit = Math.min(Number(search.get("limit") ?? 25), options.pageCap ?? 100);
+  const cursor = search.get("cursor");
+  let offset = 0;
+  if (cursor) {
+    const separator = cursor.indexOf("|");
+    const position = Number(cursor.slice("fixture-directory:".length, separator));
+    if (
+      !cursor.startsWith("fixture-directory:") ||
+      separator < 0 ||
+      !Number.isInteger(position) ||
+      cursor.slice(separator + 1) !== binding(search)
+    )
+      return reject(409, "VERSION_CONFLICT");
+    offset = position;
+  }
+  const pool = options.empty
+    ? []
+    : status === "active"
+      ? activeSeeds
+      : status === "former"
+        ? formerSeeds
+        : [...activeSeeds, ...formerSeeds];
+  const needle = term?.trim().toLowerCase();
+  const matches = pool.filter((item) => {
+    if (needle && !item.nickname.toLowerCase().includes(needle)) return false;
+    if (role && !item.roles.includes(role as Seed["roles"][number])) return false;
+    for (const game of ["ets2", "ats"] as const) {
+      const value = search.get(`${game}Level`);
+      if (value && (item.former || levelOf(game, item[game])?.id !== value)) return false;
+    }
+    return true;
+  });
+  const direction = (order ?? (sort === "nickname" ? "asc" : "desc")) === "asc" ? 1 : -1;
+  const compare = compareBy(sort, direction);
+  matches.sort((a, b) => compare(a, b) || a.id.localeCompare(b.id));
+  const next =
+    offset + limit < matches.length
+      ? `fixture-directory:${offset + limit}|${binding(search)}`
+      : null;
+  return {
+    status: 200,
+    body: {
+      data: {
+        items: matches.slice(offset, offset + limit).map((item) => entry(item, options)),
+        nextCursor: next,
+        ...(options.tripsOff ? {} : { windowEndsAt: directoryWindowEndsAt }),
+        statusCounts: directoryCounts(options),
+      },
+      meta,
+    },
+  };
+}
+
+// Invitations (applications.manage): fictional applicants with example.invalid addresses that
+// the page must never render.
+const invitationSeeds: Record<"active" | "expired", [string, string][]> = {
+  active: [
+    ["Fictional Applicant One", "2026-11-20T12:00:00.000Z"],
+    ["Fictional Applicant Two", "2026-11-22T09:30:00.000Z"],
+  ],
+  expired: [["Fictional Late Applicant", "2026-11-01T08:00:00.000Z"]],
+};
+
+export function invitationsFixture(search: URLSearchParams): DTO["InvitationStage4ListEnvelope"] {
+  const state = search.get("state") === "expired" ? "expired" : "active";
+  const limit = Number(search.get("limit") ?? 25);
+  const seeds = invitationSeeds[state];
+  const items: DTO["InvitationStage4ListItem"][] = seeds
+    .slice(0, limit)
+    .map(([nickname, expiresAt], index) => {
+      const n = `${state === "active" ? 6 : 7}0${index}`;
+      return {
+        invitation: {
+          id: `41500000-0000-4000-8000-000000000${n}`,
+          version: 1,
+          applicationId: `41500000-0000-4000-8000-000000001${n}`,
+          expiresAt,
+          state,
+          emailDelivery: "accepted" as const,
+          deliveryId: null,
+        },
+        applicant: { nickname, email: `applicant-${n}@example.invalid` },
+      };
+    });
+  return {
+    data: {
+      items,
+      nextCursor: seeds.length > limit ? "fixture-invitations-next" : null,
+      total: seeds.length,
     },
     meta,
   };

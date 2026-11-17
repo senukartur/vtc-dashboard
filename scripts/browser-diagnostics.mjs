@@ -5,6 +5,7 @@ export const browserFiles = {
   "test/e2e/dashboard-blocks.spec.ts": "dashboard-blocks",
   "test/e2e/events.spec.ts": "events",
   "test/e2e/drivers.spec.ts": "drivers",
+  "test/e2e/drivers-directory.spec.ts": "drivers-directory",
   "test/e2e/notifications.spec.ts": "notifications",
   "test/e2e/notifications-real.spec.ts": "notifications-real",
   "test/e2e/events-real.spec.ts": "events-real",

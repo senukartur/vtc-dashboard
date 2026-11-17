@@ -1,5 +1,7 @@
 // Pure driver profile helpers: analytics window, level ladder, trip request paths and failures.
+import type { TFunction } from "i18next";
 import type { Locale } from "../../shared/formatting.js";
+import { formatDay } from "../admin/members-model.js";
 import { calendarToday, isoDate } from "../dashboard/model.js";
 import { DriversFailure, type DTO } from "./transport.js";
 
@@ -112,4 +114,36 @@ export function initial(nickname: string): string {
           .next().value?.segment
       : Array.from(text)[0];
   return segment ? segment.toLocaleUpperCase() : "?";
+}
+
+/**
+ * "In the company since … · last trip …" (a former member: "Joined the company on …"). An absent
+ * field is omitted; a null last trip means no accepted trip yet.
+ */
+export function membershipLine(
+  profile: DTO["MemberProfile"],
+  locale: Locale,
+  timeZone: string,
+  t: TFunction<"drivers">,
+): string | null {
+  const since = profile.memberSince ? formatDay(profile.memberSince, locale, timeZone) : null;
+  const lastDay = profile.lastAcceptedTripAt
+    ? formatDay(profile.lastAcceptedTripAt, locale, timeZone)
+    : null;
+  const last =
+    profile.lastAcceptedTripAt === null
+      ? t("profile.noTrips")
+      : lastDay
+        ? t("profile.lastTrip", { date: lastDay })
+        : null;
+  const parts = [
+    since &&
+      t(profile.member.formerMember ? "profile.joinedOn" : "profile.inCompanySince", {
+        date: since,
+      }),
+    last,
+  ].filter((part): part is string => !!part);
+  if (!parts.length) return null;
+  const text = parts.join(" · ");
+  return `${text.charAt(0).toLocaleUpperCase(locale)}${text.slice(1)}`;
 }

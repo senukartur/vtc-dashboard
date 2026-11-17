@@ -182,7 +182,12 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
     const visibleGames = GAMES.filter((g) => game === "all" || g === game);
     content = (
       <>
-        <DriverKpis query={analyticsView} locale={locale} onRetry={() => void retryAnalytics()} />
+        <DriverKpis
+          query={analyticsView}
+          lifetime={profile.lifetimeTotals}
+          locale={locale}
+          onRetry={() => void retryAnalytics()}
+        />
         <div className="driver-layout">
           <div className="driver-main">
             <DriverTrips
@@ -190,7 +195,6 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
               isSelf={isSelf}
               game={effectiveGame}
               member={profile.member}
-              lifetime={profile.lifetimeTotals}
               locale={locale}
               displayTimezone={displayTimezone}
             />
@@ -230,6 +234,9 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
         profile={profile}
         pending={profileQuery.isPending}
         isSelf={isSelf}
+        canManage={!!session.self?.capabilities.includes("members.manage")}
+        locale={locale}
+        displayTimezone={displayTimezone}
         assignments={assignments}
         levels={levels}
         game={game}

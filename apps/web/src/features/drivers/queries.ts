@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
+import { keepPreviousPage } from "../../shared/paging.js";
 import { AccountFailure } from "../account/transport.js";
 import { type Game, tripsPath } from "./model.js";
 import { type DTO, driversRead } from "./transport.js";
@@ -90,6 +91,45 @@ function useProfileRead() {
 }
 
 const common = { meta: { private: true }, retry: false, staleTime: 30000 } as const;
+
+/** Index of the request path in the directory query key, for `keepPreviousPage`. */
+const directoryPathIndex = 6;
+
+/**
+ * One drivers directory read (`MemberStage4DirectoryListEnvelope`), keyed by viewer, session
+ * generation, identity epoch, capabilities and path. The response is not localized, so a language
+ * switch keeps it. `keepPage` keeps the previous rows while another page or sort of the same list
+ * loads; another tab or filter shows the loading skeleton.
+ */
+export function useDirectoryList(path: string, enabled: boolean, keepPage = false) {
+  const { allowed, read } = useProfileRead();
+  const session = useSession();
+  const queryKey = [
+    "drivers-directory",
+    session.self?.member.id,
+    session.generation,
+    session.self?.identityEpoch,
+    session.self?.capabilities.join(","),
+    "MemberStage4DirectoryListEnvelope",
+    path,
+  ];
+  return useQuery({
+    ...common,
+    queryKey,
+    enabled: allowed && enabled,
+    ...(keepPage
+      ? {
+          placeholderData: keepPreviousPage(queryKey, directoryPathIndex, [
+            "cursor",
+            "sort",
+            "order",
+          ]),
+        }
+      : {}),
+    queryFn: async ({ signal }) =>
+      (await read(path, "MemberStage4DirectoryListEnvelope", signal)).data,
+  });
+}
 
 export function useMemberProfile(memberId: string) {
   const { allowed, key, read } = useProfileRead();
