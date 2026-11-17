@@ -298,15 +298,24 @@ export function createQualifications(
       tx,
       rows.flatMap((row) => (row.actorId ? [row.actorId] : [])),
     );
-    // One bounded label read for every recorded trailer type of the listed entries.
+    // Labels for every recorded trailer type, read in batches of the catalog's 300 bound (each
+    // side stores at most 100 types and a page has at most 50 entries). No recorded type is cut
+    // off, so a changed list never renders as unchanged.
     const typeIds = [
       ...new Set(
         contexts.flatMap((context) =>
           [context?.before, context?.after].flatMap((side) => side?.limits.trailers.typeIds ?? []),
         ),
       ),
-    ].slice(0, 300);
-    const labels = await trailerLabels(tx, typeIds, language);
+    ];
+    const labels = new Map<string, S["CatalogLabel"]>();
+    for (let offset = 0; offset < typeIds.length; offset += 300)
+      for (const [key, label] of await trailerLabels(
+        tx,
+        typeIds.slice(offset, offset + 300),
+        language,
+      ))
+        labels.set(key, label);
     const shown = (side: QualificationLevelValues | null | undefined) =>
       side
         ? {
