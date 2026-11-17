@@ -383,7 +383,7 @@ function EvidenceImage({ item, label }: { item: DTO["Evidence"]; label: string }
   return <img className="review-evidence-image" src={state.url} alt={label} />;
 }
 
-function EvidenceViewer({ item, number }: { item: DTO["Evidence"]; number: number }) {
+export function EvidenceViewer({ item, number }: { item: DTO["Evidence"]; number: number }) {
   const { t } = useTranslation("trips"),
     [open, setOpen] = useState(false),
     label = t("evidenceNumber", { number });

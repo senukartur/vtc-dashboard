@@ -5,29 +5,33 @@ import { useSession } from "../../app/Session.js";
 import { useWorkspaceSummary } from "../../app/workspace-summary.js";
 import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Pager } from "../../shared/ui/pager.js";
-import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
-import { EventSelect, EvidenceItem } from "../manual-reports/fields.js";
-import { ReferenceFacts } from "../manual-reports/ReferenceFacts.js";
+import { Button, Card, Label } from "../../shared/ui/primitives.js";
+import { EventSelect } from "../manual-reports/fields.js";
 import { DecisionPanel } from "../review/DecisionPanel.js";
 import { dispatchSearch } from "../review/dispatch-model.js";
 import { ReviewAccessState } from "../review/ReviewAccessState.js";
 import { ProposalList } from "../review/ReviewPanel.js";
 import { ReconciliationHistory } from "../review/reconciliation-parts.js";
 import { queueSearch } from "../review/review-model.js";
-import {
-  Codes,
-  Confirm,
-  EffectiveFacts,
-  Failure,
-  Fields,
-  Revision,
-  State,
-  TripSummary,
-} from "./components.js";
+import { Confirm, Failure, Fields, Revision, State } from "./components.js";
 import { useTripCommand, useTripQuery } from "./queries.js";
-import { TripDeliveryFacts, TripQualificationCheck, TripSources } from "./TripPageSections.js";
-import { validId } from "./transport.js";
+import { TripHeader, TripHistory, TripTiles } from "./TripPageOverview.js";
+import {
+  TripEvidence,
+  TripFacts,
+  TripQualificationCheck,
+  TripSources,
+} from "./TripPageSections.js";
+import { TripTechnicalDetails } from "./TripTechnicalDetails.js";
+import { type DTO, validId } from "./transport.js";
+import { nextStep, privateOf, revisableReportId, tripStatus } from "./trip-page-model.js";
 import "./trips.css";
+/**
+ * Trip page (VTC-158): header with status and actions, summary tiles, the trip facts, screenshots
+ * and sources beside the history and qualification check. Staff also get collapsed technical
+ * details, the private report history and reconciliation history. Hiding is presentation only:
+ * the server filters every private field.
+ */
 export function TripDetailPage({ review = false }: { review?: boolean }) {
   const { t } = useTranslation("trips"),
     session = useSession(),
@@ -38,12 +42,17 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
       // The review page reads the trip through its review read instead.
       validId(tripId) && !review,
     ),
-    [history, setHistory] = useState(false),
-    [reason, setReason] = useState(""),
-    command = useTripCommand();
+    [history, setHistory] = useState(false);
   const view = query.data?.data.data,
+    own = privateOf(view),
     summary = view?.view === "private" ? view.summary : view,
-    staff = !!session.self?.capabilities.includes("trips.review");
+    selfId = session.self?.member.id,
+    staff = !!session.self?.capabilities.includes("trips.review"),
+    owner = !!summary && summary.owner.id === selfId,
+    submitOwn = owner && !!session.self?.capabilities.includes("trips.submit_own"),
+    reportId = revisableReportId(view, selfId),
+    status = summary ? tripStatus(summary, reportId !== null) : null,
+    next = nextStep(view, { owner, staff, revisable: reportId !== null });
   if (review && !staff)
     return (
       <Card>
@@ -57,155 +66,124 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
       </Card>
     );
   if (review) return <ReviewDetail tripId={tripId} />;
-  return (
-    <div className="stack trip-page">
-      <header className="trip-heading">
-        <h1>{t("title")}</h1>
-        {!query.isError && (
-          <Button
-            variant="outline"
-            onClick={() => void query.refetch()}
-            disabled={query.isFetching}
-          >
-            {t("refresh")}
-          </Button>
-        )}
-        <Button asChild variant="outline">
-          <Link to="/account/trips">{t("back")}</Link>
+  const actions = (
+    <>
+      {reportId && status === "needs_fix" && (
+        <Button asChild>
+          <Link to={`/account/reports/${reportId}/edit`}>{t("fixReport")}</Link>
         </Button>
-      </header>
+      )}
+      {reportId && status !== "needs_fix" && (
+        <Button asChild variant="outline">
+          <Link to={`/account/reports/${reportId}/edit`}>{t("revise")}</Link>
+        </Button>
+      )}
+      {staff && summary && (
+        <Button asChild variant="outline">
+          <Link to={`/account/review/${summary.id}`}>{t("review")}</Link>
+        </Button>
+      )}
+      {!query.isError && (
+        <Button variant="outline" onClick={() => void query.refetch()} disabled={query.isFetching}>
+          {t("refresh")}
+        </Button>
+      )}
+    </>
+  );
+  return (
+    <div className="stack trip-page trip-detail">
+      <TripHeader summary={summary} view={own} status={status} owner={owner} actions={actions} />
       <State query={query} />
       {summary && (
         <>
-          <Card>
-            <TripSummary trip={summary} link={false} />
-            <TripDeliveryFacts
-              summary={summary}
-              facts={view?.view === "private" ? view.effectiveFacts : undefined}
-            />
-            <small className="trip-wrap">{summary.id}</small>
-            <p>{t(view?.view === "private" ? "privateView" : "summaryView")}</p>
-          </Card>
-          {view?.view === "private" && (
-            <>
-              <TripSources sources={view.sources} />
-              <TripQualificationCheck check={view.qualificationCheck} />
-              <EffectiveFacts facts={view.effectiveFacts} />
-              <Codes values={view.reviewReasonCodes} />
-              {view.manualRevision && (
-                <Card className="stack">
-                  <ReferenceFacts revision={view.manualRevision} />
-                  <Revision revision={view.manualRevision} hideReferenceFields />
-                  {summary.owner.id === session.self?.member.id &&
-                    summary.decision !== "accepted" &&
-                    "reportId" in view.manualRevision && (
-                      <Button asChild>
-                        <Link to={`/account/reports/${view.manualRevision.reportId}/edit`}>
-                          {t("revise")}
-                        </Link>
-                      </Button>
-                    )}
-                </Card>
+          {!own && <p className="trip-muted">{t("summaryView")}</p>}
+          <TripTiles
+            summary={summary}
+            facts={own?.effectiveFacts}
+            next={next}
+            revisable={reportId !== null}
+          />
+          <div className="trip-detail-layout">
+            <div className="trip-detail-main">
+              <TripFacts summary={summary} view={own} />
+              {own && (own.evidence.length > 0 || own.manualRevision) && (
+                <TripEvidence evidence={own.evidence} />
               )}
-              <Card className="stack">
-                <h2>{t("evidence")}</h2>
-                {view.evidence.map((e) => (
-                  <EvidenceItem key={e.id} id={e.id} metadata={e} />
-                ))}
-                <p>{t("retention")}</p>
-              </Card>
-              <Card className="stack">
-                <h2>{t("decisions")}</h2>
-                {!view.decisions.length && <p>{t("empty")}</p>}
-                {view.decisions.map((d) => (
-                  <article key={d.id} className="trip-revision">
-                    <h3>{t(d.outcome)}</h3>
-                    <p className="review-decision-by">
-                      {d.reviewer?.nickname ?? t("system")}
-                      {d.acceptedOverLimits && (
-                        <Badge className="review-marker">{t("overLimitsMarker")}</Badge>
-                      )}
-                    </p>
-                    <p className="review-multiline">{d.reason}</p>
-                    <Fields
-                      values={{
-                        reviewedRevisionId: d.reviewedRevisionId,
-                        submittedAt: d.decidedAt,
-                        ...d.basis,
-                      }}
-                    />
-                    <Codes values={d.reasonCodes} />
-                  </article>
-                ))}
-                <p>{t("historyBound")}</p>
-              </Card>
-              {summary.owner.id === session.self?.member.id &&
-                summary.decision === "accepted" &&
-                session.self.capabilities.includes("trips.submit_own") && (
-                  <Card className="stack">
-                    <h2>{t("correction")}</h2>
-                    <p>{t("correctionHelp")}</p>
-                    <Label htmlFor="correction-reason">{t("reason")}</Label>
-                    <textarea
-                      className="input"
-                      id="correction-reason"
-                      maxLength={4000}
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                    />
-                    <Failure error={command.failure} seconds={command.seconds} />
-                    <Confirm
-                      label={t("correction")}
-                      guard={JSON.stringify([query.data?.etag, reason])}
-                      disabled={!reason.trim() || command.seconds > 0}
-                      pending={command.pending}
-                      failure={command.failure}
-                      onConfirm={async () => {
-                        const r = await command.run(
-                          `/trips/${summary.id}/correction-requests`,
-                          { reason: reason.trim() },
-                          "EnvelopeCommandResult",
-                          query.data?.etag,
-                        );
-                        if (r) setReason("");
-                        return r;
-                      }}
-                    >
-                      <p>{reason}</p>
-                      <Fields
-                        values={{
-                          version: summary.version,
-                          reviewedRevisionId: view.manualRevision?.id ?? null,
-                        }}
-                      />
-                    </Confirm>
-                  </Card>
-                )}
-              {summary.owner.id === session.self?.member.id &&
-                session.self.capabilities.includes("trips.submit_own") && (
-                  <OwnerAssociation
-                    tripId={summary.id}
-                    game={summary.game}
-                    etag={query.data?.etag ?? null}
-                  />
-                )}
+              {own && <TripSources sources={own.sources} />}
+              {own && submitOwn && summary.decision === "accepted" && (
+                <OwnerCorrection view={own} etag={query.data?.etag ?? null} />
+              )}
+              {own && submitOwn && (
+                <OwnerAssociation
+                  tripId={summary.id}
+                  game={summary.game}
+                  etag={query.data?.etag ?? null}
+                />
+              )}
+            </div>
+            {own && (
+              <aside className="trip-detail-aside">
+                <TripHistory view={own} />
+                <TripQualificationCheck check={own.qualificationCheck} />
+              </aside>
+            )}
+          </div>
+          {own && staff && (
+            <>
+              <TripTechnicalDetails view={own} />
               <Card>
                 <details open={history} onToggle={(e) => setHistory(e.currentTarget.open)}>
                   <summary>{t("privateView")}</summary>
                   {history && <PrivateHistory tripId={summary.id} />}
                 </details>
               </Card>
-              {staff && (
-                <Button asChild>
-                  <Link to={`/account/review/${summary.id}`}>{t("review")}</Link>
-                </Button>
-              )}
-              {staff && <ReconciliationHistory tripId={summary.id} />}
+              <ReconciliationHistory tripId={summary.id} />
             </>
           )}
         </>
       )}
     </div>
+  );
+}
+/** The owner's correction request for an accepted trip; the accepted result stays effective. */
+function OwnerCorrection({ view, etag }: { view: DTO["TripPrivate"]; etag: string | null }) {
+  const { t } = useTranslation("trips"),
+    [reason, setReason] = useState(""),
+    command = useTripCommand();
+  return (
+    <Card className="stack">
+      <h2>{t("correction")}</h2>
+      <p>{t("correctionHelp")}</p>
+      <Label htmlFor="correction-reason">{t("reason")}</Label>
+      <textarea
+        className="input"
+        id="correction-reason"
+        maxLength={4000}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <Failure error={command.failure} seconds={command.seconds} />
+      <Confirm
+        label={t("correction")}
+        guard={JSON.stringify([etag, reason])}
+        disabled={!reason.trim() || command.seconds > 0}
+        pending={command.pending}
+        failure={command.failure}
+        onConfirm={async () => {
+          const r = await command.run(
+            `/trips/${view.summary.id}/correction-requests`,
+            { reason: reason.trim() },
+            "EnvelopeCommandResult",
+            etag,
+          );
+          if (r) setReason("");
+          return r;
+        }}
+      >
+        <p>{t("correctionConfirmText")}</p>
+        <p className="trip-detail-quote">{reason}</p>
+      </Confirm>
+    </Card>
   );
 }
 /**
@@ -395,7 +373,7 @@ function OwnerAssociation({
           return r;
         }}
       >
-        <Fields values={{ eventId: event, version: etag }} />
+        <p>{t("associateConfirmText")}</p>
       </Confirm>
     </Card>
   );

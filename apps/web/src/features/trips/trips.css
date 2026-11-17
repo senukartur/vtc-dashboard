@@ -148,10 +148,7 @@
   display: contents;
 }
 
-/* Stage 4 author blocks: delivery facts and sources (VTC-146); the check uses the shared list. */
-.trip-delivery {
-  margin-block: 16px;
-}
+/* Stage 4 author blocks: companies and sources (VTC-146); the check uses the shared list. */
 .trip-muted,
 .trip-company-code {
   color: var(--muted);
@@ -205,5 +202,268 @@
 @media (max-width: 760px) {
   .trip-source-facts {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Trip page layout (VTC-158): header, summary tiles, main column and aside. Existing tokens only. */
+.trip-detail-header {
+  display: grid;
+  gap: 10px;
+}
+.trip-detail-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.trip-detail-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px 24px;
+}
+.trip-detail-title {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.trip-detail-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.trip-detail-title-row h1 {
+  margin: 0;
+  min-width: 0;
+}
+.trip-detail-status {
+  gap: 4px;
+  white-space: nowrap;
+  background: var(--surface-active);
+  color: var(--secondary);
+}
+.trip-detail-status[data-status="accepted"] {
+  background: var(--accepted-surface);
+  color: var(--accepted);
+}
+.trip-detail-status[data-status="pending_review"],
+.trip-detail-status[data-status="needs_fix"] {
+  background: var(--pending-surface);
+  color: var(--pending);
+}
+.trip-detail-status[data-status="needs_fix"] {
+  box-shadow: inset 0 0 0 1px var(--pending);
+}
+.trip-detail-status[data-status="rejected"] {
+  background: var(--rejected-surface);
+  color: var(--destructive);
+}
+.trip-detail-status[data-status="in_progress"] {
+  background: var(--accent-soft);
+  color: var(--focus);
+}
+/* Inline flow keeps the spaces around the separators; long lines simply wrap. */
+.trip-detail-meta {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.trip-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.trip-detail-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 12px;
+}
+.trip-detail-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.trip-detail-tile[data-attention] {
+  border-color: var(--pending);
+  background: var(--pending-surface);
+}
+.trip-detail-tile-label {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.trip-detail-tile-value {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.trip-detail-tile-note,
+.trip-detail-inline,
+.trip-detail-unknown {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.trip-detail-unknown {
+  color: var(--muted);
+  font-weight: 400;
+}
+.trip-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+@media (min-width: 1100px) {
+  .trip-detail-layout:has(> .trip-detail-aside) {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+  }
+}
+.trip-detail-main,
+.trip-detail-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.trip-detail-card h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+.trip-detail-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+.trip-detail-kv {
+  display: grid;
+  grid-template-columns: minmax(96px, 160px) minmax(0, 1fr);
+  gap: 9px 12px;
+  align-items: baseline;
+  margin: 0;
+}
+.trip-detail-kv > div {
+  display: contents;
+}
+/* The Hard Mode term keeps its flame icon on the same line as the text. */
+.trip-detail-kv dt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.trip-detail-kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trip-detail-place {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.trip-detail-list {
+  display: grid;
+  gap: 4px;
+}
+.trip-detail-evidence,
+.trip-detail-history {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trip-detail-evidence {
+  gap: 8px;
+}
+.trip-detail-evidence li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.trip-detail-evidence-name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trip-detail-history {
+  gap: 12px;
+}
+.trip-detail-history li {
+  display: flex;
+  gap: 10px;
+}
+.trip-detail-history-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.trip-detail-history li[data-kind="telemetry"] .trip-detail-history-dot {
+  background: var(--focus);
+}
+.trip-detail-history li[data-kind="accepted"] .trip-detail-history-dot {
+  background: var(--accepted);
+}
+.trip-detail-history li[data-kind="returned"] .trip-detail-history-dot {
+  background: var(--pending);
+}
+.trip-detail-history li[data-kind="rejected"] .trip-detail-history-dot {
+  background: var(--destructive);
+}
+.trip-detail-history-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.trip-detail-history-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.trip-detail-quote {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.trip-detail-reasons {
+  margin: 0;
+  padding-left: 16px;
+}
+/* Reused raw blocks render their own card; inside the technical card they stay flat. */
+.trip-detail-technical .card {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+@media (max-width: 760px) {
+  .trip-detail-actions {
+    width: 100%;
+  }
+  .trip-detail-actions > .button {
+    flex: 1 1 auto;
+  }
+  .trip-detail-tile[data-attention] {
+    order: -1;
+  }
+  .trip-detail-kv {
+    grid-template-columns: minmax(84px, 120px) minmax(0, 1fr);
   }
 }
