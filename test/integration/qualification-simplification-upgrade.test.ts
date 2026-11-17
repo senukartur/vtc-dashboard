@@ -48,7 +48,8 @@ test(
   "the old qualification model upgrades to the three-table model and matches a fresh schema",
   async () => {
     // Fictional old-model rows: an archived level, rule versions, promotion proof and review,
-    // an orphan open assignment, and outbox and notification rows of the retired types.
+    // an orphan open assignment, a decided and credited trip that name a rule version, and
+    // outbox, routing, durable job, receipt and notification rows of retired and kept types.
     const seed = [
       `INSERT INTO identity_users (id,name,email,created_at,updated_at) VALUES ('${id(1)}','Fictional One','fictional-one@example.invalid',UTC_TIMESTAMP(3),UTC_TIMESTAMP(3)),('${id(2)}','Fictional Two','fictional-two@example.invalid',UTC_TIMESTAMP(3),UTC_TIMESTAMP(3))`,
       `INSERT INTO identity_memberships (user_id,status) VALUES ('${id(1)}','active'),('${id(2)}','active')`,
@@ -63,14 +64,32 @@ test(
       `INSERT INTO qualification_states (user_id,game,assignment_id,version) VALUES ('${id(1)}','ets2','${id(21)}',3),('${id(2)}','ets2','${id(24)}',2)`,
       `INSERT INTO qualification_promotions (id,source_assignment_id,target_assignment_id,rule_version_id,required_trips,required_distance_m,accepted_trips,actual_distance_m,period_revision,confirmed_at,actor_id,reason) VALUES ('${id(30)}','${id(20)}','${id(21)}','${id(10)}',5,NULL,5,'1000',1,'2026-02-01 00:00:00.000','${id(2)}','Fictional proof')`,
       `INSERT INTO qualification_promotion_reviews (promotion_id,review_required,version,checked_revision,checked_at) VALUES ('${id(30)}',1,1,1,'2026-02-02 00:00:00.000')`,
+      `INSERT INTO trips (id,owner_id,game,version,outcome,recording,decision,reporting_at,actual_distance_m,review_reasons,created_at) VALUES ('${id(60)}','${id(1)}','ets2',1,'delivered','complete','accepted','2026-01-10 03:00:00.000','12500',JSON_ARRAY(),'2026-01-10 00:00:00.000')`,
+      `INSERT INTO source_trips (id,provider,game,session_key,trip_key,owner_id,canonical_trip_id,latest_revision,connection_context,created_at) VALUES ('${id(61)}','ets2telemetry','ets2','fictional-session','fictional-trip','${id(1)}','${id(60)}','1',JSON_OBJECT(),'2026-01-10 00:00:00.000')`,
+      `INSERT INTO source_messages (id,source_trip_id,provider,event_key,revision,sha256,received_at,delivery_mode) VALUES ('${id(62)}','${id(61)}','ets2telemetry','fictional-event','1',REPEAT('c',32),'2026-01-10 03:00:00.000','live')`,
+      `INSERT INTO trip_facts (id,message_id,canonical_trip_id,adapter_version,outcome,recording,start_basis,start_verified,end_basis,end_verified,whole_trip_distance_supported,trailers_complete,trailer_count,rule_context_complete,reasons,evidence) VALUES ('${id(63)}','${id(62)}','${id(60)}',1,'delivered','complete','unknown',0,'unknown',0,1,1,0,1,JSON_ARRAY(),JSON_OBJECT())`,
+      `INSERT INTO trip_decisions (id,trip_id,sequence,fact_id,outcome,reason_codes,assignment_id,level_id,rule_version_id,attribution_at,attribution_basis,supporting_facts,decided_at) VALUES ('${id(64)}','${id(60)}',1,'${id(63)}','accepted',JSON_ARRAY(),'${id(20)}','${l1}','${id(10)}','2026-01-10 00:00:00.000','actual_start',JSON_ARRAY(),'2026-01-10 03:00:00.000')`,
+      `INSERT INTO trip_contributions (trip_id,version,owner_id,game,fact_id,accepted,credited,assignment_id,rule_version_id,attribution_basis,attribution_at,actual_distance_m,fingerprint,changed_at) VALUES ('${id(60)}',1,'${id(1)}','ets2','${id(63)}',1,1,'${id(20)}','${id(10)}','actual_start','2026-01-10 00:00:00.000','12500',REPEAT('d',32),'2026-01-10 03:00:00.000')`,
       `INSERT INTO outbox_events (id,type,schema_version,aggregate_kind,aggregate_id,aggregate_version,occurred_at,correlation_id,causation_id,data,fingerprint,recorded_at) VALUES
         ('${id(40)}','qualification.progress_changed',1,'qualification','${id(21)}',1,UTC_TIMESTAMP(3),'${id(40)}',NULL,'{}',REPEAT('a',32),UTC_TIMESTAMP(3)),
-        ('${id(41)}','qualification.assigned',1,'qualification','${id(21)}',1,UTC_TIMESTAMP(3),'${id(41)}',NULL,'{}',REPEAT('b',32),UTC_TIMESTAMP(3))`,
-      `INSERT INTO outbox_routing (event_id,consumer,event_type,recorded_at) VALUES ('${id(40)}','notifications','qualification.progress_changed',UTC_TIMESTAMP(3))`,
+        ('${id(41)}','qualification.assigned',1,'qualification','${id(21)}',1,UTC_TIMESTAMP(3),'${id(41)}',NULL,'{}',REPEAT('b',32),UTC_TIMESTAMP(3)),
+        ('${id(42)}','qualification.rules_changed',1,'qualification','${l1}',1,UTC_TIMESTAMP(3),'${id(42)}',NULL,'{}',REPEAT('e',32),UTC_TIMESTAMP(3)),
+        ('${id(43)}','promotion.review_required',1,'qualification','${id(30)}',1,UTC_TIMESTAMP(3),'${id(43)}',NULL,'{}',REPEAT('f',32),UTC_TIMESTAMP(3))`,
+      `INSERT INTO outbox_routing (event_id,consumer,event_type,recorded_at) VALUES
+        ('${id(40)}','notifications','qualification.progress_changed',UTC_TIMESTAMP(3)),
+        ('${id(41)}','notifications','qualification.assigned',UTC_TIMESTAMP(3))`,
+      `INSERT INTO durable_jobs (id,kind,schema_version,consumer,effect_key,event_id,reference,fingerprint,state,available_at,attempts,max_attempts,created_at,completed_at) VALUES
+        ('${id(70)}','notification.deliver',1,'notifications','fictional-retired-1','${id(40)}',JSON_OBJECT(),REPEAT('g',32),'completed',UTC_TIMESTAMP(3),1,5,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3)),
+        ('${id(71)}','notification.deliver',1,'notifications','fictional-kept','${id(41)}',JSON_OBJECT(),REPEAT('h',32),'completed',UTC_TIMESTAMP(3),1,5,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3)),
+        ('${id(72)}','notification.deliver',1,'notifications','fictional-retired-2','${id(43)}',JSON_OBJECT(),REPEAT('i',32),'ready',UTC_TIMESTAMP(3),0,5,UTC_TIMESTAMP(3),NULL)`,
+      `INSERT INTO job_effect_receipts (consumer,effect_key,job_id,committed_at) VALUES
+        ('notifications','fictional-retired-1','${id(70)}',UTC_TIMESTAMP(3)),
+        ('notifications','fictional-kept','${id(71)}',UTC_TIMESTAMP(3))`,
       `INSERT INTO notification_recipients (recipient_id) VALUES ('${id(1)}')`,
       `INSERT INTO notifications (id,recipient_id,sequence,effect_key,category,access,subject_kind,subject_id,subject_version,occurred_at,recipient_access_epoch) VALUES
         ('${id(50)}','${id(1)}',1,'fictional-e1','promotion.eligible','company','qualification','${id(21)}',1,UTC_TIMESTAMP(3),1),
-        ('${id(51)}','${id(1)}',2,'fictional-e2','qualification.promoted','company','qualification','${id(21)}',1,UTC_TIMESTAMP(3),1)`,
+        ('${id(51)}','${id(1)}',2,'fictional-e2','qualification.promoted','company','qualification','${id(21)}',1,UTC_TIMESTAMP(3),1),
+        ('${id(52)}','${id(1)}',3,'fictional-e3','promotion.review_required','company','qualification','${id(30)}',1,UTC_TIMESTAMP(3),1)`,
     ];
     for (const statement of seed) await control.query(statement);
     expect(await runMigrations(settings)).toBe(1);
@@ -115,10 +134,32 @@ test(
     expect(
       (await rows("SELECT CAST(type AS CHAR) t FROM outbox_events ORDER BY 1")).map((r) => r.t),
     ).toEqual(["qualification.assigned"]);
-    expect(Number((await rows("SELECT COUNT(*) n FROM outbox_routing"))[0]?.n)).toBe(0);
+    // Only the retired event types lose their routing, jobs and receipts.
+    const ids = async (sql: string) => (await rows(sql)).map((r) => r.id);
+    expect(await ids("SELECT CAST(event_id AS CHAR) id FROM outbox_routing ORDER BY 1")).toEqual([
+      id(41),
+    ]);
+    expect(await ids("SELECT CAST(id AS CHAR) id FROM durable_jobs ORDER BY 1")).toEqual([id(71)]);
+    expect(await ids("SELECT CAST(job_id AS CHAR) id FROM job_effect_receipts ORDER BY 1")).toEqual(
+      [id(71)],
+    );
     expect(
       (await rows("SELECT category FROM notifications ORDER BY 1")).map((r) => r.category),
     ).toEqual(["qualification.promoted"]);
+    // The decision and the credit stay without their rule version reference. An upgraded
+    // decision has no snapshot, so reads fall back to the level's current limits.
+    expect(
+      await rows(
+        "SELECT CAST(id AS CHAR) id, CAST(level_id AS CHAR) level, CAST(assignment_id AS CHAR) assignment, qualification_snapshot snapshot FROM trip_decisions",
+      ),
+    ).toEqual([{ id: id(64), level: l1, assignment: id(20), snapshot: null }]);
+    expect(
+      await rows(
+        "SELECT CAST(trip_id AS CHAR) id, credited, CAST(assignment_id AS CHAR) assignment, CAST(actual_distance_m AS CHAR) distance FROM trip_contributions",
+      ),
+    ).toEqual([
+      { id: id(60), credited: 1, assignment: id(20), distance: "12500.000000000000000000" },
+    ]);
 
     const upgraded = await schema();
     await reset(control);
