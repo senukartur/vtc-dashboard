@@ -1,11 +1,13 @@
 """Focused control-flow tests; real child failures are also exercised by rehearsal.py."""
 import contextlib
+import hashlib
 import io
 import json
 import signal
 import sys
 import pathlib
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -314,6 +316,180 @@ class ChildOutcomeTests(unittest.TestCase):
             destination.seek(0)
             self.assertEqual(destination.read(), b'streamed\n')
         self.assertNotIn('private-', captured.getvalue())
+
+
+def archive(files, link=None):
+    """A volume archive as tar writes it: the root entry, then fictional regular files."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w') as output:
+        root = tarfile.TarInfo('.')
+        root.type, root.mode = tarfile.DIRTYPE, 0o700
+        output.addfile(root)
+        for name, content in files.items():
+            entry = tarfile.TarInfo(f'./{name}')
+            entry.size = len(content)
+            output.addfile(entry, io.BytesIO(content))
+        if link:
+            entry = tarfile.TarInfo(f'./{link[0]}')
+            entry.type, entry.linkname = tarfile.LNKTYPE, f'./{link[1]}'
+            output.addfile(entry)
+    return buffer.getvalue()
+
+
+class FakeDocker:
+    """Answers the export and restore children; archives are keyed by volume name suffix."""
+    def __init__(self, volumes, archives):
+        self.volumes, self.archives, self.calls = volumes, archives, []
+
+    def __call__(self, args, **kwargs):
+        self.calls.append((args, kwargs))
+        if args[:3] == ['docker', 'volume', 'ls']:
+            return ''.join(f'{name}\n' for name in self.volumes).encode()
+        if args[:2] == ['docker', 'run'] and args[-3:] == ['-cf', '-', '.']:
+            source = next(value for value in args if value.startswith('type=volume,')).split(',')[1]
+            kwargs['output'].write(self.archives[source.removeprefix('source=').rsplit('_', 1)[1]])
+            return None
+        return b''
+
+    def media_calls(self):
+        return [args for args, _ in self.calls if any('event-media' in value for value in args)]
+
+
+def compose(args, **kwargs):
+    if 'mysqldump' in args:
+        kwargs['output'].write(b'-- fictional dump\n')
+        return None
+    return b''
+
+
+class ExportTests(unittest.TestCase):
+    revision, image = 'a' * 40, 'sha256:' + 'b' * 64
+    media = {'fictional.blob': b'fictional-media\n', 'fictional.thumb': b'fictional-thumb\n'}
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.base = pathlib.Path(self.directory.name)
+        (self.base / 'state').mkdir()
+        (self.base / 'private/maintenance').mkdir(parents=True)
+        (self.base / 'private/identity-mail.env').write_text('IDENTITY_ENABLED=true\nMAIL_MODE=disabled\n')
+        for target, value in [('BASE', self.base), ('validate_image', None), ('compose', compose),
+                              ('accepted_image_id', lambda _revision: self.image)]:
+            item = patch.object(ops, target, value) if value is not None else patch.object(ops, target)
+            item.start()
+            self.addCleanup(item.stop)
+
+    def export(self, volumes, media=None):
+        docker = FakeDocker(volumes, {'evidence': archive({'fictional-evidence.txt': b'evidence\n'}),
+                                      'event-media': archive(media or self.media)})
+        with patch.object(ops, 'run', docker):
+            identity = ops.export_locked(self.revision)
+        return identity, docker
+
+    def test_export_without_a_media_volume_keeps_the_two_file_manifest(self):
+        identity, docker = self.export([])
+        directory, manifest = ops.validate_export(identity)
+        self.assertEqual(set(manifest['files']), {'database.sql', 'evidence.tar'})
+        self.assertNotIn('eventMediaFiles', manifest)
+        self.assertFalse((directory / 'event-media.tar').exists())
+        self.assertEqual(len(docker.media_calls()), 1)  # Only the inventory query.
+
+    def test_export_follows_the_project_set_at_run_time(self):
+        # The rehearsal sets PROJECT after import; the inventory and archive must use that value.
+        with patch.object(ops, 'PROJECT', 'vtc011-0123456789abcdef'):
+            identity, docker = self.export(['vtc011-0123456789abcdef_event-media'])
+        self.assertIn('eventMediaFiles', ops.validate_export(identity)[1])
+        self.assertTrue(all('vtc011-0123456789abcdef_event-media' in ' '.join(args) for args in docker.media_calls()))
+
+    def test_export_refuses_a_configured_root_without_its_volume_and_an_unexpected_inventory(self):
+        (self.base / 'private/identity-mail.env').write_text('EVENT_MEDIA_ROOT=/app/private-event-media\n')
+        for volumes, code in [([], 'EVENT_MEDIA_VOLUME_MISSING'),
+                              ([f'{ops.PROJECT}_event-media-copy'], 'EVENT_MEDIA_VOLUME_INVENTORY_INVALID'),
+                              ([f'{ops.PROJECT}_event-media'] * 2, 'EVENT_MEDIA_VOLUME_INVENTORY_INVALID')]:
+            with self.subTest(volumes=volumes):
+                with patch.object(ops, 'compose') as dump:
+                    with self.assertRaisesRegex(RuntimeError, '^EXPORT_FAILED$') as failure:
+                        self.export(volumes)
+                self.assertEqual(failure.exception.__context__.args, (code,))
+                dump.assert_not_called()
+        self.assertFalse(list((self.base / 'state/exports').glob('*/manifest.json')))
+
+    def test_export_with_media_hashes_every_name_and_validation_fails_closed(self):
+        identity, docker = self.export([f'{ops.PROJECT}_event-media'])
+        directory, manifest = ops.validate_export(identity)
+        self.assertEqual(set(manifest['files']), {'database.sql', 'evidence.tar', 'event-media.tar'})
+        self.assertEqual(manifest['eventMediaFiles'], {name: {'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest()}
+                                                       for name, content in self.media.items()})
+        archive_call = docker.media_calls()[1]
+        self.assertIn('--hard-dereference', archive_call)
+        self.assertIn(f'type=volume,source={ops.PROJECT}_event-media,target=/event-media,readonly', archive_call)
+        original = (directory / 'manifest.json').read_text()
+        media_bytes = (directory / 'event-media.tar').read_bytes()
+
+        def changed(update, code):
+            value = json.loads(original)
+            update(value)
+            (directory / 'manifest.json').write_text(json.dumps(value))
+            with self.assertRaisesRegex(RuntimeError, f'^{code}$'):
+                ops.validate_export(identity)
+            (directory / 'manifest.json').write_text(original)
+            (directory / 'event-media.tar').write_bytes(media_bytes)
+
+        changed(lambda value: value.pop('eventMediaFiles'), 'EXPORT_INVALID')
+        changed(lambda value: value['files'].pop('event-media.tar'), 'EXPORT_INVALID')
+        changed(lambda value: value['eventMediaFiles']['fictional.blob'].update(bytes=1), 'EVENT_MEDIA_MANIFEST_INVALID')
+        changed(lambda value: value['eventMediaFiles'].pop('fictional.thumb'), 'EVENT_MEDIA_MANIFEST_INVALID')
+        changed(lambda _value: (directory / 'event-media.tar').write_bytes(media_bytes + b'x'), 'EXPORT_CHECKSUM_INVALID')
+        # A hard link that reaches the manifest with matching hashes is still not a regular file.
+        linked = archive(self.media, link=('fictional.copy', 'fictional.blob'))
+        def relinked(value):
+            (directory / 'event-media.tar').write_bytes(linked)
+            value['files']['event-media.tar'] = {'sha256': hashlib.sha256(linked).hexdigest(), 'bytes': len(linked)}
+        changed(relinked, 'ARCHIVE_TYPE_INVALID')
+        ops.validate_export(identity)
+
+    def restore(self, identity, restored_media):
+        self.docker = FakeDocker([], {'evidence': archive({'fictional-evidence.txt': b'evidence\n'}),
+                                      'event-media': restored_media})
+        with patch.object(ops, 'run', self.docker), patch.object(ops, 'compose', side_effect=compose) as self.composed, \
+                patch.object(ops, 'fenced', side_effect=lambda *_a, **_k: ops.maintenance(True)), \
+                patch.object(ops, 'ready'), patch.object(ops, 'public_ready'):
+            return ops.restore_locked(identity), self.docker
+
+    def test_restore_fills_only_a_new_media_volume_and_compares_it(self):
+        identity, _ = self.export([f'{ops.PROJECT}_event-media'])
+        exported = (self.base / 'state/exports' / identity / 'event-media.tar').read_bytes()
+        project, docker = self.restore(identity, archive(self.media))
+        self.assertTrue(project.startswith('vtc-development-restore-'))
+        self.assertFalse((self.base / 'private/maintenance/enabled').exists())
+        calls = docker.media_calls()
+        self.assertEqual(calls[0], ['docker', 'volume', 'create', f'{project}_event-media'])
+        self.assertEqual([kwargs.get('data') for args, kwargs in docker.calls if '-xf' in args][-1], exported)
+        self.assertIn(ops.MEDIA_ROOT_CHECK, calls[2])
+        self.assertIn(f'type=volume,source={project}_event-media,target=/app/private-event-media', calls[2])
+        # The active volume is never mounted, so restore cannot change or switch active media.
+        self.assertFalse([args for args in calls if any(f'source={ops.PROJECT}_event-media,' in value for value in args)])
+
+    def test_restore_with_different_media_bytes_stays_fenced(self):
+        identity, _ = self.export([f'{ops.PROJECT}_event-media'])
+        with self.assertRaisesRegex(RuntimeError, '^RESTORED_EVENT_MEDIA_MISMATCH$'):
+            self.restore(identity, archive({'fictional.blob': b'other-media\n'}))
+        self.assertTrue((self.base / 'private/maintenance/enabled').exists())
+        self.assertFalse([call for call in self.composed.call_args_list if 'app' in call.args[0]])
+        # A refused media root also stops the restore before the inventory comparison.
+        refused = FakeDocker([], {})
+        def failing(args, **kwargs):
+            if ops.MEDIA_ROOT_CHECK in args:
+                raise RuntimeError('OPERATION_CHILD_FAILED')
+            return refused(args, **kwargs)
+        manifest = json.loads((self.base / 'state/exports' / identity / 'manifest.json').read_text())
+        with patch.object(ops, 'run', failing):
+            with self.assertRaisesRegex(RuntimeError, '^OPERATION_CHILD_FAILED$'):
+                ops.restore_event_media(self.base / 'state/exports' / identity, manifest,
+                                        'vtc-development-restore-fictional', self.revision, self.image)
+        self.assertFalse([args for args, _ in refused.calls if args[-3:] == ['-cf', '-', '.']])
+        with self.assertRaisesRegex(RuntimeError, '^RESTORE_DESTINATION_INVALID$'):
+            ops.restore_event_media(self.base, manifest, ops.PROJECT, self.revision, self.image)
 
 
 if __name__ == '__main__':
