@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { UnitOfWork } from "@vtc/db";
 import {
   catalogCargoes,
@@ -26,15 +26,29 @@ import {
   trips,
 } from "@vtc/db/trips-schema";
 import { demoDataset, demoEpoch, demoId, demoMembers, games } from "./demo-dataset.js";
-import type { Identity } from "./modules/identity/service.js";
+import { createIdentity, type Identity } from "./modules/identity/service.js";
 import { activeLevels, hasConditions } from "./modules/qualifications/ladder.js";
 import { createAssignments } from "./modules/qualifications/promotion.js";
 import type { Fact, NormalizedTripEvidence } from "./modules/sources/contracts/evidence.js";
 import { createContributionRegister } from "./modules/trips/contributions.js";
 import { createFactRepository } from "./modules/trips/facts.js";
+import { identityAccessEvents } from "./platform/outbox/events.js";
 
 // Explicit fixture writer: application startup and the worker never import it. It runs only through
 // the guarded local CLI (scripts/demo/cli.ts) and the root stage operation (stage-seed.ts).
+
+/**
+ * The identity both seed entries use. A rerun whose credit promotes the demo trainee ends the
+ * trainee role, which appends an access change, so the seed needs the access events port.
+ */
+export function createSeedIdentity(unit: UnitOfWork, origin: string) {
+  return createIdentity(
+    unit,
+    { secret: randomBytes(32).toString("hex"), origin, production: false },
+    { accessEvents: identityAccessEvents(unit) },
+  );
+}
+
 export async function seedDashboard(
   unit: UnitOfWork,
   identity: Identity,

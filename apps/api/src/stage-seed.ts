@@ -1,8 +1,6 @@
-import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createUnitOfWork, settingsFromEnvironment } from "@vtc/db";
-import { seedDashboard } from "./demo-seed.js";
-import { createIdentity } from "./modules/identity/service.js";
+import { createSeedIdentity, seedDashboard } from "./demo-seed.js";
 
 // Root-only `operations.py stage-seed` entry. Adds the synthetic fixture to the development host's
 // existing company. The password arrives on stdin, so it never enters argv, env or output.
@@ -19,11 +17,7 @@ try {
   )
     throw new Error("DEMO_STAGE_TARGET_REQUIRED");
   unit = createUnitOfWork(settings);
-  const identity = createIdentity(unit, {
-    secret: randomBytes(32).toString("hex"),
-    origin: "https://stage-seed.invalid",
-    production: false,
-  });
+  const identity = createSeedIdentity(unit, "https://stage-seed.invalid");
   const { passwordHash } = await identity.prepareCredential(password);
   const result = await seedDashboard(unit, identity, passwordHash, new Date(), {
     adoptCompany: true,

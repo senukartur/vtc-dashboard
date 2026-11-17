@@ -18,10 +18,9 @@ import {
   demoId,
   demoMembers,
 } from "../../apps/api/src/demo-dataset.ts";
-import { seedDashboard } from "../../apps/api/src/demo-seed.ts";
+import { createSeedIdentity, seedDashboard } from "../../apps/api/src/demo-seed.ts";
 import { createAnalytics } from "../../apps/api/src/modules/analytics/service.ts";
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
-import { catalogConfig } from "../fixtures/catalogs/synthetic.ts";
 import { createEvents } from "../../apps/api/src/modules/events/service.ts";
 import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
 import {
@@ -34,6 +33,7 @@ import { createTrips } from "../../apps/api/src/modules/trips/service.ts";
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
+import { catalogConfig } from "../fixtures/catalogs/synthetic.ts";
 import {
   guardedSettings,
   reset,
@@ -192,13 +192,48 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
       await client.delete(catalogTrailers).where(eq(catalogTrailers.id, demoId("entity/ets2/3")));
       await client.execute(sql`SET FOREIGN_KEY_CHECKS = 1`);
     });
+    // A rerun whose credit crosses the trainee's condition promotes them and ends the trainee
+    // role, which appends an access change through the seed entries' identity.
+    const trainee = demoMembers.find((member) => member.roles.includes("trainee"));
+    if (!trainee) throw new Error("DEMO_TRAINEE_MISSING");
+    const traineeState = () =>
+      unit.run(async (tx) => {
+        const client = unit.client(tx);
+        const [[level]] = (await client.execute(sql`
+          SELECT l.position FROM qualification_assignments a
+          JOIN qualification_levels l ON l.id = a.level_id
+          WHERE a.user_id = ${trainee.id} AND a.game = 'ets2' AND a.ended_at IS NULL`)) as unknown as [
+          { position: number }[],
+        ];
+        const [roleRows] = (await client.execute(
+          sql`SELECT role FROM identity_roles WHERE user_id = ${trainee.id} ORDER BY role`,
+        )) as unknown as [{ role: string }[]];
+        const [[events]] = (await client.execute(sql`
+          SELECT count(*) AS count FROM outbox_events
+          WHERE type = 'member.access_changed' AND aggregate_id = ${trainee.id}`)) as unknown as [
+          { count: number }[],
+        ];
+        return {
+          position: level?.position,
+          roles: roleRows.map((row) => row.role),
+          accessEvents: Number(events?.count),
+        };
+      });
+    expect(await traineeState()).toEqual({ position: 1, roles: ["trainee"], accessEvents: 0 });
+    await unit.run((tx) =>
+      unit.client(tx).execute(sql`
+        UPDATE qualification_levels SET required_trips = 1, required_distance_m = NULL,
+          version = version + 1
+        WHERE game = 'ets2' AND position = 1`),
+    );
     const later = await seedDashboard(
       unit,
-      identity,
+      createSeedIdentity(unit, "http://127.0.0.1:4173"),
       credential.passwordHash,
       new Date(now.getTime() + 86400000),
     );
     expect(later.addedTrips).toBeGreaterThan(0);
+    expect(await traineeState()).toEqual({ position: 2, roles: ["driver"], accessEvents: 1 });
   } finally {
     await app.close();
   }
