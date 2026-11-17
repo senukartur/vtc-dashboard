@@ -8,7 +8,6 @@ import { Pager } from "../../shared/ui/pager.js";
 import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
 import { EventSelect, EvidenceItem } from "../manual-reports/fields.js";
 import { ReferenceFacts } from "../manual-reports/ReferenceFacts.js";
-import { QualificationCheckList } from "../qualifications/QualificationCheckList.js";
 import { DecisionPanel } from "../review/DecisionPanel.js";
 import { dispatchSearch } from "../review/dispatch-model.js";
 import { ReviewAccessState } from "../review/ReviewAccessState.js";
@@ -93,11 +92,6 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
               <TripQualificationCheck check={view.qualificationCheck} />
               <EffectiveFacts facts={view.effectiveFacts} />
               <Codes values={view.reviewReasonCodes} />
-              {view.qualificationCheck && (
-                <Card>
-                  <QualificationCheckList check={view.qualificationCheck} />
-                </Card>
-              )}
               {view.manualRevision && (
                 <Card className="stack">
                   <ReferenceFacts revision={view.manualRevision} />

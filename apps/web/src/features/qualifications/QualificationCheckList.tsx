@@ -38,7 +38,10 @@ export function ruleTexts(t: T, rule: Rule, locale: Locale) {
       return {
         label: t(labels.trailer_types),
         observed: rule.observed.length ? rule.observed.map((x) => x.label).join(", ") : unknown,
-        limit: rule.mode === "any" ? t("trailersAny") : rule.allowed.map((x) => x.label).join(", "),
+        limit:
+          rule.mode === "any"
+            ? t("trailersAny")
+            : rule.allowed.map((x) => x.label).join(", ") || t("trailersSelected"),
       };
     case "adr":
       return {
@@ -54,7 +57,7 @@ export function ruleTexts(t: T, rule: Rule, locale: Locale) {
             ? t("adrForbidden")
             : rule.mode === "any"
               ? t("adrAny")
-              : rule.allowedClasses.join(", "),
+              : rule.allowedClasses.join(", ") || t("adrSelected"),
       };
     case "hard_mode":
       return {
@@ -73,16 +76,19 @@ export function ruleTexts(t: T, rule: Rule, locale: Locale) {
 export function QualificationCheckList({
   check,
   headingLevel = 2,
+  headingId,
 }: {
   check: DTO["QualificationCheck"];
   headingLevel?: 2 | 3;
+  /** Lets the surrounding card or region take its accessible name from the heading. */
+  headingId?: string;
 }) {
   const { t } = useTranslation("qualifications"),
     locale = useLocale(),
     Heading = headingLevel === 2 ? "h2" : "h3";
   return (
     <div className="qualification-check stack">
-      <Heading>{t("checkTitle")}</Heading>
+      <Heading id={headingId}>{t("checkTitle")}</Heading>
       <p className="qualification-muted">
         {check.status === "checked"
           ? t("checkChecked", { name: check.level?.name ?? "" })

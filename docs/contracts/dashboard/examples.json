@@ -10539,7 +10539,7 @@
             "basis": "current",
             "level": null,
             "outcome": null,
-            "reasonCode": "historical_assignment_missing",
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           }
         },
