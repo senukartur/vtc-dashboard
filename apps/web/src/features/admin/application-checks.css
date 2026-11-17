@@ -1,0 +1,21 @@
+/* Application TruckersMP check and referral facts (VTC-149). Scoped to .applications-page like
+   applications.css; text wraps between words and only .applications-break may break anywhere. */
+.applications-page .applications-check dd {
+  display: grid;
+  gap: 4px;
+}
+.applications-page .applications-check-action {
+  justify-self: start;
+}
+.applications-page .applications-check-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.applications-page .applications-check-line > p {
+  min-width: 0;
+}
+.applications-page .applications-referral {
+  white-space: pre-line;
+}
