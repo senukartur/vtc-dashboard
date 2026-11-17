@@ -77,11 +77,6 @@
       "notifications": ["SELECT", "UPDATE(read_at,invalidated_at)"],
       "outbox_routing": ["INSERT"],
       "outbox_routing_scans": ["SELECT"],
-      "reconciliation_candidate_dismissals": [
-        "SELECT",
-        "INSERT",
-        "UPDATE(dismissed_by,dismissed_at,reason,version,undone_by,undone_at)"
-      ],
       "reconciliation_candidates": ["SELECT", "INSERT", "UPDATE(active)"],
       "reconciliation_commands": ["SELECT", "INSERT", "UPDATE(result)"],
       "reconciliation_history": ["SELECT", "INSERT"],
@@ -109,7 +104,6 @@
       "trip_proposal_reviews": ["SELECT", "INSERT"],
       "trip_proposals": ["SELECT", "INSERT"],
       "trip_resolutions": ["SELECT", "INSERT"],
-      "trip_review_reasons": ["SELECT", "INSERT", "DELETE"],
       "trip_review_work": ["SELECT", "INSERT", "UPDATE"],
       "trips": ["SELECT", "INSERT", "UPDATE"]
     },
@@ -148,7 +142,6 @@
       "qualification_assignments": ["SELECT", "INSERT", "UPDATE(ended_at)"],
       "qualification_level_trailers": ["SELECT"],
       "qualification_levels": ["SELECT"],
-      "reconciliation_candidate_dismissals": ["SELECT"],
       "reconciliation_candidates": ["SELECT", "INSERT", "UPDATE(active)"],
       "reconciliation_rules": ["SELECT", "INSERT"],
       "reconciliation_searches": [
@@ -169,7 +162,6 @@
       "trip_proposal_reviews": ["SELECT"],
       "trip_proposals": ["SELECT"],
       "trip_resolutions": ["SELECT"],
-      "trip_review_reasons": ["SELECT", "INSERT", "DELETE"],
       "trip_review_work": ["SELECT", "INSERT", "UPDATE"],
       "trips": ["SELECT", "UPDATE"]
     }
