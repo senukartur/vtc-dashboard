@@ -217,7 +217,7 @@ const decisionBasis = (factRevisionId: string): S["Decision"]["basis"] => ({
  * R1: the author's manual report returned for fixes: an extended revision with its report, one
  * ready screenshot, an unknown review code, and two decisions listed newest-last out of order.
  */
-export function needsFixManual() {
+export function needsFixManual(variant: "effective" | "no-fact" | "unknown-damage" = "effective") {
   const { envelope, view, facts } = stage4("manual-unresolved");
   view.summary.number = 1044;
   view.summary.decision = "rejected";
@@ -232,6 +232,10 @@ export function needsFixManual() {
   revision.fields.trailerType = { status: "resolved", entityId: fixtureTrailerId };
   revision.fields.evidenceIds = [needsFixEvidence.id];
   view.manualRevision = revision;
+  // The server applies the manual values to the effective fact when the manual fact wins.
+  facts.trailers = [{ entityId: fixtureTrailerId }];
+  facts.cargoDamagePercent = variant === "unknown-damage" ? null : 12.5;
+  if (variant === "no-fact") delete view.effectiveFacts;
   view.evidence = [{ ...needsFixEvidence }];
   view.reviewReasonCodes = ["manual_report", "SYNTHETIC_STAFF_REVIEW"];
   view.decisions = [
@@ -318,6 +322,7 @@ export function tripPageStubs(): Record<string, TripEnvelope> {
     manualNoCheck: manualUnknown("no-check"),
     manualEventExempt: manualUnknown("event-exempt"),
     manualZeroDamage: manualUnknown("zero-damage"),
+    manualNoCompany: manualUnknown("no-company"),
     reconciledAccepted: reconciledAccepted(),
     returnedTrip: returnedTrip(),
     olderTelemetry: olderPrivate("private-recorded-telemetry"),
@@ -326,6 +331,8 @@ export function tripPageStubs(): Record<string, TripEnvelope> {
     withoutSources: withoutSources(),
     longValues: longValues(),
     needsFixManual: needsFixManual(),
+    needsFixNoFact: needsFixManual("no-fact"),
+    needsFixUnknownDamage: needsFixManual("unknown-damage"),
     pendingManual: pendingManual(),
     openTelemetry: openTelemetry(),
     withTrailer: withTrailer(),

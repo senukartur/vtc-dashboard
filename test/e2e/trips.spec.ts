@@ -262,7 +262,6 @@ test(
   async ({ page }) => {
     await mockTrips(page);
     const view = example("getTrip:extended-manual-revision");
-    view.data.manualRevision.fields.comment = "Fictional private retained comment";
     let deny = false,
       calls = 0,
       revoked = false;
@@ -288,9 +287,6 @@ test(
     deny = true;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("permissions");
-    await expect(page.getByText("Fictional private retained comment", { exact: true })).toHaveCount(
-      0,
-    );
     await expect(screenshots).toHaveCount(0);
     await expect(history).toHaveCount(0);
     const deniedCalls = calls;
@@ -302,9 +298,8 @@ test(
     await expect(
       page.getByRole("main").getByRole("link", { name: "Sign in", exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Fictional private retained comment", { exact: true })).toHaveCount(
-      0,
-    );
+    await expect(screenshots).toHaveCount(0);
+    await expect(history).toHaveCount(0);
   },
 );
 

@@ -157,20 +157,9 @@ test("trip status names every decision and outcome, and a returned report only w
     expect(tripTranslations.en[`status_${status}`]).toBeTruthy();
 });
 
-test("only the owner may revise a report-backed revision that is not accepted", () => {
-  const returned = needsFixManual();
-  expect(canRevise(returned.data, fixtureId)).toBe(true);
-  expect(revisableReportId(returned.data, fixtureId)).toBe(needsFixReportId);
-  expect(canRevise(returned.data, otherOwnerId)).toBe(false);
-  expect(canRevise(returned.data, undefined)).toBe(false);
-  expect(canRevise(asOtherMember(needsFixManual()).data, fixtureId)).toBe(false);
-  const accepted = needsFixManual();
-  privateView(accepted).summary.decision = "accepted";
-  expect(canRevise(accepted.data, fixtureId)).toBe(false);
-  expect(canRevise(olderPrivate("extended-manual-revision").data, fixtureId)).toBe(true);
-  // A legacy revision has no report to edit.
-  const legacy = needsFixManual();
-  privateView(legacy).manualRevision = {
+/** A legacy manual revision: resolved catalog IDs and no report behind it. */
+const legacyRevision = () =>
+  ({
     id: "41500000-0000-4000-8000-000000000380",
     number: 1,
     submittedAt: "2026-11-11T09:00:00.000Z",
@@ -186,7 +175,22 @@ test("only the owner may revise a report-backed revision that is not accepted", 
       eventId: null,
       comment: null,
     },
-  } as unknown as DTO["ManualRevision"];
+  }) as unknown as DTO["ManualRevision"];
+
+test("only the owner may revise a report-backed revision that is not accepted", () => {
+  const returned = needsFixManual();
+  expect(canRevise(returned.data, fixtureId)).toBe(true);
+  expect(revisableReportId(returned.data, fixtureId)).toBe(needsFixReportId);
+  expect(canRevise(returned.data, otherOwnerId)).toBe(false);
+  expect(canRevise(returned.data, undefined)).toBe(false);
+  expect(canRevise(asOtherMember(needsFixManual()).data, fixtureId)).toBe(false);
+  const accepted = needsFixManual();
+  privateView(accepted).summary.decision = "accepted";
+  expect(canRevise(accepted.data, fixtureId)).toBe(false);
+  expect(canRevise(olderPrivate("extended-manual-revision").data, fixtureId)).toBe(true);
+  // A legacy revision has no report to edit.
+  const legacy = needsFixManual();
+  privateView(legacy).manualRevision = legacyRevision();
   expect(canRevise(legacy.data, fixtureId)).toBe(false);
   expect(canRevise(otherSummary().data, otherOwnerId)).toBe(false);
 });
@@ -345,12 +349,25 @@ test("trip times prefer actual facts, then the reference times of the report, el
     reported: false,
   });
   expect(tripTimes(null, null)).toBeNull();
-  // Damage of the effective fact first, then the reported damage; unknown is never zero.
-  expect(reportedDamage(privateView(manualUnknown()).effectiveFacts, reported)).toBe(12.5);
-  expect(reportedDamage(privateView(manualUnknown("zero-damage")).effectiveFacts, reported)).toBe(
-    0,
-  );
-  expect(reportedDamage(privateView(manualUnknown()).effectiveFacts, null)).toBeNull();
+});
+
+test("reported damage stands in only without an effective damage field and is marked", () => {
+  const reported = privateView(needsFixManual()).manualRevision;
+  // An explicit null from the server means unknown; the report does not override it.
+  const unknown = privateView(manualUnknown()).effectiveFacts;
+  expect(unknown && "cargoDamagePercent" in unknown && unknown.cargoDamagePercent).toBeNull();
+  expect(reportedDamage(unknown, reported)).toBeNull();
+  expect(reportedDamage(unknown, null)).toBeNull();
+  expect(
+    reportedDamage(privateView(manualUnknown("zero-damage")).effectiveFacts, reported),
+  ).toEqual({ value: 0, reported: false });
+  // Without the field, or without an effective fact, the report's damage is shown as reported.
+  const absent = privateView(manualUnknown()).effectiveFacts;
+  if (!absent) throw new Error("MISSING_FACTS");
+  delete absent.cargoDamagePercent;
+  expect(reportedDamage(absent, reported)).toEqual({ value: 12.5, reported: true });
+  expect(reportedDamage(null, reported)).toEqual({ value: 12.5, reported: true });
+  expect(reportedDamage(absent, null)).toBeNull();
 });
 
 test("reason codes read as words, unknown codes as a generic reason, without duplicates", () => {
@@ -406,6 +423,15 @@ test("history runs oldest first and names returns, rejections, system actors and
   expect(merged[1]).toMatchObject({ titleKey: "revisionSubmitted", number: 2 });
   expect(merged[2]).toMatchObject({ overLimits: true, reasonKeys: ["code_rule_mass_exceeded"] });
 
+  // A staff rejection of a legacy revision cannot be fixed, so it stays a rejection.
+  const legacy = privateView(needsFixManual());
+  legacy.manualRevision = legacyRevision();
+  expect(tripHistory(legacy).map((entry) => [entry.kind, entry.titleKey])).toEqual([
+    ["submitted", "history_submitted"],
+    ["rejected", "history_rejected"],
+    ["rejected", "history_rejected"],
+  ]);
+
   // A staff rejection of a trip without a manual report is a rejection, not a return.
   expect(tripHistory(privateView(returnedTrip())).map((entry) => entry.kind)).toEqual([
     "telemetry",
@@ -425,7 +451,7 @@ test("unknown recorded values say whether telemetry recorded the trip at all", (
 
 test("every VTC-158 trip page key exists in both languages and is translated", () => {
   const pattern =
-    /^(tripTitle|tripNumber|completedOn|driverName|fixReport|status_|summaryRegion|tile|distance(By|No|Unknown)|credited|next_|quoted|fact(From|To|Trailer|Started|Completed|Damage)$|damageOfCargo|eventNone|reported(Time|InfoLabel)|unknown(InfoLabel|Help)|history_|reasonOther|code_accepted_over_limits|technical|tripId|pendingProposalId|associateConfirmText|correctionConfirmText)/;
+    /^(tripTitle|tripNumber|completedOn|driverName|fixReport|status_|summaryRegion|tile|distance(By|No|Unknown)|credited|next_|quoted|fact(From|To|Trailer|Started|Completed|Damage)$|damageOfCargo|eventNone|reported(Time|InfoLabel|ValueLabel|ValueHelp)|asideLabel|unknown(InfoLabel|Help)|history_|reasonOther|code_accepted_over_limits|technical|tripId|pendingProposalId|associateConfirmText|correctionConfirmText)/;
   const keys = Object.keys(tripTranslations.en).filter((key) => pattern.test(key)) as Array<
     keyof typeof tripTranslations.en
   >;

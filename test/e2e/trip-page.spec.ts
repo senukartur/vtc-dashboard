@@ -504,6 +504,9 @@ test(
     // The effective fact names no receiving company, so the place is the city alone.
     const receiver = fact(tripCard(page), "To");
     await expect(receiver).toHaveText("Fictional Eastbrook");
+    await expect(
+      page.getByRole("complementary", { name: "Trip history and check", exact: true }),
+    ).toContainText("History");
     const fix = page.getByRole("link", { name: "Fix the report", exact: true });
     await expect(fix).toHaveAttribute("href", `/account/reports/${needsFixReportId}/edit`);
     const next = tile(page, "What next");
@@ -515,6 +518,7 @@ test(
     await expect(shots).toContainText("Ready");
     await expect(shots.getByRole("button", { name: "View Evidence 1", exact: true })).toBeVisible();
     await expect(fact(tripCard(page), "Trailer")).toHaveText("Fictional trailer_type");
+    await expect(fact(tripCard(page), "Damage")).toHaveText("12.5 % of cargo");
     for (const hidden of [
       "Technical details",
       "Private report and review history",
@@ -523,6 +527,26 @@ test(
       await expect(page.getByText(hidden, { exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Review workspace", exact: true })).toHaveCount(0);
     await expectHumanText(page, [String(needsFixEvidence.byteLength)]);
+
+    // Without an effective fact the report's trailer and damage stand in, marked as reported.
+    state.view = needsFixManual("no-fact");
+    await page.reload();
+    await loaded(page);
+    const trailer = fact(tripCard(page), "Trailer");
+    await expect(trailer).toContainText("Fictional trailer_type");
+    await expect(trailer).toContainText("by the report");
+    const reportedDamage = fact(tripCard(page), "Damage");
+    await expect(reportedDamage).toContainText("12.5 % of cargo");
+    await expect(reportedDamage).toContainText("by the report");
+    await expect(await openTip(page, reportedDamage, "About values from the report")).toHaveText(
+      "The driver stated this in the manual report. Staff confirmation determines reporting and qualification.",
+    );
+    await closeTip(page);
+    // An explicit unknown from the server is not replaced by the report's damage.
+    state.view = needsFixManual("unknown-damage");
+    await page.reload();
+    await loaded(page);
+    await expect(fact(tripCard(page), "Damage")).toHaveText("Unavailable");
 
     state.view = telemetryWithEvent();
     await page.reload();
