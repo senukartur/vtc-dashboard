@@ -54,7 +54,7 @@ async function history(fixture: Fixture) {
   return (await notifications.history(fixture.author, { limit: 100 })).items;
 }
 test(
-  "real event reminders, read actions, arrival fence and notification switches persist through built API and MySQL",
+  "real event reminders, read actions, arrival fence and notification settings rows persist through built API and MySQL",
   browserCase(["@real"]),
   async ({ page }) => {
     test.setTimeout(90000);
@@ -155,29 +155,41 @@ test(
       await expect(changed).toHaveCount(1);
       await changed.getByRole("button", { name: "Mark read", exact: true }).click();
       await expect(changed.getByRole("button", { name: "Mark read", exact: true })).toHaveCount(0);
-      // The switches live in account Preferences and follow the keys the API returns.
+      // The rows live in account Preferences and follow the keys the API returns to a driver.
       const read = await page.request.get("/api/v1/me/notification-preferences");
       expect(read.status()).toBe(200);
       const keys = Object.keys((await read.json()).data);
       expect(keys).toEqual(expect.arrayContaining(["tripAccepted", "newEvent", "eventReminders"]));
       await page.getByRole("link", { name: "Open preferences", exact: true }).click();
       await expect(page).toHaveURL(/\/account\/preferences$/);
-      const switches = page.getByRole("main").getByRole("switch");
-      await expect(switches).toHaveCount(keys.length);
-      const reminders = page.getByRole("switch", {
-        name: "Event reminders an hour before",
+      await expect(page.getByRole("main").locator(".notification-switch-row label")).toHaveText([
+        "Decision on my trip",
+        "Company trip starts and finishes",
+        "New event and reminder an hour before",
+        "Level promotion",
+      ]);
+      await expect(page.getByRole("main").getByRole("checkbox")).toHaveCount(4);
+      const events = page.getByRole("checkbox", {
+        name: "New event and reminder an hour before",
         exact: true,
       });
-      await expect(reminders).toBeChecked();
-      await reminders.click();
+      await expect(events).toBeChecked();
+      await events.click();
       await expect(page.getByText("Preferences saved.", { exact: true })).toBeVisible();
       await page.reload();
       await catalogLanguage(page);
-      await expect(reminders).not.toBeChecked();
+      await expect(events).not.toBeChecked();
       await expect(page.locator(".notification-toast")).toHaveCount(0);
       const response = await page.request.get("/api/v1/me/notification-preferences");
       expect(response.status()).toBe(200);
-      expect((await response.json()).data.eventReminders).toBe(false);
+      const saved = (await response.json()).data;
+      // One row change wrote every event preference of the row.
+      expect([saved.newEvent, saved.eventReminders, saved.eventChanges]).toEqual([
+        false,
+        false,
+        false,
+      ]);
+      expect(saved.tripAccepted).toBe(true);
     } finally {
       releaseRead();
       try {

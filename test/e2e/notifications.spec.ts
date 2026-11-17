@@ -46,14 +46,14 @@ async function open(page: Page) {
   await expect(page.getByRole("heading", { name: "Notifications", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Open notifications · Unread: 1/ })).toBeVisible();
 }
-/** Account Preferences, where the notification switches live. */
+/** Account Preferences, where the notification settings rows live. */
 async function openPreferences(page: Page) {
   await page.goto("/account/preferences");
   await expect(
     page.getByRole("heading", { level: 1, name: "Preferences", exact: true }),
   ).toBeVisible();
   const card = page.getByRole("region", { name: "Notifications", exact: true });
-  await expect(card.getByRole("switch").first()).toBeVisible();
+  await expect(card.getByRole("checkbox").first()).toBeVisible();
   return card;
 }
 async function capture(page: Page, info: TestInfo, name: string) {
@@ -287,10 +287,12 @@ test(
         headers: { ETag: `"v${state.version}"` },
       });
     });
-    await card.getByRole("switch", { name: "Trip starts", exact: true }).click();
+    await card
+      .getByRole("checkbox", { name: "Company trip starts and finishes", exact: true })
+      .click();
     await expect(card.getByText("Preferences saved.", { exact: true })).toBeVisible();
     await expect(
-      otherCard.getByRole("switch", { name: "Trip starts", exact: true }),
+      otherCard.getByRole("checkbox", { name: "Company trip starts and finishes", exact: true }),
     ).not.toBeChecked();
     expect(preferenceReads).toBe(1);
     await other.close();
@@ -463,14 +465,17 @@ test(
   },
 );
 test(
-  "notification switches save each change, retain uncertain identity and require explicit conflict reload",
+  "notification rows save each change, retain uncertain identity and require explicit conflict reload",
   browserCase(["@functional"]),
   async ({ page }, info) => {
     const state = await mockNotifications(page);
     const card = await openPreferences(page);
-    await expect(card.getByRole("switch")).toHaveCount(8);
+    await expect(card.getByRole("checkbox")).toHaveCount(4);
     await capture(page, info, "notifications-preferences");
-    const starts = card.getByRole("switch", { name: "Trip starts", exact: true });
+    const starts = card.getByRole("checkbox", {
+      name: "Company trip starts and finishes",
+      exact: true,
+    });
     const saved = card.getByText("Preferences saved.", { exact: true });
     state.commandStatus = 503;
     await starts.click();
@@ -485,15 +490,16 @@ test(
     expect(state.commands[1]?.body).toEqual(state.commands[0]?.body);
     expect(state.commands[1]?.etag).toBe('"v1"');
     expect(state.prefs.tripStarted).toBe(false);
+    expect(state.prefs.tripFinished).toBe(false);
     state.commandStatus = 412;
-    const reminders = card.getByRole("switch", {
-      name: "Event reminders an hour before",
+    const reminders = card.getByRole("checkbox", {
+      name: "New event and reminder an hour before",
       exact: true,
     });
     await reminders.click();
     await expect(card.getByRole("alert")).toContainText("changed elsewhere");
     await expect(reminders).toBeChecked();
-    // Every switch stays focusable but sends nothing until the preferences are reloaded.
+    // Every row stays focusable but sends nothing until the preferences are reloaded.
     await expect(reminders).toHaveAttribute("aria-disabled", "true");
     await expect(starts).toHaveAttribute("aria-disabled", "true");
     await reminders.press("Space");
@@ -512,12 +518,15 @@ test(
   },
 );
 test(
-  "a pending switch shows its requested position, prevents duplicate commands and keeps focus",
+  "a pending row shows its requested position, prevents duplicate commands and keeps focus",
   browserCase(["@functional"]),
   async ({ page }) => {
     const state = await mockNotifications(page);
     const card = await openPreferences(page);
-    const starts = card.getByRole("switch", { name: "Trip starts", exact: true });
+    const starts = card.getByRole("checkbox", {
+      name: "Company trip starts and finishes",
+      exact: true,
+    });
     let release = () => {};
     state.commandGate = new Promise<void>((resolve) => {
       release = resolve;
@@ -528,14 +537,17 @@ test(
       await expect(starts).toHaveAttribute("aria-busy", "true");
       await expect(starts).not.toBeChecked();
       await expect(card.getByRole("status")).toHaveText("Saving…");
-      await expect(card.getByRole("switch", { name: "New event", exact: true })).toHaveAttribute(
-        "aria-disabled",
-        "true",
-      );
+      await expect(
+        card.getByRole("checkbox", { name: "Level promotion", exact: true }),
+      ).toHaveAttribute("aria-disabled", "true");
       await starts.press("Space");
       await expect(starts).toBeFocused();
       await expect(starts).not.toBeChecked();
-      expect(state.commands[0]?.body).toEqual({ ...state.prefs, tripStarted: false });
+      expect(state.commands[0]?.body).toEqual({
+        ...state.prefs,
+        tripStarted: false,
+        tripFinished: false,
+      });
     } finally {
       state.commandGate = null;
       release();
@@ -548,7 +560,7 @@ test(
   },
 );
 test(
-  "the notifications page links to account Preferences instead of holding switches",
+  "the notifications page links to account Preferences instead of holding settings rows",
   browserCase(["@functional"]),
   async ({ page }, info) => {
     await mockNotifications(page);
@@ -565,8 +577,8 @@ test(
     await link.click();
     await expect(page).toHaveURL(/\/account\/preferences$/);
     await expect(
-      page.getByRole("region", { name: "Notifications", exact: true }).getByRole("switch"),
-    ).toHaveCount(8);
+      page.getByRole("region", { name: "Notifications", exact: true }).getByRole("checkbox"),
+    ).toHaveCount(4);
     await page.goto("/account/notifications");
     await catalogLanguage(page, "ru");
     await expect(

@@ -1709,44 +1709,53 @@ const deputyCapabilities = [
   "members.manage",
 ];
 const memberRows = [
-  "Trip accepted",
-  "Rejections and review of your trips",
-  "Trip starts",
-  "Trip finishes and cancellations",
-  "New event",
-  "Changes to events you joined",
-  "Event reminders an hour before",
-  "Qualification changes",
+  "Decision on my trip",
+  "Company trip starts and finishes",
+  "New event and reminder an hour before",
+  "Level promotion",
 ];
+const eventsName = "New event and reminder an hour before";
+const eventDetails = [
+  "A new event was published.",
+  "About an hour before an event you are participating in.",
+  "An event you joined changed its start or route, or was cancelled.",
+];
+const ownDecision =
+  "Your trip was rejected, or your manual report is waiting for review or needs a correction.";
+const reviewerDecision = "A trip was rejected: yours, or another member's, since you review trips.";
 const notificationCard = (page: Page, locale: "en" | "ru" = "en") =>
   page.getByRole("region", {
     name: locale === "en" ? "Notifications" : "Уведомления",
     exact: true,
   });
+const infoTip = (page: Page) => page.locator(".info-tip-content");
 for (const viewer of [
-  { name: "member", capabilities: undefined, keys: null, rows: memberRows },
+  {
+    name: "member",
+    capabilities: undefined,
+    keys: null,
+    rows: memberRows,
+    first: ["tripAccepted", "tripRejected"],
+    decision: ["Your trip was accepted.", ownDecision],
+    events: eventDetails,
+  },
   {
     name: "dispatcher",
     capabilities: dispatcherCapabilities,
     keys: null,
-    rows: ["Trip accepted", "Trip rejections", ...memberRows.slice(2), "Trips for review"],
+    rows: [...memberRows, "New trips for review"],
+    first: ["tripAccepted", "tripRejected"],
+    decision: ["Your trip was accepted.", reviewerDecision],
+    events: eventDetails,
   },
   {
     name: "deputy",
     capabilities: deputyCapabilities,
     keys: null,
-    rows: [
-      "Trip accepted",
-      "Trip rejections",
-      "Trip starts",
-      "Trip finishes and cancellations",
-      "New event",
-      "Event and member access changes",
-      "Event reminders an hour before",
-      "Qualification changes",
-      "Trips for review",
-      "Membership applications",
-    ],
+    rows: [...memberRows, "New trips for review", "New applications"],
+    first: ["tripAccepted", "tripRejected"],
+    decision: ["Your trip was accepted.", reviewerDecision],
+    events: [...eventDetails, "Also member access changes, since you manage members."],
   },
   {
     name: "six-key",
@@ -1759,18 +1768,14 @@ for (const viewer of [
       "eventReminders",
       "qualificationChanges",
     ],
-    rows: [
-      "Rejections and review of your trips",
-      "Trip starts",
-      "Trip finishes and cancellations",
-      "Changes to events you joined",
-      "Event reminders an hour before",
-      "Qualification changes",
-    ],
+    rows: memberRows,
+    first: ["tripStarted", "tripFinished"],
+    decision: [ownDecision],
+    events: eventDetails.slice(1),
   },
 ] as const)
   test(
-    `notification switches follow the keys returned to a ${viewer.name} and save each change at once`,
+    `notification rows follow the keys returned to a ${viewer.name} and save each row change at once`,
     browserCase(["@functional"]),
     async ({ page }) => {
       const state = await settingsWorkspace(page, {
@@ -1782,63 +1787,174 @@ for (const viewer of [
       await language(page, "en");
       const card = notificationCard(page);
       await expect(card.getByText("Saved immediately", { exact: true })).toBeVisible();
-      await expect(card.getByRole("switch")).toHaveCount(viewer.rows.length);
+      await expect(card.getByText("Notification", { exact: true })).toBeVisible();
+      await expect(card.getByText("On site", { exact: true })).toBeVisible();
+      await expect(card.getByRole("switch")).toHaveCount(0);
+      await expect(card.getByRole("checkbox")).toHaveCount(viewer.rows.length);
       await expect(card.locator(".notification-switch-row label")).toHaveText([...viewer.rows]);
       for (const name of viewer.rows)
-        await expect(card.getByRole("switch", { name, exact: true })).toBeChecked();
-      if (viewer.name !== "member" && viewer.name !== "six-key")
+        await expect(card.getByRole("checkbox", { name, exact: true })).toBeChecked();
+      if (viewer.name === "dispatcher" || viewer.name === "deputy")
         await expect(
-          card.getByRole("switch", { name: "Trips for review", exact: true }),
+          card.getByRole("checkbox", { name: "New trips for review", exact: true }),
         ).toHaveAccessibleDescription("· reviewers");
       if (viewer.name === "deputy")
         await expect(
-          card.getByRole("switch", { name: "Membership applications", exact: true }),
+          card.getByRole("checkbox", { name: "New applications", exact: true }),
         ).toHaveAccessibleDescription("· leadership");
+      // Row details follow what this viewer receives.
+      for (const [name, lines] of [
+        ["Decision on my trip", viewer.decision],
+        [eventsName, viewer.events],
+      ] as const) {
+        await card.getByRole("button", { name: `Details: ${name}`, exact: true }).click();
+        await expect(infoTip(page).locator("strong")).toHaveText(name);
+        await expect(infoTip(page).locator("p")).toHaveText([...lines]);
+        await page.keyboard.press("Escape");
+        await expect(infoTip(page)).toHaveCount(0);
+      }
       const read = Object.keys(
         viewer.keys
           ? Object.fromEntries(viewer.keys.map((key) => [key, true]))
           : notificationPreferencesFor(state.self.data.capabilities),
       );
-      const first = viewer.keys ? "Trip starts" : "Trip accepted";
-      await card.getByRole("switch", { name: first, exact: true }).click();
+      const first = viewer.keys ? "Company trip starts and finishes" : "Decision on my trip";
+      await card.getByRole("checkbox", { name: first, exact: true }).click();
       await expect(card.getByRole("status")).toHaveText("Preferences saved.");
-      await expect(card.getByRole("switch", { name: first, exact: true })).not.toBeChecked();
+      await expect(card.getByRole("checkbox", { name: first, exact: true })).not.toBeChecked();
       expect(state.notifications.commands).toHaveLength(1);
       const [command] = state.notifications.commands;
-      // One PUT with exactly the keys of the read, the read's ETag and an idempotency key.
+      // One PUT with exactly the keys of the read: the row's keys off, every other key unchanged.
       expect(Object.keys(command?.body ?? {})).toEqual(read);
-      expect(command?.body[viewer.keys ? "tripStarted" : "tripAccepted"]).toBe(false);
+      expect(command?.body).toEqual({
+        ...Object.fromEntries(read.map((key) => [key, true])),
+        ...Object.fromEntries(viewer.first.map((key) => [key, false])),
+      });
       expect(command?.ifMatch).toBe('"v1"');
       expect(command?.key).toMatch(/^[0-9a-f-]{36}$/);
-      // The saved response's ETag is the base of the next switch, without another read.
+      // The saved response's ETag is the base of the next row change, without another read.
       const reads = state.notifications.reads;
-      await card.getByRole("switch", { name: "Qualification changes", exact: true }).click();
+      await card.getByRole("checkbox", { name: "Level promotion", exact: true }).click();
       await expect(
-        card.getByRole("switch", { name: "Qualification changes", exact: true }),
+        card.getByRole("checkbox", { name: "Level promotion", exact: true }),
       ).not.toBeChecked();
       await expect.poll(() => state.notifications.commands.length).toBe(2);
       await expect(card.getByRole("status")).toHaveText("Preferences saved.");
       expect(state.notifications.commands[1]?.ifMatch).toBe('"v2"');
       expect(state.notifications.commands[1]?.key).not.toBe(command?.key);
       expect(state.notifications.commands[1]?.body.qualificationChanges).toBe(false);
+      for (const key of viewer.first)
+        expect(state.notifications.commands[1]?.body[key], key).toBe(false);
       expect(state.notifications.reads).toBe(reads);
       // Saved positions survive a reload from the server.
       await page.reload();
       await language(page, "en");
-      await expect(card.getByRole("switch", { name: first, exact: true })).not.toBeChecked();
+      await expect(card.getByRole("checkbox", { name: first, exact: true })).not.toBeChecked();
+      await expect(
+        card.getByRole("checkbox", { name: "Level promotion", exact: true }),
+      ).not.toBeChecked();
     },
   );
 
 test(
-  "a failed switch reverts with an alert; retry keeps its key, changed keys and rate limits lock until resolved",
+  "a mixed row shows partly on, sets every grouped key and stays mixed while locked",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    const state = await settingsWorkspace(page, {
+      verified: true,
+      capabilities: [...deputyCapabilities],
+    });
+    // Values saved before the rows existed: one key of two rows is off.
+    state.notifications.values = { tripRejected: false, eventChanges: false };
+    await page.goto("/account/preferences");
+    await language(page, "en");
+    const card = notificationCard(page);
+    const decision = card.getByRole("checkbox", { name: "Decision on my trip", exact: true });
+    const events = card.getByRole("checkbox", { name: eventsName, exact: true });
+    await expect(decision).toBeChecked({ indeterminate: true });
+    await expect(events).toBeChecked({ indeterminate: true });
+    for (const name of [
+      "Company trip starts and finishes",
+      "Level promotion",
+      "New trips for review",
+      "New applications",
+    ])
+      await expect(card.getByRole("checkbox", { name, exact: true })).toBeChecked();
+    const mixed = "Partly on: some of these are off. Switching the row turns them all on.";
+    await card.getByRole("button", { name: `Details: ${eventsName}`, exact: true }).click();
+    await expect(infoTip(page).locator("p").last()).toHaveText(mixed);
+    await capture(page, info, "en-notifications-mixed-tip");
+    await page.keyboard.press("Escape");
+    await card.getByRole("button", { name: "Details: Level promotion", exact: true }).click();
+    await expect(infoTip(page).getByText(mixed)).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await language(page, "ru");
+    const ru = notificationCard(page, "ru");
+    await expect(
+      ru.getByRole("checkbox", { name: "Решение по моему рейсу", exact: true }),
+    ).toBeChecked({ indeterminate: true });
+    await expect(
+      ru.getByRole("checkbox", { name: "Новое событие и напоминание за час", exact: true }),
+    ).toBeChecked({ indeterminate: true });
+    await expect(ru.getByText("Событие", { exact: true })).toBeVisible();
+    await expect(ru.getByText("На сайте", { exact: true })).toBeVisible();
+    await capture(page, info, "ru-notifications-mixed");
+    await language(page, "en");
+    // A click on a mixed row turns every key of the row on and leaves other rows as they are.
+    await decision.click();
+    await expect(card.getByRole("status")).toHaveText("Preferences saved.");
+    await expect(decision).toBeChecked();
+    await expect(decision).not.toBeChecked({ indeterminate: true });
+    expect(state.notifications.commands).toHaveLength(1);
+    expect(state.notifications.commands[0]?.body).toMatchObject({
+      tripAccepted: true,
+      tripRejected: true,
+      newEvent: true,
+      eventReminders: true,
+      eventChanges: false,
+    });
+    await expect(events).toBeChecked({ indeterminate: true });
+    // A failed write shows the row as mixed again; a locked row keeps it on Space.
+    state.notifications.statuses.push(412);
+    await events.click();
+    await expect(card.getByRole("alert")).toContainText("changed elsewhere");
+    await expect(events).toBeChecked({ indeterminate: true });
+    await expect(events).toHaveAttribute("aria-disabled", "true");
+    await events.press("Space");
+    await expect(events).toBeChecked({ indeterminate: true });
+    expect(state.notifications.commands).toHaveLength(2);
+    await card.getByRole("button", { name: "Reload preferences", exact: true }).click();
+    await expect(events).not.toHaveAttribute("aria-disabled", /.*/);
+    await expect(events).toBeChecked({ indeterminate: true });
+    await events.click();
+    await expect(card.getByRole("status")).toHaveText("Preferences saved.");
+    await expect(events).toBeChecked();
+    expect(state.notifications.commands).toHaveLength(3);
+    expect(state.notifications.commands[2]?.body).toMatchObject({
+      newEvent: true,
+      eventReminders: true,
+      eventChanges: true,
+    });
+    await card.getByRole("button", { name: `Details: ${eventsName}`, exact: true }).click();
+    await expect(infoTip(page).getByText(mixed)).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await language(page, "en");
+    await expect(events).toBeChecked();
+    await expect(decision).toBeChecked();
+  },
+);
+
+test(
+  "a failed row change reverts with an alert; retry keeps its key, changed keys and rate limits lock until resolved",
   browserCase(["@functional"]),
   async ({ page }, info) => {
     const state = await settingsWorkspace(page, { verified: true });
     await page.goto("/account/preferences");
     await language(page, "en");
     const card = notificationCard(page);
-    const accepted = card.getByRole("switch", { name: "Trip accepted", exact: true });
-    const event = card.getByRole("switch", { name: "New event", exact: true });
+    const accepted = card.getByRole("checkbox", { name: "Decision on my trip", exact: true });
+    const event = card.getByRole("checkbox", { name: eventsName, exact: true });
     const saved = card.getByText("Preferences saved.", { exact: true });
     state.notifications.statuses.push(503);
     await accepted.click();
@@ -1846,7 +1962,7 @@ test(
       "Notifications are unavailable. Please try again.",
     );
     await expect(accepted).toBeChecked();
-    // Toggling the same switch again resends the same attempt, like Retry does.
+    // Toggling the same row again resends the same attempt, like Retry does.
     state.notifications.statuses.push(503);
     await accepted.click();
     await expect.poll(() => state.notifications.commands.length).toBe(2);
@@ -1855,12 +1971,13 @@ test(
     await expect(saved).toBeVisible();
     await expect(accepted).not.toBeChecked();
     const [failed, toggled, retried] = state.notifications.commands;
+    expect(failed?.body).toMatchObject({ tripAccepted: false, tripRejected: false });
     for (const repeat of [toggled, retried]) {
       expect(repeat?.key).toBe(failed?.key);
       expect(repeat?.body).toEqual(failed?.body);
       expect(repeat?.ifMatch).toBe(failed?.ifMatch);
     }
-    // 422: the available types changed; every switch waits for a reload.
+    // 422: the available types changed; every row waits for a reload.
     state.notifications.statuses.push(422);
     await event.click();
     await expect(card.getByRole("alert")).toHaveText(
@@ -1887,9 +2004,17 @@ test(
     await expect(saved).toBeVisible();
     await expect(event).not.toBeChecked();
     expect(state.notifications.commands.at(-1)?.key).toBe(state.notifications.commands.at(-2)?.key);
+    expect(state.notifications.commands.at(-1)?.body).toMatchObject({
+      newEvent: false,
+      eventReminders: false,
+      eventChanges: false,
+    });
     await language(page, "ru");
     await expect(
-      notificationCard(page, "ru").getByRole("switch", { name: "Новое событие", exact: true }),
+      notificationCard(page, "ru").getByRole("checkbox", {
+        name: "Новое событие и напоминание за час",
+        exact: true,
+      }),
     ).not.toBeChecked();
     await expect(notificationCard(page, "ru").getByText("Сохраняется сразу")).toBeVisible();
   },
@@ -2057,23 +2182,25 @@ test(
 );
 
 for (const viewer of [
-  { name: "member", capabilities: undefined, rows: 8 },
-  { name: "deputy", capabilities: deputyCapabilities, rows: 10 },
+  { name: "member", capabilities: undefined, rows: 4 },
+  { name: "deputy", capabilities: deputyCapabilities, rows: 6 },
 ] as const)
   test(
     `preferences cards fit at every width in EN and RU for a ${viewer.name}`,
     browserCase(["@layout"]),
     async ({ page }, info) => {
-      await settingsWorkspace(page, {
+      const state = await settingsWorkspace(page, {
         verified: true,
         ...(viewer.capabilities ? { capabilities: [...viewer.capabilities] } : {}),
       });
+      // One mixed row, so its partly-on switch is part of the layout.
+      state.notifications.values = { eventChanges: false };
       await page.goto("/account/preferences");
       const coarse = await coarsePointer(page);
       for (const locale of ["en", "ru"] as const) {
         await language(page, locale);
         const card = notificationCard(page, locale);
-        await expect(card.getByRole("switch")).toHaveCount(viewer.rows);
+        await expect(card.getByRole("checkbox")).toHaveCount(viewer.rows);
         const content = await box(page.locator(".account-settings-content"));
         const cards = page.locator(".account-settings-content > .settings-card");
         await expect(cards).toHaveCount(2);
@@ -2094,17 +2221,50 @@ for (const viewer of [
         expect(select.x + select.width).toBeLessThanOrEqual(languageTime.x + languageTime.width);
         if (coarse) expect(select.height).toBeGreaterThanOrEqual(40);
         else near(select.height, 32);
+        // Each switch sits centered under the "On site" column label.
+        const site = await box(
+          card.locator(".notification-switch-columns .notification-switch-cell"),
+        );
         for (const row of await card.locator(".notification-switch-row").all()) {
           const area = await box(row);
           const text = await box(row.locator(".notification-switch-text"));
-          const control = await box(row.getByRole("switch"));
-          // Labels wrap beside the switch; they never run under it.
+          const control = await box(row.getByRole("checkbox"));
+          const tip = await box(row.locator(".info-tip-trigger"));
+          // Labels and their info button wrap beside the switch; they never run under it.
           expect(text.x + text.width).toBeLessThanOrEqual(control.x + 0.5);
           expect(control.x + control.width).toBeLessThanOrEqual(area.x + area.width + 0.5);
           expect(control.height).toBeGreaterThanOrEqual(coarse ? 40 : 24);
           expect(control.width).toBeGreaterThanOrEqual(coarse ? 40 : 24);
+          expect(tip.x).toBeGreaterThanOrEqual(text.x - 0.5);
+          expect(tip.x + tip.width).toBeLessThanOrEqual(text.x + text.width + 0.5);
+          if (coarse) expect(Math.min(tip.width, tip.height)).toBeGreaterThanOrEqual(40);
+          expect(Math.abs(control.x + control.width / 2 - (site.x + site.width / 2))).toBeLessThan(
+            1,
+          );
         }
+        await expect(
+          card.getByRole("checkbox", {
+            name: locale === "en" ? eventsName : "Новое событие и напоминание за час",
+            exact: true,
+          }),
+        ).toBeChecked({ indeterminate: true });
         await capture(page, info, `${locale}-preferences-${viewer.name}`);
+        await card
+          .getByRole("button", {
+            name:
+              locale === "en"
+                ? `Details: ${eventsName}`
+                : "Подробнее: Новое событие и напоминание за час",
+            exact: true,
+          })
+          .click();
+        const popover = await box(infoTip(page));
+        const viewport = page.viewportSize();
+        expect(popover.x).toBeGreaterThanOrEqual(0);
+        expect(popover.x + popover.width).toBeLessThanOrEqual((viewport?.width ?? 0) + 0.5);
+        await capture(page, info, `${locale}-preferences-${viewer.name}-tip`);
+        await page.keyboard.press("Escape");
+        await expect(infoTip(page)).toHaveCount(0);
       }
     },
   );
