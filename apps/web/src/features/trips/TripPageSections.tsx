@@ -339,19 +339,23 @@ export function TripEvidence({ evidence }: { evidence: DTO["Evidence"][] }) {
         <span className="trip-muted">{t("screenshotCount", { count: evidence.length })}</span>
       </div>
       {evidence.length ? (
-        <ul className="trip-detail-evidence">
-          {evidence.map((item, index) => (
-            <li key={item.id}>
-              <span className="trip-detail-evidence-name">
-                <strong>{item.originalName}</strong>
-                <small className="trip-muted">
-                  {t(item.state === "expired" ? "expiredShort" : item.state)}
-                </small>
-              </span>
-              {item.state === "ready" && <EvidenceViewer item={item} number={index + 1} />}
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="trip-detail-evidence">
+            {evidence.map((item, index) => (
+              <li key={item.id}>
+                <span className="trip-detail-evidence-name">
+                  <strong>{item.originalName}</strong>
+                  <small className="trip-muted">
+                    {t(item.state === "expired" ? "expiredShort" : item.state)}
+                  </small>
+                </span>
+                {item.state === "ready" && <EvidenceViewer item={item} number={index + 1} />}
+              </li>
+            ))}
+          </ul>
+          {/* The retention disclosure belongs to every reader of the screenshots (policy). */}
+          <p className="trip-muted">{t("retention")}</p>
+        </>
       ) : (
         <p className="trip-muted">{t("noEvidence")}</p>
       )}

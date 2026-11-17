@@ -34,6 +34,8 @@ import { mockTrips } from "./support/trip-ui.ts";
 const tripPath = `/account/trips/${tripPageId}`;
 // A device zone other than UTC, so a saved zone and "as on the device" (null) render differently.
 const deviceZone = "Asia/Tokyo";
+const retentionNotice =
+  "Screenshots remain for at least one calendar year after the latest decision and throughout review. Structured history remains after expiry.";
 test.use({ timezoneId: deviceZone });
 
 /**
@@ -517,6 +519,8 @@ test(
     await expect(shots).toContainText(needsFixEvidence.originalName);
     await expect(shots).toContainText("Ready");
     await expect(shots.getByRole("button", { name: "View Evidence 1", exact: true })).toBeVisible();
+    // The author sees the retention notice under the screenshots, not only staff details.
+    await expect(shots.getByText(retentionNotice, { exact: true })).toBeVisible();
     await expect(fact(tripCard(page), "Trailer")).toHaveText("Fictional trailer_type");
     await expect(fact(tripCard(page), "Damage")).toHaveText("12.5 % of cargo");
     for (const hidden of [
@@ -547,6 +551,15 @@ test(
     await page.reload();
     await loaded(page);
     await expect(fact(tripCard(page), "Damage")).toHaveText("Unavailable");
+
+    // A manual report without screenshots keeps the card but has nothing to retain.
+    const bare = needsFixManual();
+    tripPrivate(bare).evidence = [];
+    state.view = bare;
+    await page.reload();
+    await loaded(page);
+    await expect(region(page, "Completion screenshots")).toBeVisible();
+    await expect(page.getByText(retentionNotice, { exact: true })).toHaveCount(0);
 
     state.view = telemetryWithEvent();
     await page.reload();
