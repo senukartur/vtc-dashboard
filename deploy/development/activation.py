@@ -31,9 +31,14 @@ RETIRED_SETTINGS = {'CATALOGS_SYNTHETIC', 'CATALOGS_MAX_FILE_BYTES', 'CATALOGS_A
                     'CATALOGS_POLICY_REVISION', 'CATALOGS_EVIDENCE_FILE', 'CATALOGS_EVIDENCE_BASE64',
                     'QUALIFICATIONS_CURSOR_KEY', 'QUALIFICATION_LADDER_EDITS_ENABLED',
                     'QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED', 'QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE'}
+# Operator-set, never written by prepare-stage. Each adds its profile supplement to the grants.
+DISPATCH_STAGE3_FLAG = 'DISPATCH_REVIEW_STAGE3_ENABLED'
+EVENT_MEDIA_SETTING = 'EVENT_MEDIA_ROOT'
+# Where compose.yaml mounts the event-media volume in the app and jobs containers.
+EVENT_MEDIA_ROOT = '/app/private-event-media'
 SHARED_KEYS = {'IDENTITY_ENABLED', 'IDENTITY_SECRET', 'IDENTITY_ORIGIN', 'MAIL_MODE',
                'MAIL_ENCRYPTION_KEY', 'MAIL_SENDER', 'MAIL_API_KEY', 'MAIL_TRACKING_DISABLED',
-               'ADMISSIONS_ENABLED', 'ADMISSIONS_ENCRYPTION_KEY',
+               'ADMISSIONS_ENABLED', 'ADMISSIONS_ENCRYPTION_KEY', DISPATCH_STAGE3_FLAG, EVENT_MEDIA_SETTING,
                *STAGE_FLAGS, *STAGE_SETTINGS, *STAGE_KEYS, *RETIRED_SETTINGS}
 # Dropped by migrations 0019 and 0035. MySQL keeps grant rows after DROP TABLE, so apply revokes them.
 RETIRED_TABLES = ('catalog_aliases', 'catalog_artifacts', 'catalog_changes', 'catalog_commands', 'catalog_coverage',
@@ -174,11 +179,38 @@ def stage_enabled(values):
 def module_flags(path):
     """Only which modules a file enables; `validate` owns its ownership and syntax checks."""
     lines = path.read_text().splitlines()
-    return {flag: 'true' for flag in STAGE_FLAGS if f'{flag}=true' in lines}
+    flags = {flag: 'true' for flag in STAGE_FLAGS | {DISPATCH_STAGE3_FLAG} if f'{flag}=true' in lines}
+    # Any configured root counts, so a wrong value still requires the media volume in an export.
+    media = [line.partition('=')[2] for line in lines if line.startswith(f'{EVENT_MEDIA_SETTING}=')]
+    if media and media[-1]:
+        flags[EVENT_MEDIA_SETTING] = media[-1]
+    return flags
+
+
+def module_settings(o, values):
+    """The operator-set module values; checked before anything starts or changes."""
+    if EVENT_MEDIA_SETTING in values:
+        o.require(values[EVENT_MEDIA_SETTING] == EVENT_MEDIA_ROOT and
+                  values.get('EVENTS_ROUTE_ENABLED') == 'true' and values.get(EVENTS_DRAFTS_FLAG) == 'true',
+                  'EVENT_MEDIA_PROFILE_REQUIRED')
+    if DISPATCH_STAGE3_FLAG in values:
+        o.require(values[DISPATCH_STAGE3_FLAG] in ['true', 'false'] and
+                  (values[DISPATCH_STAGE3_FLAG] == 'false' or values.get('TRIP_DECISIONS_ENABLED') == 'true'),
+                  'STAGE_3_PROFILE_REQUIRED')
+
+
+def add_supplement(o, grants, supplement, code):
+    """Append a conditional supplement; a permission it repeats is a profile error, not a merge."""
+    o.require(isinstance(supplement, dict) and supplement and set(supplement) <= set(grants), code)
+    for role, tables in supplement.items():
+        for table, permissions in tables.items():
+            merged = grants[role].setdefault(table, [])
+            o.require(permissions and not set(permissions) & set(merged), code)
+            merged.extend(permissions)
 
 
 def stage_grants(o, values):
-    """The reviewed supplement, with draft privileges only for the opt-in API."""
+    """The reviewed supplement, with draft, media and Dispatch privileges only for their opt-ins."""
     path = o.BASE / STAGE_PROFILE
     if not path.exists():
         return {}
@@ -190,6 +222,10 @@ def stage_grants(o, values):
         o.require(not (grants['runtime'].keys() & profile['eventsDraftsGrants'].keys()),
                   'EVENTS_DRAFTS_PROFILE_INVALID')
         grants['runtime'].update(profile['eventsDraftsGrants'])
+    if values.get(EVENT_MEDIA_SETTING):
+        add_supplement(o, grants, profile.get('eventMediaGrants'), 'EVENT_MEDIA_PROFILE_REQUIRED')
+    if values.get(DISPATCH_STAGE3_FLAG) == 'true':
+        add_supplement(o, grants, profile.get('dispatchStage3Grants'), 'STAGE_3_PROFILE_REQUIRED')
     return grants
 
 
@@ -358,6 +394,7 @@ def retire_previous(o, shared, previous, intent_path, candidate):
 
 def validate(o, revision, image_id, path):
     values = private_values(o, path, SHARED_KEYS)
+    module_settings(o, values)
     if values.get('MAIL_MODE') == 'resend':
         o.require(len({values.get('IDENTITY_SECRET'), values.get('MAIL_ENCRYPTION_KEY'),
                        values.get('MAIL_API_KEY')}) == 3, 'SEPARATE_KEYS_REQUIRED')

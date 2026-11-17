@@ -601,6 +601,21 @@ def stage_smoke_locked(revision, image_id):
                data=stage_demo_password(), timeout=120)
 
 
+def event_media_volume():
+    """Whether the active project's event media volume exists. Only an exact, single name counts."""
+    name = f'{PROJECT}_event-media'
+    names = run(['docker', 'volume', 'ls', '-q', '--filter', f'name=^{name}$'], timeout=30).decode().split()
+    require(names in ([], [name]), 'EVENT_MEDIA_VOLUME_INVENTORY_INVALID')
+    return bool(names)
+
+
+def media_archive(volume, image_id, output):
+    # Promotion hard-links staged files, so store each name as its own regular file.
+    run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--user', '0',
+         '--mount', f'type=volume,source={volume},target=/event-media,readonly',
+         image_id, 'tar', '--hard-dereference', '-C', '/event-media', '-cf', '-', '.'], output=output)
+
+
 def export_locked(revision):
     """Caller owns lock and stopped all application/probe writers; cron shares that lock."""
     identity = uuid.uuid4().hex
@@ -609,6 +624,10 @@ def export_locked(revision):
     try:
         image_id = accepted_image_id(revision)
         validate_image(image_id, revision)
+        media = event_media_volume()
+        # A configured media root without its volume would export without the uploads.
+        require(media or not activation.module_flags(BASE / 'private/identity-mail.env').get(
+            activation.EVENT_MEDIA_SETTING), 'EVENT_MEDIA_VOLUME_MISSING')
         with open(directory / 'database.sql', 'wb') as output:
             compose(['exec', '-T', 'db', 'mysqldump', '--defaults-extra-file=/run/secrets/export.cnf',
                      '--single-transaction', '--set-gtid-purged=OFF', '--no-tablespaces', '--hex-blob',
@@ -622,11 +641,18 @@ def export_locked(revision):
         inventory = evidence_inventory(directory / 'evidence.tar')
         if reference:
             require(inventory.get('vtc011-sentinel.txt', {}).get('sha256') == reference, 'SYNTHETIC_REFERENCE_MISMATCH')
+        files = ['database.sql', 'evidence.tar']
+        if media:
+            with open(directory / 'event-media.tar', 'wb') as output:
+                media_archive(f'{PROJECT}_event-media', image_id, output)
+            files.append('event-media.tar')
         manifest = {'version': 1, 'revision': revision, 'imageId': image_id, 'createdUtc': int(time.time()),
                     'syntheticReference': reference,
                     'evidenceFiles': inventory,
                     'files': {name: {'sha256': digest(directory / name), 'bytes': (directory / name).stat().st_size}
-                              for name in ['database.sql', 'evidence.tar']}}
+                              for name in files}}
+        if media:
+            manifest['eventMediaFiles'] = evidence_inventory(directory / 'event-media.tar')
         atomic_json(directory / 'manifest.json', manifest)
         return identity
     except BaseException:
@@ -640,14 +666,48 @@ def validate_export(identity):
     manifest = json.loads((directory / 'manifest.json').read_text())
     require(manifest.get('version') == 1 and SHA.fullmatch(manifest.get('revision', '')), 'EXPORT_INVALID')
     require(re.fullmatch(r'sha256:[a-f0-9]{64}', manifest.get('imageId', '')), 'EXPORT_IMAGE_INVALID')
-    require(set(manifest.get('files', {})) == {'database.sql', 'evidence.tar'}, 'EXPORT_INVALID')
+    # Event media is optional, but its archive and its inventory always travel together.
+    media = 'eventMediaFiles' in manifest
+    require(set(manifest.get('files', {})) == {'database.sql', 'evidence.tar', *(['event-media.tar'] if media else [])},
+            'EXPORT_INVALID')
     for name, expected in manifest['files'].items():
         path = directory / name
         require(path.is_file() and not path.is_symlink() and path.stat().st_size == expected['bytes']
                 and digest(path) == expected['sha256'], 'EXPORT_CHECKSUM_INVALID')
     archive_safe(directory / 'evidence.tar')
     require(evidence_inventory(directory / 'evidence.tar') == manifest['evidenceFiles'], 'EVIDENCE_MANIFEST_INVALID')
+    if media:
+        require(evidence_inventory(directory / 'event-media.tar') == manifest['eventMediaFiles'],
+                'EVENT_MEDIA_MANIFEST_INVALID')
     return directory, manifest
+
+
+# The application refuses a media root that its own user does not own with mode 0700.
+MEDIA_ROOT_CHECK = ("const f=require('node:fs'),p=process.argv[1],s=f.lstatSync(p);"
+                    "if(!s.isDirectory()||s.uid!==process.getuid()||(s.mode&0o777)!==0o700)process.exit(1);"
+                    "f.accessSync(p,f.constants.R_OK|f.constants.W_OK|f.constants.X_OK);"
+                    "for(const n of f.readdirSync(p)){const x=p+'/'+n;if(!f.lstatSync(x).isFile())process.exit(1);"
+                    "f.closeSync(f.openSync(x,'r'));}")
+
+
+def restore_event_media(directory, manifest, project, revision, image_id):
+    """Into the destination's own new volume; the active media volume is never mounted."""
+    volume = f'{project}_event-media'
+    require(project != PROJECT, 'RESTORE_DESTINATION_INVALID')
+    run(['docker', 'volume', 'create', volume])
+    run(['docker', 'run', '--rm', '-i', '--network', 'none', '--read-only', '--user', '0',
+         '--mount', f'type=volume,source={volume},target=/restore',
+         image_id, 'tar', '-C', '/restore', '-xf', '-'],
+        data=(directory / 'event-media.tar').read_bytes())
+    run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+         '--mount', f'type=volume,source={volume},target={activation.EVENT_MEDIA_ROOT}',
+         image_id, 'node', '-e', MEDIA_ROOT_CHECK, activation.EVENT_MEDIA_ROOT],
+        revision=revision, image_id=image_id)
+    with tempfile.NamedTemporaryFile() as restored:
+        media_archive(volume, image_id, restored)
+        restored.flush()
+        require(evidence_inventory(pathlib.Path(restored.name)) == manifest['eventMediaFiles'],
+                'RESTORED_EVENT_MEDIA_MISMATCH')
 
 
 def restore_locked(identity):
@@ -682,6 +742,8 @@ def restore_locked(identity):
             restored.flush()
             require(evidence_inventory(pathlib.Path(restored.name)) == manifest['evidenceFiles'],
                     'RESTORED_EVIDENCE_MISMATCH')
+        if 'eventMediaFiles' in manifest:
+            restore_event_media(directory, manifest, project, revision, image_id)
     finally:
         # Leave isolated volumes intact for private inspection; never delete active volumes.
         compose(['stop', 'db'], revision=revision, image_id=image_id, project=project)

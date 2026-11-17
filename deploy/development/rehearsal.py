@@ -891,12 +891,18 @@ def core():
         prepared = json.loads((base / 'trip-decisions-grants.prepared.json').read_text())
         notification_grants = json.loads((base / 'notifications-grants.prepared.json').read_text())
         baseline = json.loads((base / 'activation-grants.json').read_text())
+        # The Stage 3 tables come only from the profile activation installs for the Dispatch flag.
+        dispatch_grants = json.loads((base / ops.activation.STAGE_PROFILE).read_text())['dispatchStage3Grants']
+        dispatch_tables = {table for tables in dispatch_grants.values() for table in tables}
+        assert dispatch_tables == {'trip_review_reasons', 'reconciliation_candidate_dismissals'}
+        assert not dispatch_tables & {table for tables in prepared.values() for table in tables}
         deltas = {}
-        dispatch_tables = {'trip_review_reasons', 'reconciliation_candidate_dismissals'}
         applied = []
         for role in ['runtime', 'jobs']:
             combined = {table: set(permissions) for table, permissions in manual_grants[role].items()}
             for table, permissions in prepared[role].items():
+                combined.setdefault(table, set()).update(permissions)
+            for table, permissions in dispatch_grants[role].items():
                 combined.setdefault(table, set()).update(permissions)
             for table, permissions in notification_grants[role].items():
                 combined.setdefault(table, set()).update(permissions)
@@ -1284,6 +1290,17 @@ def recovery():
         evidence_check = "const f=require('node:fs');if(f.readFileSync('/app/private-evidence/sentinel.txt','utf8')!=='fictional-evidence-sentinel-vtc011\\n'||f.readFileSync('/app/private-evidence/unhealthy-http-observed.txt','utf8')!=='HTTP_503_OBSERVED\\n')process.exit(1)"
         compose(['exec', '-T', 'app', 'node', '-e', evidence_check], revision=revision)
     with rehearsal_phase('tail-export'):
+        # Compose created the media volume from the image's private directory; the app never used it.
+        # One fictional file and its promotion-style hard link prove the media archive round trip.
+        media_volume = f'{project}_event-media'
+        media_mount = f'type=volume,source={media_volume},target=/app/private-event-media'
+        ops.run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--mount', media_mount,
+                 image_id, 'node', '-e', ops.MEDIA_ROOT_CHECK, '/app/private-event-media'])
+        media_sentinel = b'fictional-event-media-sentinel-vtc157\n'
+        ops.run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--mount', media_mount,
+                 image_id, 'node', '-e', "const f=require('node:fs'),p='/app/private-event-media/vtc011-media.blob';"
+                 "f.writeFileSync(p,'fictional-event-media-sentinel-vtc157\\n',{mode:0o600,flag:'wx'});"
+                 "f.linkSync(p,'/app/private-event-media/vtc011-media.staging');"])
         ops.fenced(revision)
         with ops.lock():
             export_id = ops.export_locked(revision)
@@ -1292,6 +1309,9 @@ def recovery():
         assert manifest['evidenceFiles']['vtc011-sentinel.txt']['sha256'] == manifest['syntheticReference']
         assert manifest['imageId'] == image_id  # The revision tag still points at the rejected image.
         assert manifest['files']['database.sql']['bytes'] > 0
+        media_entry = {'bytes': len(media_sentinel), 'sha256': hashlib.sha256(media_sentinel).hexdigest()}
+        assert manifest['eventMediaFiles'] == {'vtc011-media.blob': media_entry, 'vtc011-media.staging': media_entry}
+        assert set(manifest['files']) == {'database.sql', 'evidence.tar', 'event-media.tar'}
     with rehearsal_phase('tail-encrypted-copy'):
         # Authenticate a full SQL/files/manifest copy before restoring from its recovered bytes.
         # This local fixture proves the pipeline; actual off-VM storage/access remains hosted acceptance.
@@ -1316,9 +1336,27 @@ def recovery():
             for entry in archive.getmembers():
                 assert entry.isfile()
                 (recovered_directory / entry.name).write_bytes(archive.extractfile(entry).read())
+        # The media archive takes the same authenticated path as a second sealed copy.
+        media_tar, media_encrypted, media_decrypted = (copy_directory / name for name in
+                                                       ['media.tar', 'media.encrypted', 'media-recovered.tar'])
+        with tarfile.open(media_tar, 'w') as archive:
+            archive.add(directory / 'event-media.tar', arcname='event-media.tar')
+        for args, data in [(['seal', str(media_encrypted), str(key)], media_tar.read_bytes()),
+                           (['open', str(media_encrypted), str(key), str(media_decrypted)], None)]:
+            subprocess.run(['node', str(base / 'recovery-copy.mjs'), *args], input=data, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with tarfile.open(media_decrypted, 'r:') as archive:
+            entries = archive.getmembers()
+            assert [entry.name for entry in entries] == ['event-media.tar'] and entries[0].isfile()
+            (recovered_directory / 'event-media.tar').write_bytes(archive.extractfile(entries[0]).read())
     with rehearsal_phase('tail-restore'):
         with ops.lock():
             restored_project = ops.restore_locked(recovered_id)
+        # Restore compared the new volume's inventory and root; the active media stays as it was.
+        active_media = ops.run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--user', '0',
+                                '--mount', f'type=volume,source={media_volume},target=/event-media,readonly',
+                                image_id, 'sha256sum', '/event-media/vtc011-media.blob'])
+        assert active_media.split()[0].decode() == media_entry['sha256']
     with rehearsal_phase('tail-restored-references'):
         # Restore helper stops destination after verifying ledger/files. Restart only that isolated DB for references.
         ops.fenced(revision)
