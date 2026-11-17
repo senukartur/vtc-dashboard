@@ -125,7 +125,7 @@ export const driverTranslations = {
       progressUnavailable: "Прогресс недоступен",
       levelLoading: "Загрузка уровня…",
       levelUnavailable: "Уровень недоступен",
-      note: "Прогресс считает засчитанные рейсы и фактический пробег на текущем уровне. Повышение происходит автоматически, когда выполнены условия; понижения нет.",
+      note: "Прогресс считает засчитанные рейсы и фактический пробег на текущем уровне. Повышение происходит автоматически, когда выполнены условия.",
     },
     chart: {
       title: "Пробег по месяцам",
@@ -283,7 +283,7 @@ export const driverTranslations = {
       progressUnavailable: "Progress unavailable",
       levelLoading: "Loading level…",
       levelUnavailable: "Level unavailable",
-      note: "Progress counts credited trips and actual distance on the current level. Promotion happens automatically once the conditions are met; there is no demotion.",
+      note: "Progress counts credited trips and actual distance on the current level. Promotion happens automatically once the conditions are met.",
     },
     chart: {
       title: "Distance by month",
