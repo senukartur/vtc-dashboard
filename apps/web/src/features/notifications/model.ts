@@ -2,14 +2,50 @@ import type { components } from "@vtc/contracts";
 export type DTO = components["schemas"];
 export type Notification = DTO["Notification"];
 export const notificationAccountPath = (path: string) => /^\/account(?:\/|$)/i.test(path);
-export const preferenceNames = [
+/** Fixed display order of the notification switches; the read decides which ones render. */
+export const preferenceOrder = [
+  "tripAccepted",
+  "tripRejected",
   "tripStarted",
   "tripFinished",
-  "tripRejected",
+  "newEvent",
   "eventChanges",
   "eventReminders",
   "qualificationChanges",
+  "reviewQueue",
+  "newApplications",
 ] as const;
+export type PreferenceName = (typeof preferenceOrder)[number];
+type Same<A, B> = [Exclude<A, B> | Exclude<B, A>] extends [never] ? true : false;
+/** Fails to compile when the contract and the display order list different preference keys. */
+export const preferenceOrderComplete: Same<keyof DTO["NotificationPreferences"], PreferenceName> =
+  true;
+/**
+ * Switches to render, in display order: exactly the keys the server returned. Hiding a key is
+ * presentation only; the server decides which notification types a viewer has.
+ */
+export function visiblePreferences(data: DTO["NotificationPreferences"]): PreferenceName[] {
+  return preferenceOrder.filter((name) => typeof data[name] === "boolean");
+}
+/** Staff-only switches carry a muted audience suffix. */
+export const preferenceAudience = ["reviewQueue", "newApplications"] as const;
+/**
+ * Translation key under `toggles.` for a switch. Two switches gate more than their name says, so
+ * their label follows what this viewer actually receives: with reviewQueue, review notices about
+ * own trips move there and tripRejected keeps only rejections; with members.manage, eventChanges
+ * also covers member access changes. Presentation only; routing stays on the server.
+ */
+export function preferenceLabel(
+  name: PreferenceName,
+  data: DTO["NotificationPreferences"],
+  capabilities: readonly string[],
+): string {
+  if (name === "tripRejected")
+    return typeof data.reviewQueue === "boolean" ? "tripRejected" : "tripRejectedOwn";
+  if (name === "eventChanges")
+    return capabilities.includes("members.manage") ? "eventChangesAccess" : "eventChanges";
+  return name;
+}
 export const messages = [
   "trip.started",
   "trip.finished",

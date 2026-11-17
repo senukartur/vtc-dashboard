@@ -54,7 +54,7 @@ async function history(fixture: Fixture) {
   return (await notifications.history(fixture.author, { limit: 100 })).items;
 }
 test(
-  "real event reminders, read actions, arrival fence and six preferences persist through built API and MySQL",
+  "real event reminders, read actions, arrival fence and notification switches persist through built API and MySQL",
   browserCase(["@real"]),
   async ({ page }) => {
     test.setTimeout(90000);
@@ -155,14 +155,25 @@ test(
       await expect(changed).toHaveCount(1);
       await changed.getByRole("button", { name: "Mark read", exact: true }).click();
       await expect(changed.getByRole("button", { name: "Mark read", exact: true })).toHaveCount(0);
-      const form = page.getByRole("form", { name: "Notification preferences", exact: true });
-      await expect(form.getByRole("checkbox")).toHaveCount(6);
-      await form.getByLabel("Event reminders", { exact: true }).uncheck();
-      await form.getByRole("button", { name: "Save preferences", exact: true }).click();
+      // The switches live in account Preferences and follow the keys the API returns.
+      const read = await page.request.get("/api/v1/me/notification-preferences");
+      expect(read.status()).toBe(200);
+      const keys = Object.keys((await read.json()).data);
+      expect(keys).toEqual(expect.arrayContaining(["tripAccepted", "newEvent", "eventReminders"]));
+      await page.getByRole("link", { name: "Open preferences", exact: true }).click();
+      await expect(page).toHaveURL(/\/account\/preferences$/);
+      const switches = page.getByRole("main").getByRole("switch");
+      await expect(switches).toHaveCount(keys.length);
+      const reminders = page.getByRole("switch", {
+        name: "Event reminders an hour before",
+        exact: true,
+      });
+      await expect(reminders).toBeChecked();
+      await reminders.click();
       await expect(page.getByText("Preferences saved.", { exact: true })).toBeVisible();
       await page.reload();
       await catalogLanguage(page);
-      await expect(form.getByLabel("Event reminders", { exact: true })).not.toBeChecked();
+      await expect(reminders).not.toBeChecked();
       await expect(page.locator(".notification-toast")).toHaveCount(0);
       const response = await page.request.get("/api/v1/me/notification-preferences");
       expect(response.status()).toBe(200);

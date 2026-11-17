@@ -46,6 +46,16 @@ async function open(page: Page) {
   await expect(page.getByRole("heading", { name: "Notifications", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Open notifications · Unread: 1/ })).toBeVisible();
 }
+/** Account Preferences, where the notification switches live. */
+async function openPreferences(page: Page) {
+  await page.goto("/account/preferences");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Preferences", exact: true }),
+  ).toBeVisible();
+  const card = page.getByRole("region", { name: "Notifications", exact: true });
+  await expect(card.getByRole("switch").first()).toBeVisible();
+  return card;
+}
 async function capture(page: Page, info: TestInfo, name: string) {
   await page.evaluate(() => document.fonts.ready);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -265,10 +275,10 @@ test(
   browserCase(["@functional"]),
   async ({ context, page }) => {
     const state = await mockNotifications(page);
-    await open(page);
+    const card = await openPreferences(page);
     const other = await context.newPage();
     await mockNotifications(other);
-    await open(other);
+    const otherCard = await openPreferences(other);
     let preferenceReads = 0;
     await other.route("**/api/v1/me/notification-preferences", (route) => {
       preferenceReads++;
@@ -277,14 +287,10 @@ test(
         headers: { ETag: `"v${state.version}"` },
       });
     });
-    const form = page.getByRole("form", { name: "Notification preferences", exact: true });
-    await form.getByLabel("Trip starts", { exact: true }).uncheck();
-    await form.getByRole("button", { name: "Save preferences", exact: true }).click();
-    await expect(page.getByText("Preferences saved.", { exact: true })).toBeVisible();
+    await card.getByRole("switch", { name: "Trip starts", exact: true }).click();
+    await expect(card.getByText("Preferences saved.", { exact: true })).toBeVisible();
     await expect(
-      other
-        .getByRole("form", { name: "Notification preferences", exact: true })
-        .getByLabel("Trip starts", { exact: true }),
+      otherCard.getByRole("switch", { name: "Trip starts", exact: true }),
     ).not.toBeChecked();
     expect(preferenceReads).toBe(1);
     await other.close();
@@ -457,68 +463,194 @@ test(
   },
 );
 test(
-  "preferences expose six flags, retain uncertain identity and require explicit conflict reload",
+  "notification switches save each change, retain uncertain identity and require explicit conflict reload",
   browserCase(["@functional"]),
   async ({ page }, info) => {
     const state = await mockNotifications(page);
-    await open(page);
-    const form = page.getByRole("form", { name: "Notification preferences", exact: true });
-    await expect(form.getByRole("checkbox")).toHaveCount(6);
+    const card = await openPreferences(page);
+    await expect(card.getByRole("switch")).toHaveCount(8);
     await capture(page, info, "notifications-preferences");
-    await form.getByLabel("Trip starts", { exact: true }).uncheck();
+    const starts = card.getByRole("switch", { name: "Trip starts", exact: true });
+    const saved = card.getByText("Preferences saved.", { exact: true });
     state.commandStatus = 503;
-    await form.getByRole("button", { name: "Save preferences", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("unavailable");
+    await starts.click();
+    await expect(card.getByRole("alert")).toContainText("unavailable");
+    // A failed write shows the last server-confirmed position again.
+    await expect(starts).toBeChecked();
     state.commandStatus = 200;
-    await form.getByRole("button", { name: "Save preferences", exact: true }).click();
-    await expect(page.getByText("Preferences saved.", { exact: true })).toBeVisible();
-    expect(state.commands[0]?.key).toBe(state.commands[1]?.key);
+    await card.getByRole("button", { name: "Retry saving", exact: true }).click();
+    await expect(saved).toBeVisible();
+    await expect(starts).not.toBeChecked();
+    expect(state.commands[1]?.key).toBe(state.commands[0]?.key);
+    expect(state.commands[1]?.body).toEqual(state.commands[0]?.body);
     expect(state.commands[1]?.etag).toBe('"v1"');
     expect(state.prefs.tripStarted).toBe(false);
     state.commandStatus = 412;
-    await form.getByLabel("Event reminders", { exact: true }).uncheck();
-    await form.getByRole("button", { name: "Save preferences", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("changed elsewhere");
-    await expect(
-      form.getByRole("button", { name: "Save preferences", exact: true }),
-    ).toBeDisabled();
+    const reminders = card.getByRole("switch", {
+      name: "Event reminders an hour before",
+      exact: true,
+    });
+    await reminders.click();
+    await expect(card.getByRole("alert")).toContainText("changed elsewhere");
+    await expect(reminders).toBeChecked();
+    // Every switch stays focusable but sends nothing until the preferences are reloaded.
+    await expect(reminders).toHaveAttribute("aria-disabled", "true");
+    await expect(starts).toHaveAttribute("aria-disabled", "true");
+    await reminders.press("Space");
+    await expect(reminders).toBeChecked();
+    expect(state.commands).toHaveLength(3);
     state.commandStatus = 200;
     state.version++;
-    await page.getByRole("button", { name: "Reload preferences", exact: true }).click();
-    await expect(form.getByLabel("Event reminders", { exact: true })).toBeChecked();
-    await form.getByLabel("Event reminders", { exact: true }).uncheck();
-    await form.getByRole("button", { name: "Save preferences", exact: true }).click();
-    await expect(page.getByText("Preferences saved.", { exact: true })).toBeVisible();
+    await card.getByRole("button", { name: "Reload preferences", exact: true }).click();
+    await expect(reminders).not.toHaveAttribute("aria-disabled", /.*/);
+    await expect(card.getByRole("alert")).toHaveCount(0);
+    await reminders.click();
+    await expect(saved).toBeVisible();
+    await expect(reminders).not.toBeChecked();
     expect(state.commands.at(-1)?.key).not.toBe(state.commands[2]?.key);
+    expect(state.commands.at(-1)?.etag).toBe('"v3"');
   },
 );
 test(
-  "pending preferences prevent duplicate commands and preserve the six selected flags",
+  "a pending switch shows its requested position, prevents duplicate commands and keeps focus",
   browserCase(["@functional"]),
   async ({ page }) => {
     const state = await mockNotifications(page);
-    await open(page);
-    const form = page.getByRole("form", { name: "Notification preferences", exact: true });
-    await form.getByLabel("Trip starts", { exact: true }).uncheck();
+    const card = await openPreferences(page);
+    const starts = card.getByRole("switch", { name: "Trip starts", exact: true });
     let release = () => {};
     state.commandGate = new Promise<void>((resolve) => {
       release = resolve;
     });
     try {
-      await form.getByRole("button", { name: "Save preferences", exact: true }).click();
+      await starts.click();
       await expect.poll(() => state.commands.length).toBe(1);
-      await expect(form.getByRole("button", { name: "Saving…", exact: true })).toBeDisabled();
-      await expect(form.getByLabel("Trip starts", { exact: true })).toBeDisabled();
+      await expect(starts).toHaveAttribute("aria-busy", "true");
+      await expect(starts).not.toBeChecked();
+      await expect(card.getByRole("status")).toHaveText("Saving…");
+      await expect(card.getByRole("switch", { name: "New event", exact: true })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+      await starts.press("Space");
+      await expect(starts).toBeFocused();
+      await expect(starts).not.toBeChecked();
       expect(state.commands[0]?.body).toEqual({ ...state.prefs, tripStarted: false });
     } finally {
       state.commandGate = null;
       release();
     }
-    await expect(page.getByText("Preferences saved.", { exact: true })).toBeVisible();
-    await expect(form.getByLabel("Trip starts", { exact: true })).not.toBeChecked();
+    await expect(card.getByText("Preferences saved.", { exact: true })).toBeVisible();
+    await expect(starts).not.toBeChecked();
+    await expect(starts).not.toHaveAttribute("aria-busy", /.*/);
+    await expect(starts).toBeFocused();
     expect(state.commands).toHaveLength(1);
   },
 );
+test(
+  "the notifications page links to account Preferences instead of holding switches",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    await mockNotifications(page);
+    await open(page);
+    const aside = page.getByRole("complementary", { name: "How notifications arrive" });
+    await expect(page.getByRole("main").getByRole("switch")).toHaveCount(0);
+    await expect(page.getByRole("main").getByRole("checkbox")).toHaveCount(0);
+    await expect(
+      aside.getByRole("heading", { name: "Notification preferences", exact: true }),
+    ).toBeVisible();
+    const link = aside.getByRole("link", { name: "Open preferences", exact: true });
+    await expect(link).toHaveAttribute("href", "/account/preferences");
+    await capture(page, info, "notifications-aside");
+    await link.click();
+    await expect(page).toHaveURL(/\/account\/preferences$/);
+    await expect(
+      page.getByRole("region", { name: "Notifications", exact: true }).getByRole("switch"),
+    ).toHaveCount(8);
+    await page.goto("/account/notifications");
+    await catalogLanguage(page, "ru");
+    await expect(
+      page.getByRole("link", { name: "Открыть предпочтения", exact: true }),
+    ).toHaveAttribute("href", "/account/preferences");
+    await capture(page, info, "notifications-aside-ru");
+  },
+);
+test.describe("new notification kinds in the device time zone", () => {
+  test.use({ timezoneId: "Asia/Tokyo" });
+  const tripId = "e0380000-0000-4000-8000-000000000001",
+    eventId = "e0350000-0000-4000-8000-000000000002";
+  test(
+    "trip accepted and new event render in RU/EN, link to their trip and event and use the browser zone",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockNotifications(page);
+      state.displayTimezone = null;
+      state.items = [
+        notificationFixture({
+          id: nextId,
+          category: "event.published",
+          messageKey: "notifications.event.published",
+          display: { actorNickname: null, eventTitle: "Fictional Yukon convoy", game: "ets2" },
+          target: { kind: "event", id: eventId },
+          liveToastEligible: false,
+        }),
+        notificationFixture({
+          category: "trip.accepted",
+          messageKey: "notifications.trip.accepted",
+          display: { actorNickname: null, eventTitle: null, game: "ets2" },
+          target: { kind: "trip", id: tripId },
+          liveToastEligible: false,
+        }),
+      ];
+      state.unread = 2;
+      await page.goto("/account/notifications");
+      await expect(
+        page.getByRole("button", { name: /Open notifications · Unread: 2/ }),
+      ).toBeVisible();
+      const row = (text: string) =>
+        page.locator("main .notification-row").filter({ hasText: text });
+      const accepted = row("Your trip was accepted · ETS2"),
+        published = row("New event: Fictional Yukon convoy");
+      await expect(accepted).toHaveCount(1);
+      await expect(published).toHaveCount(1);
+      await expect(accepted.locator(".notification-meta")).toContainText("Trip");
+      await expect(published.locator(".notification-meta")).toContainText("Event");
+      // 12:00 UTC is 9 PM in the browser zone; a null display timezone means the device zone.
+      for (const item of [accepted, published])
+        await expect(item.locator("time.notification-absolute")).toContainText(
+          /9:00 PM · Asia\/Tokyo · GMT\+09:00/,
+        );
+      await expect(accepted.getByRole("link", { name: "Open", exact: true })).toHaveAttribute(
+        "href",
+        `/account/trips/${tripId}`,
+      );
+      await expect(published.getByRole("link", { name: "Open", exact: true })).toHaveAttribute(
+        "href",
+        `/account/events/${eventId}`,
+      );
+      await page.getByRole("button", { name: /Open notifications/ }).click();
+      const popover = page.getByRole("dialog", { name: "Notifications", exact: true });
+      const acceptedLink = popover.getByRole("link", { name: /Your trip was accepted · ETS2/ });
+      await expect(acceptedLink).toHaveAttribute("href", `/account/trips/${tripId}`);
+      await expect(acceptedLink).toContainText(/Trip · .*9:00 PM · Asia\/Tokyo/);
+      await expect(
+        popover.getByRole("link", { name: /New event: Fictional Yukon convoy/ }),
+      ).toHaveAttribute("href", `/account/events/${eventId}`);
+      await page.keyboard.press("Escape");
+      await catalogLanguage(page, "ru");
+      const acceptedRu = row("Ваш рейс принят · ETS2");
+      await expect(acceptedRu.locator(".notification-meta")).toContainText("Рейс");
+      await expect(acceptedRu.locator("time.notification-absolute")).toContainText(
+        /21:00 · Asia\/Tokyo · GMT\+09:00/,
+      );
+      await expect(
+        row("Новое событие: Fictional Yukon convoy").locator(".notification-meta"),
+      ).toContainText("Событие");
+      await acceptedRu.getByRole("link", { name: "Открыть", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/account/trips/${tripId}$`));
+    },
+  );
+});
 test(
   "visible 30 second polls resume immediately, serialize delayed refresh and suppress baseline/reload toasts",
   browserCase(["@functional"]),

@@ -1,7 +1,7 @@
 import type { DTO } from "./transport.js";
 export const fixtureId = "41000000-0000-4000-8000-000000000017";
 /** Nonfunctional, fictional contract fixtures for controlled rendering only. */
-export function accountFixture(locale: "ru" | "en" = "en"): DTO["EnvelopeSelf"] {
+export function accountFixture(locale: "ru" | "en" = "en"): DTO["SelfStage4Envelope"] {
   return {
     data: {
       member: {
