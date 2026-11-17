@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useRef, useState } from "react";
+import { type ReactNode, type Ref, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, Tooltip, XAxis } from "recharts";
@@ -244,6 +244,7 @@ export function ActualDistanceChart({
   onGranularityChange,
   showGranularity = true,
   failure,
+  headingRef,
 }: {
   analytics: ChartAnalytics | undefined;
   pending: boolean;
@@ -258,6 +259,8 @@ export function ActualDistanceChart({
   showGranularity?: boolean;
   /** Shown in the body when the read failed without data (My overview has no page alert). */
   failure?: ReactNode;
+  /** Makes the heading programmatically focusable, the focus target of a successful Retry. */
+  headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const { t } = useTranslation("dashboard");
   const headingId = useId();
@@ -387,7 +390,9 @@ export function ActualDistanceChart({
   return (
     <Card className="dashboard-chart" aria-labelledby={headingId}>
       <div className="dashboard-card-head">
-        <h2 id={headingId}>{title ?? t("chart.title")}</h2>
+        <h2 id={headingId} ref={headingRef} tabIndex={headingRef ? -1 : undefined}>
+          {title ?? t("chart.title")}
+        </h2>
         <div className="dashboard-card-controls">
           {showGranularity && onGranularityChange && (
             <SegmentedControl

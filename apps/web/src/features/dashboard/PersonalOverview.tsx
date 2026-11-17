@@ -52,6 +52,7 @@ export function PersonalOverview() {
   const capabilities = session.self?.capabilities ?? [];
   const self = session.self?.member;
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const chartHeading = useRef<HTMLHeadingElement>(null);
   const [game, setGame] = useState<GameFilter>("all");
   const effectiveGame = game === "all" ? undefined : game;
   const canSubmit = capabilities.includes("trips.submit_own");
@@ -149,7 +150,7 @@ export function PersonalOverview() {
               : ""}
           </p>
           <p className="visually-hidden" role="status">
-            {pending && !analyticsQuery.isError ? t("states.loading") : ""}
+            {pending && !analytics.isError ? t("states.loading") : ""}
           </p>
         </div>
         <div className="dashboard-filters">
@@ -216,11 +217,16 @@ export function PersonalOverview() {
             locale={locale}
             displayTimezone={displayTimezone}
             title={t("personal.chartTitle")}
+            headingRef={chartHeading}
             failure={
               chartFailed ? (
                 <div className="dashboard-block-error">
                   <p>{t("personal.monthError")}</p>
-                  <KeepFocusButton variant="outline" onClick={chartRetry.retry}>
+                  <KeepFocusButton
+                    variant="outline"
+                    onClick={chartRetry.retry}
+                    focusTarget={() => chartHeading.current?.focus()}
+                  >
                     {t("personal.retry")}
                   </KeepFocusButton>
                 </div>

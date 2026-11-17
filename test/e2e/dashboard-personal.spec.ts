@@ -503,6 +503,17 @@ test(
     // The stats read had not failed, so Retry did not reread the zone.
     expect(requestsTo(state, statsPath)).toHaveLength(1);
 
+    // The chart has its own Retry; a successful retry from it focuses the chart heading.
+    const again = await open(page, { setup: (s) => (s.failures.memberAnalytics = 503) });
+    const chartRetry = chartCard(page).getByRole("button", { name: "Retry", exact: true });
+    await expect(chartRetry).toBeVisible();
+    delete again.failures.memberAnalytics;
+    await chartRetry.focus();
+    await page.keyboard.press("Enter");
+    await expect(chartCard(page).getByText("Could not load your month statistics")).toHaveCount(0);
+    await expect(chartCard(page).getByRole("heading", { level: 2 })).toBeFocused();
+    await expect(monthValues(page)).toHaveText(["1,284 km", "6", "Not ranked in the company"]);
+
     // Without company.read nothing of the page is requested.
     const forbidden = await open(page, { capabilities: withoutCompanyRead });
     await expect(page.getByText("You do not have access to company statistics.")).toBeVisible();
