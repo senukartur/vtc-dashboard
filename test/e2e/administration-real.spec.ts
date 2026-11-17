@@ -124,7 +124,7 @@ test(
       if (!before) throw new Error("SYNTHETIC_APPLICATIONS_COUNTS_REQUIRED");
       expect(before.submitted).toBe(previous + 1);
       const number = new Intl.NumberFormat("en");
-      await staffPage(page, staff, "/account/dashboard", /^(Company Overview|Обзор компании)$/);
+      await staffPage(page, staff, "/account/dashboard", /^(My overview|Мой обзор)$/);
       const nav = page.getByRole("navigation", { name: "Main navigation", exact: true });
       await expect(
         nav.getByRole("link", {

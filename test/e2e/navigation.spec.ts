@@ -203,12 +203,13 @@ async function capture(page: Page, info: TestInfo, name: string) {
   await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: false });
 }
 
-const company = ["Events", "Drivers", "Qualifications"];
+const company = ["Company overview", "Events", "Drivers", "Qualifications"];
 const review = ["Dispatch", "Duplicate reconciliation"];
 const management = ["Applications", "Members and roles", "Game catalogs", "Company settings"];
 const reporterBar = ["Overview", "My trips", "New report", "Events"];
 const reviewerBar = ["Overview", "My trips", "Review", "Events"];
-const phoneCompany = ["Drivers", "Qualifications"];
+// Company overview has no bar tab: phones reach it from the More sheet (VTC-159).
+const phoneCompany = ["Company overview", "Drivers", "Qualifications"];
 
 for (const role of ["driver", "dispatcher", "deputy_director", "director"] as const) {
   test(
@@ -357,7 +358,7 @@ test(
     state.me = 200;
     state.self.data.capabilities = [];
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Company Overview" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "My overview" })).toBeVisible();
     expect(state.summaryReads).toBe(0);
     state.self.data.capabilities = capabilities(["driver"]);
     state.summary = { computedAt, tripsNeedingFixes: { count: 125, items: [] } };
@@ -412,21 +413,21 @@ test(
 for (const { roles, groups, phoneGroups, bar, report } of [
   {
     roles: ["trainee"],
-    groups: { "My work": ["Overview", "My trips", "Drafts"], Company: company },
+    groups: { "My work": ["My overview", "My trips", "Drafts"], Company: company },
     phoneGroups: { "My work": ["Drafts"], Company: phoneCompany },
     bar: reporterBar,
     report: true,
   },
   {
     roles: ["dispatcher"],
-    groups: { "My work": ["Overview", "My trips"], Company: company, Review: review },
+    groups: { "My work": ["My overview", "My trips"], Company: company, Review: review },
     phoneGroups: { Company: phoneCompany, Review: ["Duplicate reconciliation"] },
     bar: reviewerBar,
     report: false,
   },
   {
     roles: ["driver", "dispatcher"],
-    groups: { "My work": ["Overview", "My trips", "Drafts"], Company: company, Review: review },
+    groups: { "My work": ["My overview", "My trips", "Drafts"], Company: company, Review: review },
     phoneGroups: { "My work": ["Drafts"], Company: phoneCompany, Review: review },
     bar: reporterBar,
     report: true,
@@ -434,7 +435,7 @@ for (const { roles, groups, phoneGroups, bar, report } of [
   {
     roles: ["deputy_director"],
     groups: {
-      "My work": ["Overview", "My trips"],
+      "My work": ["My overview", "My trips"],
       Company: company,
       Review: review,
       Management: management,
@@ -495,7 +496,7 @@ for (const { roles, groups, phoneGroups, bar, report } of [
           if (!onPhone)
             await expect(
               navigation.getByRole("list", { name: "Моя работа", exact: true }).getByRole("link"),
-            ).toHaveText(["Обзор", "Мои рейсы"]);
+            ).toHaveText(["Мой обзор", "Мои рейсы"]);
           await expect(
             navigation.getByRole("list", { name: "Управление", exact: true }).getByRole("link"),
           ).toHaveText(["Заявки", "Участники и роли", "Каталоги игр", "Настройки компании"]);
@@ -532,6 +533,19 @@ test(
       "Fictional Yukon evening convoy",
     );
     await expect(banner.getByRole("button", { name: /Open notifications/ })).toBeVisible();
+    // The two overviews: My overview under My work, Company overview first under Company.
+    await page.goto("/account/dashboard");
+    await expect(crumb.getByRole("listitem")).toHaveText(["My work", "My overview"]);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("My overview");
+    await page.goto("/account/company");
+    await expect(crumb.getByRole("listitem")).toHaveText(["Company", "Company overview"]);
+    await expect(page).toHaveTitle("Company overview · Yukon Union");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Company overview");
+    await current("Company overview", "page");
+    // Phones show My overview as the Overview bar tab.
+    if (phone(page))
+      await marked(bottomBar(page).getByRole("link", { name: "Overview", exact: true }), null);
+    else await current("My overview", null);
     await page.goto(`/account/drivers/${fixtureId}`);
     await expect(crumb.getByRole("listitem")).toHaveText(["Company", "Drivers", "Driver profile"]);
     await expect(crumb.getByRole("link", { name: "Drivers", exact: true })).toHaveAttribute(
@@ -715,7 +729,7 @@ test(
     await expect(page).toHaveURL(/\/account\/dashboard$/);
     await expect(
       page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("listitem"),
-    ).toHaveText(["My work", "Overview"]);
+    ).toHaveText(["My work", "My overview"]);
     state.me = 401;
     await page.goto("/account/trips?scope=company");
     await page
@@ -1122,7 +1136,7 @@ test(
     ).toHaveText(["Drafts"]);
     await expect(
       navigation.getByRole("list", { name: "Company", exact: true }).getByRole("link"),
-    ).toHaveText(["Drivers", "Qualifications"]);
+    ).toHaveText(phoneCompany);
     for (const name of ["Overview", "My trips", "Events", "New report"])
       await expect(dialog.getByRole("link", { name, exact: true })).toHaveCount(0);
     const account = dialog.getByRole("list", { name: "Account", exact: true });
@@ -1196,7 +1210,7 @@ test(
     await expect(russian).toBeFocused();
     await expect(
       ru.getByRole("list", { name: "Компания", exact: true }).getByRole("link"),
-    ).toHaveText(["Водители", "Квалификации"]);
+    ).toHaveText(["Обзор компании", "Водители", "Квалификации"]);
     await expect(
       ru.getByRole("list", { name: "Аккаунт", exact: true }).getByRole("link"),
     ).toHaveText([

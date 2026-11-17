@@ -463,7 +463,7 @@ test(
       await expect(actions.getByText(earlierReason, { exact: true })).toHaveCount(0);
       await actions.getByRole("link", { name: "Open trip", exact: true }).click();
       await expect(page).toHaveURL(`${origin}/account/trips/${returned.tripId}`);
-      await nav.getByRole("link", { name: "Overview", exact: true }).click();
+      await nav.getByRole("link", { name: "My overview", exact: true }).click();
       const editingList = page.waitForResponse((response) => {
         const url = new URL(response.url());
         return (
@@ -478,13 +478,13 @@ test(
         `/account/reports/drafts/${editing.id}`,
       );
       await expect(page.locator(`a[href="/account/reports/${held.id}/edit"]`)).toHaveCount(0);
-      await nav.getByRole("link", { name: "Overview", exact: true }).click();
+      await nav.getByRole("link", { name: "My overview", exact: true }).click();
       await actions.getByRole("link", { name: /^Continue draft/ }).click();
       await expect(page).toHaveURL(`${origin}/account/reports/drafts/${editing.id}`);
       await expect(page.getByLabel("Comment (optional)")).toHaveValue("Fictional editing draft");
       // Draft navigation and RSVP are separate phases sharing the synthetic loopback read bucket.
       await resetAccountLimits();
-      await nav.getByRole("link", { name: "Overview", exact: true }).click();
+      await nav.getByRole("link", { name: "My overview", exact: true }).click();
       await actions.getByRole("link", { name: event.title, exact: true }).click();
       await expect(page).toHaveURL(`${origin}/account/events/${event.id}`);
       const refreshed = page.waitForResponse(
@@ -505,7 +505,7 @@ test(
       const freshSummary =
         (await refreshResponse.json()) as Schemas["WorkspaceStage3SummaryEnvelope"];
       expect(freshSummary.data.unansweredUpcomingEvents?.count).toBe(eventCount - 1);
-      await nav.getByRole("link", { name: "Overview", exact: true }).click();
+      await nav.getByRole("link", { name: "My overview", exact: true }).click();
       await expect(actions.getByRole("link", { name: event.title, exact: true })).toHaveCount(0);
 
       await resetAccountLimits();
