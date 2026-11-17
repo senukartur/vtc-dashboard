@@ -1,5 +1,5 @@
-import type { components } from "@vtc/contracts";
 import type { Page } from "@playwright/test";
+import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 import { inertNotifications } from "./notifications.ts";
 
@@ -31,7 +31,7 @@ const envelope = (data: unknown) => ({ data, meta: { requestId: "fictional-reque
 
 export async function mockQualifications(
   page: Page,
-  options: { lead: boolean; locale?: "en" | "ru" },
+  options: { lead: boolean; locale?: "en" | "ru"; qualifiedTop?: boolean },
 ) {
   const requests: QualificationRequest[] = [];
   let next = 100;
@@ -56,8 +56,21 @@ export async function mockQualifications(
       name: "Fictional Driver",
       version: 1,
       limits: { ...open, hardModeRequired: true },
-      conditions: { requiredTrips: null, requiredDistanceM: null },
-      drivers: [],
+      // With qualifiedTop the top has conditions that one of its drivers already meets, so a
+      // level placed above it would promote that driver at once.
+      conditions: options.qualifiedTop
+        ? { requiredTrips: 3, requiredDistanceM: null }
+        : { requiredTrips: null, requiredDistanceM: null },
+      drivers: options.qualifiedTop
+        ? [
+            {
+              memberId: qid(902),
+              displayName: "Fictional_Veteran",
+              since: "2026-10-01T10:00:00.000Z",
+              credited: { trips: 4, distanceM: "900000" },
+            },
+          ]
+        : [],
     },
   ];
   const ats: Row[] = [

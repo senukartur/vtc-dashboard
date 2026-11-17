@@ -10,6 +10,8 @@ import {
   meetsConditions,
   percent,
   promotionPreview,
+  pushedTop,
+  reorder,
   setLimits,
   tripCount,
 } from "../../apps/web/src/features/qualifications/model.ts";
@@ -69,6 +71,25 @@ describe("promotion preview", () => {
     expect(hasConditions(none)).toBe(false);
     expect(hasConditions(null)).toBe(false);
     expect(meetsConditions({ trips: 99, distanceM: "1" }, none)).toBe(false);
+  });
+  test("a move that puts a level above the top names the former top and its new next level", () => {
+    const ladder = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(reorder(ladder, "c", 1).map((level) => level.id)).toEqual(["c", "a", "b"]);
+    expect(reorder(ladder, "a", 2).map((level) => level.id)).toEqual(["b", "a", "c"]);
+    expect(reorder(ladder, "missing", 1)).toEqual(ladder);
+    // The top stays the top: nobody is promoted by the move.
+    expect(pushedTop(ladder, "a", 2)).toBeNull();
+    expect(pushedTop(ladder, "c", 3)).toBeNull();
+    expect(pushedTop([], "a", 1)).toBeNull();
+    // Moving the top down, or another level to the end, gives the former top a next level.
+    expect(pushedTop(ladder, "c", 2)).toEqual({ top: { id: "c" }, next: { id: "b" } });
+    expect(pushedTop(ladder, "a", 3)).toEqual({ top: { id: "c" }, next: { id: "a" } });
+    expect(pushedTop([{ id: "a" }, { id: "b" }], "a", 2)).toEqual({
+      top: { id: "b" },
+      next: { id: "a" },
+    });
+    // The confirmation counts the former top's drivers against its own conditions.
+    expect(promotionPreview(drivers, { requiredTrips: 5, requiredDistanceM: null }, true)).toBe(2);
   });
   test("progress bars are bounded and absent for an unset condition", () => {
     expect(percent(1, 4)).toBe(25);

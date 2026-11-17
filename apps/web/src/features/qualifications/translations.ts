@@ -24,6 +24,14 @@ const en = {
   needBoth: "{{distance}} and {{trips}}",
   moveUp: "Move “{{name}}” up",
   moveDown: "Move “{{name}}” down",
+  moveConfirmTitle: "Move “{{name}}”?",
+  moveConfirm_one:
+    "“{{top}}” will no longer be the top level: {{count}} driver on it moves to “{{next}}” at once.",
+  moveConfirm_other:
+    "“{{top}}” will no longer be the top level: {{count}} drivers on it move to “{{next}}” at once.",
+  moveConfirmUnknown:
+    "“{{top}}” will no longer be the top level. Its drivers who already meet its conditions move to “{{next}}” at once.",
+  moveConfirmSubmit: "Move level",
   edit: "Edit",
   editLevel: "Edit “{{name}}”",
   mine: "My level",
@@ -172,6 +180,9 @@ const en = {
     "Enter a distance or a number of trips, otherwise drivers cannot move to the next level.",
   warn_one: "After saving, {{count}} driver moves to “{{name}}” at once.",
   warn_other: "After saving, {{count}} drivers move to “{{name}}” at once.",
+  warnCreate_one: "After saving, {{count}} driver on “{{from}}” moves to “{{name}}” at once.",
+  warnCreate_other: "After saving, {{count}} drivers on “{{from}}” move to “{{name}}” at once.",
+  newLevelName: "the new level",
   immediateTitle: "Changes apply at once",
   immediateLabel: "About saving",
   immediate1: "New limits apply to trips checked after saving.",
@@ -252,6 +263,18 @@ const ru: Messages = {
   needBoth: "{{distance}} и {{trips}}",
   moveUp: "Поднять «{{name}}»",
   moveDown: "Опустить «{{name}}»",
+  moveConfirmTitle: "Переместить «{{name}}»?",
+  moveConfirm_one:
+    "«{{top}}» перестанет быть верхним уровнем: {{count}} водитель с него сразу перейдёт на «{{next}}».",
+  moveConfirm_few:
+    "«{{top}}» перестанет быть верхним уровнем: {{count}} водителя с него сразу перейдут на «{{next}}».",
+  moveConfirm_many:
+    "«{{top}}» перестанет быть верхним уровнем: {{count}} водителей с него сразу перейдут на «{{next}}».",
+  moveConfirm_other:
+    "«{{top}}» перестанет быть верхним уровнем: {{count}} водителя с него сразу перейдут на «{{next}}».",
+  moveConfirmUnknown:
+    "«{{top}}» перестанет быть верхним уровнем. Его водители, которые уже выполнили условия, сразу перейдут на «{{next}}».",
+  moveConfirmSubmit: "Переместить",
   edit: "Изменить",
   editLevel: "Изменить «{{name}}»",
   mine: "Мой уровень",
@@ -406,6 +429,13 @@ const ru: Messages = {
   warn_few: "После сохранения {{count}} водителя сразу перейдут на «{{name}}».",
   warn_many: "После сохранения {{count}} водителей сразу перейдут на «{{name}}».",
   warn_other: "После сохранения {{count}} водителя сразу перейдут на «{{name}}».",
+  warnCreate_one: "После сохранения {{count}} водитель с «{{from}}» сразу перейдёт на «{{name}}».",
+  warnCreate_few: "После сохранения {{count}} водителя с «{{from}}» сразу перейдут на «{{name}}».",
+  warnCreate_many:
+    "После сохранения {{count}} водителей с «{{from}}» сразу перейдут на «{{name}}».",
+  warnCreate_other:
+    "После сохранения {{count}} водителя с «{{from}}» сразу перейдут на «{{name}}».",
+  newLevelName: "новый уровень",
   immediateTitle: "Изменения действуют сразу",
   immediateLabel: "О сохранении",
   immediate1: "Новые ограничения применяются к рейсам, которые проверят после сохранения.",

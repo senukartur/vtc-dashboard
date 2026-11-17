@@ -63,14 +63,24 @@ function CreateLevel({ game }: { game: Game }) {
       `/qualification-levels?game=${game}`,
       "EnvelopeQualificationLevelList",
     ),
-    ladder = query.data?.data.data.levels;
+    ladder = query.data?.data.data.levels,
+    // A level added at the top gives the current top a next level; its preview needs its drivers.
+    topId = ladder?.at(-1)?.id,
+    topQuery = useQualificationQuery(
+      `/qualification-levels/${encodeURIComponent(topId ?? "")}`,
+      "EnvelopeQualificationLevelDetail",
+      !!topId,
+    ),
+    formerTop = topQuery.data?.data.data ?? null;
   if (!ladder) return <Loading query={query} />;
+  if (topId && !formerTop) return <Loading query={topQuery} />;
   return (
     <Editor
       key={ladder.map((level) => `${level.id}:${level.version}`).join(",")}
       game={game}
       ladder={ladder}
       detail={null}
+      formerTop={formerTop}
       command={command}
       title={t("newTitle")}
     />
@@ -98,6 +108,7 @@ function EditLevel({ levelId }: { levelId: string }) {
       game={detail.game}
       ladder={ladder}
       detail={detail}
+      formerTop={null}
       command={command}
       title={t("editTitle", { name: detail.name })}
     />
@@ -186,12 +197,15 @@ function Editor({
   game,
   ladder,
   detail,
+  formerTop,
   command,
   title,
 }: {
   game: Game;
   ladder: Level[];
   detail: LevelDetail | null;
+  /** On create, the current top level, whose drivers a new top level could promote. */
+  formerTop: LevelDetail | null;
   command: Command;
   title: string;
 }) {
@@ -212,6 +226,11 @@ function Editor({
     detail && nextName && !errors.conditions
       ? promotionPreview(detail.drivers, conditions, true)
       : 0;
+  // Creating at the top: the former top's drivers who meet its conditions move up at once.
+  const createdTop = !detail && top && formerTop ? formerTop : null;
+  const createPreview = createdTop
+    ? promotionPreview(createdTop.drivers, createdTop.conditions, true)
+    : 0;
   const previewLimits: Limits = {
     massMinKg: amounts.massMin ?? null,
     massMaxKg: amounts.massMax ?? null,
@@ -541,6 +560,15 @@ function Editor({
             {preview > 0 && nextName && (
               <p role="status" className="qualification-warning">
                 {t("warn", { count: preview, name: nextName })}
+              </p>
+            )}
+            {createPreview > 0 && createdTop && (
+              <p role="status" className="qualification-warning">
+                {t("warnCreate", {
+                  count: createPreview,
+                  from: createdTop.name,
+                  name: draft.name.trim() || t("newLevelName"),
+                })}
               </p>
             )}
           </Card>

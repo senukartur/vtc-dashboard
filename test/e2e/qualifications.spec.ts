@@ -5,8 +5,13 @@ import { driverId, mockQualifications, qid } from "./support/qualifications-ui.t
 
 // Desktop rows and phone cards both carry one entry per level inside the ladder card.
 const ladder = (page: Page) => page.locator(".qualification-ladder-card");
-async function open(page: Page, lead: boolean, path = "/account/qualifications") {
-  const mock = await mockQualifications(page, { lead });
+async function open(
+  page: Page,
+  lead: boolean,
+  path = "/account/qualifications",
+  qualifiedTop = false,
+) {
+  const mock = await mockQualifications(page, { lead, qualifiedTop });
   await page.goto(path);
   await switchLanguage(page, "en");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -158,5 +163,58 @@ test(
       await expect(content).toHaveCount(0);
       await expect(trigger).toBeFocused();
     }
+  },
+);
+
+test(
+  "placing a level above the top shows how many drivers move up before saving",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    // The top has conditions that its fictional veteran already meets.
+    const mock = await open(page, true, "/account/qualifications/new?game=ets2", true);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("New qualification");
+    const warning = page.locator(".qualification-warning");
+    await expect(warning).toHaveText(
+      "After saving, 1 driver on “Fictional Driver” moves to “the new level” at once.",
+    );
+    await page.getByLabel("Name", { exact: true }).fill("Fictional Senior");
+    await expect(warning).toHaveText(
+      "After saving, 1 driver on “Fictional Driver” moves to “Fictional Senior” at once.",
+    );
+    // Below the top the new level promotes nobody.
+    await page
+      .getByLabel("Place in the ladder")
+      .selectOption({ label: "After “Fictional Trainee”" });
+    await expect(warning).toHaveCount(0);
+    await switchLanguage(page, "ru");
+    await page
+      .getByLabel("Место в лестнице")
+      .selectOption({ label: "После «Fictional Driver» — высший" });
+    await expect(warning).toHaveText(
+      "После сохранения 1 водитель с «Fictional Driver» сразу перейдёт на «Fictional Senior».",
+    );
+    expect(writes(mock)).toEqual([]);
+    // Moving the first level down puts it above the top: the count is confirmed before saving.
+    await switchLanguage(page, "en");
+    await page.goto("/account/qualifications");
+    await page.getByRole("button", { name: "Move “Fictional Trainee” down" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText(
+      "“Fictional Driver” will no longer be the top level: 1 driver on it moves to “Fictional Trainee” at once.",
+    );
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(writes(mock)).toEqual([]);
+    await page.getByRole("button", { name: "Move “Fictional Trainee” down" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Move level" }).click();
+    await expect
+      .poll(() => writes(mock))
+      .toEqual([
+        {
+          method: "PUT",
+          path: `/admin/qualification-levels/${qid(1)}/position`,
+          body: { expectedVersion: 1, position: 2 },
+        },
+      ]);
   },
 );

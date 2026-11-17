@@ -1,8 +1,15 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { DataTable, type DataTableColumn } from "../../shared/ui/DataTable.js";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "../../shared/ui/dialog.js";
 import { InfoTip } from "../../shared/ui/info-tip.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
@@ -15,7 +22,7 @@ import {
   Time,
   useLocale,
 } from "./limits.js";
-import { hasConditions } from "./model.js";
+import { hasConditions, promotionPreview, pushedTop } from "./model.js";
 import { useQualificationCommand, useQualificationQuery } from "./queries.js";
 import type { Game, Level, Mine } from "./transport.js";
 import "./qualifications.css";
@@ -74,8 +81,23 @@ function Ladder({ game }: { game: Game }) {
     command = useQualificationCommand(),
     list = query.data?.data.data,
     manage = !!list?.canManage,
-    levels = list?.levels ?? [];
-  const move = (level: Level, position: number) =>
+    levels = list?.levels ?? [],
+    topId = levels.at(-1)?.id,
+    // A move that puts a level above the top promotes the top's qualifying drivers at once.
+    topQuery = useQualificationQuery(
+      `/qualification-levels/${encodeURIComponent(topId ?? "")}`,
+      "EnvelopeQualificationLevelDetail",
+      manage && levels.length > 1 && !!topId,
+    ),
+    topDetail = topQuery.data?.data.data,
+    [confirming, setConfirming] = useState<{
+      level: Level;
+      position: number;
+      top: Level;
+      next: Level;
+      count: number | null;
+    } | null>(null);
+  const apply = (level: Level, position: number) =>
     void command.run(
       "PUT",
       `/admin/qualification-levels/${level.id}/position`,
@@ -83,6 +105,15 @@ function Ladder({ game }: { game: Game }) {
       "EnvelopeQualificationLevelCommandResult",
       (result) => result.data.promotedCount > 0,
     );
+  const move = (level: Level, position: number) => {
+    const pushed = pushedTop(levels, level.id, position);
+    const count =
+      pushed && topDetail?.id === pushed.top.id
+        ? promotionPreview(topDetail.drivers, topDetail.conditions, true)
+        : null;
+    if (!pushed || count === 0) apply(level, position);
+    else setConfirming({ level, position, top: pushed.top, next: pushed.next, count });
+  };
   const columns: DataTableColumn<Level>[] = [
     {
       id: "number",
@@ -196,6 +227,41 @@ function Ladder({ game }: { game: Game }) {
         />
       </Card>
       {list?.mine && manage && <MineCard mine={list.mine} game={game} />}
+      <Dialog open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
+        <DialogContent>
+          <DialogTitle>{t("moveConfirmTitle", { name: confirming?.level.name ?? "" })}</DialogTitle>
+          <DialogDescription>
+            {confirming &&
+              (confirming.count === null
+                ? t("moveConfirmUnknown", {
+                    top: confirming.top.name,
+                    next: confirming.next.name,
+                  })
+                : t("moveConfirm", {
+                    count: confirming.count,
+                    top: confirming.top.name,
+                    next: confirming.next.name,
+                  }))}
+          </DialogDescription>
+          <div className="qualification-card-actions">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                {t("cancel")}
+              </Button>
+            </DialogClose>
+            <Button
+              type="button"
+              disabled={command.pending}
+              onClick={() => {
+                if (confirming) apply(confirming.level, confirming.position);
+                setConfirming(null);
+              }}
+            >
+              {t("moveConfirmSubmit")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

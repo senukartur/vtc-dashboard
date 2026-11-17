@@ -74,6 +74,33 @@ export function promotionPreview(
 ): number {
   return hasNext ? drivers.filter((d) => meetsConditions(d.credited, conditions)).length : 0;
 }
+/** The ladder order after moving levelId to the 1-based position. */
+export function reorder<T extends { id: string }>(
+  levels: readonly T[],
+  levelId: string,
+  position: number,
+): T[] {
+  const moved = levels.find((level) => level.id === levelId);
+  if (!moved) return [...levels];
+  const rest = levels.filter((level) => level.id !== levelId);
+  rest.splice(Math.min(Math.max(position, 1), levels.length) - 1, 0, moved);
+  return rest;
+}
+/**
+ * A move that puts another level above the current top: the top's drivers who already meet its
+ * conditions are promoted to `next` at once. Null when the top stays the top.
+ */
+export function pushedTop<T extends { id: string }>(
+  levels: readonly T[],
+  levelId: string,
+  position: number,
+): { top: T; next: T } | null {
+  const top = levels.at(-1);
+  if (!top) return null;
+  const order = reorder(levels, levelId, position);
+  const next = order[order.findIndex((level) => level.id === top.id) + 1];
+  return next ? { top, next } : null;
+}
 /** Progress toward one condition, 0..100, for a decorative bar; null when the condition is unset. */
 export function percent(value: string | number, required: string | number | null): number | null {
   if (required === null) return null;
