@@ -324,8 +324,8 @@ test.describe("Company Dashboard E2E", () => {
         expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-11-01");
         expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-12-01");
       }
-      // Progress for both games and the recent trips follow the period reads.
-      await expect.poll(() => requestsTo(state, "/api/v1/me/qualifications").length).toBe(2);
+      // Progress for both games (one shared read) and the recent trips follow the period reads.
+      await expect.poll(() => requestsTo(state, "/api/v1/me/qualifications").length).toBe(1);
       await expect.poll(() => requestsTo(state, "/api/v1/trips").length).toBe(1);
       expect(state.requests.some((url) => url.searchParams.get("scope") === "review")).toBe(false);
       const firstIndex = (path: string) =>
@@ -396,9 +396,9 @@ test.describe("Company Dashboard E2E", () => {
       // Positive control: queries that opt into reconnect refetches reread, so the reconnect
       // was handled.
       await expect.poll(selfReads).toBeGreaterThan(selfBefore);
-      // The now stale progress reads of both games refetch on the same reconnect, after the
-      // stats read would have been issued.
-      await expect.poll(progressReads).toBe(progressBefore + 2);
+      // The now stale progress read shared by both games refetches once on the same reconnect,
+      // after the stats read would have been issued.
+      await expect.poll(progressReads).toBe(progressBefore + 1);
       expect(requestsTo(state, statsPath)).toHaveLength(1);
       await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
       await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
