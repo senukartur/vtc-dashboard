@@ -94,16 +94,6 @@
   overflow-wrap: anywhere;
 }
 
-.popover-content {
-  z-index: 70;
-  max-width: calc(100vw - 16px);
-  padding: 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--foreground);
-  box-shadow: 0 16px 40px #00000066;
-}
 .calendar {
   --cell: 32px;
 }
