@@ -22,7 +22,7 @@ import {
   Time,
   useLocale,
 } from "./limits.js";
-import { hasConditions, percent } from "./model.js";
+import { driverName, hasConditions, percent } from "./model.js";
 import { levelPath, MineCard } from "./QualificationsPage.js";
 import { useQualificationCommand, useQualificationQuery } from "./queries.js";
 import {
@@ -263,7 +263,7 @@ function Drivers({
       rowHeader: true,
       cell: (driver) => (
         <Link to={`/account/drivers/${encodeURIComponent(driver.memberId)}`}>
-          {driver.displayName}
+          {driverName(t, driver)}
         </Link>
       ),
     },
@@ -295,7 +295,7 @@ function Drivers({
                 type="button"
                 size="xs"
                 variant="outline"
-                aria-label={t("changeLevelFor", { name: driver.displayName })}
+                aria-label={t("changeLevelFor", { name: driverName(t, driver) })}
                 onClick={() => onChange(driver)}
               >
                 {t("changeLevel")}
@@ -422,7 +422,7 @@ function ChangeDialog({
   return (
     <Dialog open={driver !== null} onOpenChange={(open) => !open && close()}>
       <DialogContent>
-        <DialogTitle>{t("changeTitle", { name: driver?.displayName ?? "" })}</DialogTitle>
+        <DialogTitle>{t("changeTitle", { name: driver ? driverName(t, driver) : "" })}</DialogTitle>
         <DialogDescription>{t("resetNote")}</DialogDescription>
         <form
           className="stack"

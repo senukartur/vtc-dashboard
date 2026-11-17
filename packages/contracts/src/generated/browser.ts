@@ -5428,7 +5428,8 @@ export interface components {
         };
         QualificationLevelDriver: {
             credited: components["schemas"]["QualificationProgress"];
-            displayName: string;
+            /** @description Null when the member's name is no longer available, for example a former member; the client shows a localized label. */
+            displayName: string | null;
             memberId: components["schemas"]["Id"];
             since: components["schemas"]["Timestamp"];
         };

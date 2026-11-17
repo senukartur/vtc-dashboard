@@ -4,6 +4,7 @@ import {
   baseUnits,
   compareDecimal,
   displayUnits,
+  driverName,
   failureText,
   hasConditions,
   meetsConditions,
@@ -119,6 +120,13 @@ describe("limits and messages", () => {
     expect(failureText(t, failure(422, null))).toBe("errorInvalid");
     expect(failureText(t, new QualificationFailure("conflict", 409))).toBe("errorConflict");
     expect(failureText(t, new Error("network"))).toBe("errorUncertain");
+  });
+  test("a driver without a name shows the localized former-member label", () => {
+    const t = ((key: string) => key) as unknown as Parameters<typeof driverName>[0];
+    expect(driverName(t, { displayName: "Fictional_Driver" })).toBe("Fictional_Driver");
+    expect(driverName(t, { displayName: null })).toBe("formerMember");
+    expect(qualificationTranslations.en.formerMember).toBe("Former member");
+    expect(qualificationTranslations.ru.formerMember).toBe("Бывший участник");
   });
 });
 

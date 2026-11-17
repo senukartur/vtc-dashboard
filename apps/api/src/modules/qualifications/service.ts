@@ -48,7 +48,6 @@ import {
   conditionsOf,
   type Game,
   hasConditions,
-  type LevelRow,
   levelTrailers,
   limitsOf,
 } from "./ladder.js";
@@ -388,7 +387,7 @@ export function createQualifications(
       mine: await mine(tx, actor.userId, found.game, ladder),
       drivers: open.map((row) => ({
         memberId: row.userId,
-        displayName: names.get(row.userId) ?? "Former member",
+        displayName: names.get(row.userId) ?? null,
         since: row.assignedAt,
         credited: credited(row.id),
       })),

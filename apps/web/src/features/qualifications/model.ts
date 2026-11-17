@@ -93,6 +93,12 @@ export function setLimits(limits: Limits) {
   };
 }
 /** The message text for a failed command; the 422 conditions code has its own messages. */
+/** A driver's name, or the localized former-member label when the API has none. */
+export const driverName = (
+  t: TFunction<"qualifications">,
+  driver: { displayName: string | null },
+) => driver.displayName ?? t("formerMember");
+
 /**
  * `levels` names the existing level a create or move would leave below the top without
  * conditions; without it, or for the edited level itself, the general conditions message shows.

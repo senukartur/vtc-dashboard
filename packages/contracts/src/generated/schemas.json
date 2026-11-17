@@ -17240,9 +17240,17 @@
           "$ref": "#/$defs/Id"
         },
         "displayName": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
+          "description": "Null when the member's name is no longer available, for example a former member; the client shows a localized label.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "since": {
           "$ref": "#/$defs/Timestamp"
