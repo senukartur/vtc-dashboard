@@ -2217,7 +2217,7 @@ export interface paths {
         };
         /**
          * listMembers
-         * @description Company member directory. Filters and the optional nickname search apply before paging. Omitted sort keeps ascending member ID order; each sort is a stable keyset on (sort value, member ID). Signed cursors bind the actor, session, access epoch, normalized filters, sort, order and windowEndsAt; mismatches return 409 VERSION_CONFLICT. last30Days counts accepted canonical trips whose reportingAt lies in [windowEndsAt - 30 days, windowEndsAt], including zeros.
+         * @description Company member directory. Filters and the optional nickname search apply before paging. Omitted sort keeps ascending member ID order; each sort is a stable keyset on (sort value, member ID). Signed cursors bind the actor, session, access epoch, normalized filters including status, sort, order and windowEndsAt; mismatches return 409 VERSION_CONFLICT. last30Days counts accepted canonical trips whose reportingAt lies in [windowEndsAt - 30 days, windowEndsAt], including zeros. statusCounts are company-wide totals that ignore every filter and are read in the page's transaction. With Qualifications each row's levels holds its current level per game, null without a current assignment, for a former member and for a level no longer on the active ladder; levels is absent without Qualifications.
          */
         get: operations["listMembers"];
         put?: never;
@@ -5429,6 +5429,15 @@ export interface components {
             membership: "trainee" | "driver";
             reason: string;
         };
+        /** @description Company-wide member totals returned on every page and read in the page's transaction. */
+        MemberStage4DirectoryCounts: {
+            /** @description Active members of the company; ignores the search, role, level and status filters. */
+            active: number;
+            /** @description Active members with at least one accepted canonical trip whose reportingAt lies in [windowEndsAt - 30 days, windowEndsAt], the rule of last30Days; ignores the filters. Absent, never zero, when accepted-trip facts are unavailable. */
+            droveLast30Days?: number;
+            /** @description Former members of the company; ignores the search, role, level and status filters. */
+            former: number;
+        };
         /** @description MemberSummary plus the Stage 4 directory facts. Every row carries both when accepted-trip facts are available; both are absent, never zero, when they are not. */
         MemberStage4DirectoryEntry: {
             formerMember: boolean;
@@ -5438,12 +5447,27 @@ export interface components {
             last30Days?: components["schemas"]["AnalyticsStage4Totals"];
             /** @description reportingAt of the member's latest accepted canonical trip; null when none. */
             lastAcceptedTripAt?: components["schemas"]["Timestamp"] | null;
+            /** @description Current level per game; absent when qualifications are unavailable. */
+            levels?: components["schemas"]["MemberStage4DirectoryLevels"];
             nickname: string;
             roles: ("trainee" | "driver" | "dispatcher" | "deputy_director" | "director")[];
+        };
+        /** @description A current level as listQualificationLevels returns it to the reader: same ID, name and 1-based position. */
+        MemberStage4DirectoryLevel: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            position: number;
+        };
+        /** @description The member's current level per game. A game is null when the member has no current assignment in it, for every former member, and when the assigned level is no longer on the active ladder. */
+        MemberStage4DirectoryLevels: {
+            ats: components["schemas"]["MemberStage4DirectoryLevel"] | null;
+            ets2: components["schemas"]["MemberStage4DirectoryLevel"] | null;
         };
         MemberStage4DirectoryList: {
             items: components["schemas"]["MemberStage4DirectoryEntry"][];
             nextCursor: string | null;
+            statusCounts?: components["schemas"]["MemberStage4DirectoryCounts"];
             /** @description End of the 30-day window used by every row of this page and bound into the cursor. */
             windowEndsAt?: components["schemas"]["Timestamp"];
         };
@@ -10805,6 +10829,8 @@ export interface operations {
                 search?: string;
                 /** @description nickname, 30-day accepted distance, 30-day accepted trips or last accepted trip time. Ties break by member ID. Omitted keeps ascending member ID order. */
                 sort?: "nickname" | "distance30d" | "trips30d" | "lastTrip";
+                /** @description Membership status: active or former members. Omitted lists both. Filters before pagination and combines with the other filters; bound into the signed cursor. */
+                status?: "active" | "former";
             };
             header?: never;
             path?: never;

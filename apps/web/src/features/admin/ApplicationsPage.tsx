@@ -5,6 +5,7 @@ import { useSession } from "../../app/Session.js";
 import { accountTimeZone, formatUtc } from "../../shared/formatting.js";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../../shared/ui/dialog.js";
 import { Badge, Button, Card, Label, Table } from "../../shared/ui/primitives.js";
+import { ReferralFact, TruckersmpFact } from "./ApplicationChecks.js";
 import {
   type ApplicationStatus,
   applicationTone,
@@ -305,7 +306,9 @@ function ApplicationDetail({ id, back }: { id: string; back: () => void }) {
       `/admin/applications/${id}/history?limit=25${historyCursor ? `&cursor=${encodeURIComponent(historyCursor)}` : ""}`,
       "EnvelopeListApplication",
     ),
-    command = useWorkspaceCommand();
+    command = useWorkspaceCommand(),
+    // Owned here so recheck feedback survives the detail re-read after a 403 or 409.
+    recheck = useWorkspaceCommand();
   const [reason, setReason] = useState("");
   const app = query.data?.data.data;
   const busy = command.pending || command.seconds > 0;
@@ -356,6 +359,12 @@ function ApplicationDetail({ id, back }: { id: string; back: () => void }) {
                 <span className="muted">{t("applicationsUi.steamUnverified")}</span>
               </dd>
             </div>
+            <TruckersmpFact
+              id={app.id}
+              check={app.truckersmpCheck}
+              updatedAt={query.dataUpdatedAt}
+              command={recheck}
+            />
             <div>
               <dt>{t("games")}</dt>
               <dd>{games}</dd>
@@ -364,6 +373,7 @@ function ApplicationDetail({ id, back }: { id: string; back: () => void }) {
               <dt>{t("discord")}</dt>
               <dd>{app.fields.discord ?? t("notSet")}</dd>
             </div>
+            <ReferralFact fields={app.fields} />
             <div className="applications-wide">
               <dt>{t("introduction")}</dt>
               <dd>{app.fields.introduction ?? t("notSet")}</dd>

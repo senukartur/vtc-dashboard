@@ -619,7 +619,7 @@ test(
       .getByRole("navigation", { name: "Account sections", exact: true })
       .getByRole("link", { name: "Preferences", exact: true })
       .click();
-    await page.getByLabel("Display timezone", { exact: true }).fill("Europe/Warsaw");
+    await page.getByLabel("Display timezone", { exact: true }).selectOption("Europe/Warsaw");
     const opened = await openUserMenu(page);
     await opened.getByRole("menuitemradio", { name: "Русский", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
@@ -1194,7 +1194,7 @@ test(
       .getByRole("navigation", { name: "Account sections", exact: true })
       .getByRole("link", { name: "Preferences", exact: true })
       .click();
-    await page.getByLabel("Display timezone", { exact: true }).fill("Europe/Warsaw");
+    await page.getByLabel("Display timezone", { exact: true }).selectOption("Europe/Warsaw");
     await more.click();
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Русский", exact: true }).click();

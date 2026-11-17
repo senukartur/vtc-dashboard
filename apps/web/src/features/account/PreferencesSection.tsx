@@ -1,11 +1,15 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
+import { accountTimeZone } from "../../shared/formatting.js";
 import { writeStoredLocale } from "../../shared/i18n.js";
-import { Button, FieldError, Input } from "../../shared/ui/primitives.js";
+import { Button, Card, FieldError, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
+import { useMinuteNow } from "../notifications/components.js";
+import { OptionalNotifications } from "../notifications/controller.js";
+import { NotificationPreferencesCard } from "../notifications/preferences.js";
 import { SettingsRow } from "./SettingsRow.js";
-import { timezoneOptions, timezoneValid } from "./settings.js";
+import { runtimeZones, type TimezoneChoice, timezoneChoices, timezoneValid } from "./settings.js";
 import type { DTO } from "./transport.js";
 import { useCommand } from "./useCommand.js";
 
@@ -43,74 +47,112 @@ function RowStatus({ state, saved }: { state: "pending" | "saved" | null; saved:
   );
 }
 
+const zoneName = (zone: string) => zone.replaceAll("_", " ");
+const clockLocales = { ru: "ru-RU", en: "en-GB" } as const;
+
 function TimezoneForm({
   initial,
   busy,
   onEdit,
   save,
 }: {
-  initial: string;
+  initial: string | null;
   busy: boolean;
   onEdit: () => void;
-  save: (value: string) => void;
+  save: (value: string | null) => Promise<boolean>;
 }) {
-  const { t } = useTranslation("account");
-  const [value, setValue] = useState(initial);
+  const { t, i18n } = useTranslation("account");
+  // The user's selection, or null while untouched: an untouched field follows the saved value
+  // when the session refreshes, while an edit is never overwritten.
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? initial ?? "";
   const [invalid, setInvalid] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  const options = timezoneOptions(initial);
+  const select = useRef<HTMLSelectElement>(null);
+  const now = useMinuteNow();
+  // Several hundred offset formatters: built once per mount. The device and saved entries follow
+  // the current saved value, so a saved replacement drops an unknown legacy zone without a remount.
+  const [zones] = useState(() => runtimeZones());
+  const choices = timezoneChoices(initial, now, zones, value);
+  const unknown = choices.some((choice) => choice.kind === "unknown" && choice.value === value);
   const id = "preferences-timezone";
+  // The preview follows the selection before it is saved; an unknown zone shows UTC honestly.
+  const zone = accountTimeZone(value === "" ? null : value);
+  const clock = new Intl.DateTimeFormat(
+    clockLocales[i18n.resolvedLanguage === "ru" ? "ru" : "en"],
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: zone,
+    },
+  ).format(now);
+  const label = (choice: TimezoneChoice) =>
+    choice.kind === "device"
+      ? t("timezoneDevice", { zone: zoneName(choice.zone), offset: choice.offset })
+      : choice.kind === "unknown"
+        ? t("timezoneUnknown", { zone: choice.zone })
+        : `${zoneName(choice.zone)} (${choice.offset})`;
   return (
     <form
       noValidate
-      className="settings-inline-form"
+      className="settings-inline-form settings-timezone-form"
       onSubmit={(event) => {
         event.preventDefault();
         if (busy) return;
-        const next = value.trim();
-        if (!timezoneValid(next)) {
+        // "As on the device" saves as null; a zone this browser cannot format is never sent.
+        if (value !== "" && !timezoneValid(value)) {
           setInvalid(true);
-          input.current?.focus();
+          select.current?.focus();
           return;
         }
         setInvalid(false);
-        save(next);
+        const sent = value;
+        void save(sent === "" ? null : sent).then((saved) => {
+          // A saved selection is the saved value again, so the field follows it from now on,
+          // unless the user already picked something else while the save was pending.
+          if (saved) setDraft((current) => (current === sent ? null : current));
+        });
       }}
     >
-      <Input
-        ref={input}
+      <Select
+        ref={select}
         id={id}
-        list={`${id}-options`}
-        autoComplete="off"
-        spellCheck={false}
         aria-labelledby={`${id}-title`}
-        aria-describedby={`${id}-hint${invalid ? ` ${id}-error` : ""}`}
+        aria-describedby={`${id}-hint${unknown ? ` ${id}-unknown` : ""}${invalid ? ` ${id}-error` : ""}`}
         aria-invalid={invalid}
         value={value}
         onChange={(event) => {
-          setValue(event.target.value);
+          setDraft(event.target.value);
           setInvalid(false);
           onEdit();
         }}
-      />
-      <datalist id={`${id}-options`}>
-        {options.map((zone) => (
-          <option key={zone} value={zone} />
+      >
+        {choices.map((choice) => (
+          <option key={choice.kind === "device" ? "device" : choice.value} value={choice.value}>
+            {label(choice)}
+          </option>
         ))}
-      </datalist>
+      </Select>
       <Button type="submit" size="xs" aria-disabled={busy || undefined}>
         {t("saveShort")}
       </Button>
-      <FieldError id={`${id}-error`}>
-        {invalid ? t("invalidField", { field: t("timezone") }) : undefined}
-      </FieldError>
+      {unknown && (
+        <p id={`${id}-unknown`} className="settings-timezone-unknown">
+          {t("timezoneUnknownHint")}
+        </p>
+      )}
+      <p className="settings-timezone-now">
+        {t("timezoneNow", { time: clock, zone: zoneName(zone) })}
+      </p>
+      <FieldError id={`${id}-error`}>{invalid ? t("timezoneChooseListed") : undefined}</FieldError>
     </form>
   );
 }
 
 /**
  * Saved account preferences. Language saves as soon as another option is chosen; the timezone
- * saves explicitly. Each command sends the other preference's saved value, never an unsaved edit.
+ * saves explicitly, since a closed native select changes on every arrow key. Each command sends
+ * the other preference's saved value, never an unsaved edit. Notification switches follow in their
+ * own card when the notifications provider is active.
  */
 export function PreferencesSection({
   self,
@@ -131,7 +173,7 @@ export function PreferencesSection({
   const waiting = request.seconds > 0;
   const saved = self.preferences;
   async function save(row: Row, preferences: { locale: Locale; displayTimezone: string | null }) {
-    if (!etag || busy || waiting) return;
+    if (!etag || busy || waiting) return false;
     setStatus({ row, state: "pending" });
     const result = await request.run("preferences", preferences, etag);
     if (result) {
@@ -143,18 +185,21 @@ export function PreferencesSection({
         await i18n.changeLanguage(preferences.locale);
       }
       setStatus({ row, state: "saved" });
-    } else {
-      setStatus(null);
-      if (request.lastFailure()?.kind === "unauthorized") await session.refresh();
+      return true;
     }
+    setStatus(null);
+    if (request.lastFailure()?.kind === "unauthorized") await session.refresh();
+    return false;
   }
   const rowState = (row: Row) => (status?.row === row ? status.state : null);
   return (
     <>
       {review && <p role="alert">{t("preferenceConflict")}</p>}
-      <div className="settings-card">
+      <Card className="settings-card" aria-labelledby="preferences-language-time">
+        <h2 id="preferences-language-time">{t("languageTimeCard")}</h2>
         <SettingsRow
           id="preferences-language"
+          level={3}
           title={t("languageRow")}
           hint={t("languageHint")}
           action={
@@ -177,21 +222,24 @@ export function PreferencesSection({
         >
           <RowStatus state={rowState("language")} saved={t("languageSaved")} />
         </SettingsRow>
-        <SettingsRow id="preferences-timezone" title={t("timezone")} hint={t("timezoneHelp")}>
+        <SettingsRow
+          id="preferences-timezone"
+          level={3}
+          title={t("timezone")}
+          hint={t("timezoneHelp")}
+        >
           <TimezoneForm
             key={revision}
-            initial={saved.displayTimezone ?? ""}
+            initial={saved.displayTimezone}
             busy={busy || waiting || !etag}
             onEdit={() => {
               if (status?.state === "saved") setStatus(null);
             }}
-            save={(displayTimezone) =>
-              void save("timezone", { locale: saved.locale, displayTimezone })
-            }
+            save={(displayTimezone) => save("timezone", { locale: saved.locale, displayTimezone })}
           />
           <RowStatus state={rowState("timezone")} saved={t("timezoneSaved")} />
         </SettingsRow>
-      </div>
+      </Card>
       {!etag && <p role="alert">{t("sessionUnavailable")}</p>}
       {request.failure && (
         <p role="alert" className="field-error">
@@ -213,6 +261,9 @@ export function PreferencesSection({
           {t("refreshPreferences")}
         </Button>
       )}
+      <OptionalNotifications>
+        <NotificationPreferencesCard />
+      </OptionalNotifications>
     </>
   );
 }

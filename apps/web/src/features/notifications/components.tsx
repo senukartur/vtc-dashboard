@@ -37,7 +37,9 @@ export function NotificationFailure({
           error instanceof AccountFailure
             ? preference && error.kind === "conflict"
               ? "preferenceConflict"
-              : error.kind
+              : preference && error.kind === "invalid"
+                ? "preferenceKeysChanged"
+                : error.kind
             : "unavailable",
         )}
       </p>

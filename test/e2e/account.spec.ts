@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { Locator, Page, Request, Route, TestInfo } from "@playwright/test";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { publicContent } from "../../apps/web/src/features/landing/content.ts";
+import { notificationPreferencesFor } from "../../apps/web/src/features/notifications/fixtures.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { openMoreSheet, phone, signOutFromMenu, switchLanguage } from "./support/locale.ts";
 
@@ -849,13 +850,13 @@ test(
     await capture(page, info, "ru-preferences");
     await language(page, "en");
     const timezone = page.getByLabel("Display timezone", { exact: true });
-    await timezone.fill("Asia/Tokyo");
+    await timezone.selectOption("Asia/Tokyo");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await page.getByRole("button", { name: "Refresh preferences for review" }).click();
     await expect(page.getByText(/Preferences changed elsewhere/)).toBeVisible();
     await expect(timezone).toHaveValue("Europe/Warsaw");
     conflicts = false;
-    await timezone.fill("UTC");
+    await timezone.selectOption("UTC");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
     await page
@@ -1060,7 +1061,7 @@ for (const held of ["probe", "command"] as const) {
           page.getByRole("main").getByText("Fictional Member B", { exact: true }),
         ).toBeVisible();
         const timezone = page.getByLabel("Display timezone", { exact: true });
-        await timezone.fill("Europe/Warsaw");
+        await timezone.selectOption("Europe/Warsaw");
         release();
         await Promise.all([handlerFinished, requestSettled]);
         await page.evaluate(
@@ -1203,7 +1204,22 @@ async function settingsWorkspace(
     preferences: [] as { body: unknown; ifMatch: string | undefined }[],
     preferenceStatus: 200,
     hold: null as Promise<void> | null,
+    /** Notification switches: the read follows the capabilities unless `keys` overrides them. */
+    notifications: {
+      version: 1,
+      reads: 0,
+      keys: null as string[] | null,
+      values: {} as Record<string, boolean>,
+      statuses: [] as number[],
+      hold: null as Promise<void> | null,
+      commands: [] as {
+        body: Record<string, boolean>;
+        ifMatch: string | undefined;
+        key: string | undefined;
+      }[],
+    },
   };
+
   // Registered after the base mocks, so it answers first and falls back for other paths.
   await page.route("**/api/v1/**", async (route: Route) => {
     const request = route.request();
@@ -1257,6 +1273,40 @@ async function settingsWorkspace(
       state.self.data.preferences = request.postDataJSON();
       state.version++;
       return route.fulfill({ json: { data: state.self.data.preferences, meta } });
+    }
+    if (path === "/api/v1/me/notification-preferences") {
+      const switches = state.notifications;
+      const keys =
+        switches.keys ?? Object.keys(notificationPreferencesFor(state.self.data.capabilities));
+      const read = () => Object.fromEntries(keys.map((key) => [key, switches.values[key] ?? true]));
+      const reply = () =>
+        route.fulfill({
+          json: { data: read(), meta },
+          headers: { ETag: `"v${switches.version}"` },
+        });
+      if (request.method() === "GET") {
+        switches.reads++;
+        return reply();
+      }
+      const body = request.postDataJSON() as Record<string, boolean>;
+      switches.commands.push({
+        body,
+        ifMatch: request.headers()["if-match"],
+        key: request.headers()["idempotency-key"],
+      });
+      if (switches.hold) await switches.hold;
+      const status = switches.statuses.shift() ?? 200;
+      if (status === 429)
+        return route.fulfill({ ...error(status), headers: { "Retry-After": "1" } });
+      if (status !== 200) return route.fulfill(error(status));
+      // The server checks the exact key set before the revision.
+      if (JSON.stringify(Object.keys(body).sort()) !== JSON.stringify([...keys].sort()))
+        return route.fulfill(error(422));
+      if (request.headers()["if-match"] !== `"v${switches.version}"`)
+        return route.fulfill(error(412));
+      Object.assign(switches.values, body);
+      switches.version++;
+      return reply();
     }
     return route.fallback();
   });
@@ -1559,11 +1609,16 @@ test(
     const timezone = page.getByLabel("Display timezone", { exact: true });
     const save = page.getByRole("button", { name: "Save", exact: true });
     const statuses = page.locator(".settings-row").getByRole("status");
+    await expect(
+      page.getByRole("region", { name: "Language and time", exact: true }),
+    ).toBeVisible();
     await expect(statuses).toHaveCount(2);
     await expect(statuses.nth(0)).toHaveText("");
     await expect(statuses.nth(1)).toHaveText("");
     await expect(english).toHaveAttribute("aria-pressed", "true");
-    await expect(timezone).toHaveAccessibleDescription(/IANA timezone/);
+    await expect(timezone).toHaveAccessibleDescription(/All dates in the dashboard use this zone/);
+    await expect(timezone).toHaveValue("UTC");
+    await expect(timezone.locator("option").first()).toHaveText(/^As on the device — /);
     await russian.click();
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
     await expect(statuses.nth(0)).toHaveText("Язык сохранён");
@@ -1576,14 +1631,9 @@ test(
     await language(page, "en");
     // The session-only menu switch changes the interface, not the saved choice.
     await expect(russian).toHaveAttribute("aria-pressed", "true");
-    await timezone.fill("Mars/Base");
-    await save.click();
-    await expect(timezone).toHaveAttribute("aria-invalid", "true");
-    await expect(page.getByText("Check Display timezone.", { exact: true })).toBeVisible();
-    await expect(timezone).toBeFocused();
+    // Choosing an option saves nothing until Save.
+    await timezone.selectOption("Europe/Warsaw");
     expect(state.preferences).toHaveLength(1);
-    await timezone.fill("Europe/Warsaw");
-    await expect(timezone).toHaveAttribute("aria-invalid", "false");
     await save.click();
     await expect(statuses.nth(1)).toHaveText("Timezone saved");
     await expect(statuses.nth(0)).toHaveText("");
@@ -1593,7 +1643,7 @@ test(
     });
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await capture(page, info, "en-preferences-saved");
-    await timezone.fill("Europe/Warsa");
+    await timezone.selectOption("Europe/Berlin");
     await expect(statuses.nth(1)).toHaveText("");
     // A held save ignores another press; buttons stay focusable rather than disabled.
     let release = () => {};
@@ -1601,7 +1651,7 @@ test(
       release = resolve;
     });
     try {
-      await timezone.fill("Asia/Tokyo");
+      await timezone.selectOption("Asia/Tokyo");
       await save.click();
       await expect(statuses.nth(1)).toHaveText("Please wait…");
       await expect(save).toHaveAttribute("aria-disabled", "true");
@@ -1620,7 +1670,7 @@ test(
     expect(state.preferences).toHaveLength(3);
     // A rate-limit wait keeps Save focusable but aria-disabled until the wait ends.
     state.preferenceStatus = 429;
-    await timezone.fill("Asia/Seoul");
+    await timezone.selectOption("Asia/Seoul");
     await save.click();
     await expect(page.getByText(/^Wait \d+ s before retrying\.$/)).toBeVisible();
     await expect(save).toHaveAttribute("aria-disabled", "true");
@@ -1628,7 +1678,7 @@ test(
     await expect(save).not.toHaveAttribute("aria-disabled", /.*/, { timeout: 4000 });
     expect(state.preferences).toHaveLength(4);
     state.preferenceStatus = 409;
-    await timezone.fill("America/Denver");
+    await timezone.selectOption("America/Denver");
     await save.click();
     await expect(page.getByRole("alert")).toContainText("The current state changed");
     await page.getByRole("button", { name: "Refresh preferences for review", exact: true }).click();
@@ -1643,10 +1693,421 @@ test(
       body: { locale: "en", displayTimezone: "Europe/Warsaw" },
       ifMatch: `"v${state.version - 1}"`,
     });
+    // The timezone form never writes notification switches.
+    expect(state.notifications.commands).toHaveLength(0);
     await language(page, "ru");
     await capture(page, info, "ru-preferences-saved");
   },
 );
+
+const dispatcherCapabilities = ["company.read", "events.respond", "trips.review"];
+const deputyCapabilities = [
+  "company.read",
+  "events.respond",
+  "trips.review",
+  "applications.manage",
+  "members.manage",
+];
+const memberRows = [
+  "Trip accepted",
+  "Rejections and review of your trips",
+  "Trip starts",
+  "Trip finishes and cancellations",
+  "New event",
+  "Changes to events you joined",
+  "Event reminders an hour before",
+  "Qualification changes",
+];
+const notificationCard = (page: Page, locale: "en" | "ru" = "en") =>
+  page.getByRole("region", {
+    name: locale === "en" ? "Notifications" : "Уведомления",
+    exact: true,
+  });
+for (const viewer of [
+  { name: "member", capabilities: undefined, keys: null, rows: memberRows },
+  {
+    name: "dispatcher",
+    capabilities: dispatcherCapabilities,
+    keys: null,
+    rows: ["Trip accepted", "Trip rejections", ...memberRows.slice(2), "Trips for review"],
+  },
+  {
+    name: "deputy",
+    capabilities: deputyCapabilities,
+    keys: null,
+    rows: [
+      "Trip accepted",
+      "Trip rejections",
+      "Trip starts",
+      "Trip finishes and cancellations",
+      "New event",
+      "Event and member access changes",
+      "Event reminders an hour before",
+      "Qualification changes",
+      "Trips for review",
+      "Membership applications",
+    ],
+  },
+  {
+    name: "six-key",
+    capabilities: undefined,
+    keys: [
+      "tripStarted",
+      "tripFinished",
+      "tripRejected",
+      "eventChanges",
+      "eventReminders",
+      "qualificationChanges",
+    ],
+    rows: [
+      "Rejections and review of your trips",
+      "Trip starts",
+      "Trip finishes and cancellations",
+      "Changes to events you joined",
+      "Event reminders an hour before",
+      "Qualification changes",
+    ],
+  },
+] as const)
+  test(
+    `notification switches follow the keys returned to a ${viewer.name} and save each change at once`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await settingsWorkspace(page, {
+        verified: true,
+        ...(viewer.capabilities ? { capabilities: [...viewer.capabilities] } : {}),
+      });
+      if (viewer.keys) state.notifications.keys = [...viewer.keys];
+      await page.goto("/account/preferences");
+      await language(page, "en");
+      const card = notificationCard(page);
+      await expect(card.getByText("Saved immediately", { exact: true })).toBeVisible();
+      await expect(card.getByRole("switch")).toHaveCount(viewer.rows.length);
+      await expect(card.locator(".notification-switch-row label")).toHaveText([...viewer.rows]);
+      for (const name of viewer.rows)
+        await expect(card.getByRole("switch", { name, exact: true })).toBeChecked();
+      if (viewer.name !== "member" && viewer.name !== "six-key")
+        await expect(
+          card.getByRole("switch", { name: "Trips for review", exact: true }),
+        ).toHaveAccessibleDescription("· reviewers");
+      if (viewer.name === "deputy")
+        await expect(
+          card.getByRole("switch", { name: "Membership applications", exact: true }),
+        ).toHaveAccessibleDescription("· leadership");
+      const read = Object.keys(
+        viewer.keys
+          ? Object.fromEntries(viewer.keys.map((key) => [key, true]))
+          : notificationPreferencesFor(state.self.data.capabilities),
+      );
+      const first = viewer.keys ? "Trip starts" : "Trip accepted";
+      await card.getByRole("switch", { name: first, exact: true }).click();
+      await expect(card.getByRole("status")).toHaveText("Preferences saved.");
+      await expect(card.getByRole("switch", { name: first, exact: true })).not.toBeChecked();
+      expect(state.notifications.commands).toHaveLength(1);
+      const [command] = state.notifications.commands;
+      // One PUT with exactly the keys of the read, the read's ETag and an idempotency key.
+      expect(Object.keys(command?.body ?? {})).toEqual(read);
+      expect(command?.body[viewer.keys ? "tripStarted" : "tripAccepted"]).toBe(false);
+      expect(command?.ifMatch).toBe('"v1"');
+      expect(command?.key).toMatch(/^[0-9a-f-]{36}$/);
+      // The saved response's ETag is the base of the next switch, without another read.
+      const reads = state.notifications.reads;
+      await card.getByRole("switch", { name: "Qualification changes", exact: true }).click();
+      await expect(
+        card.getByRole("switch", { name: "Qualification changes", exact: true }),
+      ).not.toBeChecked();
+      await expect.poll(() => state.notifications.commands.length).toBe(2);
+      await expect(card.getByRole("status")).toHaveText("Preferences saved.");
+      expect(state.notifications.commands[1]?.ifMatch).toBe('"v2"');
+      expect(state.notifications.commands[1]?.key).not.toBe(command?.key);
+      expect(state.notifications.commands[1]?.body.qualificationChanges).toBe(false);
+      expect(state.notifications.reads).toBe(reads);
+      // Saved positions survive a reload from the server.
+      await page.reload();
+      await language(page, "en");
+      await expect(card.getByRole("switch", { name: first, exact: true })).not.toBeChecked();
+    },
+  );
+
+test(
+  "a failed switch reverts with an alert; retry keeps its key, changed keys and rate limits lock until resolved",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    const state = await settingsWorkspace(page, { verified: true });
+    await page.goto("/account/preferences");
+    await language(page, "en");
+    const card = notificationCard(page);
+    const accepted = card.getByRole("switch", { name: "Trip accepted", exact: true });
+    const event = card.getByRole("switch", { name: "New event", exact: true });
+    const saved = card.getByText("Preferences saved.", { exact: true });
+    state.notifications.statuses.push(503);
+    await accepted.click();
+    await expect(card.getByRole("alert")).toHaveText(
+      "Notifications are unavailable. Please try again.",
+    );
+    await expect(accepted).toBeChecked();
+    // Toggling the same switch again resends the same attempt, like Retry does.
+    state.notifications.statuses.push(503);
+    await accepted.click();
+    await expect.poll(() => state.notifications.commands.length).toBe(2);
+    await expect(accepted).toBeChecked();
+    await card.getByRole("button", { name: "Retry saving", exact: true }).click();
+    await expect(saved).toBeVisible();
+    await expect(accepted).not.toBeChecked();
+    const [failed, toggled, retried] = state.notifications.commands;
+    for (const repeat of [toggled, retried]) {
+      expect(repeat?.key).toBe(failed?.key);
+      expect(repeat?.body).toEqual(failed?.body);
+      expect(repeat?.ifMatch).toBe(failed?.ifMatch);
+    }
+    // 422: the available types changed; every switch waits for a reload.
+    state.notifications.statuses.push(422);
+    await event.click();
+    await expect(card.getByRole("alert")).toHaveText(
+      "Available notification types changed. Reload them before saving again.",
+    );
+    await expect(event).toBeChecked();
+    await expect(accepted).toHaveAttribute("aria-disabled", "true");
+    await expect(card.getByRole("button", { name: "Retry saving" })).toHaveCount(0);
+    await capture(page, info, "en-notifications-keys-changed");
+    await event.press("Space");
+    expect(state.notifications.commands).toHaveLength(4);
+    const reads = state.notifications.reads;
+    await card.getByRole("button", { name: "Reload preferences", exact: true }).click();
+    await expect(accepted).not.toHaveAttribute("aria-disabled", /.*/);
+    await expect(card.getByRole("alert")).toHaveCount(0);
+    expect(state.notifications.reads).toBe(reads + 1);
+    // 429: a countdown, then the same attempt can be retried.
+    state.notifications.statuses.push(429);
+    await event.click();
+    await expect(card.getByText("Retry in 1 seconds.", { exact: true })).toBeVisible();
+    await expect(event).toHaveAttribute("aria-disabled", "true");
+    await expect(event).not.toHaveAttribute("aria-disabled", /.*/, { timeout: 4000 });
+    await card.getByRole("button", { name: "Retry saving", exact: true }).click();
+    await expect(saved).toBeVisible();
+    await expect(event).not.toBeChecked();
+    expect(state.notifications.commands.at(-1)?.key).toBe(state.notifications.commands.at(-2)?.key);
+    await language(page, "ru");
+    await expect(
+      notificationCard(page, "ru").getByRole("switch", { name: "Новое событие", exact: true }),
+    ).not.toBeChecked();
+    await expect(notificationCard(page, "ru").getByText("Сохраняется сразу")).toBeVisible();
+  },
+);
+
+test.describe("display time zone as on the device", () => {
+  test.use({ timezoneId: "Asia/Tokyo" });
+  test(
+    "the device option saves null, dates follow the browser zone and an unknown saved zone shows UTC",
+    browserCase(["@functional"]),
+    async ({ page }, info) => {
+      await page.clock.setFixedTime(new Date("2026-10-17T12:00:00.000Z"));
+      const state = await settingsWorkspace(page, { verified: true });
+      state.self.data.preferences.displayTimezone = "Europe/Warsaw";
+      await page.goto("/account/preferences");
+      await language(page, "en");
+      const timezone = page.getByLabel("Display timezone", { exact: true });
+      const save = page.getByRole("button", { name: "Save", exact: true });
+      await expect(timezone).toHaveValue("Europe/Warsaw");
+      await expect(timezone.locator("option").first()).toHaveText(
+        "As on the device — Asia/Tokyo (UTC+9)",
+      );
+      await expect(timezone.locator('option[value="Europe/Warsaw"]')).toHaveText(
+        "Europe/Warsaw (UTC+2)",
+      );
+      await expect(page.getByText("Now 14:00 · Europe/Warsaw", { exact: true })).toBeVisible();
+      // The preview follows the selection before it is saved.
+      await timezone.selectOption("");
+      await expect(page.getByText("Now 21:00 · Asia/Tokyo", { exact: true })).toBeVisible();
+      await save.click();
+      await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
+      expect(state.preferences).toEqual([
+        { body: { locale: "en", displayTimezone: null }, ifMatch: '"v1"' },
+      ]);
+      await page.reload();
+      await language(page, "en");
+      await expect(timezone).toHaveValue("");
+      await expect(page.getByText("Now 21:00 · Asia/Tokyo", { exact: true })).toBeVisible();
+      await capture(page, info, "en-preferences-device");
+      await language(page, "ru");
+      await expect(
+        page.getByLabel("Часовой пояс отображения", { exact: true }).locator("option").first(),
+      ).toHaveText("Как на устройстве — Asia/Tokyo (UTC+9)");
+      await expect(page.getByText("Сейчас 21:00 · Asia/Tokyo", { exact: true })).toBeVisible();
+      await language(page, "en");
+      // Other account dates use the browser zone too.
+      await sectionNav(page).getByRole("link", { name: "Connections", exact: true }).click();
+      await expect(page.getByText(/Created: 17 Oct 2026, 21:00/)).toBeVisible();
+      await sectionNav(page).getByRole("link", { name: "Preferences", exact: true }).click();
+      await timezone.selectOption("UTC");
+      await save.click();
+      await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
+      expect(state.preferences.at(-1)).toEqual({
+        body: { locale: "en", displayTimezone: "UTC" },
+        ifMatch: '"v2"',
+      });
+      // A saved zone this browser cannot format is shown as it is, and times fall back to UTC.
+      state.self.data.preferences.displayTimezone = "Mars/Base";
+      state.version++;
+      await page.reload();
+      await language(page, "en");
+      await expect(timezone).toHaveValue("Mars/Base");
+      // The closed select keeps a short label; the full explanation is visible below it.
+      await expect(timezone.locator("option:checked")).toHaveText("Mars/Base (unknown here)");
+      const unknownHint = "This zone is unknown to this browser; times are shown in UTC.";
+      await expect(page.getByText(unknownHint, { exact: true })).toBeVisible();
+      await expect(timezone).toHaveAccessibleDescription(
+        `All dates in the dashboard use this zone. Company reporting periods stay the same. ${unknownHint}`,
+      );
+      await expect(page.getByText("Now 12:00 · UTC", { exact: true })).toBeVisible();
+      await save.click();
+      await expect(
+        page.getByText("Choose a zone from the list to save.", { exact: true }),
+      ).toBeVisible();
+      await expect(timezone).toHaveAttribute("aria-invalid", "true");
+      await expect(timezone).toBeFocused();
+      expect(state.preferences).toHaveLength(2);
+      await capture(page, info, "en-preferences-unknown-zone");
+      await language(page, "ru");
+      const timezoneRu = page.getByLabel("Часовой пояс отображения", { exact: true });
+      await expect(timezoneRu.locator("option:checked")).toHaveText("Mars/Base (неизвестен здесь)");
+      await expect(
+        page.getByText("Этот пояс неизвестен браузеру; время показано в UTC.", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("Выберите пояс из списка, чтобы сохранить.", { exact: true }),
+      ).toBeVisible();
+      await capture(page, info, "ru-preferences-unknown-zone");
+      await language(page, "en");
+      await sectionNav(page).getByRole("link", { name: "Connections", exact: true }).click();
+      await expect(page.getByText(/Created: 17 Oct 2026, 12:00/)).toBeVisible();
+      // Saving another zone drops the unknown entry at once, without remounting the form.
+      await sectionNav(page).getByRole("link", { name: "Preferences", exact: true }).click();
+      await timezone.selectOption("UTC");
+      await expect(page.getByText(unknownHint, { exact: true })).toHaveCount(0);
+      await save.click();
+      await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
+      await expect(timezone.locator('option[value="Mars/Base"]')).toHaveCount(0);
+      await expect(save).toBeFocused();
+      expect(state.preferences.at(-1)?.body).toEqual({ locale: "en", displayTimezone: "UTC" });
+    },
+  );
+});
+
+test(
+  "an untouched timezone field follows a saved value changed elsewhere; an edited one keeps the edit",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await settingsWorkspace(page, { verified: true });
+    const elsewhere = async (displayTimezone: string | null) => {
+      state.self.data.preferences = { locale: "en", displayTimezone };
+      state.version++;
+      // The session refetches /me when the window regains focus.
+      const refetched = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/me",
+      );
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await refetched;
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+    };
+    for (const legacy of ["US/Eastern", "Mars/Base"]) {
+      state.self.data.preferences = { locale: "en", displayTimezone: legacy };
+      await page.goto("/account/preferences");
+      await language(page, "en");
+      const timezone = page.getByLabel("Display timezone", { exact: true });
+      const save = page.getByRole("button", { name: "Save", exact: true });
+      await expect(timezone).toHaveValue(legacy);
+      await elsewhere("UTC");
+      // The legacy entry is gone and the select shows the new saved zone, which Save sends.
+      await expect(timezone).toHaveValue("UTC");
+      await expect(timezone.locator("option:checked")).toHaveText("UTC (UTC+0)");
+      await expect(timezone.locator(`option[value="${legacy}"]`)).toHaveCount(0);
+      await expect(
+        page.getByText("This zone is unknown to this browser; times are shown in UTC.", {
+          exact: true,
+        }),
+      ).toHaveCount(0);
+      await save.click();
+      await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
+      expect(state.preferences.at(-1)?.body).toEqual({ locale: "en", displayTimezone: "UTC" });
+    }
+    // An edit survives the refetch, stays visible as selected and is what Save sends.
+    const timezone = page.getByLabel("Display timezone", { exact: true });
+    await timezone.selectOption("Asia/Tokyo");
+    await elsewhere("Europe/Warsaw");
+    await expect(timezone).toHaveValue("Asia/Tokyo");
+    await expect(timezone.locator("option:checked")).toHaveText("Asia/Tokyo (UTC+9)");
+    await expect(page.locator(".settings-timezone-now")).toContainText("Asia/Tokyo");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
+    expect(state.preferences.at(-1)?.body).toEqual({
+      locale: "en",
+      displayTimezone: "Asia/Tokyo",
+    });
+    // After the save the field is untouched again and follows the next change elsewhere.
+    await elsewhere(null);
+    await expect(timezone).toHaveValue("");
+    await expect(timezone.locator("option:checked")).toHaveText(/^As on the device — /);
+  },
+);
+
+for (const viewer of [
+  { name: "member", capabilities: undefined, rows: 8 },
+  { name: "deputy", capabilities: deputyCapabilities, rows: 10 },
+] as const)
+  test(
+    `preferences cards fit at every width in EN and RU for a ${viewer.name}`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await settingsWorkspace(page, {
+        verified: true,
+        ...(viewer.capabilities ? { capabilities: [...viewer.capabilities] } : {}),
+      });
+      await page.goto("/account/preferences");
+      const coarse = await coarsePointer(page);
+      for (const locale of ["en", "ru"] as const) {
+        await language(page, locale);
+        const card = notificationCard(page, locale);
+        await expect(card.getByRole("switch")).toHaveCount(viewer.rows);
+        const content = await box(page.locator(".account-settings-content"));
+        const cards = page.locator(".account-settings-content > .settings-card");
+        await expect(cards).toHaveCount(2);
+        for (const item of await cards.all()) {
+          const area = await box(item);
+          expect(area.x).toBeGreaterThanOrEqual(content.x - 0.5);
+          expect(area.x + area.width).toBeLessThanOrEqual(content.x + content.width + 0.5);
+          expect(
+            await item.evaluate((element) => element.scrollWidth <= element.clientWidth + 0.5),
+          ).toBe(true);
+        }
+        const languageTime = await box(cards.first());
+        const select = await box(
+          page.getByLabel(locale === "en" ? "Display timezone" : "Часовой пояс отображения", {
+            exact: true,
+          }),
+        );
+        expect(select.x + select.width).toBeLessThanOrEqual(languageTime.x + languageTime.width);
+        if (coarse) expect(select.height).toBeGreaterThanOrEqual(40);
+        else near(select.height, 32);
+        for (const row of await card.locator(".notification-switch-row").all()) {
+          const area = await box(row);
+          const text = await box(row.locator(".notification-switch-text"));
+          const control = await box(row.getByRole("switch"));
+          // Labels wrap beside the switch; they never run under it.
+          expect(text.x + text.width).toBeLessThanOrEqual(control.x + 0.5);
+          expect(control.x + control.width).toBeLessThanOrEqual(area.x + area.width + 0.5);
+          expect(control.height).toBeGreaterThanOrEqual(coarse ? 40 : 24);
+          expect(control.width).toBeGreaterThanOrEqual(coarse ? 40 : 24);
+        }
+        await capture(page, info, `${locale}-preferences-${viewer.name}`);
+      }
+    },
+  );
 
 test(
   "connections section shows Steam, TruckersMP and telemetry credentials as rows, partial runtimes and formatted dates",
