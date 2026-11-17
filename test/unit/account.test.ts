@@ -10,8 +10,10 @@ import { clearPrivateQueries, createAppQueryClient } from "../../apps/web/src/ap
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import {
   legacyAccountSection,
-  timezoneOptions,
+  runtimeZones,
+  timezoneChoices,
   timezoneValid,
+  utcOffset,
   visibleAccountSections,
 } from "../../apps/web/src/features/account/settings.ts";
 import { accountTranslations } from "../../apps/web/src/features/account/translations.ts";
@@ -42,7 +44,7 @@ test("account fixtures and response parsers agree with the approved generated wi
   addFormats.default(ajv);
   ajv.addSchema(browserSchemaDocument);
   for (const locale of ["ru", "en"] as const) {
-    expect(ajv.compile(browserSchemaRef("EnvelopeSelf"))(accountFixture(locale))).toBe(true);
+    expect(ajv.compile(browserSchemaRef("SelfStage4Envelope"))(accountFixture(locale))).toBe(true);
     expect(operations.login.schema.safeParse(accountFixture(locale)).success).toBe(true);
   }
   expect(operations.recovery.schema.safeParse({ data: { status: "received" }, meta }).success).toBe(
@@ -378,6 +380,12 @@ test("account settings copy covers every section and row in RU/EN and drops the 
       "languageHint",
       "languageSaved",
       "timezoneSaved",
+      "languageTimeCard",
+      "timezoneDevice",
+      "timezoneUnknown",
+      "timezoneUnknownHint",
+      "timezoneChooseListed",
+      "timezoneNow",
       "saveShort",
       "steamHint",
     ] as const)
@@ -448,15 +456,95 @@ test("a null display time zone parses in the Stage 4 envelopes and resolves to t
   expect(savedTimeZone("Mars/Base")).toBe("Mars/Base");
   expect(savedTimeZone("Europe/Warsaw")).toBe("Europe/Warsaw");
 });
-test("display timezone validation and suggestions keep the existing technical bounds", () => {
-  for (const zone of ["UTC", "Europe/Warsaw"]) expect(timezoneValid(zone)).toBe(true);
+test("display timezone validation keeps the existing technical bounds", () => {
+  for (const zone of ["UTC", "Europe/Warsaw", "US/Eastern"]) expect(timezoneValid(zone)).toBe(true);
   for (const zone of ["", "Mars/Base", "x".repeat(129)]) expect(timezoneValid(zone)).toBe(false);
-  const options = timezoneOptions("Europe/Warsaw");
-  expect(options).toContain("UTC");
-  expect(options).toContain("Europe/Warsaw");
-  expect(new Set(options).size).toBe(options.length);
-  expect(options).toEqual([...options].sort());
-  expect(timezoneOptions("").includes("")).toBe(false);
+});
+test("UTC offsets follow the zone at the given instant, including half hours and daylight saving", () => {
+  const winter = Date.parse("2026-01-15T12:00:00.000Z"),
+    summer = Date.parse("2026-07-15T12:00:00.000Z");
+  expect(utcOffset("Europe/Warsaw", winter)).toBe("UTC+1");
+  expect(utcOffset("Europe/Warsaw", summer)).toBe("UTC+2");
+  expect(utcOffset("Asia/Kolkata", winter)).toBe("UTC+5:30");
+  expect(utcOffset("Asia/Kolkata", summer)).toBe("UTC+5:30");
+  expect(utcOffset("America/St_Johns", winter)).toBe("UTC-3:30");
+  expect(utcOffset("America/St_Johns", summer)).toBe("UTC-2:30");
+  expect(utcOffset("UTC", winter)).toBe("UTC+0");
+  expect(utcOffset("Asia/Tokyo", summer)).toBe("UTC+9");
+});
+test("timezone choices put the device first, flag an unknown saved zone and keep a saved alias", () => {
+  const at = Date.parse("2026-01-15T12:00:00.000Z");
+  const device = accountTimeZone(null);
+  for (const saved of [null, "Europe/Warsaw", "US/Eastern", "Mars/Base"]) {
+    const choices = timezoneChoices(saved, at);
+    expect(choices[0]).toEqual({
+      value: "",
+      zone: device,
+      offset: utcOffset(device, at),
+      kind: "device",
+    });
+    const values = choices.map((choice) => choice.value);
+    expect(new Set(values).size).toBe(values.length);
+    expect(values).toContain("UTC");
+    const zones = choices.filter((choice) => choice.kind === "zone").map((choice) => choice.value);
+    expect(zones).toEqual([...zones].sort());
+    expect(choices.slice(saved === "Mars/Base" ? 2 : 1).every((c) => c.kind === "zone")).toBe(true);
+    for (const choice of choices.filter((c) => c.kind === "zone"))
+      expect(choice.offset).toBe(utcOffset(choice.zone, at));
+  }
+  expect(timezoneChoices("Europe/Warsaw", at).map((c) => c.value)).toContain("Europe/Warsaw");
+  // A valid alias the runtime does not list stays selectable instead of silently changing.
+  expect(timezoneChoices("US/Eastern", at).filter((c) => c.value === "US/Eastern")).toEqual([
+    { value: "US/Eastern", zone: "US/Eastern", offset: "UTC-5", kind: "zone" },
+  ]);
+  // A saved zone this browser cannot format is shown second, without an invented offset.
+  const unknown = timezoneChoices("Mars/Base", at);
+  expect(unknown[1]).toEqual({
+    value: "Mars/Base",
+    zone: "Mars/Base",
+    offset: null,
+    kind: "unknown",
+  });
+  expect(unknown.filter((c) => c.value === "Mars/Base")).toHaveLength(1);
+  expect(timezoneChoices(null, at).some((c) => c.kind === "unknown")).toBe(false);
+});
+test("cached runtime zones keep their list while the saved entries follow the current value", () => {
+  const at = Date.parse("2026-01-15T12:00:00.000Z");
+  const zones = runtimeZones(at);
+  const snapshot = structuredClone(zones);
+  expect(zones.every((choice) => choice.kind === "zone")).toBe(true);
+  expect(zones.map((choice) => choice.value)).toContain("UTC");
+  // An unknown legacy zone disappears once another value is saved, from the same cached list.
+  const before = timezoneChoices("Mars/Base", at, zones);
+  const after = timezoneChoices("UTC", at, zones);
+  expect(before[1]?.kind).toBe("unknown");
+  expect(after.some((choice) => choice.kind === "unknown")).toBe(false);
+  expect(after.slice(1)).toEqual(zones);
+  // A valid alias is merged in sorted position without changing the cached list.
+  const alias = timezoneChoices("US/Eastern", at, zones).slice(1);
+  expect(alias.filter((choice) => choice.value === "US/Eastern")).toHaveLength(1);
+  expect(alias.map((choice) => choice.value)).toEqual(alias.map((choice) => choice.value).sort());
+  expect(zones).toEqual(snapshot);
+  expect(timezoneChoices(null, at, zones)).toEqual(timezoneChoices(null, at));
+  // The current selection always stays displayable, so the select shows what Save would send.
+  const kept = timezoneChoices("UTC", at, zones, "US/Eastern");
+  expect(kept.filter((choice) => choice.value === "US/Eastern")).toEqual([
+    { value: "US/Eastern", zone: "US/Eastern", offset: "UTC-5", kind: "zone" },
+  ]);
+  const unknownDraft = timezoneChoices("UTC", at, zones, "Mars/Base");
+  expect(unknownDraft[1]).toEqual({
+    value: "Mars/Base",
+    zone: "Mars/Base",
+    offset: null,
+    kind: "unknown",
+  });
+  expect(
+    timezoneChoices("Mars/Base", at, zones, "Mars/Base").filter((c) => c.kind === "unknown"),
+  ).toHaveLength(1);
+  expect(timezoneChoices("UTC", at, zones, "")).toEqual(timezoneChoices("UTC", at, zones));
+  expect(timezoneChoices("UTC", at, zones, "Europe/Warsaw")).toEqual(
+    timezoneChoices("UTC", at, zones),
+  );
 });
 test("language preference persistence in client storage and initial resolution", () => {
   const store = new Map<string, string>();

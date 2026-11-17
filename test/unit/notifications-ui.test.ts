@@ -1,10 +1,13 @@
 import { afterEach, expect, test, vi } from "vitest";
+import { capabilities, type Role } from "../../apps/api/src/modules/identity/permissions.ts";
+import { preferenceKeys } from "../../apps/api/src/modules/notifications/policy.ts";
 import { claimToast } from "../../apps/web/src/features/notifications/claims.ts";
 import {
   notificationFeed,
   notificationFixture,
   notificationId,
   notificationPreferences,
+  notificationPreferencesFor,
 } from "../../apps/web/src/features/notifications/fixtures.ts";
 import {
   badgeText,
@@ -17,7 +20,10 @@ import {
   notificationVisual,
   observeFeed,
   notificationAccountPath,
-  preferenceNames,
+  preferenceAudience,
+  preferenceLabel,
+  preferenceOrder,
+  visiblePreferences,
 } from "../../apps/web/src/features/notifications/model.ts";
 import { notificationTranslations } from "../../apps/web/src/features/notifications/translations.ts";
 import {
@@ -29,7 +35,7 @@ import { schema } from "../../apps/web/src/features/dashboard/transport.ts";
 import { safeBrowserFailure } from "../../scripts/browser-diagnostics.mjs";
 const envelope = (data: unknown) => ({ data, meta: { requestId: "synthetic-notifications" } });
 afterEach(() => vi.unstubAllGlobals());
-test("notification fixtures use reviewed DTOs and exactly the existing six preferences", () => {
+test("notification fixtures use reviewed DTOs and mirror the server preference keys per capability", () => {
   expect(
     schema("EnvelopeNotificationFeed").safeParse(
       envelope(notificationFeed([notificationFixture()])),
@@ -38,7 +44,113 @@ test("notification fixtures use reviewed DTOs and exactly the existing six prefe
   expect(
     schema("EnvelopeNotificationPreferences").safeParse(envelope(notificationPreferences)).success,
   ).toBe(true);
-  expect(Object.keys(notificationPreferences).sort()).toEqual([...preferenceNames].sort());
+  // The default stub is the Stage 4 member read.
+  expect(Object.keys(notificationPreferences).sort()).toEqual(
+    [...preferenceKeys(capabilities(["driver"]))].sort(),
+  );
+  for (const roles of [
+    ["trainee"],
+    ["driver"],
+    ["dispatcher"],
+    ["deputy_director"],
+    ["director"],
+  ] as Role[][]) {
+    const granted = capabilities(roles),
+      read = notificationPreferencesFor(granted);
+    expect(Object.keys(read), roles.join()).toEqual(preferenceKeys(granted));
+    expect(schema("EnvelopeNotificationPreferences").safeParse(envelope(read)).success).toBe(true);
+  }
+  expect(Object.keys(notificationPreferencesFor(capabilities(["dispatcher"])))).toContain(
+    "reviewQueue",
+  );
+  expect(Object.keys(notificationPreferencesFor(capabilities(["dispatcher"])))).not.toContain(
+    "newApplications",
+  );
+  expect(Object.keys(notificationPreferencesFor(capabilities(["deputy_director"])))).toHaveLength(
+    10,
+  );
+  // An undeclared key makes the strict generated schema reject the read instead of hiding it.
+  expect(
+    schema("EnvelopeNotificationPreferences").safeParse(
+      envelope({ ...notificationPreferences, pushAlerts: true }),
+    ).success,
+  ).toBe(false);
+});
+test("switches follow exactly the returned keys in a fixed order with viewer-specific labels", () => {
+  expect(preferenceOrder).toEqual([
+    "tripAccepted",
+    "tripRejected",
+    "tripStarted",
+    "tripFinished",
+    "newEvent",
+    "eventChanges",
+    "eventReminders",
+    "qualificationChanges",
+    "reviewQueue",
+    "newApplications",
+  ]);
+  expect(visiblePreferences(notificationPreferences)).toEqual([
+    "tripAccepted",
+    "tripRejected",
+    "tripStarted",
+    "tripFinished",
+    "newEvent",
+    "eventChanges",
+    "eventReminders",
+    "qualificationChanges",
+  ]);
+  expect(visiblePreferences(notificationPreferencesFor(capabilities(["director"])))).toEqual(
+    preferenceOrder,
+  );
+  // A pre-Stage 4 read without the optional keys renders the six it returned.
+  const { tripAccepted: _accepted, newEvent: _event, ...six } = notificationPreferences;
+  expect(visiblePreferences(six)).toEqual([
+    "tripRejected",
+    "tripStarted",
+    "tripFinished",
+    "eventChanges",
+    "eventReminders",
+    "qualificationChanges",
+  ]);
+  // False is a returned value, not an absent key.
+  expect(visiblePreferences({ ...six, newEvent: false })).toContain("newEvent");
+  const member = notificationPreferencesFor(capabilities(["driver"])),
+    deputy = notificationPreferencesFor(capabilities(["deputy_director"]));
+  expect(preferenceLabel("tripRejected", member, capabilities(["driver"]))).toBe("tripRejectedOwn");
+  expect(preferenceLabel("tripRejected", deputy, capabilities(["deputy_director"]))).toBe(
+    "tripRejected",
+  );
+  expect(preferenceLabel("eventChanges", member, capabilities(["driver"]))).toBe("eventChanges");
+  expect(preferenceLabel("eventChanges", deputy, capabilities(["deputy_director"]))).toBe(
+    "eventChangesAccess",
+  );
+  expect(preferenceLabel("newEvent", member, [])).toBe("newEvent");
+});
+test("switch labels and audience suffixes have RU/EN parity and no removed form keys", () => {
+  const { en, ru } = notificationTranslations;
+  expect(Object.keys(ru.toggles).sort()).toEqual(Object.keys(en.toggles).sort());
+  expect(Object.keys(ru.audience).sort()).toEqual(Object.keys(en.audience).sort());
+  expect(Object.keys(en.audience).sort()).toEqual([...preferenceAudience].sort());
+  for (const locale of [en, ru]) {
+    for (const name of preferenceOrder)
+      for (const label of [
+        preferenceLabel(name, notificationPreferencesFor(capabilities(["driver"])), []),
+        preferenceLabel(name, notificationPreferencesFor(capabilities(["director"])), [
+          "members.manage",
+        ]),
+      ])
+        expect((locale.toggles as Record<string, string>)[label], label).toMatch(/\S/);
+    for (const key of [
+      "savedImmediately",
+      "toggleHint",
+      "preferenceKeysChanged",
+      "preferencesLink",
+      "retrySave",
+    ] as const)
+      expect(locale[key]).toMatch(/\S/);
+    for (const removed of ["save", "tripStarted", "eventChanges", "qualificationChanges"])
+      expect(removed in locale).toBe(false);
+  }
 });
 test("notification scope matches account routes case-insensitively and excludes lookalike public prefixes", () => {
   for (const path of ["/account", "/account/notifications", "/ACCOUNT/notifications"])
@@ -228,7 +340,7 @@ test("read-through uncertain identity survives the generic ten-minute expiry", (
   );
 });
 
-test("individual read has no body; preferences use PUT, exactly six flags and strong If-Match", async () => {
+test("individual read has no body; preferences use PUT with exactly the read keys and strong If-Match", async () => {
   const requests: RequestInit[] = [];
   vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
     requests.push(init);
@@ -266,6 +378,9 @@ test("individual read has no body; preferences use PUT, exactly six flags and st
   );
   expect(requests[3]?.method).toBe("PUT");
   expect(JSON.parse(String(requests[3]?.body))).toEqual(notificationPreferences);
+  expect(Object.keys(JSON.parse(String(requests[3]?.body)))).toEqual(
+    Object.keys(notificationPreferences),
+  );
   expect(new Headers(requests[3]?.headers).get("If-Match")).toBe('"v1"');
 });
 test("malformed and cancelled decoded reads cannot become accepted feed data", async () => {

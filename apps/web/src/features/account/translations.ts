@@ -19,7 +19,7 @@ export const accountTranslations = {
       profile: "How other members see you.",
       security: "Sign-in email, password and this session.",
       connections: "Game profiles and personal telemetry credentials.",
-      preferences: "Interface language and display time for your account.",
+      preferences: "Interface language, display time and notifications.",
     },
     needsAttention: "needs attention",
     nickname: "Nickname",
@@ -43,6 +43,12 @@ export const accountTranslations = {
       "Saved to your account and applied each time you open the dashboard. The language switch in the menu changes only this session.",
     languageSaved: "Language saved",
     timezoneSaved: "Timezone saved",
+    languageTimeCard: "Language and time",
+    timezoneDevice: "As on the device — {{zone}} ({{offset}})",
+    timezoneUnknown: "{{zone}} (unknown here)",
+    timezoneUnknownHint: "This zone is unknown to this browser; times are shown in UTC.",
+    timezoneChooseListed: "Choose a zone from the list to save.",
+    timezoneNow: "Now {{time}} · {{zone}}",
     saveShort: "Save",
     steamHint:
       "To change the linked account, verify the new one; company administrators then apply the replacement.",
@@ -107,7 +113,7 @@ export const accountTranslations = {
     sessionUnavailableHelp:
       "Your access could not be checked. Reconnect and try again; this does not confirm that you have been signed out.",
     timezoneHelp:
-      "Use an IANA timezone, for example Europe/Warsaw or UTC. This changes display times only; company reporting periods stay the same.",
+      "All dates in the dashboard use this zone. Company reporting periods stay the same.",
     preferenceConflict:
       "Preferences changed elsewhere. Review the refreshed values, adjust them if needed, then save again.",
     refreshPreferences: "Refresh preferences for review",
@@ -176,7 +182,7 @@ export const accountTranslations = {
       profile: "Так вас видят другие участники.",
       security: "Почта для входа, пароль и текущий сеанс.",
       connections: "Игровые профили и личные ключи телеметрии.",
-      preferences: "Язык интерфейса и время отображения для вашего аккаунта.",
+      preferences: "Язык интерфейса, время отображения и уведомления.",
     },
     needsAttention: "требует внимания",
     nickname: "Никнейм",
@@ -200,6 +206,12 @@ export const accountTranslations = {
       "Сохраняется в аккаунте и применяется при каждом открытии панели. Переключатель языка в меню меняет язык только для текущего сеанса.",
     languageSaved: "Язык сохранён",
     timezoneSaved: "Часовой пояс сохранён",
+    languageTimeCard: "Язык и время",
+    timezoneDevice: "Как на устройстве — {{zone}} ({{offset}})",
+    timezoneUnknown: "{{zone}} (неизвестен здесь)",
+    timezoneUnknownHint: "Этот пояс неизвестен браузеру; время показано в UTC.",
+    timezoneChooseListed: "Выберите пояс из списка, чтобы сохранить.",
+    timezoneNow: "Сейчас {{time}} · {{zone}}",
     saveShort: "Сохранить",
     steamHint:
       "Чтобы сменить привязанный аккаунт, подтвердите новый; затем администрация компании применит замену.",
@@ -265,7 +277,7 @@ export const accountTranslations = {
     sessionUnavailableHelp:
       "Доступ не удалось проверить. Восстановите подключение и повторите попытку. Это не подтверждает выход из аккаунта.",
     timezoneHelp:
-      "Укажите пояс IANA, например Europe/Warsaw или UTC. Меняется только отображение времени, а не отчётные периоды компании.",
+      "Все даты в кабинете показаны в этом поясе. Отчётные периоды компании не меняются.",
     preferenceConflict:
       "Настройки изменены в другой сессии. Проверьте обновлённые значения, при необходимости измените их и сохраните снова.",
     refreshPreferences: "Обновить настройки для проверки",

@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { type ComponentProps, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
+import { accountTimeZone } from "../../shared/formatting.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { AccountFailure } from "../account/transport.js";
 import { useUpcomingEvent } from "../dashboard/queries.js";
@@ -32,11 +33,8 @@ export function useEventStarted(startsAt: string | null) {
 
 export function useEventTimezone(publicView = false) {
   const session = useSession();
-  return (
-    (!publicView && session.self?.preferences.displayTimezone) ||
-    Intl.DateTimeFormat().resolvedOptions().timeZone ||
-    "UTC"
-  );
+  // Null or a public view means the device zone; a zone this browser cannot format shows UTC.
+  return accountTimeZone(publicView ? null : (session.self?.preferences.displayTimezone ?? null));
 }
 export function EventFailureView({ error, seconds = 0 }: { error: unknown; seconds?: number }) {
   const { t } = useTranslation("events");

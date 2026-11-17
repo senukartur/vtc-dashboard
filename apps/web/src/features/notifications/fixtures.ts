@@ -1,5 +1,6 @@
 import type { DTO, Notification } from "./model.js";
 export const notificationId = "e0370000-0000-4000-8000-000000000001";
+/** A Stage 4 member read: the six original switches plus tripAccepted and newEvent. */
 export const notificationPreferences: DTO["NotificationPreferences"] = {
   tripStarted: true,
   tripFinished: true,
@@ -7,7 +8,22 @@ export const notificationPreferences: DTO["NotificationPreferences"] = {
   eventChanges: true,
   eventReminders: true,
   qualificationChanges: true,
+  tripAccepted: true,
+  newEvent: true,
 };
+/** The read a viewer with these capabilities receives, in the server's key order. */
+export function notificationPreferencesFor(
+  capabilities: readonly string[],
+): DTO["NotificationPreferences"] {
+  const { tripAccepted, newEvent, ...original } = notificationPreferences;
+  return {
+    ...original,
+    ...(capabilities.includes("trips.review") ? { reviewQueue: true } : {}),
+    ...(capabilities.includes("applications.manage") ? { newApplications: true } : {}),
+    tripAccepted: tripAccepted ?? true,
+    newEvent: newEvent ?? true,
+  };
+}
 export function notificationFixture(overrides: Partial<Notification> = {}): Notification {
   return {
     id: notificationId,
