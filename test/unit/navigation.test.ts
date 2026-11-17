@@ -30,7 +30,7 @@ const shape = (roles: Role[]) =>
 test("sidebar groups follow the server capability mapping for every role combination", () => {
   const member = {
     personal: ["overview", "myTrips", "drafts"],
-    company: ["events", "drivers", "qualifications"],
+    company: ["companyOverview", "events", "drivers", "qualifications"],
   };
   expect(shape(["trainee"])).toEqual(member);
   expect(shape(["driver"])).toEqual(shape(["trainee"]));
@@ -127,6 +127,13 @@ test("every workspace route has metadata and resolves through router ranking", (
     group: "account",
     titleKey: "account:sections.connections",
   });
+  expect(matchRouteMeta("/account/company")).toEqual({
+    id: "companyOverview",
+    group: "company",
+    item: "companyOverview",
+    titleKey: "nav.items.companyOverview",
+  });
+  expect(matchRouteMeta("/account/dashboard")).toMatchObject({ id: "dashboard", item: "overview" });
   for (const unknown of ["/", "/accounting", "/account/unknown", "/foundation/member"])
     expect(matchRouteMeta(unknown)).toBeNull();
 });
@@ -262,7 +269,8 @@ test("phone bottom bar keeps four sections with a role-dependent third slot", ()
 });
 
 test("More sheet groups hold exactly the visible sections that the bar leaves out", () => {
-  const company = ["drivers", "qualifications"];
+  // Company overview has no bar tab: phones reach it from the More sheet (VTC-159).
+  const company = ["companyOverview", "drivers", "qualifications"];
   expect(more(["trainee"])).toEqual({ personal: ["drafts"], company });
   expect(more(["driver"])).toEqual(more(["trainee"]));
   expect(more(["dispatcher"])).toEqual({ company, review: ["reconciliation"] });
@@ -350,6 +358,15 @@ test("bar accessible names contain their visible labels in Russian and English",
       const name = lookup(locale, entry.nameKey ?? entry.labelKey);
       expect(name.toLocaleLowerCase(), entry.id).toContain(label.toLocaleLowerCase());
     }
+  // The sidebar names the two overviews apart; the bar tab keeps its short label.
+  expect([core.en.nav.items.overview, core.en.nav.items.companyOverview]).toEqual([
+    "My overview",
+    "Company overview",
+  ]);
+  expect([core.ru.nav.items.overview, core.ru.nav.items.companyOverview]).toEqual([
+    "Мой обзор",
+    "Обзор компании",
+  ]);
   expect(core.en.nav.bar).toEqual({
     overview: "Overview",
     myTrips: "Trips",

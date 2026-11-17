@@ -3,24 +3,22 @@ import {
   makeRecentTripsFixture,
   nextUpcomingEvent,
   overviewNow,
-  recentTripItems,
-  recentTrips,
+  ownTrips,
   upcomingEvent,
 } from "./support/dashboard-fixtures.ts";
 import { type DashboardMockState, mockDashboardRoutes } from "./support/dashboard-ui.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { switchLanguage } from "./support/locale.ts";
 
-// Overview recent company trips and nearest convoy RSVP blocks (VTC-055), all requests mocked.
+// My overview blocks: own recent trips (VTC-159) and the nearest convoy RSVP (VTC-055), plus the
+// company statistics split between the two overviews; all requests mocked.
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
 const text = {
   en: {
-    allTrips: "All company trips",
+    allTrips: "All my trips",
     unavailable: "Unavailable",
-    unknown: "Unknown",
-    phoenix: "Phoenix",
     fallback: "English fallback",
     countdown: "in 3 d 4 h",
     going: "Going: 8",
@@ -32,9 +30,10 @@ const text = {
     reasonRequired: "Enter a reason to decline.",
     unanswered: "You have not answered. Leaving it unanswered has no penalty.",
     declined: "You can't attend. Only you, the director and deputies see your reason.",
-    tripsEmpty: "No accepted company trips yet",
-    tripsError: "Could not load recent company trips",
-    tripsForbidden: "No access to company trips",
+    tripsEmpty: "You have no trips yet",
+    tripsError: "Could not load your recent trips",
+    tripsForbidden: "No access to your trips",
+    decisions: ["✓ Accepted", "● Pending review", "✕ Rejected", "Unassessed", "✓ Accepted"],
     noUpcoming: "No scheduled convoys",
     allEvents: "All events",
     eventError: "Could not load the upcoming event",
@@ -43,10 +42,8 @@ const text = {
     retry: "Retry",
   },
   ru: {
-    allTrips: "Все рейсы компании",
+    allTrips: "Все мои рейсы",
     unavailable: "Недоступно",
-    unknown: "Неизвестно",
-    phoenix: "Финикс",
     fallback: "Показано на английском",
     countdown: "через 3 д 4 ч",
     going: "Поедут: 8",
@@ -58,9 +55,10 @@ const text = {
     reasonRequired: "Укажите причину отказа.",
     unanswered: "Вы ещё не ответили. Можно оставить без ответа — штрафов нет.",
     declined: "Вы не сможете. Причину видят только вы, директор и заместители.",
-    tripsEmpty: "У компании пока нет принятых рейсов",
-    tripsError: "Не удалось загрузить последние рейсы компании",
-    tripsForbidden: "Нет доступа к рейсам компании",
+    tripsEmpty: "У вас пока нет рейсов",
+    tripsError: "Не удалось загрузить ваши последние рейсы",
+    tripsForbidden: "Нет доступа к вашим рейсам",
+    decisions: ["✓ Принят", "● На проверке", "✕ Отклонено", "Не оценён", "✓ Принят"],
     noUpcoming: "Нет запланированных конвоев",
     allEvents: "Все мероприятия",
     eventError: "Не удалось загрузить ближайшее мероприятие",
@@ -74,17 +72,17 @@ type Locale = keyof typeof text;
 const eventCard = (page: Page) =>
   page.getByRole("region", { name: /^(Upcoming Event|Ближайшее мероприятие)$/ });
 const tripsCard = (page: Page) =>
-  page.getByRole("region", { name: /^(Recent company trips|Последние рейсы компании)$/ });
+  page.getByRole("region", { name: /^(Recent trips|Последние рейсы)$/ });
+const monthCard = (page: Page) => page.getByRole("region", { name: /^(My November|Мой ноябрь)$/ });
+const monthValues = (page: Page) => monthCard(page).locator("dd.dashboard-month-value");
 const leaderboardCard = (page: Page) =>
   page.getByRole("region", { name: /^(Driver Leaderboard|Таблица лидеров)$/ });
 const chartCard = (page: Page) =>
-  page.getByRole("region", { name: /^(Distance Dynamics|Динамика пробега)$/ });
+  page.getByRole("region", { name: /^(My daily distance|Мой пробег по дням)$/ });
 const qualificationCard = (page: Page) =>
   page.getByRole("region", { name: /^(My Qualification|Моя квалификация)$/ });
-const reviewCard = (page: Page) =>
-  page.getByRole("region", { name: /^(Review Queue|Очередь проверки)$/ });
 const attentionCard = (page: Page) =>
-  page.getByRole("region", { name: /^(Needs attention|Дела)$/ });
+  page.getByRole("region", { name: /^(Needs attention|Нужно сделать)$/ });
 const kpis = (page: Page) =>
   page.getByRole("region", { name: /^(Key metrics|Ключевые показатели)$/ });
 const routesCard = (page: Page) =>
@@ -199,12 +197,12 @@ const summaryReads = (state: DashboardMockState) =>
   count(state, /^\/api\/v1\/me\/workspace-summary\?view=stage3$/);
 
 test(
-  "workspace actions survive analytics failure and show exact bounded destinations",
+  "workspace actions survive a month statistics failure and show exact bounded destinations",
   browserCase(["@layout"]),
   async ({ page }, info) => {
     await page.clock.setFixedTime(new Date(overviewNow));
     const state = await mockDashboardRoutes(page, {
-      failures: { analytics: 503, summary: 503 },
+      failures: { memberAnalytics: 503, summary: 503 },
       capabilities: [
         "company.read",
         "trips.read_own_private",
@@ -225,7 +223,7 @@ test(
     } finally {
       state.release("summary");
     }
-    await expect(page.locator(".dashboard-error")).toBeVisible();
+    await expect(monthCard(page).getByText("Could not load your month statistics")).toBeVisible();
     await expect(actions.getByRole("alert")).toHaveText("Could not load your actions.");
     const retry = actions.getByRole("button", { name: "Retry", exact: true });
     state.hold("summary");
@@ -296,12 +294,15 @@ test(
     await expect(actions.getByRole("listitem")).toHaveCount(3);
     await capture(page, info, "workspace-actions-en");
     await switchLanguage(page, "ru");
-    await expect(actions.getByRole("heading", { name: "Дела", exact: true })).toBeVisible();
+    await expect(
+      actions.getByRole("heading", { name: "Нужно сделать", exact: true }),
+    ).toBeVisible();
     await expect(actions.getByRole("link", { name: "Черновики в работе (4)" })).toBeVisible();
     await expect(actions.getByRole("link", { name: "Заявки на рассмотрении (3)" })).toBeVisible();
     await capture(page, info, "workspace-actions-ru");
     expect(summaryReads(state)).toBe(3);
-    // Omitted counts are not mentioned: no partial or unavailable note, only the empty state.
+    // Omitted counts are not mentioned: no partial or unavailable note, only the empty state,
+    // which stays after the member's own Retry so focus never falls to the page.
     state.summary = { computedAt: overviewNow, unfinishedManualDrafts: { count: 0, items: [] } };
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(actions.getByText("Нет действий, требующих вашего внимания.")).toBeVisible();
@@ -349,8 +350,9 @@ test(
       state.release("summary");
     }
     await expect(eventCard(page).getByRole("status")).toHaveText("Response saved.");
-    await expect(actions.getByText("Nothing needs your attention.")).toBeVisible();
-    await expect(actions.getByRole("link", { name: upcomingEvent.title })).toHaveCount(0);
+    // Nothing needs attention any more: the card leaves the page.
+    await expect(actions).toHaveCount(0);
+    await expect(page.getByText("Nothing needs your attention.")).toHaveCount(0);
     await page.clock.fastForward(60_000);
     expect(summaryReads(state)).toBe(3);
   },
@@ -403,16 +405,14 @@ async function open(
   mocks.set(page, state);
   setup?.(state);
   await page.goto("/account/dashboard");
-  await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
+  await expect(monthCard(page)).toHaveAttribute("aria-busy", "false");
   return state;
 }
-/** Both blocks and the trip breakdowns loaded with data, the own response ready. */
+/** Both blocks and the own month loaded with data, the own response ready. */
 async function settled(page: Page, respond = true) {
   await expect(eventCard(page).getByRole("heading", { level: 3 })).toHaveText(upcomingEvent.title);
   await expect(tripsCard(page).getByRole("listitem")).toHaveCount(5);
-  for (const card of [routesCard(page), cargoCard(page)])
-    await expect(breakdownItems(card)).toHaveCount(5);
-  await expect(sourceCard(page).locator(".dashboard-source-legend li")).toHaveCount(2);
+  await expect(monthValues(page).first()).toHaveText(/^1[,\s]284 (km|км)$/);
   if (respond) await expect(going(page)).toHaveAttribute("aria-pressed", "false");
   await page.evaluate(() => document.fonts.ready);
 }
@@ -423,7 +423,7 @@ async function inLocale(page: Page, locale: Locale) {
 
 for (const locale of ["en", "ru"] as const) {
   test(
-    `B1 shows recent company trips and the nearest convoy (${locale})`,
+    `B1 shows the own recent trips and the nearest convoy (${locale})`,
     browserCase(["@layout"]),
     async ({ page }, info) => {
       await open(page);
@@ -431,28 +431,27 @@ for (const locale of ["en", "ru"] as const) {
       const t = text[locale];
       const trips = tripsCard(page);
       const rows = trips.getByRole("listitem");
-      for (const [index, trip] of recentTripItems.entries()) {
-        await expect(tripLink(page, trip.id)).toBeVisible();
-        await expect(rows.nth(index)).toContainText(trip.owner.nickname);
-      }
+      const own = ownTrips(locale);
+      for (const trip of own) await expect(tripLink(page, trip.id)).toBeVisible();
+      // Own trips: no driver name; each shows its game and the company decision.
+      await expect(trips).not.toContainText("Fictional Yukon Member");
+      await expect(trips.locator(".dashboard-game")).toHaveText(
+        own.map((trip) => trip.game.toUpperCase()),
+      );
+      await expect(trips.locator(".dashboard-decision")).toHaveText([...t.decisions]);
       await expect(trips.getByRole("link", { name: t.allTrips, exact: true })).toHaveAttribute(
         "href",
-        "/account/trips?scope=company",
+        "/account/trips",
       );
       await expect(rows.nth(1)).toContainText(t.unavailable);
       await expect(rows.nth(1)).not.toContainText(/\b0 (km|км)/);
       // Only the Russian rendering lacks a name (Wien) and falls back to English.
       if (locale === "ru")
-        await expect(tripLink(page, recentTripItems[2]?.id ?? "")).toContainText(
+        await expect(tripLink(page, own[2]?.id ?? "")).toContainText(
           `Прага → Wien · ${t.fallback}`,
         );
       else await expect(trips).not.toContainText(t.fallback);
-      await expect(tripLink(page, recentTripItems[3]?.id ?? "")).toContainText(
-        `${t.unknown} → ${t.phoenix}`,
-      );
-      await expect(tripLink(page, recentTripItems[0]?.id ?? "")).not.toContainText(t.fallback);
-      // Accepted-only list: no status badges.
-      await expect(trips.locator(".badge")).toHaveCount(0);
+      await expect(tripLink(page, own[0]?.id ?? "")).not.toContainText(t.fallback);
 
       const event = eventCard(page);
       await expect(event.getByRole("heading", { level: 3 })).toHaveText(upcomingEvent.title);
@@ -483,8 +482,7 @@ for (const locale of ["en", "ru"] as const) {
 
 const statsText = {
   en: {
-    place: "14 of 15",
-    placeTotals: "37,400 km · trips: 4",
+    place: "14 of 15 in the company",
     you: "Fictional Yukon Member · you",
     route: "ETS2Munich · München → Warszawa8 trips",
     other: "Other routes8 trips",
@@ -492,8 +490,7 @@ const statsText = {
     note: "Manual reports count after review in Dispatch.",
   },
   ru: {
-    place: "14 из 15",
-    placeTotals: /^37\s400 км · рейсы: 4$/,
+    place: "14 из 15 в компании",
     you: "Fictional Yukon Member · вы",
     route: "ETS2Мюнхен · München → Варшава8 рейсов",
     other: "Другие маршруты8 рейсов",
@@ -504,20 +501,21 @@ const statsText = {
 
 for (const locale of ["en", "ru"] as const) {
   test(
-    `S1 shows the place, active counts and trip breakdowns (${locale})`,
+    `S1 splits active counts and breakdowns from the own place (${locale})`,
     browserCase(["@layout"]),
     async ({ page }, info) => {
-      await open(page, (state) => {
-        state.leaderboardViewer = "offPage";
-      });
-      await inLocale(page, locale);
+      await page.clock.setFixedTime(new Date(overviewNow));
+      const state = await mockDashboardRoutes(page, { leaderboardViewer: "offPage" });
+      mocks.set(page, state);
+      await page.goto("/account/company");
+      await toLocale(page, locale);
+      for (const card of [routesCard(page), cargoCard(page)])
+        await expect(breakdownItems(card)).toHaveCount(5);
       const t = statsText[locale];
       const metrics = kpis(page);
       await expect(metrics.locator("dd.dashboard-kpi-sub")).toHaveCount(4);
-      await expect(metrics.locator("dd.dashboard-kpi-value").nth(3)).toHaveText(t.place);
       // Active drivers equal the ranked members behind the place.
-      await expect(metrics.locator("dd.dashboard-kpi-value").nth(2)).toHaveText("15");
-      await expect(metrics.locator("dd.dashboard-kpi-sub").nth(3)).toHaveText(t.placeTotals);
+      await expect(metrics.locator("dd.dashboard-kpi-value").nth(3)).toHaveText("15");
       const own = leaderboardCard(page).locator(".dashboard-leaderboard-self tr");
       await expect(own.locator("td").nth(1)).toHaveText(t.you);
       await expect(breakdownItems(routesCard(page)).nth(1)).toHaveText(t.route);
@@ -539,73 +537,55 @@ for (const locale of ["en", "ru"] as const) {
       for (const dd of await metrics.getByRole("definition").all())
         expect(await dd.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
       await capture(page, info, `stats-${locale}`);
+
+      // The own place among ranked members is part of My overview's month.
+      await page.goto("/account/dashboard");
+      await expect(monthValues(page).nth(2)).toHaveText(t.place);
+      await expect(kpis(page)).toHaveCount(0);
     },
   );
 }
 
 test(
-  "B2 keeps the first desktop screen and places both blocks",
+  "B2 keeps the first desktop screen and places the personal blocks",
   browserCase(["@layout"]),
   async ({ page }, info) => {
     await open(page);
     for (const locale of ["en", "ru"] as const) {
       await inLocale(page, locale);
-      const chart = await box(chartCard(page));
+      const month = await box(monthCard(page));
       const qualification = await box(qualificationCard(page));
-      const leaderboard = await box(leaderboardCard(page));
       const event = await box(eventCard(page));
+      const chart = await box(chartCard(page));
       const trips = await box(tripsCard(page));
-      const breakdowns = await box(page.locator(".dashboard-breakdowns"));
-      const [routes, cargo, source] = await Promise.all(
-        [routesCard(page), cargoCard(page), sourceCard(page)].map((card) => box(card)),
-      );
-      if (!routes || !cargo || !source) throw new Error("BREAKDOWNS_NOT_RENDERED");
+      // Nothing needs attention: no empty card above the blocks.
+      await expect(attentionCard(page)).toHaveCount(0);
       if (info.project.name === "desktop-chromium") {
         expect(await page.evaluate(() => scrollY)).toBe(0);
-        // 4px spare below the 800px fold for wider Linux fonts.
+        // One row of the month, qualification and convoy on the first screen (4px spare below
+        // the 800px fold for wider Linux fonts).
+        for (const rect of [qualification, event])
+          expect(Math.abs(rect.y - month.y)).toBeLessThanOrEqual(1);
+        expect(month.x).toBeLessThan(qualification.x);
+        expect(qualification.x).toBeLessThan(event.x);
         expect(qualification.y + qualification.height).toBeLessThanOrEqual(796);
+        expect(event.y + event.height).toBeLessThanOrEqual(796);
         const headings = await qualificationCard(page).getByRole("heading", { level: 3 }).all();
         expect(headings).toHaveLength(2);
-        for (const heading of headings) {
-          const rect = await box(heading);
-          expect(rect.y + rect.height).toBeLessThanOrEqual(796);
-        }
-        for (const target of [
-          leaderboardCard(page).getByRole("heading", { level: 2 }),
-          leaderboardCard(page).locator("tbody tr").first(),
-        ]) {
-          const rect = await box(target);
-          expect(rect.y + rect.height).toBeLessThanOrEqual(796);
-        }
-        const grid = await box(page.locator(".dashboard-grid"));
-        expect(trips.y).toBeGreaterThanOrEqual(leaderboard.y + leaderboard.height - 0.5);
-        expect(trips.y).toBeGreaterThanOrEqual(event.y + event.height - 0.5);
-        expect(Math.abs(trips.x - grid.x)).toBeLessThanOrEqual(2);
-        expect(Math.abs(trips.width - grid.width)).toBeLessThanOrEqual(2);
-        expect(event.x).toBeGreaterThan(leaderboard.x);
-        // The breakdowns: one full-width row of three cards after the leaderboard and the side
-        // column and before the recent trips, below the first screen.
-        const side = await box(page.locator(".dashboard-side"));
-        expect(breakdowns.y).toBeGreaterThanOrEqual(leaderboard.y + leaderboard.height - 0.5);
-        expect(breakdowns.y).toBeGreaterThanOrEqual(side.y + side.height - 0.5);
-        expect(trips.y).toBeGreaterThanOrEqual(breakdowns.y + breakdowns.height - 0.5);
-        expect(Math.abs(breakdowns.x - grid.x)).toBeLessThanOrEqual(2);
-        expect(Math.abs(breakdowns.width - grid.width)).toBeLessThanOrEqual(2);
-        for (const card of [routes, cargo, source])
-          expect(Math.abs(card.y - breakdowns.y)).toBeLessThanOrEqual(1);
-        expect(routes.x).toBeLessThan(cargo.x);
-        expect(cargo.x).toBeLessThan(source.x);
+        // The chart beside the latest trips below them.
+        expect(chart.y).toBeGreaterThanOrEqual(qualification.y + qualification.height - 0.5);
+        expect(Math.abs(chart.y - trips.y)).toBeLessThanOrEqual(1);
+        expect(chart.x).toBeLessThan(trips.x);
+        const heading = await box(chartCard(page).getByRole("heading", { level: 2 }));
+        expect(heading.y + heading.height).toBeLessThanOrEqual(796);
       } else {
-        expect(chart.y).toBeLessThan(qualification.y);
-        expect(qualification.y).toBeLessThan(leaderboard.y);
-        expect(leaderboard.y).toBeLessThan(event.y);
-        expect(event.y).toBeLessThan(breakdowns.y);
-        expect(breakdowns.y + breakdowns.height).toBeLessThanOrEqual(trips.y + 0.5);
-        // DOM order: routes, cargo, then the source split, also when the row wraps.
-        const before = (a: typeof routes, b: typeof routes) =>
+        // Reading order follows the DOM, also when a row wraps.
+        const before = (a: typeof month, b: typeof month) =>
           a.y < b.y - 0.5 || (Math.abs(a.y - b.y) <= 0.5 && a.x < b.x);
-        expect(before(routes, cargo)).toBe(true);
-        expect(before(cargo, source)).toBe(true);
+        expect(before(month, qualification)).toBe(true);
+        expect(before(qualification, event)).toBe(true);
+        expect(before(event, chart)).toBe(true);
+        expect(before(chart, trips)).toBe(true);
       }
       await capture(page, info, `blocks-layout-${locale}`);
     }
@@ -776,7 +756,6 @@ test(
     );
     await expect(responseGroup(page)).toHaveCount(0);
     await expect(eventCard(page).getByRole("button")).toHaveCount(0);
-    await expect(reviewCard(page)).toBeVisible();
     await page.waitForTimeout(300);
     expect(count(state, /\/my-response$/)).toBe(0);
     await capture(page, info, "blocks-read-only-en");
@@ -789,26 +768,26 @@ for (const locale of ["en", "ru"] as const) {
     browserCase(["@functional"]),
     async ({ page }, info) => {
       const t = text[locale];
-      const state = await open(page, (s) => s.hold("companyTrips"));
+      const state = await open(page, (s) => s.hold("ownTrips"));
       await toLocale(page, locale);
       const trips = tripsCard(page);
       await expect(trips).toHaveAttribute("aria-busy", "true");
       await expect(trips.locator(".dashboard-skeleton")).toHaveCount(5);
       expect(await liveRegions(trips)).toBe(0);
-      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
+      await expect(monthValues(page).nth(1)).toHaveText("6");
       await capture(page, info, `blocks-trips-loading-${locale}`);
 
-      state.companyTrips = makeRecentTripsFixture([]);
-      state.release("companyTrips");
+      state.ownTrips = makeRecentTripsFixture([]);
+      state.release("ownTrips");
       await expect(trips.getByText(t.tripsEmpty, { exact: true })).toBeVisible();
       await expect(trips).toHaveAttribute("aria-busy", "false");
       await capture(page, info, `blocks-trips-empty-${locale}`);
 
-      state.failures.companyTrips = 403;
+      state.failures.ownTrips = 403;
       await reload(page, locale);
       await expect(tripsCard(page).getByText(t.tripsForbidden, { exact: true })).toBeVisible();
       await expect(tripsCard(page).getByRole("button")).toHaveCount(0);
-      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
+      await expect(monthValues(page).nth(1)).toHaveText("6");
       await expect(page.getByRole("alert")).toHaveCount(0);
       await capture(page, info, `blocks-trips-forbidden-${locale}`);
     },
@@ -820,23 +799,23 @@ for (const locale of ["en", "ru"] as const) {
     async ({ page }, info) => {
       const t = text[locale];
       const state = await open(page, (s) => {
-        s.failures.companyTrips = 503;
+        s.failures.ownTrips = 503;
       });
       await toLocale(page, locale);
       const retry = tripsCard(page).getByRole("button", { name: t.retry, exact: true });
       await expect(tripsCard(page).getByText(t.tripsError, { exact: true })).toBeVisible();
-      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
+      await expect(monthValues(page).nth(1)).toHaveText("6");
       await expect(page.getByRole("alert")).toHaveCount(0);
       await capture(page, info, `blocks-trips-error-${locale}`);
 
       // A failed retry keeps focus on Retry; a successful one hands it to the heading.
-      const reads = count(state, /^\/api\/v1\/trips\?scope=company/);
+      const reads = count(state, /^\/api\/v1\/trips\?scope=mine/);
       await retry.focus();
       await page.keyboard.press("Enter");
-      await expect.poll(() => count(state, /^\/api\/v1\/trips\?scope=company/)).toBe(reads + 1);
+      await expect.poll(() => count(state, /^\/api\/v1\/trips\?scope=mine/)).toBe(reads + 1);
       await page.waitForTimeout(300);
       await expect(retry).toBeFocused();
-      delete state.failures.companyTrips;
+      delete state.failures.ownTrips;
       await page.keyboard.press("Enter");
       await expect(tripsCard(page).getByRole("listitem")).toHaveCount(5);
       await expect(tripsHeading(page)).toBeFocused();
@@ -866,7 +845,7 @@ for (const locale of ["en", "ru"] as const) {
       state.failures.event = 503;
       await reload(page, locale);
       await expect(eventCard(page).getByText(t.eventError, { exact: true })).toBeVisible();
-      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
+      await expect(monthValues(page).nth(1)).toHaveText("6");
       await capture(page, info, `blocks-convoy-error-${locale}`);
       delete state.failures.event;
       await eventCard(page).getByRole("button", { name: t.retry, exact: true }).focus();
@@ -883,7 +862,7 @@ for (const locale of ["en", "ru"] as const) {
       await expect(eventCard(page)).not.toContainText(/(Going|Поедут): 0/);
       await expect(eventCard(page).getByText(t.responseUnavailable, { exact: true })).toBeVisible();
       await expect(responseGroup(page)).toHaveCount(0);
-      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
+      await expect(monthValues(page).nth(1)).toHaveText("6");
       await capture(page, info, `blocks-convoy-partial-${locale}`);
       // A failed retry keeps the unavailable state and focus on Retry, with no toggles between.
       const responseRetry = eventCard(page).getByRole("button", { name: t.retry, exact: true });
@@ -925,15 +904,15 @@ test(
   async ({ page }) => {
     // Retry succeeds at the first error; the next game's first error is then a 403.
     const state = await open(page, (s) => {
-      s.failures.companyTrips = 503;
+      s.failures.ownTrips = 503;
     });
     const retry = tripsCard(page).getByRole("button", { name: "Retry", exact: true });
     await expect(retry).toBeVisible();
-    delete state.failures.companyTrips;
+    delete state.failures.ownTrips;
     await retry.focus();
     await page.keyboard.press("Enter");
     await expect(tripsCard(page).getByRole("listitem")).toHaveCount(5);
-    state.failures.companyTrips = 403;
+    state.failures.ownTrips = 403;
     await page
       .getByRole("group", { name: "Game", exact: true })
       .getByRole("button", { name: "ETS2", exact: true })
@@ -944,7 +923,7 @@ test(
       state.requests.some(
         (url) =>
           url.pathname === "/api/v1/trips" &&
-          url.searchParams.get("scope") === "company" &&
+          url.searchParams.get("scope") === "mine" &&
           url.searchParams.get("game") === "ets2" &&
           url.searchParams.get("limit") === "5" &&
           url.searchParams.get("order") === "completion_desc" &&
@@ -1014,36 +993,45 @@ test(
     expect(await smallTargets(eventCard(page), min)).toEqual([]);
     expect(await smallTargets(tripsCard(page), min)).toEqual([]);
 
-    state.failures.companyTrips = 503;
+    expect(await smallTargets(monthCard(page), min)).toEqual([]);
+
+    state.failures.ownTrips = 503;
     state.failures.myResponse = 503;
-    state.failures.breakdownRoute = 503;
+    state.failures.memberAnalytics = 503;
     await page.reload();
     await expect(tripsCard(page).getByRole("button")).toHaveCount(1);
     await expect(eventCard(page).getByRole("button")).toHaveCount(1);
-    await expect(routesCard(page).getByRole("button")).toHaveCount(1);
+    await expect(monthCard(page).getByRole("button")).toHaveCount(1);
+    await expect(chartCard(page).getByRole("button", { name: "Retry" })).toHaveCount(1);
     expect(await smallTargets(eventCard(page), min)).toEqual([]);
     expect(await smallTargets(tripsCard(page), min)).toEqual([]);
-    expect(await smallTargets(routesCard(page), min)).toEqual([]);
+    expect(await smallTargets(monthCard(page), min)).toEqual([]);
+    // The chart's segmented controls keep their compact 24px size; its Retry is a full target.
+    expect(
+      (await box(chartCard(page).getByRole("button", { name: "Retry" }))).height,
+    ).toBeGreaterThanOrEqual(min - 0.5);
   },
 );
 
 test(
-  "B10 keeps the desktop Tab order through both blocks",
+  "B10 keeps the desktop Tab order through the personal blocks",
   browserCase(["@functional"]),
-  async ({ page }, info) => {
+  async ({ page }) => {
     await open(page);
     await settled(page);
+    // The phone-only company card is skipped; the chart has no Interval on My overview.
     const sequence = [
-      leaderboardCard(page).getByRole("link", { name: "All drivers" }),
-      leaderboardCard(page).getByRole("link", { name: "AlphaDriver" }),
-      leaderboardCard(page).getByRole("link", { name: "BetaHauler" }),
-      reviewCard(page).getByRole("link", { name: "Go to review" }),
+      monthCard(page).getByRole("link", { name: "in the company" }),
+      qualificationCard(page).getByRole("link", { name: "All qualifications" }),
+      qualificationCard(page).getByRole("link", { name: "European Driver II" }),
+      qualificationCard(page).getByRole("link", { name: "Pacific Driver III" }),
       going(page),
       cantGo(page),
       eventCard(page).getByRole("link", { name: "Details" }),
-      tripsCard(page).getByRole("link", { name: "All company trips" }),
-      ...recentTripItems.map((trip) => tripLink(page, trip.id)),
-      page.getByRole("button", { name: "Show explanations" }),
+      chartCard(page).getByRole("button", { name: "Chart", exact: true }),
+      chartCard(page).getByRole("button", { name: "Table", exact: true }),
+      tripsCard(page).getByRole("link", { name: "All my trips" }),
+      ...ownTrips("en").map((trip) => tripLink(page, trip.id)),
     ];
     await sequence[0]?.focus();
     for (const [index, target] of sequence.entries()) {
@@ -1059,15 +1047,15 @@ for (const locale of ["en", "ru"] as const)
     browserCase(["@layout"]),
     async ({ page }, info) => {
       await open(page, (state) => {
-        const trips = recentTrips(locale),
+        const trips = ownTrips(locale),
           first = trips[0];
         if (first?.origin) first.origin = { ...first.origin, nameNative: "Krönburg" };
         if (first?.destination)
           first.destination = { ...first.destination, nameNative: first.destination.label };
-        state.companyTrips = makeRecentTripsFixture(trips);
+        state.ownTrips = makeRecentTripsFixture(trips);
       });
       await inLocale(page, locale);
-      const link = tripLink(page, recentTrips(locale)[0]?.id ?? "");
+      const link = tripLink(page, ownTrips(locale)[0]?.id ?? "");
       await expect(link).toContainText("· Krönburg →");
       await expect(link.locator("small")).toHaveCount(1);
       await expect(link.locator(".catalog-native")).toHaveCSS("display", "inline");

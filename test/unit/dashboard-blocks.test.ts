@@ -17,19 +17,24 @@ import {
 import {
   activeDriversView,
   analyticsPath,
+  averageTripM,
   BREAKDOWN_LIMIT,
   blockView,
   breakdownEmpty,
   breakdownPath,
   breakdownRows,
   type Countdown,
+  companyDeltas,
   countdown,
   formatPercent,
   gameSplit,
   LEADERBOARD_LIMIT,
   leaderboardPath,
   leaderboardRows,
+  memberAnalyticsPath,
+  personalDistanceDelta,
   placeView,
+  previousPeriod,
   type QueryView,
   RECENT_TRIPS_LIMIT,
   recentTripRow,
@@ -54,12 +59,17 @@ import {
   makeFilteredAnalyticsFixture,
   makeLeaderboardFixture,
   makeMemberAnalyticsFixture,
+  makeMemberPeriodAnalyticsFixture,
   makeOptionalEventFixture,
+  makeRangeAnalyticsFixture,
   makeRecentTripsFixture,
   makeResponseCountsFixture,
   makeRsvpFixture,
+  makeTripStatusSummaryFixture,
   nextUpcomingEvent,
   overviewNow,
+  ownTrips,
+  rangeKey,
   recentTripItems,
   recentTrips,
   upcomingEvent,
@@ -179,26 +189,24 @@ it("refreshes a newer authority in the command's member and generation after com
   }
 });
 
-describe("recent company trips path", () => {
-  it("asks for five completion-ordered accepted company trips with optional game", () => {
+describe("own recent trips path", () => {
+  it("asks for the viewer's five latest trips by completion with optional game", () => {
     expect(RECENT_TRIPS_LIMIT).toBe(5);
-    expect(recentTripsPath()).toBe("/trips?scope=company&limit=5&order=completion_desc");
-    expect(recentTripsPath(undefined)).toBe("/trips?scope=company&limit=5&order=completion_desc");
+    expect(recentTripsPath()).toBe("/trips?scope=mine&limit=5&order=completion_desc");
+    expect(recentTripsPath(undefined)).toBe("/trips?scope=mine&limit=5&order=completion_desc");
     expect(recentTripsPath("ets2")).toBe(
-      "/trips?scope=company&limit=5&order=completion_desc&game=ets2",
+      "/trips?scope=mine&limit=5&order=completion_desc&game=ets2",
     );
-    expect(recentTripsPath("ats")).toBe(
-      "/trips?scope=company&limit=5&order=completion_desc&game=ats",
-    );
+    expect(recentTripsPath("ats")).toBe("/trips?scope=mine&limit=5&order=completion_desc&game=ats");
     for (const path of [recentTripsPath(), recentTripsPath("ats")])
       expect(path).not.toMatch(/decision=|cursor=|hold=/);
   });
   it("labels the trips in the interface language when one is given", () => {
     expect(recentTripsPath(undefined, "ru")).toBe(
-      "/trips?scope=company&limit=5&order=completion_desc&locale=ru",
+      "/trips?scope=mine&limit=5&order=completion_desc&locale=ru",
     );
     expect(recentTripsPath("ats", "en")).toBe(
-      "/trips?scope=company&limit=5&order=completion_desc&game=ats&locale=en",
+      "/trips?scope=mine&limit=5&order=completion_desc&game=ats&locale=en",
     );
   });
 });
@@ -292,7 +300,7 @@ describe("recent trip rows", () => {
       game: "ets2",
       origin: "Berlin",
       destination: "Warszawa",
-      driver: "AlphaDriver",
+      decision: "accepted",
       fallback: false,
       distance: "580 km",
       countedAt: "1 Nov 2099, 14:30",
@@ -621,13 +629,13 @@ describe("overview statistics paths", () => {
     );
   });
 
-  it("asks for the top ten of the leaderboard", () => {
-    expect(LEADERBOARD_LIMIT).toBe(10);
+  it("asks for the top five of the leaderboard", () => {
+    expect(LEADERBOARD_LIMIT).toBe(5);
     expect(leaderboardPath(range)).toBe(
-      "/analytics/leaderboard?fromDate=2026-11-01&toDateExclusive=2026-12-01&limit=10",
+      "/analytics/leaderboard?fromDate=2026-11-01&toDateExclusive=2026-12-01&limit=5",
     );
     expect(leaderboardPath(allTime, "ats")).toBe(
-      "/analytics/leaderboard?period=all_time&limit=10&game=ats",
+      "/analytics/leaderboard?period=all_time&limit=5&game=ats",
     );
   });
 
@@ -714,12 +722,12 @@ describe("leaderboard rows", () => {
     expect(offPage).toBeNull();
   });
 
-  it("returns the viewer below the top ten separately", () => {
+  it("returns the viewer below the top five separately", () => {
     const { rows, offPage } = leaderboardRows(
       makeLeaderboardFixture({ viewer: "offPage" }).data,
       fixtureId,
     );
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(5);
     expect(rows.some((row) => row.self)).toBe(false);
     expect(offPage).toEqual({ position: 14, acceptedTrips: 4, actualDistanceM: "37400000" });
   });
@@ -899,14 +907,16 @@ describe("overview statistics translations", () => {
           placeholders(text),
         );
     for (const key of [
-      "myPlace",
       "placeOf",
-      "placeTotals",
       "notRanked",
-      "noTrips",
       "activeMembers",
+      "averageTrip",
+      "averageSub",
+      "noAverage",
     ])
       expect(keys(en.metrics)).toContain(key);
+    for (const key of ["myPlace", "placeTotals", "noTrips"])
+      expect(keys(en.metrics)).not.toContain(key);
     for (const key of ["tripsOne", "tripsFew", "tripsMany", "tripsOther"] as const) {
       expect(placeholders(en.breakdowns[key])).toEqual(["trips"]);
       expect(placeholders(ru.breakdowns[key])).toEqual(["trips"]);
@@ -1024,5 +1034,198 @@ describe("overview statistics fixtures", () => {
     const route = makeBreakdownFixture(new URLSearchParams({ dimension: "route" }));
     const wrong = { ...route, data: { ...route.data, dimension: "source" } };
     expect(schema("AnalyticsStage4BreakdownEnvelope").safeParse(wrong).success).toBe(false);
+  });
+});
+
+describe("own period analytics and comparisons (VTC-159)", () => {
+  const november = { fromDate: "2026-11-01", toDateExclusive: "2026-12-01" };
+  const range = { fromDate: "2026-10-01", toDateExclusive: "2026-10-13" };
+  const search = (extra: Record<string, string> = {}) =>
+    new URLSearchParams({ ...range, granularity: "day", ...extra });
+  const ready = <T>(data: T) => previousPeriod(range, { data, isError: false });
+
+  it("asks for the viewer's analytics with both dates and a granularity", () => {
+    expect(memberAnalyticsPath(fixtureId, november, { granularity: "day" })).toBe(
+      `/members/${fixtureId}/analytics?fromDate=2026-11-01&toDateExclusive=2026-12-01&granularity=day`,
+    );
+    expect(memberAnalyticsPath(fixtureId, range, { granularity: "day", game: "ets2" })).toBe(
+      `/members/${fixtureId}/analytics?fromDate=2026-10-01&toDateExclusive=2026-10-13&granularity=day&game=ets2`,
+    );
+    expect(memberAnalyticsPath(fixtureId, range, { granularity: "month" })).not.toMatch(/period=/);
+  });
+
+  it("sees the previous read as none, pending, failed or ready", () => {
+    const data = makeRangeAnalyticsFixture(search(), { acceptedTrips: 1, actualDistanceM: "1" });
+    expect(previousPeriod(null, { data: data.data, isError: false })).toEqual({ state: "none" });
+    expect(previousPeriod(range, { data: undefined, isError: false })).toEqual({
+      state: "pending",
+    });
+    expect(previousPeriod(range, { data: undefined, isError: true })).toEqual({ state: "failed" });
+    // Data wins over a failed background refresh.
+    expect(previousPeriod(range, { data: data.data, isError: true })).toEqual({
+      state: "ready",
+      data: data.data,
+      range,
+    });
+  });
+
+  it("compares every company KPI with the previous period of the same length", () => {
+    const current = makeAnalyticsFixture().data;
+    expect(averageTripM(current)).toBe("2986000");
+    expect(averageTripM(makeAnalyticsFixture(true).data)).toBeNull();
+    const previous = makeRangeAnalyticsFixture(search(), {
+      acceptedTrips: 40,
+      actualDistanceM: "116000000",
+      activeDrivers: 3,
+    }).data;
+    expect(companyDeltas(current, ready(previous))).toEqual({
+      // 125,430 km against 116,000 km: +8.13%.
+      distance: { kind: "up", percent: 8, lessThanOne: false, difference: "9430000" },
+      trips: { kind: "up", percent: null, lessThanOne: false, difference: "2" },
+      // 2,986.43 km against 2,900 km per trip: +2.98%.
+      average: expect.objectContaining({ kind: "up", percent: 3, lessThanOne: false }),
+      drivers: { kind: "down", percent: null, lessThanOne: false, difference: "1" },
+    });
+  });
+
+  it("is neutral without previous trips, unavailable after a failure, reserved while pending", () => {
+    const current = makeAnalyticsFixture().data;
+    const none = makeRangeAnalyticsFixture(search(), { acceptedTrips: 0, actualDistanceM: "0" });
+    const noBaseline = { kind: "noBaseline" };
+    expect(companyDeltas(current, ready(none.data))).toEqual({
+      distance: noBaseline,
+      trips: noBaseline,
+      average: noBaseline,
+      drivers: noBaseline,
+    });
+    const unavailable = { kind: "unavailable" };
+    expect(companyDeltas(current, { state: "failed" })).toEqual({
+      distance: unavailable,
+      trips: unavailable,
+      average: unavailable,
+      drivers: unavailable,
+    });
+    expect(Object.values(companyDeltas(current, { state: "pending" }))).toEqual([
+      "pending",
+      "pending",
+      "pending",
+      "pending",
+    ]);
+    expect(Object.values(companyDeltas(current, { state: "none" }))).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ]);
+    // Without current trips the average tile says "No trips" and has no comparison.
+    expect(companyDeltas(makeAnalyticsFixture(true).data, ready(none.data)).average).toBeNull();
+    // An API without Stage 4 fields compares the totals but not the active drivers.
+    const bare = analyticsWithoutStage4(
+      makeRangeAnalyticsFixture(search(), { acceptedTrips: 42, actualDistanceM: "125430000" }),
+    ).data;
+    const deltas = companyDeltas(current, ready(bare));
+    expect(deltas.drivers).toEqual(unavailable);
+    expect(deltas.distance).toEqual(expect.objectContaining({ kind: "same", difference: "0" }));
+  });
+
+  it("states the own month's distance as an exact difference", () => {
+    const previous = (acceptedTrips: number, actualDistanceM: string) =>
+      ready({ acceptedTrips, actualDistanceM });
+    expect(personalDistanceDelta({ actualDistanceM: "1284000" }, previous(3, "964000"))).toEqual({
+      kind: "up",
+      percent: null,
+      lessThanOne: false,
+      difference: "320000",
+    });
+    expect(personalDistanceDelta({ actualDistanceM: "964000" }, previous(3, "1284000"))).toEqual(
+      expect.objectContaining({ kind: "down", difference: "320000" }),
+    );
+    expect(personalDistanceDelta({ actualDistanceM: "1284000" }, previous(6, "1284000"))).toEqual(
+      expect.objectContaining({ kind: "same", difference: "0" }),
+    );
+    expect(personalDistanceDelta({ actualDistanceM: "1284000" }, previous(0, "0"))).toEqual({
+      kind: "noBaseline",
+    });
+    expect(personalDistanceDelta({ actualDistanceM: "1" }, { state: "failed" })).toEqual({
+      kind: "unavailable",
+    });
+    expect(personalDistanceDelta({ actualDistanceM: "1" }, { state: "pending" })).toBe("pending");
+    expect(personalDistanceDelta({ actualDistanceM: "1" }, { state: "none" })).toBeNull();
+  });
+});
+
+describe("My overview fixtures (VTC-159)", () => {
+  const november = new URLSearchParams({
+    fromDate: "2026-11-01",
+    toDateExclusive: "2026-12-01",
+    granularity: "day",
+  });
+
+  it("parse with the browser runtime schemas", () => {
+    const member = schema("EnvelopeAnalytics");
+    const company = schema("AnalyticsStage4CompanyEnvelope");
+    for (const game of [undefined, "ets2", "ats"]) {
+      const search = new URLSearchParams(november);
+      if (game) search.set("game", game);
+      expect(member.safeParse(makeMemberPeriodAnalyticsFixture(search)).success).toBe(true);
+      const range = makeRangeAnalyticsFixture(search, {
+        acceptedTrips: 40,
+        actualDistanceM: "116000000",
+      });
+      expect(company.safeParse(range).success).toBe(true);
+      expect(company.safeParse(analyticsWithoutStage4(range)).success).toBe(true);
+    }
+    const zero = { acceptedTrips: 0, actualDistanceM: "0" };
+    expect(member.safeParse(makeMemberPeriodAnalyticsFixture(november, zero)).success).toBe(true);
+    expect(company.safeParse(makeRangeAnalyticsFixture(november, zero)).success).toBe(true);
+    for (const locale of ["en", "ru"] as const)
+      expect(
+        schema("EnvelopeListTripSummary").safeParse(makeRecentTripsFixture(ownTrips(locale)))
+          .success,
+      ).toBe(true);
+    for (const empty of [false, true])
+      expect(
+        schema("EnvelopeOwnTripStatusSummary").safeParse(makeTripStatusSummaryFixture(empty))
+          .success,
+      ).toBe(true);
+  });
+
+  it("split the own month by game and keep only days inside the range", () => {
+    const totals = (extra: Record<string, string> = {}) => {
+      const search = new URLSearchParams(november);
+      for (const [key, value] of Object.entries(extra)) search.set(key, value);
+      const { acceptedTrips, actualDistanceM, buckets } =
+        makeMemberPeriodAnalyticsFixture(search).data;
+      return { acceptedTrips, actualDistanceM, dates: buckets.map((bucket) => bucket.date) };
+    };
+    expect(totals()).toEqual({
+      acceptedTrips: 6,
+      actualDistanceM: "1284000",
+      dates: ["2026-11-01", "2026-11-03", "2026-11-06"],
+    });
+    expect(totals({ game: "ets2" })).toMatchObject({ acceptedTrips: 4, actualDistanceM: "812000" });
+    expect(totals({ game: "ats" })).toMatchObject({ acceptedTrips: 2, actualDistanceM: "472000" });
+    expect(totals({ fromDate: "2026-10-01", toDateExclusive: "2026-10-04" })).toEqual({
+      acceptedTrips: 3,
+      actualDistanceM: "698000",
+      dates: ["2026-10-01", "2026-10-03"],
+    });
+    expect(rangeKey(november)).toBe("2026-11-01..2026-12-01");
+  });
+
+  it("give the own trips every decision, owned by the account member", () => {
+    const trips = ownTrips("en");
+    expect(trips.map((trip) => trip.decision)).toEqual([
+      "accepted",
+      "pending_review",
+      "rejected",
+      "unassessed",
+      "accepted",
+    ]);
+    expect(new Set(trips.map((trip) => trip.owner.id))).toEqual(new Set([fixtureId]));
+    expect(new Set(trips.map((trip) => trip.id)).size).toBe(trips.length);
+    expect(trips[1]?.actualDistanceM).toBeNull();
+    const { counts, activeTrips } = makeTripStatusSummaryFixture(true).data;
+    expect([...Object.values(counts), activeTrips]).toEqual([0, 0, 0, 0, 0]);
   });
 });

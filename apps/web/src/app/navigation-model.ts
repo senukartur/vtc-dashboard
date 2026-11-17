@@ -9,6 +9,7 @@ export const paths = {
   connections: "/account/connections",
   notifications: "/account/notifications",
   dashboard: "/account/dashboard",
+  companyOverview: "/account/company",
   trips: "/account/trips",
   trip: "/account/trips/:tripId",
   reports: "/account/reports",
@@ -37,6 +38,7 @@ export type RouteId = keyof typeof paths;
 export type NavGroupId = "personal" | "company" | "review" | "management";
 export type NavItemId =
   | "overview"
+  | "companyOverview"
   | "myTrips"
   | "drafts"
   | "events"
@@ -71,6 +73,7 @@ export const navGroups: readonly NavGroup[] = [
   {
     id: "company",
     items: [
+      { id: "companyOverview", route: "companyOverview", capability: "company.read" },
       { id: "events", route: "events", capability: "company.read" },
       { id: "drivers", route: "drivers", capability: "company.read" },
       { id: "qualifications", route: "qualifications", capability: "company.read" },
@@ -114,6 +117,7 @@ export const routeMeta: Record<RouteId, RouteMeta> = {
   connections: { group: "account", titleKey: "account:sections.connections" },
   notifications: { group: "account", titleKey: "nav.account.notifications" },
   dashboard: item("personal", "overview"),
+  companyOverview: item("company", "companyOverview"),
   trips: item("personal", "myTrips"),
   trip: item("personal", "myTrips", "trip"),
   revise: item("personal", "myTrips", "revise"),

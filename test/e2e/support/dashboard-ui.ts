@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
-import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
+import { accountFixture, fixtureId } from "../../../apps/web/src/features/account/fixtures.ts";
 import {
   analyticsWithoutStage4,
   type BreakdownDimension,
@@ -14,10 +14,16 @@ import {
   makeFilteredAnalyticsFixture,
   makeLeaderboardFixture,
   makeMemberAnalyticsFixture,
+  makeMemberPeriodAnalyticsFixture,
   makeOptionalEventFixture,
+  makeRangeAnalyticsFixture,
   makeRecentTripsFixture,
   makeResponseCountsFixture,
   makeRsvpFixture,
+  makeTripStatusSummaryFixture,
+  ownTrips,
+  type RangeTotals,
+  rangeKey,
   recentTrips,
   upcomingEvent,
   withActiveDrivers,
@@ -197,6 +203,8 @@ export type DashboardEndpoint =
   | "progress"
   | "review"
   | "companyTrips"
+  | "ownTrips"
+  | "memberAnalytics"
   | "event"
   | "myResponse"
   | "counts"
@@ -215,6 +223,7 @@ const breakdownEndpoint = {
 /** Endpoints that take the period parameters. */
 const periodEndpoints: readonly DashboardEndpoint[] = [
   "analytics",
+  "memberAnalytics",
   "leaderboard",
   ...Object.values(breakdownEndpoint),
 ];
@@ -246,6 +255,17 @@ export interface DashboardMockState {
   release(endpoint: DashboardEndpoint): void;
   /** `scope=company` trips; undefined keeps the five-trip fixture in `tripLocale`. */
   companyTrips: S["EnvelopeListTripSummary"] | undefined;
+  /** `scope=mine` trips; undefined keeps the five own trips in `tripLocale`. */
+  ownTrips: S["EnvelopeListTripSummary"] | undefined;
+  /** The trip status summary has no trips at all (a new member). */
+  emptyStatusSummary: boolean;
+  /**
+   * Company analytics per requested range (`fromDate..toDateExclusive`, see `rangeKey`): totals
+   * in the full Stage 4 shape or an HTTP status. Unlisted ranges keep the default fixtures.
+   */
+  companyAnalyticsByRange: Record<string, RangeTotals | number>;
+  /** The viewer's own analytics per requested range: totals or an HTTP status. */
+  memberAnalyticsByRange: Record<string, RangeTotals | number>;
   /**
    * Locale the API renders catalog labels in. Switching the UI language is local to the browser,
    * so a test in Russian sets it to match.
@@ -278,8 +298,15 @@ export interface DashboardMockState {
 /**
  * The API's 422 rules for the period parameters: all time forbids dates, a range needs both,
  * company analytics rejects day buckets for all time, and the source split rejects `limit`.
+ * Member analytics takes only both dates and a day or month granularity.
  */
 function invalidQuery(endpoint: DashboardEndpoint, search: URLSearchParams) {
+  if (endpoint === "memberAnalytics")
+    return (
+      search.has("period") ||
+      !(search.has("fromDate") && search.has("toDateExclusive")) ||
+      !["day", "month"].includes(search.get("granularity") ?? "")
+    );
   const period = search.get("period") ?? "range";
   const dated = search.has("fromDate") || search.has("toDateExclusive");
   if (period !== "range" && period !== "all_time") return true;
@@ -309,8 +336,10 @@ function endpointOf(method: string, url: URL): DashboardEndpoint | undefined {
   if (path === "/api/v1/me/upcoming-event") return "event";
   if (path === "/api/v1/me/workspace-summary") return "summary";
   if (path === "/api/v1/public/company-stats") return "stats";
+  if (path === `/api/v1/members/${fixtureId}/analytics`) return "memberAnalytics";
   if (path === "/api/v1/trips") {
     const scope = url.searchParams.get("scope");
+    if (scope === "mine") return "ownTrips";
     return scope === "review" ? "review" : scope === "company" ? "companyTrips" : undefined;
   }
   if (/^\/api\/v1\/events\/[^/]+\/my-response$/.test(path))
@@ -372,6 +401,10 @@ export async function mockDashboardRoutes(
       state.release("analytics");
     },
     companyTrips: undefined,
+    ownTrips: undefined,
+    emptyStatusSummary: false,
+    companyAnalyticsByRange: {},
+    memberAnalyticsByRange: {},
     tripLocale: "en",
     upcoming: upcomingEvent,
     response: makeRsvpFixture().data,
@@ -433,6 +466,23 @@ export async function mockDashboardRoutes(
         viewer: state.leaderboardViewer,
         search,
       });
+    const byRange = (overrides: Record<string, RangeTotals | number>) =>
+      url.searchParams.has("fromDate") ? overrides[rangeKey(url.searchParams)] : undefined;
+    if (endpoint === "analytics" || endpoint === "memberAnalytics") {
+      const override = byRange(
+        endpoint === "analytics" ? state.companyAnalyticsByRange : state.memberAnalyticsByRange,
+      );
+      if (typeof override === "number")
+        return route.fulfill({ status: override, json: { error: { code: "SYNTHETIC_FAILURE" } } });
+      if (endpoint === "memberAnalytics")
+        return route.fulfill({
+          json: makeMemberPeriodAnalyticsFixture(url.searchParams, override),
+        });
+      if (override) {
+        const fixture = makeRangeAnalyticsFixture(url.searchParams, override);
+        return route.fulfill({ json: state.stage4 ? fixture : analyticsWithoutStage4(fixture) });
+      }
+    }
     if (endpoint === "analytics") {
       const game = url.searchParams.get("game");
       const answered = options.filterAware
@@ -464,16 +514,7 @@ export async function mockDashboardRoutes(
       });
     }
     if (path === "/api/v1/me/trip-status-summary") {
-      return route.fulfill({
-        json: {
-          data: {
-            counts: { unassessed: 1, pendingReview: 2, accepted: 15, rejected: 0 },
-            activeTrips: 1,
-            correctionPending: 0,
-          },
-          meta,
-        },
-      });
+      return route.fulfill({ json: makeTripStatusSummaryFixture(state.emptyStatusSummary) });
     }
     if (endpoint === "event") {
       return route.fulfill({ json: makeOptionalEventFixture(state.upcoming) });
@@ -547,6 +588,11 @@ export async function mockDashboardRoutes(
     if (path.startsWith("/api/v1/members/")) {
       const memberId = path.split("/").pop() ?? member1Id;
       return route.fulfill({ json: makeMemberProfileFixture(memberId) });
+    }
+    if (endpoint === "ownTrips") {
+      return route.fulfill({
+        json: state.ownTrips ?? makeRecentTripsFixture(ownTrips(state.tripLocale)),
+      });
     }
     if (endpoint === "companyTrips") {
       return route.fulfill({

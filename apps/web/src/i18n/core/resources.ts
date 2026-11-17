@@ -62,7 +62,8 @@ export const core = {
         account: "Account",
       },
       items: {
-        overview: "Overview",
+        overview: "My overview",
+        companyOverview: "Company overview",
         myTrips: "My trips",
         drafts: "Drafts",
         events: "Events",
@@ -201,7 +202,8 @@ export const core = {
         account: "Аккаунт",
       },
       items: {
-        overview: "Обзор",
+        overview: "Мой обзор",
+        companyOverview: "Обзор компании",
         myTrips: "Мои рейсы",
         drafts: "Черновики",
         events: "События",

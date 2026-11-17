@@ -138,6 +138,76 @@ export function recentTrips(locale: FixtureLocale = "en"): S["TripSummary"][] {
 /** The English rendering, for tests that only need IDs, drivers and values. */
 export const recentTripItems = recentTrips("en");
 
+/**
+ * The fictional account member's own latest trips (My overview, VTC-159) with every decision:
+ * accepted, pending review, rejected (returned for fixes), unassessed and accepted, rendered for
+ * `locale`. The second has no distance (`Unavailable`).
+ */
+export function ownTrips(locale: FixtureLocale = "en"): S["TripSummary"][] {
+  const own = (
+    index: number,
+    decision: S["TripSummary"]["decision"],
+    values: Parameters<typeof trip>[1],
+  ): S["TripSummary"] => ({
+    ...trip(index, values),
+    id: `05600000-0000-4000-8000-00000000000${index}`,
+    owner: {
+      id: fixtureId,
+      nickname: "Fictional Yukon Member",
+      formerMember: false,
+      roles: ["trainee"],
+    },
+    decision,
+  });
+  const values = (
+    game: S["TripSummary"]["game"],
+    origin: keyof typeof places,
+    destination: keyof typeof places,
+    actualDistanceM: string | null,
+    reportingAt: string,
+  ) => ({
+    game,
+    origin: place(origin, locale),
+    destination: place(destination, locale),
+    driver: "Fictional Yukon Member",
+    actualDistanceM,
+    reportingAt,
+  });
+  return [
+    own(1, "accepted", values("ets2", "berlin", "warszawa", "412000", "2026-11-10T17:20:00.000Z")),
+    own(
+      2,
+      "pending_review",
+      values("ats", "seattle", "portland", null, "2026-11-09T09:15:00.000Z"),
+    ),
+    own(3, "rejected", values("ets2", "praha", "wien", "286000", "2026-11-08T19:40:00.000Z")),
+    own(4, "unassessed", values("ats", "phoenix", "seattle", "186000", "2026-11-07T12:05:00.000Z")),
+    own(
+      5,
+      "accepted",
+      values("ets2", "petersburg", "novgorod", "400000", "2026-11-06T07:45:00.000Z"),
+    ),
+  ];
+}
+
+/** Own trip counts; `empty` is a member without any trip yet (the start steps). */
+export function makeTripStatusSummaryFixture(empty = false) {
+  return {
+    data: empty
+      ? {
+          counts: { unassessed: 0, pendingReview: 0, accepted: 0, rejected: 0 },
+          activeTrips: 0,
+          correctionPending: 0,
+        }
+      : {
+          counts: { unassessed: 1, pendingReview: 2, accepted: 15, rejected: 0 },
+          activeTrips: 1,
+          correctionPending: 0,
+        },
+    meta,
+  } satisfies S["EnvelopeOwnTripStatusSummary"];
+}
+
 export function makeRecentTripsFixture(items: S["TripSummary"][] = recentTripItems) {
   return {
     data: { items, nextCursor: items.length >= 5 ? "NONFUNCTIONAL_CURSOR" : null },
@@ -420,6 +490,115 @@ export function makeMemberAnalyticsFixture() {
   return analyticsWithoutStage4(makeAnalyticsFixture(false)) satisfies S["EnvelopeAnalytics"];
 }
 
+/** Totals a test sets for one requested date range (VTC-159 comparisons). */
+export type RangeTotals = {
+  acceptedTrips: number;
+  actualDistanceM: string;
+  activeDrivers?: number;
+};
+export const rangeKey = (search: URLSearchParams) =>
+  `${search.get("fromDate")}..${search.get("toDateExclusive")}`;
+
+function addDays(date: string, days: number) {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+/** Own daily distance per game: day offsets from the range start, ETS2 + ATS = all games. */
+const memberDays = {
+  ets2: [
+    { offset: 0, acceptedTrips: 2, actualDistanceM: "412000" },
+    { offset: 5, acceptedTrips: 2, actualDistanceM: "400000" },
+  ],
+  ats: [
+    { offset: 2, acceptedTrips: 1, actualDistanceM: "286000" },
+    { offset: 5, acceptedTrips: 1, actualDistanceM: "186000" },
+  ],
+} as const;
+
+/**
+ * One member's analytics for the requested range in days (My overview): the closed
+ * `EnvelopeAnalytics` shape. By default 6 trips and 1,284 km in the first six days of the range
+ * (ETS2 4 and 812 km, ATS 2 and 472 km), only the days inside the range; `totals` replaces them
+ * with one bucket on the first day.
+ */
+export function makeMemberPeriodAnalyticsFixture(search: URLSearchParams, totals?: RangeTotals) {
+  const fromDate = search.get("fromDate") ?? "2026-11-01";
+  const toDateExclusive = search.get("toDateExclusive") ?? "2026-12-01";
+  const game = search.get("game");
+  const games: readonly ("ets2" | "ats")[] =
+    game === "ets2" || game === "ats" ? [game] : ["ets2", "ats"];
+  const byDate = new Map<string, Totals>();
+  if (totals) {
+    if (totals.acceptedTrips > 0)
+      byDate.set(fromDate, {
+        acceptedTrips: totals.acceptedTrips,
+        actualDistanceM: totals.actualDistanceM,
+      });
+  } else
+    for (const item of games)
+      for (const day of memberDays[item]) {
+        const date = addDays(fromDate, day.offset);
+        if (date >= toDateExclusive) continue;
+        byDate.set(date, sum([...(byDate.has(date) ? [byDate.get(date) as Totals] : []), day]));
+      }
+  const buckets = [...byDate.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ date, ...value }));
+  return {
+    data: {
+      ...(totals
+        ? { acceptedTrips: totals.acceptedTrips, actualDistanceM: totals.actualDistanceM }
+        : sum(buckets)),
+      reportingTimezone: "Europe/Moscow",
+      fromDate,
+      toDateExclusive,
+      granularity: "day" as const,
+      buckets,
+      computedAt: "2026-11-12T08:00:00.000Z",
+      projectionVersion: 2,
+      projectionPending: false,
+    },
+    meta,
+  } satisfies S["EnvelopeAnalytics"];
+}
+
+/**
+ * Company analytics of a comparison range in the full Stage 4 shape, with the totals a test sets:
+ * one daily bucket on the first day, ETS2 carrying the totals (ATS zero) for all games.
+ */
+export function makeRangeAnalyticsFixture(search: URLSearchParams, totals: RangeTotals) {
+  const game = search.get("game");
+  const filtered = game === "ets2" || game === "ats" ? game : undefined;
+  const value = { acceptedTrips: totals.acceptedTrips, actualDistanceM: totals.actualDistanceM };
+  const zero = { acceptedTrips: 0, actualDistanceM: "0" };
+  const fromDate = search.get("fromDate") ?? "2026-10-01";
+  return {
+    data: {
+      ...value,
+      reportingTimezone: "Europe/Moscow",
+      fromDate,
+      toDateExclusive: search.get("toDateExclusive") ?? "2026-11-01",
+      granularity: "day" as const,
+      buckets: totals.acceptedTrips > 0 ? [{ date: fromDate, ...value }] : [],
+      computedAt: "2026-10-26T12:00:00.000Z",
+      projectionVersion: 2,
+      projectionPending: false,
+      period: "range" as const,
+      activeDrivers: totals.activeDrivers ?? (totals.acceptedTrips > 0 ? 1 : 0),
+      activeMembers: activity.activeMembers,
+      byGame: filtered
+        ? [{ game: filtered, ...value }]
+        : [
+            { game: "ets2" as Game, ...value },
+            { game: "ats" as Game, ...zero },
+          ],
+    },
+    meta,
+  } satisfies S["AnalyticsStage4CompanyEnvelope"];
+}
+
 export const leaderboardMember1Id = "41000000-0000-4000-8000-000000000001";
 export const leaderboardMember2Id = "41000000-0000-4000-8000-000000000002";
 
@@ -482,7 +661,7 @@ function leaderboardEntry(index: number, viewer: LeaderboardViewer): S["Leaderbo
 
 /**
  * Leaderboard of `size` ranked members (default 2; 15 with the viewer below the page), answering
- * `limit` rows with positions, the ranked members count and the viewer's own row. All time has
+ * `limit` rows (default 5, the overview page) with positions, the ranked members count and the viewer's own row. All time has
  * twelve times the range values. The first two entries are AlphaDriver and BetaHauler.
  */
 export function makeLeaderboardFixture(
@@ -502,7 +681,7 @@ export function makeLeaderboardFixture(
         viewer === "onPage" ? 3 : 0,
         viewer === "offPage" ? 14 : 0,
       );
-  const limit = Number(options.search?.get("limit") ?? 10);
+  const limit = Number(options.search?.get("limit") ?? 5);
   const factor = isAllTime(options.search) ? ALL_TIME_MONTHS : 1;
   const ranked = Array.from({ length: size }, (_, index) => {
     const entry = leaderboardEntry(index, viewer);

@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useRef } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
@@ -10,11 +10,16 @@ import { eventTime } from "../events/model.js";
 import { useBlockRetry } from "./blocks.js";
 import { type ActionKey, visibleActionSections } from "./view-model.js";
 
+/**
+ * "Needs attention" at the top of My overview. A loaded summary without work for the viewer hides
+ * the card, except after the viewer's own Retry: then the empty line keeps focus on the heading.
+ */
 export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezone: string }) {
   const { t } = useTranslation("dashboard");
   const { self } = useSession();
   const query = useWorkspaceSummary();
   const heading = useRef<HTMLHeadingElement>(null);
+  const [retried, setRetried] = useState(false);
   const { retrying, retry } = useBlockRetry({
     ...query,
     refetch: () => query.refetch({ cancelRefetch: false }),
@@ -73,6 +78,7 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
   // "Unavailable" is only a failed load; an omitted count is not mentioned at all.
   const actionable = summary ? visibleActionSections(summary, self?.capabilities ?? []) : [];
   const number = new Intl.NumberFormat(locale);
+  if (summary && actionable.length === 0 && !query.isError && !retrying && !retried) return null;
 
   return (
     <Card className="dashboard-side-card dashboard-actions" aria-labelledby={id}>
@@ -98,7 +104,9 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
             aria-disabled={query.isFetching}
             focusTarget={() => heading.current?.focus()}
             onClick={() => {
-              if (!query.isFetching) retry();
+              if (query.isFetching) return;
+              setRetried(true);
+              retry();
             }}
           >
             {t("states.retry")}

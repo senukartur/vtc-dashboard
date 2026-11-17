@@ -123,6 +123,7 @@ const accountRoutes: Record<RouteId, ReactElement> = {
   connections: <AccountPage section="connections" />,
   notifications: <NotificationsPage />,
   dashboard: <DashboardPage />,
+  companyOverview: <DashboardPage view="company" />,
   trips: <TripsPage />,
   trip: <TripDetailPage />,
   reports: <ReportsPage />,
