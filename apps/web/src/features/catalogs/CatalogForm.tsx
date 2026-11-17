@@ -89,6 +89,7 @@ export function CatalogForm({
   // DLCs and companies use only their canonical name and never ask for a Russian one.
   const translated = isTranslatable(list);
   const [code, setCode] = useState(item?.code ?? ""),
+    [commonTrailer, setCommonTrailer] = useState(item?.commonTrailer ?? ""),
     [nameEn, setNameEn] = useState(item?.nameEn ?? ""),
     [nameRu, setNameRu] = useState(item?.nameRu ?? ""),
     [nameNative, setNameNative] = useState(item?.nameNative ?? ""),
@@ -110,6 +111,9 @@ export function CatalogForm({
     }
     const body: Record<string, unknown> = {
       code,
+      ...(list === "trailers" && (commonTrailer !== "" || item?.commonTrailer)
+        ? { commonTrailer: commonTrailer || null }
+        : {}),
       nameEn,
       ...(translated ? { nameRu: nameRu === "" ? null : nameRu } : {}),
       ...(list === "dlcs" ? { steamAppId: steamNumber } : { dlcId }),
@@ -152,6 +156,19 @@ export function CatalogForm({
             <p className="field-hint">{t(list === "trailers" ? "trailerCodeHint" : "codeHint")}</p>
           )}
         </div>
+        {list === "trailers" && (
+          <div className="catalog-field">
+            <Label htmlFor={`${id}-common`}>{t("fieldCommonTrailer")}</Label>
+            <Input
+              id={`${id}-common`}
+              maxLength={128}
+              autoComplete="off"
+              value={commonTrailer}
+              onChange={(e) => setCommonTrailer(e.target.value)}
+            />
+            <p className="field-hint">{t("commonTrailerHint")}</p>
+          </div>
+        )}
         <div className="catalog-field">
           <Label htmlFor={`${id}-en`}>{t("fieldNameEn")}</Label>
           <Input

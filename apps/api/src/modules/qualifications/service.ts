@@ -72,7 +72,8 @@ interface Ports {
     | "authorizeInTransaction"
   >;
   trips: Pick<Trips, "contributions">;
-  catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction">;
+  catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction"> &
+    Partial<Pick<Catalogs, "trailerGroupsInTransaction">>;
   events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
 const MAX_DRIVERS = 1000;
@@ -681,8 +682,20 @@ export function createQualifications(
         attributionAt: instant,
       };
     const trailers = await levelTrailers(unit, tx, [level.id]);
+    const trailerIds = [
+      ...(trailers.get(level.id) ?? []),
+      ...evidence.trailers.items.flatMap((item) =>
+        item.status === "known" ? [item.value.entityId] : [],
+      ),
+    ];
+    const trailerGroups = await ports.catalogs?.trailerGroupsInTransaction?.(
+      tx,
+      evidence.game,
+      trailerIds,
+    );
     return {
       status: "resolved" as const,
+      ...(trailerGroups ? { trailerGroups } : {}),
       assignmentId: assignment.id,
       levelId: level.id,
       levelName: level.name,

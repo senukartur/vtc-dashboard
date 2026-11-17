@@ -20261,6 +20261,25 @@
             "minimum": 0,
             "maximum": 9007199254740991,
             "description": "Companies list only. Count linked same-game depots."
+          },
+          "commonTrailer": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized."
+          },
+          "variantCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Number of stored body-type variants in this trailer group, including hidden variants."
           }
         },
         "required": [
@@ -20825,6 +20844,19 @@
                 "type": "null"
               }
             ]
+          },
+          "commonTrailer": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized."
           }
         },
         "required": [
@@ -20972,6 +21004,19 @@
           },
           "hidden": {
             "type": "boolean"
+          },
+          "commonTrailer": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized."
           }
         },
         "minProperties": 1,

@@ -372,7 +372,9 @@ export function CatalogSelector({
                             </>
                           )}
                         </span>
-                        <code title={row.item.code}>{row.item.code}</code>
+                        <code title={row.item.commonTrailer ?? row.item.code}>
+                          {row.item.commonTrailer ?? row.item.code}
+                        </code>
                       </>
                     )}
                     {row.kind === "more" && (

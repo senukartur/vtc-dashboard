@@ -66,6 +66,10 @@ export const catalogTranslations = {
     formTitleNew: "New row: {{list}} · {{game}}",
     formTitleEdit: "Edit row: {{list}} · {{game}}",
     fieldCode: "Code",
+    fieldCommonTrailer: "Common trailer",
+    commonTrailerHint:
+      "Variants with the same game trailer key appear once and share qualification access. Their original body types remain recognized. Leave blank for a separate trailer.",
+    trailerVariants: "Variants: {{count}}",
     codeHint: "Must match the ID sent by telemetry exactly.",
     trailerCodeHint:
       "Body type from telemetry (body.type), not the trailer ID. A coupling counts as its first trailer's type.",
@@ -277,6 +281,10 @@ export const catalogTranslations = {
     formTitleNew: "Новая запись: {{list}} · {{game}}",
     formTitleEdit: "Изменение записи: {{list}} · {{game}}",
     fieldCode: "Код",
+    fieldCommonTrailer: "Общий прицеп",
+    commonTrailerHint:
+      "Варианты с одним игровым ключом прицепа показываются одной строкой и имеют общий допуск. Исходные типы кузова продолжают распознаваться. Пустое поле — отдельный прицеп.",
+    trailerVariants: "Вариантов: {{count}}",
     codeHint: "Должен точно совпадать с ID, который присылает телеметрия.",
     trailerCodeHint:
       "Тип кузова из телеметрии (body.type), а не ID прицепа. У сцепки учитывается тип первого прицепа.",

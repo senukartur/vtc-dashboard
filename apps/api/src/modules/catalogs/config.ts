@@ -49,12 +49,13 @@ export const importColumns: Readonly<Record<ImportList, readonly string[]>> = {
   companies: ["game", "code", "name_en", "dlc_code"],
   depots: ["game", "company_code", "city_code", "dlc_code"],
   cargoes: ["game", "code", "name_en", "name_ru", "adr_class", "dlc_code"],
-  trailers: ["game", "code", "name_en", "name_ru", "dlc_code"],
+  trailers: ["game", "code", "name_en", "name_ru", "dlc_code", "common_trailer"],
 };
 
 /** Columns a file header may leave out; an absent column reads as an empty cell. */
 export const optionalImportColumns: Readonly<Partial<Record<ImportList, readonly string[]>>> = {
   cities: ["name_native"],
+  trailers: ["common_trailer", "name_en", "name_ru", "dlc_code"],
 };
 
 /**

@@ -13,6 +13,7 @@
     "reconciliation_commands": ["SELECT", "INSERT"]
   },
   "jobs": {
+    "catalog_trailers": ["SELECT"],
     "trip_decisions": ["SELECT", "INSERT"],
     "trip_history": ["SELECT", "INSERT"],
     "trip_contribution_history": ["SELECT", "INSERT"],

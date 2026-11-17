@@ -28,6 +28,22 @@ const item = {
   region: { ...label, entityId: regionId, label: "Fictional Region" },
 };
 
+test("common trailer metadata is optional and writable only on trailer inputs", () => {
+  const base = { game: "ets2", code: "_fiction_body", nameEn: "Fictional transporter" };
+  expect(
+    validate("CatalogTrailerInput")({ ...base, commonTrailer: "trailer.fiction_common" }),
+  ).toBe(true);
+  expect(validate("CatalogTrailerInput")({ ...base, commonTrailer: null })).toBe(true);
+  expect(validate("CatalogTrailerInput")({ ...base, commonTrailer: "" })).toBe(false);
+  expect(validate("CatalogCityInput")({ ...base, commonTrailer: "trailer.fiction_common" })).toBe(
+    false,
+  );
+  expect(
+    validate("CatalogItem")({ ...item, commonTrailer: "trailer.fiction_common", variantCount: 7 }),
+  ).toBe(true);
+  expect(validate("CatalogItem")({ ...item, variantCount: 0 })).toBe(false);
+});
+
 test("catalog items carry label fallback and reject the retired revision model", () => {
   expect(validate("CatalogItem")(item)).toBe(true);
   expect(validate("CatalogItem")({ ...item, adrClass: "3" })).toBe(true);
