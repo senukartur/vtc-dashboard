@@ -85,6 +85,24 @@ test("every granted table and column exists in the latest migration snapshot", a
     assert.deepEqual(grantProblems(schema, tables, harnessTables[file]), [], label);
 });
 
+test("the Stage supplement repeats no base grant", async () => {
+  // activation.py concatenates the supplement onto the base, so a repeat would grant it twice.
+  const base = (await json(new URL("activation-grants.json", deploy))) as Matrix;
+  const stage = await json(new URL("stage-features.json", deploy));
+  const repeats: string[] = [];
+  for (const [role, tables] of Object.entries({
+    ...stage.grants,
+    runtime: { ...stage.grants.runtime, ...stage.eventsDraftsGrants },
+  }) as [string, Record<string, string[]>][])
+    for (const [table, permissions] of Object.entries(tables))
+      for (const permission of permissions)
+        if (base[role]?.[table]?.includes(permission))
+          repeats.push(`${role} ${table} ${permission}`);
+  assert.deepEqual(repeats, []);
+  // The level change history needs it on every host, not only with the supplement.
+  assert.ok(base.runtime?.audit_entries?.includes("SELECT"));
+});
+
 test("the grant check reports dropped tables and columns", () => {
   const schema = new Map([["qualification_assignments", new Set(["id", "ended_at"])]]);
   assert.deepEqual(

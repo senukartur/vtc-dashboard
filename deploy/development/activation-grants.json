@@ -9,7 +9,7 @@
     "identity_challenges": ["SELECT", "INSERT", "UPDATE", "DELETE"],
     "identity_limits": ["SELECT", "INSERT", "UPDATE"],
     "identity_command_results": ["SELECT", "INSERT", "DELETE"],
-    "audit_entries": ["INSERT"],
+    "audit_entries": ["SELECT", "INSERT"],
     "outbox_events": ["SELECT", "INSERT"],
     "durable_jobs": ["SELECT", "INSERT", "UPDATE"],
     "job_effect_receipts": ["SELECT"],

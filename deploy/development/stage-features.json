@@ -49,7 +49,6 @@
   },
   "grants": {
     "runtime": {
-      "audit_entries": ["SELECT"],
       "external_steam_accounts": ["UPDATE(created_at)"],
       "event_revision_details": ["SELECT", "INSERT"],
       "event_revision_dlcs": ["SELECT", "INSERT"],
