@@ -175,17 +175,17 @@ export function useMemberAnalytics(
 }
 
 /**
- * Public qualification progress of another member (or oneself). Enabled only when the profile
- * reported an assignment for the game, so members without one cause no request.
+ * Public qualifications of another member (or oneself): level, time on it and progress per game.
+ * Enabled only when the profile reported an assignment, so members without one cause no request.
  */
-export function useMemberProgress(memberId: string, game: Game, enabled: boolean) {
+export function useMemberQualifications(memberId: string, enabled: boolean) {
   const { allowed, key, read } = useProfileRead();
-  const path = `/members/${encodeURIComponent(memberId)}/qualification-progress?game=${game}`;
+  const path = `/members/${encodeURIComponent(memberId)}/qualifications`;
   return useQuery({
     ...common,
-    queryKey: key("driver-progress", memberId, path),
+    queryKey: key("driver-qualifications", memberId, path),
     enabled: !!memberId && allowed && enabled,
-    queryFn: async ({ signal }) => (await read(path, "EnvelopeProgressPublic", signal)).data,
+    queryFn: async ({ signal }) => (await read(path, "EnvelopeMyQualificationList", signal)).data,
   });
 }
 

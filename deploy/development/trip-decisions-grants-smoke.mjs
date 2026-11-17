@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
-import { createUnitOfWork, newId, settingsFromEnvironment, utcIso } from "@vtc/db";
+import { createUnitOfWork, newId, settingsFromEnvironment } from "@vtc/db";
 import { reconciliationCandidates, reconciliationRules } from "@vtc/db/reconciliation-schema";
 import { eq, sourceMessages, sourceTrips, tripContributions, trips } from "@vtc/db/trips-schema";
 import {
@@ -37,7 +37,6 @@ const unit = createUnitOfWork(settingsFromEnvironment()),
   password = "Fictional-manual-rehearsal-passphrase-42",
   origin = "http://127.0.0.1:4173";
 // The preceding produce phase has completed before this isolated worker is launched.
-const eligibilityTrackingSince = phase === "worker" ? new Date().toISOString() : undefined;
 const compose = (stage3 = false) =>
   composeIdentity(
     unit,
@@ -49,10 +48,7 @@ const compose = (stage3 = false) =>
     { cursorKey: key("trips") },
     undefined,
     { key: key("manual"), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
-    {
-      cursorKey: key("qualifications"),
-      ...(eligibilityTrackingSince && { eligibilityTrackingSince }),
-    },
+    {},
     { cursorKey: key("events") },
     { key: key("reconciliation") },
     { key: key("decisions") },
@@ -113,14 +109,23 @@ try {
       ["trailer", await seed("trailers", "trailer")],
     ]);
     step = "seed_rules";
-    const level = (await qualifications.levels(director, "ets2")).items.find(
+    const level = (await qualifications.list(director, "ets2")).levels.find(
       (l) => l.id === structuralLevels.ets2[0],
     );
-    await qualifications.publish(director, level.id, newId(), level.version, {
-      rules: [{ type: "max_mass", maxKg: "20000" }],
-      requiredTrips: 1,
-      requiredDistanceM: "100",
-      reason: "Fictional restricted proof configuration",
+    // Two credited trips promote, so the worker credit performs the promotion.
+    await qualifications.update(director, level.id, {
+      expectedVersion: level.version,
+      name: level.name,
+      limits: {
+        massMinKg: null,
+        massMaxKg: "20000",
+        distanceMinM: null,
+        distanceMaxM: null,
+        trailers: { mode: "any", typeIds: [] },
+        adr: { mode: "any", classes: [] },
+        hardModeRequired: false,
+      },
+      conditions: { requiredTrips: 2, requiredDistanceM: "100" },
     });
     step = "seed_facts";
     const tripIds = [],
@@ -509,8 +514,7 @@ try {
           connection.query("UPDATE manual_correction_requests SET status=status"),
           (e) => [1044, 1142, 1143, 1227].includes(e.errno),
         );
-        step = "worker_eligibility_before";
-        assert.ok(eligibilityTrackingSince);
+        step = "worker_promotion_before";
         const readCredit = async (tripId) => {
           const [row] = await unit.run((tx) =>
             unit
@@ -521,9 +525,9 @@ try {
           );
           return row;
         };
-        const readEligibility = async ({ ownerId, game }) => {
+        const readOpen = async ({ ownerId, game }) => {
           const [rows] = await connection.execute(
-            "SELECT CAST(assignment_id AS CHAR) assignmentId, CAST(eligible_since AS CHAR) eligible_since, CAST(eligibility_evaluated_at AS CHAR) eligibility_evaluated_at FROM qualification_states WHERE user_id=? AND game=?",
+            "SELECT CAST(id AS CHAR) id, CAST(previous_assignment_id AS CHAR) previousId, kind FROM qualification_assignments WHERE user_id=? AND game=? AND ended_at IS NULL",
             [ownerId, game],
           );
           assert.equal(rows.length, 1);
@@ -532,11 +536,7 @@ try {
         const runtimeCredit = await readCredit(refs.runtimeTripId);
         assert.equal(runtimeCredit.credited, true);
         assert.ok(runtimeCredit.assignmentId);
-        assert.deepEqual(await readEligibility(runtimeCredit), {
-          assignmentId: runtimeCredit.assignmentId,
-          eligible_since: null,
-          eligibility_evaluated_at: null,
-        });
+        assert.equal((await readOpen(runtimeCredit)).id, runtimeCredit.assignmentId);
 
         step = "worker_catchup";
         await service.catchup();
@@ -545,13 +545,13 @@ try {
         assert.equal(credit.credited, true);
         assert.equal(credit.actualDistanceM, "123400.000000000000000000");
         assert.equal(credit.assignmentId, runtimeCredit.assignmentId);
-        const before = await readEligibility(credit);
-        assert.equal(before.assignmentId, credit.assignmentId);
-        assert.equal(before.eligible_since, null);
-        assert.ok(utcIso(before.eligibility_evaluated_at) >= eligibilityTrackingSince);
+        // The second credit meets the conditions: the restricted worker promotes exactly once.
+        const promoted = await readOpen(credit);
+        assert.equal(promoted.kind, "promotion");
+        assert.equal(promoted.previousId, credit.assignmentId);
         await runPass(createQueue(unit, [service.handler]), new AbortController().signal);
         assert.deepEqual(await readCredit(refs.workerTripId), credit);
-        assert.deepEqual(await readEligibility(credit), before);
+        assert.deepEqual(await readOpen(credit), promoted);
       }
       step = "immutable_denials";
       for (const statement of [

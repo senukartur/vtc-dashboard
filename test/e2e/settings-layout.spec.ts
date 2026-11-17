@@ -906,52 +906,17 @@ for (const locale of ["en", "ru"] as const)
   );
 
 test(
-  "P11 direct qualification URL, manual tabs, game changes and Back preserve route state",
+  "P11 settings offer only General and Audit; an old qualifications tab URL opens General",
   browserCase(["@functional"]),
   async ({ page }) => {
     const state = await mockSettings(page, { role: "deputy" });
-    await page.goto("/account/admin/settings?tab=qualifications&game=ats&keep=synthetic#anchor");
-    const qualifications = page.getByRole("tab", { name: "Qualification levels", exact: true }),
-      general = page.getByRole("tab", { name: "General", exact: true }),
-      audit = page.getByRole("tab", { name: text.en.audit, exact: true }),
-      qualificationPanel = page.getByRole("tabpanel", {
-        name: "Qualification levels",
-        exact: true,
-      }),
-      ats = qualificationPanel.getByRole("button", { name: "ATS", exact: true });
-    const ladder = qualificationPanel.getByRole("table", { name: "Qualification ladder" });
-    await expect(ladder.getByRole("rowheader")).toContainText("Fictional ATS starter");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Company settings");
-    await expect(ats).toHaveAttribute("aria-pressed", "true");
-    expect(state.reads.filter((path) => path.startsWith("/admin/company-settings"))).toEqual([]);
-    expect(state.reads.filter((path) => path.includes("qualification"))).toEqual([
-      "/admin/qualification-ladders/ats",
-    ]);
-    await qualifications.focus();
-    await page.keyboard.press("ArrowRight");
-    await expect(audit).toBeFocused();
-    await expect(qualifications).toHaveAttribute("aria-selected", "true");
-    await page.keyboard.press("Home");
-    await expect(general).toBeFocused();
-    await page.keyboard.press("End");
-    await expect(audit).toBeFocused();
-    await page.keyboard.press("Enter");
-    await expect(audit).toHaveAttribute("aria-selected", "true");
-    await expect(audit).toBeFocused();
-    await expect(page.getByRole("tabpanel", { name: text.en.audit })).toBeVisible();
-    await expect(
-      page.getByText("Times in UTC because the company reporting timezone is unavailable."),
-    ).toBeVisible();
-    await expect(page).toHaveURL(/tab=audit&game=ats&keep=synthetic#anchor$/);
-    await page.goBack();
-    await expect(qualifications).toHaveAttribute("aria-selected", "true");
-    await qualificationPanel.getByRole("button", { name: "ETS2", exact: true }).click();
-    await expect(page).toHaveURL(/tab=qualifications&game=ets2&keep=synthetic#anchor$/);
-    await expect(ats).toHaveAttribute("aria-pressed", "false");
-    await expect(ladder.getByRole("rowheader")).toContainText("Fictional ETS2 starter");
-    await page.goto("/account/admin/settings?tab=invalid");
-    await expect(general).toHaveAttribute("aria-selected", "true");
-    expect(state.unexpected.filter((entry) => entry.includes(" /admin/"))).toEqual([]);
+    await page.goto("/account/admin/settings?tab=qualifications&keep=synthetic#anchor");
+    await expect(page.getByRole("tab")).toHaveText(["General", "Audit log"]);
+    await expect(page.getByRole("tab", { name: "General", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(state.reads.filter((path) => path.includes("qualification"))).toEqual([]);
   },
 );
 
@@ -1116,8 +1081,6 @@ test(
     await expect(page.getByRole("heading", { name: "Access restricted" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Company settings");
     expect(state.reads.filter((path) => path.startsWith("/admin/"))).toEqual([]);
-    await page.getByRole("tab", { name: "Qualification levels", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Access restricted" })).toBeVisible();
     await page.getByRole("tab", { name: "General", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Trip sources", exact: true })).toBeVisible();
     await expect(page.getByLabel("Company reporting timezone", { exact: true })).toBeVisible();

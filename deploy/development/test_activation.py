@@ -643,7 +643,7 @@ class ActivationTests(unittest.TestCase):
     def test_apply_revokes_grants_on_tables_dropped_by_the_simple_catalogs_migration(self):
         self.stage_profile()
         statement = activation.grant_sql(ops, values={'TRIPS_ENABLED': 'true'})
-        self.assertEqual(len(activation.RETIRED_TABLES), 15)
+        self.assertEqual(len(activation.RETIRED_TABLES), 21)
         self.assertLess(statement.index('REVOKE IF EXISTS'), statement.index('GRANT '))
         for user in ['vtc_runtime', 'vtc_jobs']:
             for table in activation.RETIRED_TABLES:

@@ -1,11 +1,19 @@
 import type { components } from "@vtc/contracts";
 import { browserSchemaDocument } from "@vtc/contracts/runtime";
 import { z } from "zod";
-import { decimalShift, type Locale } from "../../shared/formatting.js";
 import { withReadSlot } from "../../shared/read-scheduler.js";
-import { AccountFailure } from "../account/transport.js";
+import { AccountFailure, read } from "../account/transport.js";
+import { csrfEnvelope } from "../admissions/schema.js";
 import { retryDelay } from "../admissions/transport.js";
+
 export type DTO = components["schemas"];
+export type Game = "ets2" | "ats";
+export type Level = DTO["QualificationLevelSummary"];
+export type LevelDetail = DTO["QualificationLevelDetail"];
+export type Limits = DTO["QualificationLimits"];
+export type Conditions = DTO["QualificationConditions"];
+export type Mine = DTO["MyQualification"];
+
 const schemas = new Map<string, z.ZodType>();
 export function schema<K extends keyof DTO>(name: K): z.ZodType<DTO[K]> {
   let result = schemas.get(name);
@@ -15,42 +23,52 @@ export function schema<K extends keyof DTO>(name: K): z.ZodType<DTO[K]> {
   }
   return result as z.ZodType<DTO[K]>;
 }
+/** A failed qualification read or command; `code` keeps the public error code when one is sent. */
 export class QualificationFailure extends AccountFailure {
   constructor(
     kind: AccountFailure["kind"],
     public readonly status = 0,
     delay: number | null = null,
-    public readonly setupRequired = false,
+    public readonly code: string | null = null,
+    /** The existing level a create or move would leave without conditions, when named. */
+    public readonly levelId: string | null = null,
   ) {
     super(kind, delay);
   }
 }
-/**
- * Qualification lists answer 409 for a cursor they no longer accept; 409 `SETUP_REQUIRED` is a
- * missing-assignment state, not a cursor rejection, so it never restarts paging.
- */
-export function qualificationCursorRejected(error: unknown) {
-  return error instanceof QualificationFailure && error.status === 409 && !error.setupRequired;
-}
-export function fail(response: Response): never {
-  const kinds: Record<number, AccountFailure["kind"]> = {
-    400: "invalid",
-    401: "unauthorized",
-    403: "forbidden",
-    404: "unavailable",
-    409: "conflict",
-    410: "unavailable",
-    413: "invalid",
-    415: "invalid",
-    422: "invalid",
-    428: "conflict",
-    429: "limited",
-    503: "unavailable",
-  };
-  throw new QualificationFailure(
+const kinds: Record<number, AccountFailure["kind"]> = {
+  400: "invalid",
+  401: "unauthorized",
+  403: "forbidden",
+  404: "unavailable",
+  409: "conflict",
+  413: "invalid",
+  415: "invalid",
+  422: "invalid",
+  429: "limited",
+  503: "unavailable",
+};
+async function failure(response: Response): Promise<QualificationFailure> {
+  let code: string | null = null,
+    levelId: string | null = null;
+  try {
+    const parsed = schema("Error").safeParse(await response.json());
+    if (parsed.success) {
+      code = parsed.data.error.code;
+      levelId =
+        parsed.data.error.details?.find(
+          (detail) => detail.code === "QUALIFICATION_CONDITIONS_REQUIRED",
+        )?.ownResourceId ?? null;
+    }
+  } catch {
+    // A body that is not the error envelope keeps only the status.
+  }
+  return new QualificationFailure(
     kinds[response.status] ?? "uncertain",
     response.status,
     retryDelay(response.headers.get("Retry-After")),
+    code,
+    levelId,
   );
 }
 export async function qualificationRead<K extends keyof DTO>(
@@ -68,12 +86,7 @@ export async function qualificationRead<K extends keyof DTO>(
         headers: { Accept: "application/json" },
       }),
     );
-    if (response.status === 409) {
-      const safe = schema("Error").safeParse(await response.json());
-      if (safe.success && safe.data.error.code === "SETUP_REQUIRED")
-        throw new QualificationFailure("conflict", 409, null, true);
-    }
-    if (response.status !== 200) fail(response);
+    if (response.status !== 200) throw await failure(response);
     const parsed = schema(name).safeParse(await response.json());
     if (!parsed.success) throw new QualificationFailure("unavailable");
     bounded.throwIfAborted();
@@ -83,50 +96,34 @@ export async function qualificationRead<K extends keyof DTO>(
     throw new QualificationFailure("unavailable");
   }
 }
-export type Attempt = { fingerprint: string; key: string; etag: string | null };
-export function attemptFor(
-  fingerprint: string,
-  etag: string | null,
-  previous: Attempt | null,
-): Attempt {
-  return previous?.fingerprint === fingerprint
-    ? previous
-    : { fingerprint, key: crypto.randomUUID(), etag };
-}
-export type Game = "ets2" | "ats";
-export function exactInput(value: string): string | undefined {
-  const clean = value.trim().replace(",", ".");
-  if (!/^(0|[1-9]\d*)(\.\d+)?$/.test(clean)) return undefined;
-  const [whole, fraction = ""] = clean.split(".");
-  if ((whole?.length ?? 0) > 20 || fraction.length > 18) return undefined;
-  return clean.includes(".") ? clean.replace(/0+$/, "").replace(/\.$/, "") : clean;
-}
-export function distanceInput(value: string): string | null | undefined {
-  const clean = value.trim().replace(",", ".");
-  if (clean === "") return null;
-  if (!/^(0|[1-9]\d*)(\.\d+)?$/.test(clean)) return undefined;
-  const [whole = "0", fraction = ""] = clean.split(".");
-  const metres = (whole + fraction.slice(0, 3).padEnd(3, "0")).replace(/^0+(?=\d)/, "");
-  const decimals = fraction.slice(3).replace(/0+$/, "");
-  return exactInput(decimals ? `${metres}.${decimals}` : metres);
-}
-
-export function distanceForEditor(metres: string | null, locale: Locale): string {
-  if (metres === null) return "";
-  const km = decimalShift(metres, 3);
-  return locale === "ru" ? km.replace(".", ",") : km;
-}
-
-export function countInput(value: string): number | null | undefined {
-  if (value.trim() === "") return null;
-  if (!/^(0|[1-9]\d*)$/.test(value)) return undefined;
-  const n = Number(value);
-  return Number.isSafeInteger(n) && n <= 2147483647 ? n : undefined;
-}
-export function utcInput(value: string): string | undefined {
-  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(value);
-  if (!match) return undefined;
-  const canonical = `${match[1]}:${match[2] ?? "00"}.${(match[3] ?? "").padEnd(3, "0")}Z`;
-  const ms = Date.parse(canonical);
-  return Number.isFinite(ms) && new Date(ms).toISOString() === canonical ? canonical : undefined;
+/** One qualification command. Version checks live in the body, so a retry is always safe to show. */
+export async function qualificationWrite<K extends keyof DTO>(
+  method: "POST" | "PUT",
+  path: string,
+  body: unknown,
+  name: K,
+  signal: AbortSignal,
+): Promise<DTO[K]> {
+  try {
+    const csrf = await read("/auth/csrf", csrfEnvelope, signal);
+    const response = await fetch(`/api/v1${path}`, {
+      method,
+      credentials: "same-origin",
+      cache: "no-store",
+      signal,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrf.data.data.token,
+      },
+      body: JSON.stringify(body),
+    });
+    if (response.status !== 200 && response.status !== 201) throw await failure(response);
+    const parsed = schema(name).safeParse(await response.json());
+    if (!parsed.success) throw new QualificationFailure("uncertain");
+    return parsed.data;
+  } catch (error) {
+    if (error instanceof AccountFailure) throw error;
+    throw new QualificationFailure("uncertain");
+  }
 }

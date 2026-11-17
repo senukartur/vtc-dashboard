@@ -6,7 +6,6 @@
 import { formatQuantity, formatUtc, type Locale } from "../../shared/formatting.js";
 import { AccountFailure } from "../account/transport.js";
 import type { EventPhase, ResponseValue } from "../events/view-model.js";
-import { promotionReadyCount } from "../qualifications/promotion-summary.js";
 import type { PeriodQuery } from "./model.js";
 import { dashboardTranslations } from "./translations.js";
 import type { DTO } from "./transport.js";
@@ -200,7 +199,7 @@ export function responsePressed(current: ResponseValue, declining: boolean) {
   };
 }
 
-export type ActionKey = "fixes" | "drafts" | "events" | "review" | "applications" | "promotions";
+export type ActionKey = "fixes" | "drafts" | "events" | "review" | "applications";
 /** Each "Needs attention" section and the capability that offers it, in display order. */
 const actionSections: readonly { key: ActionKey; capability: string }[] = [
   { key: "fixes", capability: "trips.read_own_private" },
@@ -208,11 +207,8 @@ const actionSections: readonly { key: ActionKey; capability: string }[] = [
   { key: "events", capability: "events.respond" },
   { key: "review", capability: "trips.review" },
   { key: "applications", capability: "applications.manage" },
-  { key: "promotions", capability: "qualifications.manage" },
 ];
-type ActionSummary = DTO["WorkspaceSummary"] & {
-  promotionsReady?: Parameters<typeof promotionReadyCount>[0];
-};
+type ActionSummary = DTO["WorkspaceSummary"];
 
 const actionCount = (summary: ActionSummary, key: ActionKey) =>
   ({
@@ -221,7 +217,6 @@ const actionCount = (summary: ActionSummary, key: ActionKey) =>
     events: summary.unansweredUpcomingEvents?.count,
     review: summary.reviewQueue?.count,
     applications: summary.newApplicationsCount,
-    promotions: promotionReadyCount(summary.promotionsReady),
   })[key];
 
 /**

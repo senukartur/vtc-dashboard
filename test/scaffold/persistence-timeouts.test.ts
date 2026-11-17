@@ -499,13 +499,13 @@ assert.ok(performance.now() - started < ${mode === "short" ? 1500 : 7000});
       `journal-${target}-delayed`,
       `
 const started = performance.now();
-assert.equal(await runMigrations(settings), 35);
+assert.equal(await runMigrations(settings), 36);
 assert.ok(performance.now() - started >= 2100);
 assert.ok(performance.now() - started < 5000);
 `,
     );
-    assert.equal(counts.applying, 35);
-    assert.equal(counts.finalizations, 35);
+    assert.equal(counts.applying, 36);
+    assert.equal(counts.finalizations, 36);
     assert.equal(counts.delayedAcks, 1);
     assert.equal(counts.releaseQueries, 0);
   });

@@ -598,7 +598,7 @@ test(
         [
           ["Job type", "Unknown"],
           ["Game mode", "HaulMP"],
-          ["Hard Mode result", "Not qualified"],
+          ["Hard Mode", "Not qualified"],
         ],
       ],
       [
@@ -606,13 +606,15 @@ test(
         [
           ["Тип заказа", "Неизвестно"],
           ["Режим игры", "HaulMP"],
-          ["Результат сложного режима", "Не соответствует"],
+          // Hard Mode keeps its English name in both languages.
+          ["Hard Mode", "Не соответствует"],
         ],
       ],
     ] as const) {
       await catalogLanguage(page, locale);
       for (const [label, value] of rows) {
-        const term = page.getByText(label, { exact: true });
+        // Only the audit term: the qualification check can name Hard Mode too.
+        const term = page.locator("dt").filter({ hasText: new RegExp(`^\\s*${label}$`) });
         await expect(term).toBeVisible();
         await expect(term.locator("xpath=following-sibling::dd")).toHaveText(value);
       }

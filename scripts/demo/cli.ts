@@ -3,8 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createDatabase, createUnitOfWork, settingsFromEnvironment } from "@vtc/db";
 import { company, eq } from "@vtc/db/identity-schema";
 import { assertDemoTarget, demoEmail, demoId } from "../../apps/api/src/demo-dataset.ts";
-import { seedDashboard } from "../../apps/api/src/demo-seed.ts";
-import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
+import { createSeedIdentity, seedDashboard } from "../../apps/api/src/demo-seed.ts";
 
 try {
   assertDemoTarget(process.env);
@@ -54,11 +53,7 @@ try {
       login.password.length < 16
     )
       throw new Error("DEMO_PRIVATE_LOGIN_INVALID");
-    const identity = createIdentity(unit, {
-      secret: randomBytes(32).toString("hex"),
-      origin: "http://127.0.0.1:5173",
-      production: false,
-    });
+    const identity = createSeedIdentity(unit, "http://127.0.0.1:5173");
     const credential = await identity.prepareCredential(login.password);
     const result = await seedDashboard(unit, identity, credential.passwordHash);
     console.log(

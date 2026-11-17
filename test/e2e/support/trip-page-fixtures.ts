@@ -31,36 +31,46 @@ function stage4(name: "telemetry" | "manual-unresolved") {
   view.summary.owner.id = fixtureId;
   return { envelope, view, facts: view.effectiveFacts as S["EffectiveTripFacts"] };
 }
-function rules(view: TripPrivate) {
-  const check = view.qualificationCheck;
-  if (!check) throw new Error("MISSING_CHECK");
-  return check.rules;
+function check(view: TripPrivate) {
+  if (!view.qualificationCheck) throw new Error("MISSING_CHECK");
+  return view.qualificationCheck;
 }
 function trailerRule(view: TripPrivate) {
-  const rule = rules(view).find((r) => r.ruleType === "allowed_trailer_types");
-  if (rule?.ruleType !== "allowed_trailer_types") throw new Error("MISSING_TRAILER_RULE");
+  const rule = check(view).rules.find((r) => r.rule === "trailer_types");
+  if (rule?.rule !== "trailer_types") throw new Error("MISSING_TRAILER_RULE");
+  return rule;
+}
+function adrRule(view: TripPrivate) {
+  const rule = check(view).rules.find((r) => r.rule === "adr");
+  if (rule?.rule !== "adr") throw new Error("MISSING_ADR_RULE");
   return rule;
 }
 
-/** F1: an accepted telemetry trip linked to an event, with one source and three rules. */
+/** F1: a telemetry trip linked to an event, with one source and the five checked limits. */
 export function telemetryWithEvent() {
   const { envelope, view } = stage4("telemetry");
   view.summary.sourceKinds = ["ets2telemetry"];
   view.summary.event = { id: tripEventId, title: "Fictional Winter Convoy" };
   view.sources = (view.sources ?? []).filter((source) => source.kind === "ets2telemetry");
-  trailerRule(view).allowedTrailerTypeCount = 3;
   return envelope;
 }
 
-/** F2: a manual trip without an event; unknown companies, distance and damage, unresolved check. */
+/** F2: a manual trip without an event; unknown companies, distance, damage and level. */
 export function manualUnknown(
-  variant: "unresolved" | "no-check" | "no-rules" | "zero-damage" = "unresolved",
+  variant: "no-level" | "no-check" | "event-exempt" | "zero-damage" = "no-level",
 ) {
   const { envelope, view, facts } = stage4("manual-unresolved");
   view.summary.event = null;
   if (variant === "no-check") view.qualificationCheck = null;
-  if (variant === "no-rules")
-    view.qualificationCheck = { status: "resolved", reasonCode: null, rules: [] };
+  if (variant === "event-exempt")
+    view.qualificationCheck = {
+      status: "event_exempt",
+      basis: "current",
+      level: { id: "41570000-0000-4000-8000-000000000001", name: "Fictional Trainee" },
+      outcome: null,
+      reasonCode: null,
+      rules: [],
+    };
   if (variant === "zero-damage") facts.cargoDamagePercent = 0;
   return envelope;
 }
@@ -79,13 +89,13 @@ export function returnedTrip() {
   const { envelope, view } = stage4("telemetry");
   view.summary.decision = "rejected";
   view.summary.event = null;
-  // Empty configured allowlists: no trailer type and no ADR class is allowed.
-  const trailer = trailerRule(view);
-  trailer.allowedTrailerTypes = [];
-  trailer.allowedTrailerTypeCount = 0;
-  const adr = rules(view).find((r) => r.ruleType === "allowed_adr_categories");
-  if (adr?.ruleType !== "allowed_adr_categories") throw new Error("MISSING_ADR_RULE");
-  adr.allowedAdrClasses = [];
+  // Selected limits without entries: no trailer type and no ADR class is allowed.
+  trailerRule(view).allowed = [];
+  const adr = adrRule(view);
+  adr.mode = "selected";
+  adr.allowedClasses = [];
+  adr.observed = "3";
+  adr.result = "fail";
   view.decisions = [
     {
       id: "41500000-0000-4000-8000-000000000340",
@@ -106,7 +116,6 @@ export function returnedTrip() {
         factRevisionId: "41500000-0000-4000-8000-000000000310",
         qualificationAssignmentId: null,
         levelId: null,
-        ruleVersionId: null,
         eventId: null,
         attendanceRevisionId: null,
         attributionAt: null,
@@ -148,7 +157,7 @@ export const longEventTitle =
   "Fictional Northern Lights Winter Convoy across the Scandinavian ferries and mountain passes with a very long title";
 export const longTrailerLabel = "Fictional Extra Long Refrigerated Double Deck Curtainsider";
 
-/** L1: the reconciled trip with long names, a long event title and a truncated trailer list. */
+/** L1: the reconciled trip with long names, a long event title and long trailer labels. */
 export function longValues() {
   const { envelope, view, facts } = stage4("telemetry");
   view.summary.event = { id: tripEventId, title: longEventTitle };
@@ -156,11 +165,13 @@ export function longValues() {
   if (facts.destinationCompany?.state === "resolved")
     facts.destinationCompany.name = `${longCompanyName} Port`;
   const rule = trailerRule(view);
-  const [allowed] = rule.allowedTrailerTypes;
-  if (allowed) allowed.label = longTrailerLabel;
-  const [offending] = rule.offendingTrailerTypes;
-  if (offending) offending.label = `${longTrailerLabel} Tanker`;
-  rule.allowedTrailerTypeCount = 12;
+  const [allowed] = rule.allowed;
+  if (allowed) {
+    allowed.label = longTrailerLabel;
+    rule.allowed.push({ ...allowed, entityId: "41500000-0000-4000-8000-000000000332" });
+  }
+  const [observed] = rule.observed;
+  if (observed) observed.label = `${longTrailerLabel} Tanker`;
   return envelope;
 }
 
@@ -170,7 +181,7 @@ export function tripPageStubs(): Record<string, TripEnvelope> {
     telemetryWithEvent: telemetryWithEvent(),
     manualUnknown: manualUnknown(),
     manualNoCheck: manualUnknown("no-check"),
-    manualNoRules: manualUnknown("no-rules"),
+    manualEventExempt: manualUnknown("event-exempt"),
     manualZeroDamage: manualUnknown("zero-damage"),
     reconciledAccepted: reconciledAccepted(),
     returnedTrip: returnedTrip(),

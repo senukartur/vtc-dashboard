@@ -150,6 +150,7 @@ export async function createApp(options: AppOptions) {
         "CATALOG_IMPORT_TOKEN_INVALID",
         "CATALOG_IMPORT_INVALID",
         "CATALOG_SELECTION_HIDDEN",
+        "QUALIFICATION_CONDITIONS_REQUIRED",
       ].includes(suppliedCode)
         ? suppliedCode
         : (errorCodes[status] ?? "INTERNAL_ERROR");
@@ -179,7 +180,7 @@ export async function createApp(options: AppOptions) {
               details: [{ field: "idempotency-key", code, ownResourceId: httpError.ownResourceId }],
             }
           : {}),
-        ...(code === "CATALOG_IMPORT_INVALID" &&
+        ...((code === "CATALOG_IMPORT_INVALID" || code === "QUALIFICATION_CONDITIONS_REQUIRED") &&
         "details" in httpError &&
         Array.isArray(httpError.details)
           ? { details: httpError.details }

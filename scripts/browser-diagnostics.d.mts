@@ -1,47 +1,4 @@
 export type BrowserFailureStatus = "failed" | "timedOut" | "interrupted";
-export const qualificationPhaseAnnotation: "vtc-qualification-promotion-phase";
-export const qualificationPhaseScenario: "qualification-promotion-refresh";
-export const qualificationPromotionPhases: readonly [
-  "setup",
-  "initial-route",
-  "initial-reason",
-  "open-promotion",
-  "confirm-promotion",
-  "command-arrived",
-  "trigger-old-reads",
-  "old-reads-held",
-  "release-promotion",
-  "promotion-committed",
-  "release-old-reads",
-  "promotion-dialog-settled",
-  "current-level",
-  "promotion-disabled",
-  "history-assignment",
-  "history-level",
-  "assignment-purpose",
-  "assignment-level",
-  "open-assignment",
-  "confirm-assignment",
-  "assignment-dialog-settled",
-  "command-etags",
-  "finally-release-command",
-  "finally-release-held",
-  "finally-persist-race",
-  "complete",
-];
-export type QualificationPromotionPhase = (typeof qualificationPromotionPhases)[number];
-export interface QualificationFailurePhase {
-  scenario: typeof qualificationPhaseScenario;
-  phase: QualificationPromotionPhase;
-  primaryPhase:
-    | "none"
-    | Exclude<
-        QualificationPromotionPhase,
-        "finally-release-command" | "finally-release-held" | "finally-persist-race" | "complete"
-      >;
-}
-export function safeQualificationPhase(value: unknown): QualificationFailurePhase | undefined;
-export function safeQualificationAnnotations(value: unknown): QualificationFailurePhase | undefined;
 export function safeFailureLocation(value: unknown): string | undefined;
 export type BrowserFailure =
   | {
@@ -52,14 +9,6 @@ export type BrowserFailure =
       status: BrowserFailureStatus;
       failureAt?: string;
     }
-  | ({
-      kind: "test";
-      file: "qualifications";
-      project: string;
-      line: number;
-      status: BrowserFailureStatus;
-      failureAt?: string;
-    } & QualificationFailurePhase)
   | { kind: "global"; category: string; status: BrowserFailureStatus };
 export const browserFiles: Record<string, string>;
 export const browserProjects: string[];

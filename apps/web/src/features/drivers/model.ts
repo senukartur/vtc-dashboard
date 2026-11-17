@@ -7,7 +7,8 @@ import { DriversFailure, type DTO } from "./transport.js";
 
 export type Game = "ets2" | "ats";
 export type GameFilter = "all" | Game;
-export type Level = DTO["QualificationLevel"];
+export type Level = DTO["QualificationLevelSummary"];
+export type MemberQualification = DTO["MyQualification"];
 export type Assignment = DTO["Assignment"];
 export type TripSummary = DTO["TripSummary"];
 
@@ -51,11 +52,10 @@ export function ladderFor(levels: readonly Level[], game: Game): Level[] {
 
 /** The next ladder step, "top" for the highest level, or null when it cannot be resolved. */
 export function nextLevel(ladder: readonly Level[], levelId: string): Level | "top" | null {
-  const index = ladder.findIndex((level) => level.id === levelId);
-  const current = ladder[index];
+  const current = ladder.find((level) => level.id === levelId);
   if (!current) return null;
-  if (current.terminal) return "top";
-  return ladder[index + 1] ?? null;
+  if (!current.nextLevel) return "top";
+  return ladder.find((level) => level.id === current.nextLevel?.id) ?? null;
 }
 
 export function assignmentFor(profile: DTO["MemberProfile"], game: Game): Assignment | null {

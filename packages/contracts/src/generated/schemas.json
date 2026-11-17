@@ -2063,18 +2063,6 @@
             }
           ]
         },
-        "ruleVersionId": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "eventId": {
           "anyOf": [
             {
@@ -2137,7 +2125,6 @@
         "factRevisionId",
         "qualificationAssignmentId",
         "levelId",
-        "ruleVersionId",
         "eventId",
         "attendanceRevisionId",
         "attributionAt",
@@ -2316,7 +2303,7 @@
         "qualificationCheck": {
           "anyOf": [
             {
-              "$ref": "#/$defs/TripStage4QualificationCheck"
+              "$ref": "#/$defs/QualificationCheck"
             },
             {
               "type": "null"
@@ -3119,329 +3106,6 @@
       ],
       "additionalProperties": false
     },
-    "Rule": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "max_mass"
-            },
-            "maxKg": {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            }
-          },
-          "required": [
-            "type",
-            "maxKg"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "allowed_trailer_types"
-            },
-            "entityIds": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              },
-              "maxItems": 1000,
-              "uniqueItems": true
-            }
-          },
-          "required": [
-            "type",
-            "entityIds"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "allowed_adr_categories"
-            },
-            "classes": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "1",
-                  "2",
-                  "3",
-                  "4",
-                  "6",
-                  "8"
-                ]
-              },
-              "maxItems": 6,
-              "uniqueItems": true
-            }
-          },
-          "required": [
-            "type",
-            "classes"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    "QualificationLevel": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "version": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "ruleVersionId": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "configured": {
-          "type": "boolean"
-        },
-        "requiredTrips": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "requiredDistanceM": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "position": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 25
-        },
-        "terminal": {
-          "type": "boolean"
-        },
-        "promotionConfigured": {
-          "type": "boolean"
-        },
-        "freightRuleSummary": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/QualificationFreightRuleSummary"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "version",
-        "game",
-        "name",
-        "ruleVersionId",
-        "configured",
-        "requiredTrips",
-        "requiredDistanceM",
-        "position",
-        "terminal",
-        "promotionConfigured",
-        "freightRuleSummary"
-      ],
-      "additionalProperties": false
-    },
-    "LevelInput": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048,
-          "pattern": "\\S"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "additionalProperties": false
-    },
-    "RulesInput": {
-      "type": "object",
-      "properties": {
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Rule"
-          },
-          "maxItems": 32
-        },
-        "requiredTrips": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 2147483647
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "requiredDistanceM": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048
-        },
-        "effectiveAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
-          "description": "Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected."
-        }
-      },
-      "required": [
-        "rules",
-        "requiredTrips",
-        "requiredDistanceM",
-        "reason"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationRuleVersion": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "levelId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "publishedAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        },
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Rule"
-          }
-        },
-        "requiredTrips": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 2147483647
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "requiredDistanceM": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "effectiveAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        }
-      },
-      "required": [
-        "id",
-        "levelId",
-        "game",
-        "publishedAt",
-        "rules",
-        "requiredTrips",
-        "requiredDistanceM",
-        "effectiveAt"
-      ],
-      "additionalProperties": false
-    },
     "Assignment": {
       "type": "object",
       "properties": {
@@ -3545,16 +3209,10 @@
       "type": "object",
       "properties": {
         "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
+          "$ref": "#/$defs/Game"
         },
         "levelId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          "$ref": "#/$defs/Id"
         },
         "reason": {
           "type": "string",
@@ -3565,22 +3223,8 @@
           "type": "string",
           "enum": [
             "initial",
-            "reinstatement",
-            "historical_resolution",
-            "administrative_correction"
+            "reinstatement"
           ]
-        },
-        "assignedAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
-          "description": "Supported historical interval start, required only for historical_resolution."
-        },
-        "endedAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
-          "description": "Supported exclusive historical interval end, required only for historical_resolution."
         }
       },
       "required": [
@@ -3588,196 +3232,6 @@
         "levelId",
         "reason",
         "purpose"
-      ],
-      "additionalProperties": false
-    },
-    "Progress": {
-      "type": "object",
-      "properties": {
-        "assignment": {
-          "$ref": "#/$defs/Assignment"
-        },
-        "acceptedTrips": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "actualDistanceM": {
-          "type": "string",
-          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-          "maxLength": 64
-        },
-        "requiredTrips": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "requiredDistanceM": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "eligibleForConfirmation": {
-          "type": "boolean"
-        },
-        "reviewRequired": {
-          "type": "boolean"
-        },
-        "computedAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        },
-        "projectionVersion": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "projectionPending": {
-          "const": false,
-          "type": "boolean"
-        },
-        "reviewReasonCodes": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "promotion_requirements_no_longer_met"
-            ]
-          }
-        }
-      },
-      "required": [
-        "assignment",
-        "acceptedTrips",
-        "actualDistanceM",
-        "requiredTrips",
-        "requiredDistanceM",
-        "eligibleForConfirmation",
-        "reviewRequired",
-        "computedAt",
-        "projectionVersion",
-        "projectionPending",
-        "reviewReasonCodes"
-      ],
-      "additionalProperties": false
-    },
-    "ProgressPublic": {
-      "type": "object",
-      "properties": {
-        "assignment": {
-          "$ref": "#/$defs/Assignment"
-        },
-        "acceptedTrips": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "actualDistanceM": {
-          "type": "string",
-          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-          "maxLength": 64
-        },
-        "requiredTrips": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "requiredDistanceM": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "eligibleForConfirmation": {
-          "type": "boolean"
-        },
-        "computedAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        },
-        "projectionVersion": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "projectionPending": {
-          "const": false,
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "assignment",
-        "acceptedTrips",
-        "actualDistanceM",
-        "requiredTrips",
-        "requiredDistanceM",
-        "eligibleForConfirmation",
-        "computedAt",
-        "projectionVersion",
-        "projectionPending"
-      ],
-      "additionalProperties": false
-    },
-    "PromotionInput": {
-      "type": "object",
-      "properties": {
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "assignmentId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "targetLevelId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048
-        }
-      },
-      "required": [
-        "game",
-        "assignmentId",
-        "targetLevelId",
-        "reason"
       ],
       "additionalProperties": false
     },
@@ -5945,285 +5399,6 @@
       ],
       "additionalProperties": false
     },
-    "ListQualificationLevel": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/QualificationLevel"
-          }
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListQualificationLevel": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListQualificationLevel"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationArchivedLevel": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/Id"
-        },
-        "game": {
-          "$ref": "#/$defs/Game"
-        },
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        }
-      },
-      "required": [
-        "id",
-        "game",
-        "name"
-      ],
-      "additionalProperties": false
-    },
-    "ListQualificationArchivedLevel": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "maxItems": 100,
-          "items": {
-            "$ref": "#/$defs/QualificationArchivedLevel"
-          }
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListQualificationArchivedLevel": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListQualificationArchivedLevel"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "ListQualificationRuleVersion": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/QualificationRuleVersion"
-          }
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListQualificationRuleVersion": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListQualificationRuleVersion"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeQualificationRuleVersion": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/QualificationRuleVersion"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeProgressPublic": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ProgressPublic"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeProgress": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/Progress"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "ListAssignmentHistory": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/AssignmentHistory"
-          }
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListAssignmentHistory": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListAssignmentHistory"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeQualificationLevel": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/QualificationLevel"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeAssignment": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/Assignment"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
     "EnvelopeEventMember": {
       "type": "object",
       "properties": {
@@ -8179,498 +7354,6 @@
       ],
       "additionalProperties": false
     },
-    "QualificationPreviewInput": {
-      "type": "object",
-      "properties": {
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Rule"
-          },
-          "maxItems": 32
-        },
-        "sample": {
-          "type": "object",
-          "properties": {
-            "cargoMassKg": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-                  "maxLength": 64
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "trailerTypeIds": {
-              "type": "array",
-              "maxItems": 1,
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "format": "uuid",
-                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            },
-            "trailersComplete": {
-              "type": "boolean"
-            },
-            "adr": {
-              "type": "object",
-              "properties": {
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "known",
-                    "non_hazardous",
-                    "unknown"
-                  ]
-                },
-                "adrClass": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "1",
-                        "2",
-                        "3",
-                        "4",
-                        "6",
-                        "8"
-                      ]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "status",
-                "adrClass"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "required": [
-            "cargoMassKg",
-            "trailerTypeIds",
-            "trailersComplete",
-            "adr"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "game",
-        "rules",
-        "sample"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationPreview": {
-      "type": "object",
-      "properties": {
-        "outcome": {
-          "type": "string",
-          "enum": [
-            "pass",
-            "fail",
-            "unknown"
-          ]
-        },
-        "ruleResults": {
-          "type": "array",
-          "maxItems": 3,
-          "items": {
-            "type": "object",
-            "properties": {
-              "ruleType": {
-                "type": "string",
-                "enum": [
-                  "max_mass",
-                  "allowed_trailer_types",
-                  "allowed_adr_categories"
-                ]
-              },
-              "outcome": {
-                "type": "string",
-                "enum": [
-                  "pass",
-                  "fail",
-                  "unknown"
-                ]
-              },
-              "reasonCode": {
-                "type": "string",
-                "enum": [
-                  "rule_passed",
-                  "rule_mass_exceeded",
-                  "rule_mass_unknown",
-                  "rule_mass_invalid",
-                  "rule_trailer_type_disallowed",
-                  "rule_trailer_type_unknown",
-                  "rule_trailers_incomplete",
-                  "rule_adr_category_disallowed",
-                  "rule_adr_category_unknown"
-                ]
-              }
-            },
-            "required": [
-              "ruleType",
-              "outcome",
-              "reasonCode"
-            ],
-            "additionalProperties": false
-          }
-        }
-      },
-      "required": [
-        "outcome",
-        "ruleResults"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeQualificationPreview": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/QualificationPreview"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationActionActor": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "nickname": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "nickname"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationActionHistory": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "levelId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "assignedAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        },
-        "periodId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "endedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time",
-              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "purpose": {
-          "type": "string",
-          "enum": [
-            "initial",
-            "reinstatement",
-            "historical_resolution",
-            "administrative_correction",
-            "promotion",
-            "ladder_archive_transfer"
-          ]
-        },
-        "actor": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/QualificationActionActor"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "promotion": {
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-                },
-                "confirmedAt": {
-                  "type": "string",
-                  "format": "date-time",
-                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-                }
-              },
-              "required": [
-                "id",
-                "confirmedAt"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "levelName": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        }
-      },
-      "required": [
-        "id",
-        "levelId",
-        "game",
-        "assignedAt",
-        "periodId",
-        "endedAt",
-        "purpose",
-        "actor",
-        "promotion",
-        "levelName"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationRuleHistory": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "levelId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "publishedAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        },
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Rule"
-          }
-        },
-        "requiredTrips": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 2147483647
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "requiredDistanceM": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "effectiveAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        },
-        "publisher": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/QualificationActionActor"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "levelId",
-        "game",
-        "publishedAt",
-        "rules",
-        "requiredTrips",
-        "requiredDistanceM",
-        "effectiveAt",
-        "publisher"
-      ],
-      "additionalProperties": false
-    },
-    "ListQualificationActionHistory": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/QualificationActionHistory"
-          },
-          "maxItems": 100
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListQualificationActionHistory": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListQualificationActionHistory"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "ListQualificationRuleHistory": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/QualificationRuleHistory"
-          },
-          "maxItems": 100
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListQualificationRuleHistory": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListQualificationRuleHistory"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
     "SourceCapability": {
       "type": "object",
       "properties": {
@@ -8860,125 +7543,6 @@
         "meta"
       ],
       "additionalProperties": false
-    },
-    "QualificationRuleCheck": {
-      "type": "object",
-      "properties": {
-        "ruleType": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 64
-        },
-        "outcome": {
-          "type": "string",
-          "enum": [
-            "pass",
-            "fail",
-            "unknown"
-          ]
-        },
-        "reasonCode": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 64
-        },
-        "bypassedByEvent": {
-          "type": "boolean"
-        },
-        "observedMassKg": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Decimal"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "limitMassKg": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Decimal"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "entityIds": {
-          "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              },
-              {
-                "type": "string",
-                "enum": [
-                  "1",
-                  "2",
-                  "3",
-                  "4",
-                  "6",
-                  "8"
-                ]
-              }
-            ]
-          },
-          "maxItems": 10
-        }
-      },
-      "required": [
-        "ruleType",
-        "outcome",
-        "reasonCode",
-        "bypassedByEvent",
-        "observedMassKg",
-        "limitMassKg",
-        "entityIds"
-      ],
-      "additionalProperties": false,
-      "description": "One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 trailer catalog IDs or ADR classes that broke the rule. Unknown values are null, never zero."
-    },
-    "QualificationCheck": {
-      "type": "object",
-      "properties": {
-        "status": {
-          "type": "string",
-          "enum": [
-            "resolved",
-            "unresolved"
-          ]
-        },
-        "reasonCode": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/QualificationRuleCheck"
-          },
-          "maxItems": 32
-        }
-      },
-      "required": [
-        "status",
-        "reasonCode",
-        "rules"
-      ],
-      "additionalProperties": false,
-      "description": "Historical qualification rules evaluated for the reviewed fact. Unresolved history has a reason code and no rules."
     },
     "ReviewAcceptance": {
       "type": "object",
@@ -11284,61 +9848,6 @@
         "expectedTripVersion"
       ],
       "additionalProperties": false
-    },
-    "QualificationRulePublicationInput": {
-      "type": "object",
-      "properties": {
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Rule"
-          },
-          "maxItems": 32
-        },
-        "requiredTrips": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 2147483647
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "requiredDistanceM": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048,
-          "pattern": "\\S"
-        },
-        "effectiveAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
-          "description": "Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected."
-        }
-      },
-      "required": [
-        "rules",
-        "requiredTrips",
-        "requiredDistanceM"
-      ],
-      "additionalProperties": false,
-      "description": "Optional publication reason. A null requiredTrips or requiredDistanceM means there is no minimum for that measure. Both keys are required. Use the separate optional preview action for a sample."
     },
     "EventStage2Input": {
       "type": "object",
@@ -14840,557 +13349,6 @@
       ],
       "additionalProperties": false
     },
-    "QualificationStage3LevelSummary": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/Id"
-        },
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        }
-      },
-      "required": [
-        "id",
-        "name"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3PromotionCandidate": {
-      "type": "object",
-      "properties": {
-        "member": {
-          "$ref": "#/$defs/MemberSummary"
-        },
-        "game": {
-          "$ref": "#/$defs/Game"
-        },
-        "assignmentId": {
-          "$ref": "#/$defs/Id"
-        },
-        "version": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 4294967295
-        },
-        "currentLevel": {
-          "$ref": "#/$defs/QualificationStage3LevelSummary"
-        },
-        "nextLevel": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/QualificationStage3LevelSummary"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "acceptedTrips": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "actualDistanceM": {
-          "type": "string",
-          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-          "maxLength": 64
-        },
-        "requiredTrips": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "requiredDistanceM": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "eligible": {
-          "type": "boolean"
-        },
-        "eligibleSince": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Timestamp"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "member",
-        "game",
-        "assignmentId",
-        "version",
-        "currentLevel",
-        "nextLevel",
-        "acceptedTrips",
-        "actualDistanceM",
-        "requiredTrips",
-        "requiredDistanceM",
-        "eligible",
-        "eligibleSince"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3PromotionCandidateList": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/QualificationStage3PromotionCandidate"
-          },
-          "maxItems": 100
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "total": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor",
-        "total"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3PromotionCandidateListEnvelope": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/QualificationStage3PromotionCandidateList"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3ActionHistory": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "levelId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "assignedAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        },
-        "periodId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "endedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time",
-              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "purpose": {
-          "type": "string",
-          "enum": [
-            "initial",
-            "reinstatement",
-            "historical_resolution",
-            "administrative_correction",
-            "promotion",
-            "ladder_archive_transfer"
-          ]
-        },
-        "actor": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/QualificationActionActor"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "assignmentReason": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048,
-              "pattern": "\\S"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "promotion": {
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "$ref": "#/$defs/Id"
-                },
-                "confirmedAt": {
-                  "$ref": "#/$defs/Timestamp"
-                },
-                "actor": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/QualificationActionActor"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "reason": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 2048,
-                      "pattern": "\\S"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "id",
-                "confirmedAt",
-                "actor",
-                "reason"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "levelId",
-        "game",
-        "assignedAt",
-        "periodId",
-        "endedAt",
-        "purpose",
-        "actor",
-        "assignmentReason",
-        "promotion"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3ActionHistoryList": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/QualificationStage3ActionHistory"
-          },
-          "maxItems": 100
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3ActionHistoryListEnvelope": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/QualificationStage3ActionHistoryList"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3PromotionHistory": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "promotion"
-        },
-        "id": {
-          "$ref": "#/$defs/Id"
-        },
-        "member": {
-          "$ref": "#/$defs/MemberSummary"
-        },
-        "game": {
-          "$ref": "#/$defs/Game"
-        },
-        "sourceAssignmentId": {
-          "$ref": "#/$defs/Id"
-        },
-        "targetAssignmentId": {
-          "$ref": "#/$defs/Id"
-        },
-        "sourceLevel": {
-          "$ref": "#/$defs/QualificationStage3LevelSummary"
-        },
-        "targetLevel": {
-          "$ref": "#/$defs/QualificationStage3LevelSummary"
-        },
-        "confirmedAt": {
-          "$ref": "#/$defs/Timestamp"
-        },
-        "actor": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/QualificationActionActor"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "reason": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048,
-              "pattern": "\\S"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "acceptedTrips": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "actualDistanceM": {
-          "type": "string",
-          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-          "maxLength": 64
-        },
-        "requiredTrips": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "requiredDistanceM": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "kind",
-        "id",
-        "member",
-        "game",
-        "sourceAssignmentId",
-        "targetAssignmentId",
-        "sourceLevel",
-        "targetLevel",
-        "confirmedAt",
-        "actor",
-        "reason",
-        "acceptedTrips",
-        "actualDistanceM",
-        "requiredTrips",
-        "requiredDistanceM"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3PromotionHistoryList": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/QualificationStage3CompanyAction"
-          },
-          "maxItems": 100
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "total": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor",
-        "total"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3PromotionHistoryListEnvelope": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/QualificationStage3PromotionHistoryList"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3MemberSearchList": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/MemberSummary"
-          },
-          "maxItems": 100
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3MemberSearchListEnvelope": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/QualificationStage3MemberSearchList"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
     "WorkspaceStage3Summary": {
       "type": "object",
       "properties": {
@@ -15557,27 +13515,6 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "Requires applications.manage and enabled Admissions reads. Count submitted applications."
-        },
-        "promotionsReady": {
-          "type": "object",
-          "properties": {
-            "ets2": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "ats": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            }
-          },
-          "required": [
-            "ets2",
-            "ats"
-          ],
-          "additionalProperties": false,
-          "description": "Requires qualifications.manage and enabled qualification progress reads. Use the authorized per-game promotion-candidate population."
         }
       },
       "required": [
@@ -17507,427 +15444,6 @@
       ],
       "additionalProperties": false
     },
-    "QualificationStage3AssignmentHistory": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "assignment"
-        },
-        "id": {
-          "$ref": "#/$defs/Id"
-        },
-        "member": {
-          "$ref": "#/$defs/MemberSummary"
-        },
-        "game": {
-          "$ref": "#/$defs/Game"
-        },
-        "assignmentId": {
-          "$ref": "#/$defs/Id"
-        },
-        "level": {
-          "$ref": "#/$defs/QualificationStage3LevelSummary"
-        },
-        "assignedAt": {
-          "$ref": "#/$defs/Timestamp"
-        },
-        "endedAt": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Timestamp"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "purpose": {
-          "type": "string",
-          "enum": [
-            "initial",
-            "reinstatement",
-            "historical_resolution",
-            "administrative_correction",
-            "ladder_archive_transfer"
-          ]
-        },
-        "actor": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/QualificationActionActor"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "reason": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048,
-              "pattern": "\\S"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "kind",
-        "id",
-        "member",
-        "game",
-        "assignmentId",
-        "level",
-        "assignedAt",
-        "endedAt",
-        "purpose",
-        "actor",
-        "reason"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationStage3CompanyAction": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/QualificationStage3PromotionHistory"
-        },
-        {
-          "$ref": "#/$defs/QualificationStage3AssignmentHistory"
-        }
-      ]
-    },
-    "QualificationLadderLevel": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "version": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "ruleVersionId": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "configured": {
-          "type": "boolean"
-        },
-        "requiredTrips": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "requiredDistanceM": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "position": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 25
-        },
-        "terminal": {
-          "type": "boolean"
-        },
-        "promotionConfigured": {
-          "type": "boolean"
-        },
-        "currentDriverCount": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "effectiveRule": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/QualificationRuleVersion"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "freightRuleSummary": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/QualificationFreightRuleSummary"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "version",
-        "game",
-        "name",
-        "ruleVersionId",
-        "configured",
-        "requiredTrips",
-        "requiredDistanceM",
-        "position",
-        "terminal",
-        "promotionConfigured",
-        "currentDriverCount",
-        "effectiveRule",
-        "freightRuleSummary"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationLadder": {
-      "type": "object",
-      "properties": {
-        "game": {
-          "$ref": "#/$defs/Game"
-        },
-        "revision": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "asOf": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        },
-        "ladderEditsEnabled": {
-          "type": "boolean"
-        },
-        "levels": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/QualificationLadderLevel"
-          },
-          "minItems": 1,
-          "maxItems": 25
-        }
-      },
-      "required": [
-        "game",
-        "revision",
-        "asOf",
-        "ladderEditsEnabled",
-        "levels"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationLadderRevision": {
-      "type": "object",
-      "properties": {
-        "game": {
-          "$ref": "#/$defs/Game"
-        },
-        "revision": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": [
-        "game",
-        "revision"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeQualificationLadder": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/QualificationLadder"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeQualificationLadderRevision": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/QualificationLadderRevision"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationLadderAddInput": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "position": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 25
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048,
-          "pattern": "\\S"
-        }
-      },
-      "required": [
-        "name",
-        "position"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationLadderOrderInput": {
-      "type": "object",
-      "properties": {
-        "levelIds": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Id"
-          },
-          "uniqueItems": true,
-          "minItems": 1,
-          "maxItems": 25
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048,
-          "pattern": "\\S"
-        }
-      },
-      "required": [
-        "levelIds"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationLadderArchiveInput": {
-      "type": "object",
-      "properties": {
-        "targetLevelId": {
-          "$ref": "#/$defs/Id"
-        },
-        "observedDriverCount": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048,
-          "pattern": "\\S"
-        }
-      },
-      "required": [
-        "targetLevelId",
-        "observedDriverCount"
-      ],
-      "additionalProperties": false
-    },
-    "QualificationFreightRuleSummary": {
-      "type": "object",
-      "properties": {
-        "maxMassKg": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "allowedTrailerTypeCount": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 1000
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "allowedAdrCategoryCount": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "maxMassKg",
-        "allowedTrailerTypeCount",
-        "allowedAdrCategoryCount"
-      ],
-      "additionalProperties": false
-    },
     "AnalyticsStage4Totals": {
       "type": "object",
       "properties": {
@@ -18281,199 +15797,6 @@
       "additionalProperties": false,
       "description": "One author-safe source of the trip. Reconciliation candidates, dismissals, confidence and reasons are reviewer-only and never appear here."
     },
-    "TripStage4RuleCheck": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "ruleType": {
-              "const": "max_mass"
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "pass",
-                "fail",
-                "unknown"
-              ]
-            },
-            "bypassedByEvent": {
-              "type": "boolean"
-            },
-            "limitMassKg": {
-              "$ref": "#/$defs/Decimal"
-            },
-            "observedMassKg": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/Decimal"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          "required": [
-            "ruleType",
-            "outcome",
-            "bypassedByEvent",
-            "limitMassKg",
-            "observedMassKg"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "ruleType": {
-              "const": "allowed_trailer_types"
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "pass",
-                "fail",
-                "unknown"
-              ]
-            },
-            "bypassedByEvent": {
-              "type": "boolean"
-            },
-            "allowedTrailerTypes": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/CatalogLabel"
-              },
-              "maxItems": 100,
-              "description": "Configured trailer types in the viewer locale, truncated at 100."
-            },
-            "allowedTrailerTypeCount": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 1000,
-              "description": "Full number of configured trailer types."
-            },
-            "offendingTrailerTypes": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/CatalogLabel"
-              },
-              "maxItems": 10
-            }
-          },
-          "required": [
-            "ruleType",
-            "outcome",
-            "bypassedByEvent",
-            "allowedTrailerTypes",
-            "allowedTrailerTypeCount",
-            "offendingTrailerTypes"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "ruleType": {
-              "const": "allowed_adr_categories"
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "pass",
-                "fail",
-                "unknown"
-              ]
-            },
-            "bypassedByEvent": {
-              "type": "boolean"
-            },
-            "allowedAdrClasses": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "1",
-                  "2",
-                  "3",
-                  "4",
-                  "6",
-                  "8"
-                ]
-              },
-              "maxItems": 6,
-              "uniqueItems": true
-            },
-            "observedAdrClass": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "enum": [
-                    "1",
-                    "2",
-                    "3",
-                    "4",
-                    "6",
-                    "8"
-                  ]
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          "required": [
-            "ruleType",
-            "outcome",
-            "bypassedByEvent",
-            "allowedAdrClasses",
-            "observedAdrClass"
-          ],
-          "additionalProperties": false
-        }
-      ],
-      "description": "One historical rule applied to the effective fact with its configured value. Unknown observed values are null, never zero."
-    },
-    "TripStage4QualificationCheck": {
-      "type": "object",
-      "properties": {
-        "status": {
-          "type": "string",
-          "enum": [
-            "resolved",
-            "unresolved"
-          ]
-        },
-        "reasonCode": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 64
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/TripStage4RuleCheck"
-          },
-          "maxItems": 32
-        }
-      },
-      "required": [
-        "status",
-        "reasonCode",
-        "rules"
-      ],
-      "additionalProperties": false,
-      "description": "Author-safe qualification check of the effective fact. Unresolved history has a reason code and no rules. Acceptance, decision authority and blocked reasons are reviewer-only."
-    },
     "TripStage4CompanyRef": {
       "oneOf": [
         {
@@ -18683,8 +16006,6 @@
         "event.reminder",
         "qualification.assigned",
         "qualification.promoted",
-        "promotion.eligible",
-        "promotion.review_required",
         "application.submitted",
         "application.decided",
         "member.access_changed",
@@ -19466,6 +16787,1408 @@
         "meta"
       ],
       "additionalProperties": false
+    },
+    "QualificationLevelRef": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationLimits": {
+      "type": "object",
+      "properties": {
+        "massMinKg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "massMaxKg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "distanceMinM": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "distanceMaxM": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trailers": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "any",
+                "selected"
+              ]
+            },
+            "types": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CatalogLabel"
+              },
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "mode",
+            "types"
+          ],
+          "additionalProperties": false
+        },
+        "adr": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "forbidden",
+                "selected",
+                "any"
+              ]
+            },
+            "classes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "1",
+                  "2",
+                  "3",
+                  "4",
+                  "6",
+                  "8"
+                ]
+              },
+              "maxItems": 6,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "mode",
+            "classes"
+          ],
+          "additionalProperties": false
+        },
+        "hardModeRequired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "massMinKg",
+        "massMaxKg",
+        "distanceMinM",
+        "distanceMaxM",
+        "trailers",
+        "adr",
+        "hardModeRequired"
+      ],
+      "additionalProperties": false,
+      "description": "Trip limits of a level. Null bounds and the any modes are unset limits. Mass is kilograms and distance is the trip's actual distance in metres; bounds are inclusive."
+    },
+    "QualificationLimitsInput": {
+      "type": "object",
+      "properties": {
+        "massMinKg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "massMaxKg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "distanceMinM": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "distanceMaxM": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trailers": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "any",
+                "selected"
+              ]
+            },
+            "typeIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Id"
+              },
+              "maxItems": 100,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "mode",
+            "typeIds"
+          ],
+          "additionalProperties": false
+        },
+        "adr": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "forbidden",
+                "selected",
+                "any"
+              ]
+            },
+            "classes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "1",
+                  "2",
+                  "3",
+                  "4",
+                  "6",
+                  "8"
+                ]
+              },
+              "maxItems": 6,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "mode",
+            "classes"
+          ],
+          "additionalProperties": false
+        },
+        "hardModeRequired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "massMinKg",
+        "massMaxKg",
+        "distanceMinM",
+        "distanceMaxM",
+        "trailers",
+        "adr",
+        "hardModeRequired"
+      ],
+      "additionalProperties": false,
+      "description": "The server rejects min above max, a selected mode without items, unknown trailer types and the classes or types of a mode that does not use them."
+    },
+    "QualificationConditions": {
+      "type": "object",
+      "properties": {
+        "requiredTrips": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredDistanceM": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "requiredTrips",
+        "requiredDistanceM"
+      ],
+      "additionalProperties": false,
+      "description": "Promotion conditions on the level. Every set condition must be met. A non-top level needs at least one (422 QUALIFICATION_CONDITIONS_REQUIRED); distance must be positive."
+    },
+    "QualificationProgress": {
+      "type": "object",
+      "properties": {
+        "trips": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "distanceM": {
+          "$ref": "#/$defs/Decimal"
+        }
+      },
+      "required": [
+        "trips",
+        "distanceM"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationLevelSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 25
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "limits": {
+          "$ref": "#/$defs/QualificationLimits"
+        },
+        "conditions": {
+          "$ref": "#/$defs/QualificationConditions"
+        },
+        "nextLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationLevelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "driverCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "game",
+        "name",
+        "position",
+        "version",
+        "limits",
+        "conditions",
+        "nextLevel",
+        "driverCount"
+      ],
+      "additionalProperties": false
+    },
+    "MyQualification": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "level": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/Id"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 25
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "position"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "since": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "progress": {
+          "$ref": "#/$defs/QualificationProgress"
+        },
+        "conditions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationConditions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationLevelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "level",
+        "since",
+        "progress",
+        "conditions",
+        "nextLevel"
+      ],
+      "additionalProperties": false,
+      "description": "A member's current level in one game. Progress counts credited trips and their actual distance on the current level; a member without a current level has a null level and zero progress."
+    },
+    "QualificationLevelDriver": {
+      "type": "object",
+      "properties": {
+        "memberId": {
+          "$ref": "#/$defs/Id"
+        },
+        "displayName": {
+          "description": "Null when the member's name is no longer available, for example a former member; the client shows a localized label.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "since": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "credited": {
+          "$ref": "#/$defs/QualificationProgress"
+        }
+      },
+      "required": [
+        "memberId",
+        "displayName",
+        "since",
+        "credited"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationLevelHistoryEntry": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/Id"
+                },
+                "displayName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "required": [
+                "id",
+                "displayName"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "created",
+            "edited",
+            "moved",
+            "removed",
+            "legacy"
+          ]
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "name",
+              "limits",
+              "conditions",
+              "position"
+            ]
+          },
+          "maxItems": 4,
+          "uniqueItems": true
+        },
+        "position": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transferLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationLevelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "values": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/QualificationLevelHistoryValues"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/QualificationLevelHistoryValues"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "before",
+                "after"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The level's values before and after the change; before is null for a created level and after for a removed one. Null on entries recorded without values."
+        }
+      },
+      "required": [
+        "at",
+        "actor",
+        "operation",
+        "changes",
+        "position",
+        "transferLevel",
+        "values"
+      ],
+      "additionalProperties": false,
+      "description": "One level change from the audit log, newest first. legacy marks entries of the earlier ladder model."
+    },
+    "QualificationLevelHistoryValues": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "position": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limits": {
+          "$ref": "#/$defs/QualificationLimits"
+        },
+        "conditions": {
+          "$ref": "#/$defs/QualificationConditions"
+        }
+      },
+      "required": [
+        "name",
+        "position",
+        "limits",
+        "conditions"
+      ],
+      "additionalProperties": false,
+      "description": "A level's name, position, limits and conditions at one point of its history; null position means it was off the ladder."
+    },
+    "QualificationLevelDetail": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 25
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "limits": {
+          "$ref": "#/$defs/QualificationLimits"
+        },
+        "conditions": {
+          "$ref": "#/$defs/QualificationConditions"
+        },
+        "nextLevel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationLevelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "driverCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "levelCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 25
+        },
+        "canManage": {
+          "type": "boolean"
+        },
+        "mine": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MyQualification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "drivers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QualificationLevelDriver"
+          },
+          "maxItems": 1000
+        },
+        "history": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/QualificationLevelHistoryEntry"
+              },
+              "maxItems": 50,
+              "description": "Present only for qualifications.manage; null otherwise."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "game",
+        "name",
+        "position",
+        "version",
+        "limits",
+        "conditions",
+        "nextLevel",
+        "driverCount",
+        "levelCount",
+        "canManage",
+        "mine",
+        "drivers",
+        "history"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationLevelList": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "canManage": {
+          "type": "boolean"
+        },
+        "levels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QualificationLevelSummary"
+          },
+          "maxItems": 25
+        },
+        "mine": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MyQualification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "canManage",
+        "levels",
+        "mine"
+      ],
+      "additionalProperties": false
+    },
+    "MyQualificationList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MyQualification"
+          },
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationLevelCreateInput": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "$ref": "#/$defs/Game"
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 25
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        },
+        "limits": {
+          "$ref": "#/$defs/QualificationLimitsInput"
+        },
+        "conditions": {
+          "$ref": "#/$defs/QualificationConditions"
+        }
+      },
+      "required": [
+        "game",
+        "position",
+        "name",
+        "limits",
+        "conditions"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationLevelUpdateInput": {
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        },
+        "limits": {
+          "$ref": "#/$defs/QualificationLimitsInput"
+        },
+        "conditions": {
+          "$ref": "#/$defs/QualificationConditions"
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "name",
+        "limits",
+        "conditions"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationLevelMoveInput": {
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 25
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "position"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationLevelRemovalInput": {
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "transferLevelId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "transferLevelId"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationManualChangeInput": {
+      "type": "object",
+      "properties": {
+        "levelId": {
+          "$ref": "#/$defs/Id"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "levelId",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationLevelCommandResult": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/QualificationLevelDetail"
+        },
+        "promotedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "level",
+        "promotedCount"
+      ],
+      "additionalProperties": false,
+      "description": "promotedCount is the number of drivers promoted by the re-check in the same transaction."
+    },
+    "QualificationLevelRemovalResult": {
+      "type": "object",
+      "properties": {
+        "transferLevel": {
+          "$ref": "#/$defs/QualificationLevelDetail"
+        },
+        "promotedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "transferLevel",
+        "promotedCount"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationManualChangeResult": {
+      "type": "object",
+      "properties": {
+        "qualification": {
+          "$ref": "#/$defs/MyQualification"
+        }
+      },
+      "required": [
+        "qualification"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeQualificationLevelList": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/QualificationLevelList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeQualificationLevelDetail": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/QualificationLevelDetail"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeMyQualificationList": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/MyQualificationList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeQualificationLevelCommandResult": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/QualificationLevelCommandResult"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeQualificationLevelRemovalResult": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/QualificationLevelRemovalResult"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeQualificationManualChangeResult": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/QualificationManualChangeResult"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationRuleCheck": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "rule": {
+              "const": "cargo_mass"
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "unknown"
+              ]
+            },
+            "minKg": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Decimal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxKg": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Decimal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedKg": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Decimal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "rule",
+            "result",
+            "minKg",
+            "maxKg",
+            "observedKg"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "rule": {
+              "const": "distance"
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "unknown"
+              ]
+            },
+            "minM": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Decimal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxM": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Decimal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedM": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Decimal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "rule",
+            "result",
+            "minM",
+            "maxM",
+            "observedM"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "rule": {
+              "const": "trailer_types"
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "unknown"
+              ]
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "any",
+                "selected"
+              ]
+            },
+            "allowed": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CatalogLabel"
+              },
+              "maxItems": 100
+            },
+            "observed": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CatalogLabel"
+              },
+              "maxItems": 10
+            }
+          },
+          "required": [
+            "rule",
+            "result",
+            "mode",
+            "allowed",
+            "observed"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "rule": {
+              "const": "adr"
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "unknown"
+              ]
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "forbidden",
+                "selected",
+                "any"
+              ]
+            },
+            "allowedClasses": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "1",
+                  "2",
+                  "3",
+                  "4",
+                  "6",
+                  "8"
+                ]
+              },
+              "maxItems": 6,
+              "uniqueItems": true
+            },
+            "observed": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "6",
+                    "8",
+                    "none"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "rule",
+            "result",
+            "mode",
+            "allowedClasses",
+            "observed"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "rule": {
+              "const": "hard_mode"
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "unknown"
+              ]
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "observed": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "qualified",
+                    "not-qualified",
+                    "unknown"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "rule",
+            "result",
+            "required",
+            "observed"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "description": "One of the five level limits applied to the trip with its configured value. An unset limit passes with null bounds or the any mode. Unknown observed values are null, never zero."
+    },
+    "QualificationCheck": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "checked",
+            "event_exempt",
+            "no_level"
+          ]
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "decision",
+            "current"
+          ]
+        },
+        "level": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationLevelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "unknown"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasonCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QualificationRuleCheck"
+          },
+          "maxItems": 5
+        }
+      },
+      "required": [
+        "status",
+        "basis",
+        "level",
+        "outcome",
+        "reasonCode",
+        "rules"
+      ],
+      "additionalProperties": false,
+      "description": "The driver's level limits checked against the trip. decision reads the snapshot stored with the company decision; current checks a pending trip against the level at its attribution time. checked always lists the five rules; event_exempt (company event trip) and no_level list none."
     }
   }
 }

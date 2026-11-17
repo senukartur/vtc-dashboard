@@ -29,6 +29,7 @@ import { tripDecisionCoordinator } from "../../use-cases/trip-decisions.js";
 import type { Events } from "../events/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { ManualReports } from "../manual-reports/service.js";
+import type { QualificationSnapshot } from "../qualifications/check.js";
 import type { Qualifications } from "../qualifications/service.js";
 import { selectQuality } from "../reconciliation/quality.js";
 import type { Reconciliation } from "../reconciliation/service.js";
@@ -41,7 +42,7 @@ import {
   acceptance,
   classify,
   evaluationSnapshot,
-  qualificationCheck,
+  qualificationSnapshot,
 } from "./evaluation.js";
 import { type Page, pagination } from "./pagination.js";
 import { createReviewQueue } from "./review-queue.js";
@@ -87,7 +88,6 @@ function dto(row: Decision, e: NormalizedTripEvidence, reviewers: Reviewers): S[
       factRevisionId: row.factId,
       qualificationAssignmentId: row.assignmentId,
       levelId: row.levelId,
-      ruleVersionId: row.ruleVersionId,
       eventId: row.eventId,
       attendanceRevisionId: row.attendanceRevisionId,
       attributionAt: row.attributionAt,
@@ -249,7 +249,7 @@ export function createTripDecisions(
         e.factRevisionId,
         h.status,
         h.status === "resolved" ? h.assignmentId : h.reasonCode,
-        h.status === "resolved" ? h.ruleVersionId : null,
+        h.status === "resolved" ? [h.levelId, h.editVersion] : null,
       ]);
     }
     const hash = contentHash(
@@ -273,6 +273,28 @@ export function createTripDecisions(
       .limit(1)
       .for("share");
     return row;
+  }
+  // A decided trip shows the check stored with its decision; a pending trip is checked live.
+  async function qualificationView(
+    tx: TxContext,
+    actor: Actor,
+    row: TripState,
+    live: () => Promise<QualificationSnapshot | null>,
+  ): Promise<S["QualificationCheck"] | null> {
+    if (row.decision === "accepted" || row.decision === "rejected") {
+      const stored = (await latest(tx, row.id))?.qualificationSnapshot;
+      if (stored)
+        return ports.qualifications.checkViewInTransaction(
+          tx,
+          actor,
+          stored as unknown as QualificationSnapshot,
+          "decision",
+        );
+    }
+    const snapshot = await live();
+    return snapshot
+      ? ports.qualifications.checkViewInTransaction(tx, actor, snapshot, "current")
+      : null;
   }
   // Every staff path first runs prepare() or authorizeInTransaction(), which take the company
   // row FOR UPDATE before anything else. Identity writers lock the company row first too, so
@@ -425,7 +447,12 @@ export function createTripDecisions(
             : evaluation.reasons,
         assignmentId: basis.qualificationAssignmentId,
         levelId: basis.levelId,
-        ruleVersionId: basis.ruleVersionId,
+        // Later ladder edits never rewrite the check this decision was made on.
+        qualificationSnapshot: qualificationSnapshot(
+          e,
+          h,
+          s.event?.confirmedEvent ?? null,
+        ) as unknown as Record<string, unknown>,
         eventId: basis.eventId,
         eventRevisionId: s.event?.eventRevisionId ?? null,
         attendanceRevisionId: basis.attendanceRevisionId,
@@ -541,7 +568,7 @@ export function createTripDecisions(
         e.factRevisionId === row.currentFactId &&
         evaluation.decision === row.decision &&
         basis.qualificationAssignmentId === effective.assignmentId &&
-        basis.ruleVersionId === effective.ruleVersionId &&
+        basis.levelId === effective.levelId &&
         basis.reportingAt === effective.reportingAt &&
         basis.eventId === effective.eventId &&
         basis.attendanceRevisionId === effective.attendanceRevisionId;
@@ -781,7 +808,9 @@ export function createTripDecisions(
       const shared = {
         factRevisionId: e.factRevisionId,
         evaluation: evaluationSnapshot(evaluated, h, event, confirmedAt),
-        qualificationCheck: qualificationCheck(evaluated, h, event),
+        qualificationCheck: (await qualificationView(tx, actor, row, async () =>
+          qualificationSnapshot(evaluated, h, event),
+        )) as S["QualificationCheck"],
         acceptance: {
           mode:
             allowed.mode === "unavailable" || ownMode.mode === "unavailable"
@@ -871,8 +900,35 @@ export function createTripDecisions(
         row.id,
         projection?.manualRevision ?? null,
       )),
-      // Rule checks return with the qualifications redesign (VTC-157).
-      qualificationCheck: null,
+      qualificationCheck: await qualificationView(tx, actor, row, async () => {
+        if (!row.currentFactId) return null;
+        const e = (await ports.trips.adjudication.facts(tx, [row.currentFactId], true)).get(
+          row.currentFactId,
+        )?.evidence;
+        if (!e) return null;
+        const [association] = await c(tx)
+          .select()
+          .from(tripEventAssociations)
+          .where(eq(tripEventAssociations.tripId, row.id))
+          .for("share");
+        let event: Awaited<ReturnType<Events["currentAssociationInTransaction"]>> | null = null;
+        if (association)
+          try {
+            event = await ports.events.currentAssociationInTransaction(tx, {
+              eventId: association.eventId,
+              memberId: row.ownerId,
+              game: row.game,
+            });
+          } catch (error) {
+            if ((error as { statusCode?: number }).statusCode !== 409) throw error;
+          }
+        const h = await ports.qualifications.lookupInTransaction(
+          tx,
+          e,
+          await confirmation(tx, row, e, at()),
+        );
+        return qualificationSnapshot(e, h, event?.confirmedEvent ?? null);
+      }),
       manualRevision: projection?.manualRevision ?? null,
       evidence: projection?.evidence ?? [],
       decisions: await Promise.all(decisions.map((d) => decisionDto(tx, d, people))),
@@ -1656,20 +1712,6 @@ export function createTripDecisions(
           const current = await ports.trips.groups.resolve(tx, row.id, true);
           return { data: { id: row.id, version: current.version }, version: current.version };
         });
-      });
-    },
-    async assignments(actor: Actor, id: string, options: Page = {}) {
-      return run(async (tx) => {
-        const { row } = await prepare(tx, id, actor),
-          paging = page(actor, ["assignments", row.ownerId, row.game], options),
-          rows = await ports.qualifications.tripAssignmentsInTransaction(
-            tx,
-            row.ownerId,
-            row.game,
-            paging.after,
-            paging.limit + 1,
-          );
-        return paging.finish(rows, (r) => ({ id: r.id, time: r.assignedAt }));
       });
     },
   };

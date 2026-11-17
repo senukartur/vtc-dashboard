@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { utcInput as eventUtcInput } from "../../apps/web/src/features/events/model.ts";
 import { referenceInstant } from "../../apps/web/src/features/manual-reports/reference-time.ts";
-import { utcInput as qualificationUtcInput } from "../../apps/web/src/features/qualifications/transport.ts";
 import {
   clampSegment,
   composeEdit,
@@ -186,7 +185,6 @@ describe("exact wall-clock strings", () => {
     const marker = incompleteValue("31.02.2026", time);
     expect(marker).not.toBe("");
     expect(eventUtcInput(marker)).toBeUndefined();
-    expect(qualificationUtcInput(marker)).toBeUndefined();
     expect(referenceInstant(marker, "Europe/Warsaw")).toBeUndefined();
     expect(decodeIncomplete(marker)).toEqual({ date: "31.02.2026", ...time });
     expect(decodeIncomplete("2026-11-17T18:00")).toBeUndefined();

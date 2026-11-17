@@ -1,251 +1,205 @@
 import { readFileSync } from "node:fs";
-import type { SchemaObject } from "ajv";
-import { Ajv2020 } from "ajv/dist/2020.js";
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 
 const valid = (name: string) =>
   createSchemaValidator().compile({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
-const sample = {
-  game: "ets2",
-  rules: [],
-  sample: {
-    cargoMassKg: null,
-    trailerTypeIds: [null],
-    trailersComplete: false,
-    adr: { status: "unknown", adrClass: null },
-  },
+const id = (n: number) => `41570000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const limits = {
+  massMinKg: null,
+  massMaxKg: "20000",
+  distanceMinM: null,
+  distanceMaxM: null,
+  trailers: { mode: "selected", typeIds: [id(1)] },
+  adr: { mode: "selected", classes: ["2", "3"] },
+  hardModeRequired: true,
 };
-test("archived assignment choices expose only bounded same-game level labels", () => {
-  const parse = valid("EnvelopeListQualificationArchivedLevel");
-  const item = {
-    id: "41000000-0000-4000-8000-000000000001",
-    game: "ats",
-    name: "Fictional archived level",
-  };
-  const reply = (items: unknown[]) => ({
-    data: { items, nextCursor: null },
-    meta: { requestId: "synthetic-request" },
+const conditions = { requiredTrips: 5, requiredDistanceM: "500000" };
+
+describe("level commands", () => {
+  test("create and update carry a name, the five limits and the promotion conditions only", () => {
+    const create = valid("QualificationLevelCreateInput"),
+      update = valid("QualificationLevelUpdateInput"),
+      input = { game: "ets2", position: 2, name: "Fictional level", limits, conditions };
+    expect(create(input)).toBe(true);
+    expect(update({ expectedVersion: 1, name: "Fictional level", limits, conditions })).toBe(true);
+    for (const changes of [
+      { position: 0 },
+      { position: 26 },
+      { name: " " },
+      { name: "x".repeat(129) },
+      { game: "other" },
+      { reason: "Retired publication reason" },
+      { rules: [] },
+      { effectiveAt: "2026-01-01T00:00:00.000Z" },
+    ])
+      expect(create({ ...input, ...changes }), JSON.stringify(changes)).toBe(false);
+    expect(update({ expectedVersion: 0, name: "Fictional level", limits, conditions })).toBe(false);
   });
-  expect(parse(reply([item]))).toBe(true);
-  expect(parse(reply(Array(101).fill(item)))).toBe(false);
-  expect(parse(reply([{ ...item, game: "other" }]))).toBe(false);
-  for (const property of ["code", "position", "reason", "rules", "currentDriverCount"])
-    expect(parse(reply([{ ...item, [property]: null }]))).toBe(false);
-});
-test("preview wire facts and safe results are closed, bounded and carry no decision authority", () => {
-  expect(valid("QualificationPreviewInput")(sample)).toBe(true);
-  for (const field of ["ownerId", "sourcePayload", "accepted", "confirmedEvent", "assignmentId"])
-    expect(valid("QualificationPreviewInput")({ ...sample, [field]: true })).toBe(false);
-  expect(
-    valid("QualificationPreviewInput")({
-      ...sample,
-      sample: { ...sample.sample, trailerTypeIds: Array(33).fill(null) },
-    }),
-  ).toBe(false);
-  expect(
-    valid("QualificationPreviewInput")({
-      ...sample,
-      sample: { ...sample.sample, reasonCode: "cargo_not_adr" },
-    }),
-  ).toBe(false);
-  const result = {
-    outcome: "unknown",
-    ruleResults: [{ ruleType: "max_mass", outcome: "unknown", reasonCode: "rule_mass_unknown" }],
-  };
-  expect(valid("QualificationPreview")(result)).toBe(true);
-  expect(
-    valid("QualificationPreview")({
-      ...result,
-      ruleResults: [{ ...result.ruleResults[0], reasonCode: "raw_engine_diagnostic" }],
-    }),
-  ).toBe(false);
-  expect(
-    valid("QualificationPreview")({
-      ...result,
-      ruleResults: [{ ...result.ruleResults[0], observed: { private: true } }],
-    }),
-  ).toBe(false);
+
+  test("limits and conditions are closed, exact decimals with bounded lists", () => {
+    const parse = valid("QualificationLimitsInput");
+    expect(parse(limits)).toBe(true);
+    for (const changes of [
+      { massMaxKg: 20000 },
+      { massMaxKg: "-1" },
+      { massMaxKg: "1e3" },
+      { trailers: { mode: "selected", typeIds: Array.from({ length: 101 }, (_, n) => id(n)) } },
+      { trailers: { mode: "selected", typeIds: [id(1), id(1)] } },
+      { trailers: { mode: "some", typeIds: [] } },
+      { adr: { mode: "selected", classes: ["5"] } },
+      { adr: { mode: "selected", classes: ["2", "2"] } },
+      { hardModeRequired: "yes" },
+      { maxMassKg: "1" },
+    ])
+      expect(parse({ ...limits, ...changes }), JSON.stringify(changes)).toBe(false);
+    const omitted: Record<string, unknown> = { ...limits };
+    delete omitted.hardModeRequired;
+    expect(parse(omitted)).toBe(false);
+    const conditionsOf = valid("QualificationConditions");
+    expect(conditionsOf({ requiredTrips: null, requiredDistanceM: null })).toBe(true);
+    for (const value of [
+      { requiredTrips: 0, requiredDistanceM: null },
+      { requiredTrips: 1.5, requiredDistanceM: null },
+      { requiredTrips: 4294967296, requiredDistanceM: null },
+      { requiredTrips: null },
+      { ...conditions, requiredDays: 3 },
+    ])
+      expect(conditionsOf(value), JSON.stringify(value)).toBe(false);
+  });
+
+  test("moving, removing and a manual level change need their version, target or comment", () => {
+    expect(valid("QualificationLevelMoveInput")({ expectedVersion: 2, position: 1 })).toBe(true);
+    expect(valid("QualificationLevelMoveInput")({ expectedVersion: 2, position: 26 })).toBe(false);
+    const removal = valid("QualificationLevelRemovalInput");
+    expect(removal({ expectedVersion: 1, transferLevelId: id(2) })).toBe(true);
+    expect(removal({ expectedVersion: 1 })).toBe(false);
+    expect(removal({ expectedVersion: 1, transferLevelId: "not-an-id" })).toBe(false);
+    const change = valid("QualificationManualChangeInput");
+    expect(change({ levelId: id(2), reason: "Fictional manual change" })).toBe(true);
+    for (const value of [
+      { levelId: id(2), reason: " " },
+      { levelId: id(2), reason: "x".repeat(2049) },
+      { levelId: id(2) },
+      { levelId: id(2), reason: "Fictional", purpose: "promotion" },
+    ])
+      expect(change(value), JSON.stringify(value)).toBe(false);
+  });
 });
 
-test("staff action projections are additive and closed without extending existing safe histories", () => {
-  const id = "00000000-0000-4000-8000-000000000001",
-    instant = "2026-10-20T12:00:00.000Z";
-  const history = {
-    id,
-    periodId: id,
+describe("level reads", () => {
+  const summary = {
+    id: id(1),
     game: "ets2",
-    levelId: id,
-    levelName: "Fictional level",
-    assignedAt: instant,
-    endedAt: null,
+    position: 1,
+    name: "Fictional Trainee",
+    limits: {
+      ...limits,
+      trailers: {
+        mode: "selected",
+        types: [
+          {
+            entityId: id(1),
+            label: "Fictional curtainsider",
+            requestedLocale: "en",
+            renderedLocale: "en",
+            englishFallback: false,
+            hidden: false,
+          },
+        ],
+      },
+    },
+    conditions,
+    nextLevel: { id: id(2), name: "Fictional Driver" },
+    driverCount: 3,
+    version: 1,
   };
-  const actor = { id, nickname: "Fictional current nickname" };
-  const action = {
-    ...history,
-    purpose: "promotion",
-    actor,
-    promotion: { id, confirmedAt: instant },
-  };
-  expect(valid("AssignmentHistory")(history)).toBe(true);
-  expect(valid("AssignmentHistory")(action)).toBe(false);
-  expect(valid("QualificationActionHistory")(action)).toBe(true);
-  expect(
-    valid("QualificationActionHistory")({
-      ...action,
-      purpose: "ladder_archive_transfer",
-      promotion: null,
-    }),
-  ).toBe(true);
-  expect(valid("QualificationActionHistory")({ ...action, actor: null, promotion: null })).toBe(
-    true,
-  );
-  expect(valid("QualificationActionHistory")({ ...action, actor: { id, nickname: null } })).toBe(
-    true,
-  );
-  for (const extra of [
-    { reason: "private" },
-    { recordedAt: instant },
-    { email: "fiction@example.invalid" },
-  ])
-    expect(valid("QualificationActionHistory")({ ...action, ...extra })).toBe(false);
-  expect(
-    valid("QualificationActionHistory")({ ...action, actor: { ...actor, roles: ["director"] } }),
-  ).toBe(false);
-  const rule = {
-    id,
-    levelId: id,
-    game: "ets2",
-    publishedAt: instant,
-    effectiveAt: instant,
-    rules: [],
-    requiredTrips: null,
-    requiredDistanceM: null,
-  };
-  expect(valid("QualificationRuleVersion")({ ...rule, publisher: actor })).toBe(false);
-  expect(valid("QualificationRuleHistory")({ ...rule, publisher: actor })).toBe(true);
-  expect(valid("QualificationRuleHistory")({ ...rule, publisher: actor, reason: "private" })).toBe(
-    false,
-  );
-});
-
-test("freight summary keeps omitted restrictions and empty allowlists distinct and exposes no row IDs", () => {
-  const validate = valid("QualificationFreightRuleSummary");
-  const unrestricted = {
-    maxMassKg: null,
-    allowedTrailerTypeCount: null,
-    allowedAdrCategoryCount: null,
-  };
-  expect(validate(unrestricted)).toBe(true);
-  expect(
-    validate({
-      ...unrestricted,
-      maxMassKg: "10000.000000000000000001",
-      allowedTrailerTypeCount: 0,
-    }),
-  ).toBe(true);
-  expect(validate({ ...unrestricted, allowedTrailerTypeCount: 1001 })).toBe(false);
-  expect(validate({ ...unrestricted, entityIds: [] })).toBe(false);
-});
-
-test("staged qualification publication accepts an optional nonempty reason and keeps preview separate", () => {
-  const read = (name: string) =>
-    JSON.parse(
-      readFileSync(new URL(`../../docs/contracts/dashboard/${name}`, import.meta.url), "utf8"),
-    );
-  const spec = read("openapi.json");
-  const operation = spec.paths["/api/v1/admin/qualification-levels/{levelId}/rule-versions"].post;
-  expect(operation.requestBody.content["application/json"].schema.$ref).toBe(
-    "#/components/schemas/QualificationRulePublicationInput",
-  );
-  expect(operation).toMatchObject({
-    "x-capability": "qualifications.manage",
-    "x-guards": expect.arrayContaining(["immutable_effective_versions"]),
-    security: [{ sessionCookie: [], csrfHeader: [] }],
+  test("the level list is bounded by the ladder size and closed", () => {
+    const parse = valid("EnvelopeQualificationLevelList");
+    const reply = (levels: unknown[]) => ({
+      data: { game: "ets2", canManage: false, levels, mine: null },
+      meta: { requestId: "synthetic-request" },
+    });
+    const ok = parse(reply([summary]));
+    if (!ok) throw new Error(JSON.stringify(parse.errors));
+    expect(parse(reply(Array(26).fill(summary)))).toBe(false);
+    for (const property of ["code", "ruleVersionId", "effectiveAt", "archived"])
+      expect(parse(reply([{ ...summary, [property]: null }])), property).toBe(false);
   });
-
-  const fixtures = read("examples.json").cases;
-  const fixture = (id: string) => fixtures.find((example: { id: string }) => example.id === id);
-  const immediate = fixture("publishQualificationRules:without-reason");
-  const without = immediate.request;
-  expect(immediate.status).toBe(201);
-  expect(immediate.response.data).toMatchObject({
-    configured: true,
-    version: 2,
-    ruleVersionId: expect.any(String),
+  test("a member's qualification has a level or none, with progress that is never negative", () => {
+    const parse = valid("MyQualification");
+    const item = {
+      game: "ets2",
+      level: { id: id(1), name: "Fictional Trainee", position: 1 },
+      since: "2026-11-01T10:00:00.000Z",
+      progress: { trips: 2, distanceM: "450000" },
+      conditions,
+      nextLevel: { id: id(2), name: "Fictional Driver" },
+    };
+    expect(parse(item)).toBe(true);
+    expect(
+      parse({
+        ...item,
+        level: null,
+        since: null,
+        progress: { trips: 0, distanceM: "0" },
+        conditions: null,
+        nextLevel: null,
+      }),
+    ).toBe(true);
+    expect(parse({ ...item, progress: { trips: -1, distanceM: "0" } })).toBe(false);
+    expect(parse({ ...item, eligible: true })).toBe(false);
+    expect(valid("MyQualificationList")({ items: [item, item, item] })).toBe(false);
   });
-  const withReason = fixture("publishQualificationRules:success").request;
-  const publication = valid("QualificationRulePublicationInput");
-  const live = valid("RulesInput");
-  expect(without).toEqual({ rules: [], requiredTrips: null, requiredDistanceM: null });
-  expect(publication(without)).toBe(true);
-  expect(publication(withReason)).toBe(true);
-  expect(live(withReason)).toBe(true);
-  expect(live(without)).toBe(false);
-  for (const reason of ["", "   ", null, 1, "x".repeat(2049)]) {
-    expect(publication({ ...without, reason })).toBe(false);
-  }
-  for (const changes of [
-    { requiredTrips: undefined },
-    { requiredDistanceM: undefined },
-    { sample: sample.sample },
-    { publisherId: "private" },
-    { publishedAt: "2026-10-20T12:00:00.000Z" },
-    { effectiveAt: "2026-10-20T12:00:00.000+00:00" },
-  ]) {
-    expect(publication({ ...without, ...changes })).toBe(false);
-  }
 });
 
-test("Stage 3 company history accepts both promotion proof and ordinary assignment rows", () => {
-  const examples = JSON.parse(
-    readFileSync(new URL("../../docs/contracts/dashboard/examples.json", import.meta.url), "utf8"),
-  );
-  const response = examples.cases.find(
-    (c: { id: string }) => c.id === "listPromotionHistory:stage-3-history",
-  ).response;
-  const check = valid("QualificationStage3PromotionHistoryListEnvelope");
-  expect(response.data.items.map((item: { kind: string }) => item.kind)).toEqual([
-    "promotion",
-    "assignment",
-  ]);
-  expect(check(response)).toBe(true);
-  const [promotion, assignment] = response.data.items;
-  expect(
-    check({
-      ...response,
-      data: { ...response.data, items: [{ ...assignment, confirmedAt: promotion.confirmedAt }] },
-    }),
-  ).toBe(false);
-  expect(
-    check({
-      ...response,
-      data: { ...response.data, items: [{ ...promotion, kind: "assignment" }] },
-    }),
-  ).toBe(false);
-});
-
-test("candidate search is additive, bounded and confined to its route", () => {
-  const openapi = JSON.parse(
-    readFileSync(new URL("../../docs/contracts/dashboard/openapi.json", import.meta.url), "utf8"),
-  ) as {
-    paths: Record<
-      string,
-      { get: { parameters: { name?: string; required?: boolean; schema: SchemaObject }[] } }
-    >;
+describe("trip check", () => {
+  const rules = [
+    { rule: "cargo_mass", result: "fail", minKg: null, maxKg: "20000", observedKg: "21000" },
+    { rule: "distance", result: "pass", minM: null, maxM: null, observedM: null },
+    { rule: "trailer_types", result: "pass", mode: "any", allowed: [], observed: [] },
+    { rule: "adr", result: "unknown", mode: "forbidden", allowedClasses: [], observed: null },
+    { rule: "hard_mode", result: "pass", required: false, observed: null },
+  ];
+  const check = {
+    status: "checked",
+    basis: "decision",
+    level: { id: id(1), name: "Fictional Trainee" },
+    outcome: "fail",
+    reasonCode: null,
+    rules,
   };
-  const base = "/api/v1/admin/promotion-";
-  const search = openapi.paths[`${base}candidates`]?.get.parameters.find(
-    (item) => item.name === "search",
+  test("the check lists at most the five rules with their configured value and trip value", () => {
+    const parse = valid("QualificationCheck");
+    expect(parse(check)).toBe(true);
+    for (const status of ["event_exempt", "no_level"])
+      expect(parse({ ...check, status, outcome: null, rules: [] })).toBe(true);
+    expect(parse({ ...check, rules: [...rules, rules[0]] })).toBe(false);
+    expect(parse({ ...check, status: "resolved" })).toBe(false);
+    expect(parse({ ...check, basis: "historical" })).toBe(false);
+    const rule = valid("QualificationRuleCheck");
+    expect(rule({ ...rules[0], observedKg: 0 })).toBe(false);
+    expect(rule({ ...rules[0], ruleType: "max_mass" })).toBe(false);
+    expect(rule({ ...rules[3], observed: "5" })).toBe(false);
+    expect(rule({ ...rules[4], observed: "hard" })).toBe(false);
+  });
+});
+
+test("every qualification route is in the contract and the retired routes are gone", () => {
+  const paths = Object.keys(
+    JSON.parse(readFileSync("docs/contracts/dashboard/openapi.json", "utf8")).paths as object,
+  ).filter((path) => path.includes("qualification"));
+  expect(paths.sort()).toEqual(
+    [
+      "/api/v1/admin/members/{memberId}/qualifications/{game}",
+      "/api/v1/admin/qualification-levels",
+      "/api/v1/admin/qualification-levels/{levelId}",
+      "/api/v1/admin/qualification-levels/{levelId}/position",
+      "/api/v1/admin/qualification-levels/{levelId}/removal",
+      "/api/v1/me/qualifications",
+      "/api/v1/members/{memberId}/qualifications",
+      "/api/v1/qualification-levels",
+      "/api/v1/qualification-levels/{levelId}",
+    ].sort(),
   );
-  expect(search?.required).toBe(false);
-  if (!search) throw new Error("CANDIDATE_SEARCH_CONTRACT_MISSING");
-  const parse = new Ajv2020().compile(search.schema);
-  expect(parse("  Fictional %_\\ Pilot  ")).toBe(true);
-  expect(parse("x".repeat(128))).toBe(true);
-  for (const invalid of ["", "  ", "x".repeat(129), ["Fictional"]])
-    expect(parse(invalid)).toBe(false);
-  expect(
-    openapi.paths[`${base}history`]?.get.parameters.some((item) => item.name === "search"),
-  ).toBe(false);
 });

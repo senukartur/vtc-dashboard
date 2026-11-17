@@ -216,20 +216,52 @@ const evidenceItems: S["Evidence"][] = [
     originalName: "fictional-old-screen.png",
   },
 ];
-const rule = (
-  ruleType: string,
-  outcome: "pass" | "fail" | "unknown",
-  reasonCode: string,
-  extra: Partial<S["QualificationRuleCheck"]> = {},
-): S["QualificationRuleCheck"] => ({
-  ruleType,
+type Rule = S["QualificationRuleCheck"];
+type Result = Rule["result"];
+// The five checked limits in their fixed order; unset limits pass with null bounds or "any".
+const rules = (
+  locale: "en" | "ru",
+  values: {
+    mass?: [Result, string | null, string | null];
+    trailers?: [Result, string[], string[]];
+    adr?: Result;
+  } = {},
+): Rule[] => {
+  const [massResult, observedKg, maxKg] = values.mass ?? ["pass", null, null],
+    [trailerResult, allowed, observed] = values.trailers ?? ["pass", [], []];
+  return [
+    { rule: "cargo_mass", result: massResult, minKg: null, maxKg, observedKg },
+    { rule: "distance", result: "pass", minM: null, maxM: null, observedM: null },
+    {
+      rule: "trailer_types",
+      result: trailerResult,
+      mode: allowed.length ? "selected" : "any",
+      allowed: allowed.map((id) => label(id, locale)),
+      observed: observed.map((id) => label(id, locale)),
+    },
+    {
+      rule: "adr",
+      result: values.adr ?? "pass",
+      mode: "forbidden",
+      allowedClasses: [],
+      observed: values.adr === "unknown" ? null : "none",
+    },
+    { rule: "hard_mode", result: "pass", required: false, observed: null },
+  ];
+};
+const level = { id: "41570000-0000-4000-8000-000000000001", name: "Fictional Trainee" };
+const checked = (
+  outcome: Result,
+  reasonCode: string | null,
+  list: Rule[],
+  basis: "decision" | "current" = "current",
+): S["QualificationCheck"] => ({
+  status: "checked",
+  basis,
+  level,
   outcome,
   reasonCode,
-  bypassedByEvent: false,
-  observedMassKg: null,
-  limitMassKg: null,
-  entityIds: [],
-  ...extra,
+  rules: list,
 });
 export const rejection = "Fictional mass on the screenshot\ndiffers from the report";
 const decision = (
@@ -249,7 +281,7 @@ const decision = (
     reviewerId: reviewer.id,
     reviewer: { ...reviewer, roles: ["dispatcher"] },
     acceptedOverLimits: overLimits,
-    reasonCodes: overLimits ? ["rule_mass_exceeded", "accepted_over_limits"] : [],
+    reasonCodes: overLimits ? ["qualification_cargo_mass", "accepted_over_limits"] : [],
   };
 };
 
@@ -286,52 +318,46 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
           : ["manual"],
   };
   const checks: Record<ReviewTrip, S["QualificationCheck"]> = {
-    over: {
-      status: "resolved",
-      reasonCode: null,
-      rules: [
-        rule("max_mass", "fail", "rule_mass_exceeded", {
-          observedMassKg: "34000",
-          limitMassKg: "20000",
-        }),
-        rule("allowed_trailer_types", "fail", "rule_trailer_type_disallowed", {
-          entityIds: [entities.lowboy],
-        }),
-        rule("allowed_adr_categories", "pass", "rule_passed"),
-      ],
-    },
+    over: checked(
+      "fail",
+      "qualification_cargo_mass",
+      rules(locale, {
+        mass: ["fail", "34000", "20000"],
+        trailers: ["fail", [entities.curtain], [entities.lowboy]],
+      }),
+    ),
+    // A company event trip is credited without the level limits.
     resubmission: {
-      status: "resolved",
+      status: "event_exempt",
+      basis: "current",
+      level,
+      outcome: null,
       reasonCode: null,
-      rules: [
-        rule("max_mass", "pass", "rule_passed", { observedMassKg: "12200", limitMassKg: "25000" }),
-        rule("allowed_trailer_types", "pass", "rule_passed", { bypassedByEvent: true }),
-      ],
+      rules: [],
     },
-    own: { status: "resolved", reasonCode: null, rules: [rule("max_mass", "pass", "rule_passed")] },
-    late: {
-      status: "resolved",
-      reasonCode: null,
-      rules: [
-        rule("max_mass", "fail", "rule_mass_exceeded", {
-          observedMassKg: "21000",
-          limitMassKg: "20000",
-        }),
-      ],
-    },
+    own: checked("pass", null, rules(locale)),
+    late: checked(
+      "fail",
+      "qualification_cargo_mass",
+      rules(locale, { mass: ["fail", "21000", "20000"], adr: "unknown" }),
+      "decision",
+    ),
     telemetry: {
-      status: "unresolved",
-      reasonCode: "qualification_history_unknown",
+      status: "no_level",
+      basis: "current",
+      level: null,
+      outcome: null,
+      reasonCode: "qualification_level_unknown",
       rules: [],
     },
   };
   // Stored hold reasons of the trip itself; the telemetry trip also has an unlabeled code.
   const holds: Record<ReviewTrip, string[]> = {
-    over: ["rule_mass_exceeded", "rule_trailer_type_disallowed"],
+    over: ["qualification_cargo_mass", "qualification_trailer"],
     resubmission: [],
     own: [],
     late: ["confirmed_facts_require_review"],
-    telemetry: ["qualification_history_unknown", "clock_anomaly", "fictional_unlabeled_hold"],
+    telemetry: ["qualification_level_unknown", "clock_anomaly", "fictional_unlabeled_hold"],
   };
   const effective = (
     pins: [string, string, string, string],
@@ -415,11 +441,11 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
       hold: true,
       reasonCodes:
         key === "over"
-          ? ["rule_mass_exceeded", "rule_trailer_type_disallowed"]
+          ? ["qualification_cargo_mass", "qualification_trailer"]
           : key === "late"
-            ? ["confirmed_facts_require_review", "rule_adr_category_unknown"]
+            ? ["confirmed_facts_require_review", "qualification_unknown"]
             : key === "telemetry"
-              ? ["qualification_history_unknown", "clock_anomaly", "actual_completion_unknown"]
+              ? ["qualification_level_unknown", "clock_anomaly", "actual_completion_unknown"]
               : [],
       createdAt: current?.submittedAt ?? "2026-10-28T16:00:00.000Z",
       manualRevision: current ? { number: current.number, submittedAt: current.submittedAt } : null,

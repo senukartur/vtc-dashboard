@@ -24,17 +24,12 @@ import {
   createIdentity,
   type Identity,
 } from "../../apps/api/src/modules/identity/service.ts";
-import { matchEventPrescribedLoad } from "../../apps/api/src/modules/qualification-rules/index.ts";
 import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { createAdministration } from "../../apps/api/src/use-cases/administration.ts";
 import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
-import {
-  createSyntheticTripEvidence,
-  knownFact,
-} from "../fixtures/qualification-rules/fixtures.ts";
 import {
   guardedSettings,
   reset,
@@ -718,16 +713,6 @@ test("attendance opens at actual revised start, is atomic/versioned/private and 
     attendanceStatus: "confirmed",
     prescribedMassKg: "30000",
   });
-  expect(
-    matchEventPrescribedLoad(createSyntheticTripEvidence({ cargoMassKg: knownFact("30000") }), {
-      confirmedEvent: linked.confirmedEvent,
-    }).matches,
-  ).toBe(true);
-  expect(
-    matchEventPrescribedLoad(createSyntheticTripEvidence({ cargoMassKg: knownFact("29999") }), {
-      confirmedEvent: linked.confirmedEvent,
-    }).matches,
-  ).toBe(false);
   expect(
     (
       await unit.run((tx) =>

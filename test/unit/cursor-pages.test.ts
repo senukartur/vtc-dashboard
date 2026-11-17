@@ -1,8 +1,4 @@
 import { describe, expect, test } from "vitest";
-import {
-  QualificationFailure,
-  qualificationCursorRejected,
-} from "../../apps/web/src/features/qualifications/transport.ts";
 import { TripFailure } from "../../apps/web/src/features/trips/transport.ts";
 import {
   type CursorPagesState,
@@ -57,15 +53,6 @@ describe("cursor pages", () => {
     expect(cursorRejected({ status: "409" })).toBe(false);
     expect(cursorRejected(null)).toBe(false);
     expect(cursorRejected(undefined)).toBe(false);
-  });
-
-  test("a qualification setup conflict is not a rejected cursor", () => {
-    expect(qualificationCursorRejected(new QualificationFailure("conflict", 409))).toBe(true);
-    expect(qualificationCursorRejected(new QualificationFailure("conflict", 409, null, true))).toBe(
-      false,
-    );
-    expect(qualificationCursorRejected(new QualificationFailure("invalid", 400))).toBe(false);
-    expect(qualificationCursorRejected(new TripFailure("conflict", 409))).toBe(false);
   });
 });
 

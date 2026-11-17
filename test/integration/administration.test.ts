@@ -593,9 +593,7 @@ test("deactivation and explicit reinstatement retain identity/history and never 
     );
     expect(periods).toHaveLength(3);
     expect(periods.filter((row) => row.endedAt === null)).toHaveLength(1);
-    expect(periods.find((row) => row.purpose === "reinstatement")?.levelId).toBe(
-      assignment.levelId,
-    );
+    expect(periods.find((row) => row.kind === "reinstatement")?.levelId).toBe(assignment.levelId);
   } finally {
     await app.close();
   }

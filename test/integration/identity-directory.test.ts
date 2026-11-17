@@ -9,13 +9,9 @@ import {
   type UnitOfWork,
 } from "@vtc/db";
 import { membership, user } from "@vtc/db/identity-schema";
-import {
-  qualificationAssignments,
-  qualificationLevels,
-  qualificationStates,
-} from "@vtc/db/qualifications-schema";
+import { qualificationAssignments, qualificationLevels } from "@vtc/db/qualifications-schema";
 import { trips } from "@vtc/db/trips-schema";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
   beforeEach,
@@ -123,7 +119,7 @@ function recordingUnit(inner: UnitOfWork): UnitOfWork {
           const query = (target as { toSQL?: () => { sql: string; params: unknown[] } }).toSQL?.();
           if (
             query?.sql.includes("directory_window_trips") ||
-            query?.sql.includes("`qualification_states`")
+            query?.sql.includes("`qualification_assignments`")
           )
             recorded.push(query);
           return value.bind(target);
@@ -580,7 +576,8 @@ test("search, role and level filters apply before paging and combine with AND", 
       game: "ets2",
       name: "Fictional archived level",
       version: 1,
-      activePosition: null,
+      position: null,
+      deletedAt: "2026-01-01T00:00:00.000Z",
     }),
   );
   for (const query of [
@@ -735,7 +732,7 @@ test("joined_at is the registration instant and moves to the latest return only"
   });
   expect(await profile(userId)).toBe(iso(W + 300000));
   const [[initial]] = await control.query<RowDataPacket[]>(
-    "SELECT CAST(assigned_at AS CHAR) at FROM qualification_assignments WHERE user_id=? AND purpose='initial'",
+    "SELECT CAST(assigned_at AS CHAR) at FROM qualification_assignments WHERE user_id=? AND kind='admission'",
     [userId],
   );
   expect(initial?.at).toBe(sqlTime(W + 100000));
@@ -788,7 +785,11 @@ test("joined_at is the registration instant and moves to the latest return only"
   const [before] = await control.query<RowDataPacket[]>(
     "SELECT CAST(user_id AS CHAR) id, CAST(joined_at AS CHAR) joined FROM identity_memberships ORDER BY user_id",
   );
-  await control.query(await readFile(join(migrationFolder, "0033_joined_at_catch_up.sql"), "utf8"));
+  // 0035 renamed the assignment purpose to kind; the derivation is otherwise unchanged.
+  const catchUp = await readFile(join(migrationFolder, "0033_joined_at_catch_up.sql"), "utf8");
+  await control.query(
+    catchUp.replace("a.`purpose` = 'reinstatement'", "a.`kind` = 'reinstatement'"),
+  );
   const [after] = await control.query<RowDataPacket[]>(
     "SELECT CAST(user_id AS CHAR) id, CAST(joined_at AS CHAR) joined FROM identity_memberships ORDER BY user_id",
   );
@@ -845,7 +846,7 @@ async function baselineCounts(): Promise<Counts> {
 }
 async function levelRows() {
   const [rows] = await control.query<RowDataPacket[]>(
-    "SELECT CAST(id AS CHAR) id, game, name, active_position position FROM qualification_levels",
+    "SELECT CAST(id AS CHAR) id, game, name, position FROM qualification_levels",
   );
   return new Map(
     rows.map((row) => [
@@ -1101,14 +1102,27 @@ test("a level that left the active ladder shows null without leaking its name", 
   const retired = newId();
   const assignment = newId();
   const name = "Fictional retired ladder level";
+  const [[open]] = await control.query<RowDataPacket[]>(
+    "SELECT CAST(id AS CHAR) id, DATE_FORMAT(assigned_at,'%Y-%m-%dT%H:%i:%s.%fZ') assignedAt FROM qualification_assignments WHERE user_id=? AND game='ets2' AND ended_at IS NULL",
+    [quiet],
+  );
+  // A member with an open period moves it to the removed level; otherwise one is opened.
+  const at = open ? new Date(String(open.assignedAt)).toISOString() : iso(W - 1000);
   await unit.run(async (tx) => {
     await unit.client(tx).insert(qualificationLevels).values({
       id: retired,
       game: "ets2",
       name,
       version: 1,
-      activePosition: null,
+      position: null,
+      deletedAt: at,
     });
+    if (open)
+      await unit
+        .client(tx)
+        .update(qualificationAssignments)
+        .set({ endedAt: at })
+        .where(eq(qualificationAssignments.id, String(open.id)));
     await unit
       .client(tx)
       .insert(qualificationAssignments)
@@ -1117,14 +1131,11 @@ test("a level that left the active ladder shows null without leaking its name", 
         userId: quiet,
         game: "ets2",
         levelId: retired,
-        assignedAt: iso(W - 1000),
-        purpose: "administrative_correction",
-        reason: "Fictional retired level",
+        assignedAt: at,
+        kind: "manual",
+        comment: "Fictional retired level",
+        previousAssignmentId: open ? String(open.id) : null,
       });
-    await unit
-      .client(tx)
-      .insert(qualificationStates)
-      .values({ userId: quiet, game: "ets2", assignmentId: assignment, version: 1 });
   });
   try {
     const response = await get("/api/v1/members?limit=100");
@@ -1139,33 +1150,33 @@ test("a level that left the active ladder shows null without leaking its name", 
     await unit.run(async (tx) => {
       await unit
         .client(tx)
-        .delete(qualificationStates)
-        .where(and(eq(qualificationStates.userId, quiet), eq(qualificationStates.game, "ets2")));
-      await unit
-        .client(tx)
         .delete(qualificationAssignments)
         .where(eq(qualificationAssignments.id, assignment));
+      if (open)
+        await unit
+          .client(tx)
+          .update(qualificationAssignments)
+          .set({ endedAt: null })
+          .where(eq(qualificationAssignments.id, String(open.id)));
       await unit.client(tx).delete(qualificationLevels).where(eq(qualificationLevels.id, retired));
     });
   }
 });
 
-test("former members show no levels even when a state still points at an assignment", async () => {
+test("former members show no levels even when an assignment is still open", async () => {
   const former = ids.former as string;
-  const [[state]] = await control.query<RowDataPacket[]>(
-    "SELECT CAST(assignment_id AS CHAR) assignmentId FROM qualification_states WHERE user_id=? AND game='ets2'",
+  const [[openCount]] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM qualification_assignments WHERE user_id=? AND game='ets2' AND ended_at IS NULL",
     [former],
   );
-  expect(state?.assignmentId).toBeNull();
+  expect(Number(openCount?.n)).toBe(0);
   const [[ended]] = await control.query<RowDataPacket[]>(
-    "SELECT CAST(id AS CHAR) id FROM qualification_assignments WHERE user_id=? AND game='ets2' AND ended_at IS NOT NULL ORDER BY assigned_at DESC LIMIT 1",
+    "SELECT CAST(id AS CHAR) id, ended_at endedAt FROM qualification_assignments WHERE user_id=? AND game='ets2' AND ended_at IS NOT NULL ORDER BY assigned_at DESC LIMIT 1",
     [former],
   );
   if (!ended) throw new Error("SYNTHETIC_ENDED_ASSIGNMENT_MISSING");
-  await control.query(
-    "UPDATE qualification_states SET assignment_id=? WHERE user_id=? AND game='ets2'",
-    [ended.id, former],
-  );
+  // A stale open period on its own must not give a former member a level.
+  await control.query("UPDATE qualification_assignments SET ended_at=NULL WHERE id=?", [ended.id]);
   try {
     levelCalls.length = 0;
     const formerTab = await page("status=former&limit=100");
@@ -1182,10 +1193,10 @@ test("former members show no levels even when a state still points at an assignm
     });
     expect(levelCalls.flat()).not.toContain(former);
   } finally {
-    await control.query(
-      "UPDATE qualification_states SET assignment_id=NULL WHERE user_id=? AND game='ets2'",
-      [former],
-    );
+    await control.query("UPDATE qualification_assignments SET ended_at=? WHERE id=?", [
+      ended.endedAt,
+      ended.id,
+    ]);
   }
 });
 
@@ -1213,7 +1224,7 @@ test("current levels come from one bounded non-locking read per page", async () 
     const data = await page(`limit=${limit}`);
     const reads = recorded.filter(
       (query) =>
-        query.sql.includes("`qualification_states`") &&
+        query.sql.includes("`qualification_assignments`") &&
         !query.sql.includes("directory_window_trips"),
     );
     expect(reads, `limit ${limit}`).toHaveLength(1);
@@ -1238,9 +1249,6 @@ test("the directory waits for no qualification or trip row lock", async () => {
   const members = [ids.tie, ids.exact, ids.round] as string[];
   try {
     await holder.query("START TRANSACTION");
-    await holder.query("SELECT version FROM qualification_states WHERE user_id IN (?) FOR UPDATE", [
-      members,
-    ]);
     await holder.query("SELECT id FROM qualification_assignments WHERE user_id IN (?) FOR UPDATE", [
       members,
     ]);

@@ -24,7 +24,6 @@ import {
   State,
   TripSummary,
 } from "./components.js";
-import { HistoricalRules } from "./HistoricalRules.js";
 import { useTripCommand, useTripQuery } from "./queries.js";
 import { TripDeliveryFacts, TripQualificationCheck, TripSources } from "./TripPageSections.js";
 import { validId } from "./transport.js";
@@ -136,7 +135,6 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
                       }}
                     />
                     <Codes values={d.reasonCodes} />
-                    <HistoricalRules basis={d.basis} />
                   </article>
                 ))}
                 <p>{t("historyBound")}</p>

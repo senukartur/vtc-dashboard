@@ -90,7 +90,7 @@ Preserve the producer's field-specific integer types: `expectedIncome` is `u64` 
 
 Game-mode evidence also preserves producer invariants. `unknown` pairs with `method:none` and `confidence:none`; known modes require `module-scan` or `process-scan` with non-none confidence. Single-player confidence is always weak, never strong. A projected TruckersMP or HaulMP module-scan claim must originate from an actual native observation with its required module evidence; module names/paths remain local and are not uploaded. The summary does not turn those heuristics into proof of player identity.
 
-The producer reports its persisted Hard Mode audit. An absent or indeterminate audit maps to `unknown`. A false `isHardMode` flag alone cannot establish a failed audit. Mode, market and audit are recorded facts independent of company qualification, review and credit.
+The producer reports its persisted Hard Mode audit. An absent or indeterminate audit maps to `unknown`. A false `isHardMode` flag alone cannot establish a failed audit. Mode and market are recorded facts independent of company qualification, review and credit. The audit result feeds the qualification Hard Mode limit: `qualified` passes, `not-qualified` fails and `unknown` sends a trip on a level that requires Hard Mode to staff review.
 
 The native protocol defensively accepts damage up to 1,000; a value above the ordinary fraction range 0–1 is anomalous evidence for review, not a valid 100,000% display or a value to clamp silently. Reason codes are bounded project-defined lowercase identifiers; unrecognized codes require review/compatibility handling and must not be discarded as proof of completeness.
 

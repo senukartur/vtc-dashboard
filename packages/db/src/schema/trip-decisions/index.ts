@@ -16,11 +16,7 @@ import { idColumn, opaqueColumn, utcColumn } from "../../core/values.js";
 import { eventAttendanceRevisions, eventRevisions, events } from "../events/index.js";
 import { membership } from "../identity/index.js";
 import { manualCorrectionRequests } from "../manual-reports/index.js";
-import {
-  qualificationAssignments,
-  qualificationLevels,
-  qualificationRules,
-} from "../qualifications/index.js";
+import { qualificationAssignments, qualificationLevels } from "../qualifications/index.js";
 import { tripFacts, tripResolutions, trips } from "../trips/index.js";
 
 export { and, asc, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
@@ -47,9 +43,8 @@ export const tripDecisions = mysqlTable(
     levelId: idColumn("level_id").references(() => qualificationLevels.id, {
       onDelete: "restrict",
     }),
-    ruleVersionId: idColumn("rule_version_id").references(() => qualificationRules.id, {
-      onDelete: "restrict",
-    }),
+    // The limits and outcome of the qualification check made with this decision (VTC-157).
+    qualificationSnapshot: json("qualification_snapshot").$type<Record<string, unknown>>(),
     eventId: idColumn("event_id").references(() => events.id, { onDelete: "restrict" }),
     eventRevisionId: idColumn("event_revision_id").references(() => eventRevisions.id, {
       onDelete: "restrict",

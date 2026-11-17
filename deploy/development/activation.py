@@ -23,21 +23,25 @@ STAGE_SETTINGS = {'TELEMETRY_IP_PER_MINUTE', 'TELEMETRY_GLOBAL_PER_MINUTE',
                   'MANUAL_MAX_FILES_PER_REPORT', 'MANUAL_POLICY_REVISION', 'MANUAL_ORPHAN_GRACE_MS',
                   'MANUAL_EVIDENCE_ROOT', 'MANUAL_MAX_FILE_BYTES', 'MANUAL_MAX_PIXELS',
                   'MANUAL_UPLOAD_TIMEOUT_MS', 'ANALYTICS_REPORTING_TIMEZONE'}
-STAGE_KEYS = {'CATALOGS_CURSOR_KEY', 'TRIPS_CURSOR_KEY', 'QUALIFICATIONS_CURSOR_KEY', 'TELEMETRY_CURSOR_KEY',
+STAGE_KEYS = {'CATALOGS_CURSOR_KEY', 'TRIPS_CURSOR_KEY', 'TELEMETRY_CURSOR_KEY',
               'MANUAL_REPORTS_KEY', 'EVENTS_CURSOR_KEY', 'RECONCILIATION_KEY', 'TRIP_DECISIONS_KEY',
               'ANALYTICS_CURSOR_KEY', 'NOTIFICATIONS_CURSOR_KEY'}
 # Accepted only so an existing file still parses; prepare-stage drops them.
 RETIRED_SETTINGS = {'CATALOGS_SYNTHETIC', 'CATALOGS_MAX_FILE_BYTES', 'CATALOGS_ARTIFACT_TTL_MS',
-                    'CATALOGS_POLICY_REVISION', 'CATALOGS_EVIDENCE_FILE', 'CATALOGS_EVIDENCE_BASE64'}
+                    'CATALOGS_POLICY_REVISION', 'CATALOGS_EVIDENCE_FILE', 'CATALOGS_EVIDENCE_BASE64',
+                    'QUALIFICATIONS_CURSOR_KEY', 'QUALIFICATION_LADDER_EDITS_ENABLED',
+                    'QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED', 'QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE'}
 SHARED_KEYS = {'IDENTITY_ENABLED', 'IDENTITY_SECRET', 'IDENTITY_ORIGIN', 'MAIL_MODE',
                'MAIL_ENCRYPTION_KEY', 'MAIL_SENDER', 'MAIL_API_KEY', 'MAIL_TRACKING_DISABLED',
                'ADMISSIONS_ENABLED', 'ADMISSIONS_ENCRYPTION_KEY',
                *STAGE_FLAGS, *STAGE_SETTINGS, *STAGE_KEYS, *RETIRED_SETTINGS}
-# Dropped by migration 0019. MySQL keeps grant rows after DROP TABLE, so apply revokes them.
+# Dropped by migrations 0019 and 0035. MySQL keeps grant rows after DROP TABLE, so apply revokes them.
 RETIRED_TABLES = ('catalog_aliases', 'catalog_artifacts', 'catalog_changes', 'catalog_commands', 'catalog_coverage',
                   'catalog_entities', 'catalog_facts', 'catalog_mapping_issues', 'catalog_mapping_reviews',
                   'catalog_mappings', 'catalog_operations', 'catalog_publications', 'catalog_relations',
-                  'catalog_revisions', 'event_catalog_pins')
+                  'catalog_revisions', 'event_catalog_pins', 'qualification_initial_assignments',
+                  'qualification_ladder_history', 'qualification_promotion_reviews', 'qualification_promotions',
+                  'qualification_rule_versions', 'qualification_states')
 INGRESS_KEYS = {'VTC_INGRESS_SUBNET', 'VTC_INGRESS_APP_IPV4', 'VTC_INGRESS_PROXY_IPV4'}
 CONTROL_FILES = {'compose.yaml', 'Caddyfile', 'operations.py', 'activation.py', 'activation-grants.json',
                  'identity_acceptance.py', 'ingress_probe.py', 'receive.sh', 'notifications_acceptance.py',
@@ -274,7 +278,7 @@ def check_privileges(o, rows, *, allow_legacy=False, complete=False, values=None
     actual = {row for row in actual if row[1:] != ('global', '*', 'USAGE', 'NO')}
     legacy = ("'vtc_runtime'@'%'", 'vtc', '*', 'SELECT', 'NO')
     # A rollback keeps module grants only where an apply recorded them; any other host matches exactly.
-    # Before apply a host may still hold revoke-pending grants on the tables 0019 dropped.
+    # Before apply a host may still hold revoke-pending grants on the tables 0019 and 0035 dropped.
     retired = {row for row in actual if row[2] in RETIRED_TABLES} if allow_legacy else set()
     allowed = expected | installed_stage_rows(o) | ({legacy} if allow_legacy else set()) | retired
     o.require(actual <= allowed, 'UNEXPECTED_EFFECTIVE_PRIVILEGES')

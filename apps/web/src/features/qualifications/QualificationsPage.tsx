@@ -1,418 +1,318 @@
-import { type ReactNode, useId, useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { formatQuantity } from "../../shared/formatting.js";
-import { queryString, useCursorPages } from "../../shared/paging.js";
-import { Pager } from "../../shared/ui/pager.js";
-import { Badge, Card, Label } from "../../shared/ui/primitives.js";
-import { SegmentedControl } from "../../shared/ui/segmented-control.js";
-import { progressPercent } from "../dashboard/model.js";
-import { AssignmentEditor } from "./assignments.js";
-import { ActionActor, Fact, RulesView, State, Time } from "./components.js";
-import { LevelPanel, LevelsTable } from "./levels.js";
-import { defaultLevelId, sortLevels, unconfiguredCount } from "./model.js";
-import { useQualificationQuery } from "./queries.js";
+import { DataTable, type DataTableColumn } from "../../shared/ui/DataTable.js";
 import {
-  type DTO,
-  type Game,
-  QualificationFailure,
-  qualificationCursorRejected,
-} from "./transport.js";
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "../../shared/ui/dialog.js";
+import { InfoTip } from "../../shared/ui/info-tip.js";
+import { Button, Card } from "../../shared/ui/primitives.js";
+import { SegmentedControl } from "../../shared/ui/segmented-control.js";
+import {
+  failureText,
+  LimitChips,
+  needText,
+  ProgressRow,
+  progressRows,
+  Time,
+  useLocale,
+} from "./limits.js";
+import { hasConditions, promotionPreview, pushedTop } from "./model.js";
+import { useQualificationCommand, useQualificationQuery } from "./queries.js";
+import type { Game, Level, Mine } from "./transport.js";
 import "./qualifications.css";
 
-const games = [
+export const games = [
   { value: "ets2", label: "ETS2" },
   { value: "ats", label: "ATS" },
 ] as const;
+export const levelPath = (id: string) => `/account/qualifications/${encodeURIComponent(id)}`;
 
-/** Gate: without company.read no workspace query hook mounts, so nothing is requested. */
+/** Q1/Q3: the ladder of one game. Without company.read no query mounts, so nothing is requested. */
 export function QualificationsPage() {
   const session = useSession(),
     { t } = useTranslation("qualifications"),
     [params, setParams] = useSearchParams(),
     game: Game = params.get("game") === "ats" ? "ats" : "ets2";
-  if (!session.self?.capabilities.includes("company.read"))
-    return (
-      <div className="qualification-workspace stack">
-        <header className="qualification-header">
-          <div className="qualification-title">
-            <h1>{t("title")}</h1>
-          </div>
-        </header>
-        <Card>
-          <p>{t("forbidden")}</p>
-        </Card>
-      </div>
-    );
-  const scope = [
-    session.generation,
-    session.self?.member.id,
-    session.self?.identityEpoch,
-    session.self?.capabilities.join(","),
-  ].join(":");
+  const allowed = !!session.self?.capabilities.includes("company.read");
   return (
     <div className="qualification-workspace stack">
       <header className="qualification-header">
         <div className="qualification-title">
           <h1>{t("title")}</h1>
-          <p className="qualification-intro">{t("intro")}</p>
-          <p className="qualification-roles">{t("roles")}</p>
+          <InfoTip label={t("howLabel")} title={t("howTitle")}>
+            <p>{t("how1")}</p>
+            <p>{t("how2")}</p>
+            <p>{t("how3")}</p>
+            <p>{t("how4")}</p>
+          </InfoTip>
         </div>
-        <SegmentedControl
-          aria-label={t("game")}
-          value={game}
-          options={games}
-          onValueChange={(value) => setParams({ game: value })}
-        />
-      </header>
-      <Workspace key={`${scope}:${game}`} game={game} />
-    </div>
-  );
-}
-function Workspace({ game }: { game: Game }) {
-  const session = useSession(),
-    { t } = useTranslation("qualifications"),
-    manage = !!session.self?.capabilities.includes("qualifications.manage"),
-    headingId = useId(),
-    [target, setTarget] = useState<DTO["MemberSummary"] | null>(null),
-    [selected, setSelected] = useState<string | null>(null),
-    [editing, setEditing] = useState<ReadonlySet<string>>(() => new Set());
-  const levels = useQualificationQuery(
-      `/qualification-levels?game=${game}&limit=25`,
-      "EnvelopeListQualificationLevel",
-    ),
-    items = levels.data?.data.data.items ?? [],
-    sorted = sortLevels(items),
-    // Derived during render: a level missing from the latest list falls back to the first row.
-    selectedId = sorted.some((level) => level.id === selected) ? selected : defaultLevelId(sorted),
-    missing = unconfiguredCount(sorted);
-  const setEditingLevel = (id: string, open: boolean) =>
-    setEditing((previous) => {
-      const next = new Set(previous);
-      if (open) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  return (
-    <>
-      {levels.data && missing > 0 && (
-        <div role="status" className="qualification-banner">
-          {t("unconfigured", { count: missing, total: sorted.length, game: game.toUpperCase() })}
-        </div>
-      )}
-      <div className="qualification-layout">
-        <div className="qualification-main stack">
-          <Card className="qualification-levels-card" aria-labelledby={headingId}>
-            <h2 id={headingId}>{t("levels")}</h2>
-            <State query={levels} />
-            {levels.data &&
-              (sorted.length ? (
-                <LevelsTable
-                  levels={sorted}
-                  selectedId={selectedId}
-                  editing={editing}
-                  onSelect={setSelected}
-                  headingId={headingId}
-                />
-              ) : (
-                <p>{t("emptyLevels")}</p>
-              ))}
-          </Card>
-          {sorted.map((level) => (
-            <LevelPanel
-              key={level.id}
-              level={level}
-              manage={manage}
-              selected={level.id === selectedId}
-              editing={editing.has(level.id)}
-              onEditingChange={setEditingLevel}
-            />
-          ))}
-        </div>
-        <div className="qualification-aside stack">
-          {manage && (
-            <Card className="stack">
-              <h2>{t("staff")}</h2>
-              <TargetPicker selected={target} onChange={setTarget} />
-            </Card>
-          )}
-          <MemberQualification
-            key={target?.id ?? "self"}
-            game={game}
-            levels={items}
-            target={target}
-            manage={manage}
+        {allowed && (
+          <SegmentedControl
+            aria-label={t("game")}
+            value={game}
+            options={games}
+            onValueChange={(value) => setParams({ game: value })}
           />
-        </div>
-      </div>
-    </>
-  );
-}
-function TargetPicker({
-  selected,
-  onChange,
-}: {
-  selected: DTO["MemberSummary"] | null;
-  onChange: (member: DTO["MemberSummary"] | null) => void;
-}) {
-  const { t } = useTranslation("qualifications"),
-    pages = useCursorPages("/admin/qualification-members", {
-      rejects: qualificationCursorRejected,
-    }),
-    query = useQualificationQuery(
-      `/admin/qualification-members?${queryString({ limit: 25, cursor: pages.cursor })}`,
-      "EnvelopeListMemberSummary",
-    ),
-    items = query.data?.data.data.items ?? [];
-  pages.recover(query.error);
-  const candidates =
-    selected && !items.some((m) => m.id === selected.id) ? [selected, ...items] : items;
-  const duplicateNames = new Set(
-    candidates
-      .filter((m, i) => candidates.some((other, j) => i !== j && other.nickname === m.nickname))
-      .map((m) => m.nickname),
-  );
-  const label = (m: DTO["MemberSummary"]) =>
-    `${m.nickname}${m.formerMember ? ` · ${t("former")}` : ""}${duplicateNames.has(m.nickname) ? ` · ${m.id}` : ""}`;
-  return (
-    <div className="stack">
-      <Label htmlFor="qualification-member">{t("member")}</Label>
-      <select
-        id="qualification-member"
-        className="input"
-        value={selected?.id ?? ""}
-        onChange={(e) => {
-          const member = items.find((m) => m.id === e.target.value);
-          if (!e.target.value || member) onChange(member ?? null);
-        }}
-      >
-        <option value="">{t("own")}</option>
-        {selected && !items.some((m) => m.id === selected.id) && (
-          <option value={selected.id}>{label(selected)}</option>
         )}
-        {items.map((member) => (
-          <option key={member.id} value={member.id}>
-            {label(member)}
-          </option>
-        ))}
-      </select>
-      <State query={query} />
-      {query.isSuccess && !items.length && <p>{t("emptyMembers")}</p>}
-      {selected && (
-        <p>
-          {t("selected")}: {selected.nickname} · <code>{selected.id}</code>
-        </p>
+      </header>
+      {allowed ? (
+        <Ladder key={game} game={game} />
+      ) : (
+        <Card>
+          <p>{t("forbidden")}</p>
+        </Card>
       )}
-      <Pager pages={pages} nextCursor={query.data?.data.data.nextCursor} label={t("memberPages")} />
     </div>
   );
 }
-function MemberQualification({
-  game,
-  levels,
-  target,
-  manage,
-}: {
-  game: Game;
-  levels: DTO["QualificationLevel"][];
-  target: DTO["MemberSummary"] | null;
-  manage: boolean;
-}) {
-  const { t, i18n } = useTranslation("qualifications"),
-    locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    session = useSession(),
-    id = target?.id ?? session.self?.member.id ?? "",
-    base = manage ? `/admin/members/${id}` : "/me",
-    historyPath = `${base}/${manage ? "qualification-action-history" : "qualification-assignments"}`,
-    pages = useCursorPages(`${historyPath}?game=${game}`, { rejects: qualificationCursorRejected });
-  const progress = useQualificationQuery(
-      `${base}/qualification-progress?game=${game}`,
-      "EnvelopeProgress",
+function Ladder({ game }: { game: Game }) {
+  const { t } = useTranslation("qualifications"),
+    locale = useLocale(),
+    query = useQualificationQuery(
+      `/qualification-levels?game=${game}`,
+      "EnvelopeQualificationLevelList",
     ),
-    history = useQualificationQuery(
-      `${historyPath}?${queryString({ game, limit: 25, cursor: pages.cursor })}`,
-      manage ? "EnvelopeListQualificationActionHistory" : "EnvelopeListAssignmentHistory",
+    command = useQualificationCommand(),
+    list = query.data?.data.data,
+    manage = !!list?.canManage,
+    levels = list?.levels ?? [],
+    topId = levels.at(-1)?.id,
+    // A move that puts a level above the top promotes the top's qualifying drivers at once.
+    topQuery = useQualificationQuery(
+      `/qualification-levels/${encodeURIComponent(topId ?? "")}`,
+      "EnvelopeQualificationLevelDetail",
+      manage && levels.length > 1 && !!topId,
     ),
-    p = progress.data?.data.data,
-    level = levels.find((l) => l.id === p?.assignment.levelId),
-    missing =
-      levels.length > 0 &&
-      progress.error instanceof QualificationFailure &&
-      progress.error.setupRequired;
-  pages.recover(history.error);
-  // Progress and the level pointer can describe different instants.
-  const terminal = level?.terminal;
-  const hasEffectiveRuleAtProgress =
-    !!p && (p.requiredTrips !== null || p.requiredDistanceM !== null || p.eligibleForConfirmation);
-  const absentMinimum = t(
-    hasEffectiveRuleAtProgress || (terminal && level.ruleVersionId)
-      ? "noMinimum"
-      : level
-        ? "unset"
-        : "cellUnavailable",
-  );
-  const promotionStatus = terminal
-    ? "terminal"
-    : p?.eligibleForConfirmation
-      ? "eligible"
-      : hasEffectiveRuleAtProgress
-        ? "ineligible"
-        : level && !level.promotionConfigured
-          ? "progressUnconfigured"
-          : "progressUnavailable";
-  const currentRules = useQualificationQuery(
-    `/qualification-levels/${level?.id}/rule-versions/${level?.ruleVersionId}`,
-    "EnvelopeQualificationRuleVersion",
-    !!level?.ruleVersionId,
-  );
+    topDetail = topQuery.data?.data.data,
+    [confirming, setConfirming] = useState<{
+      level: Level;
+      position: number;
+      top: Level;
+      next: Level;
+      count: number | null;
+    } | null>(null);
+  const apply = (level: Level, position: number) =>
+    void command.run(
+      "PUT",
+      `/admin/qualification-levels/${level.id}/position`,
+      { expectedVersion: level.version, position },
+      "EnvelopeQualificationLevelCommandResult",
+      (result) => result.data.promotedCount > 0,
+    );
+  const move = (level: Level, position: number) => {
+    const pushed = pushedTop(levels, level.id, position);
+    const count =
+      pushed && topDetail?.id === pushed.top.id
+        ? promotionPreview(topDetail.drivers, topDetail.conditions, true)
+        : null;
+    if (!pushed || count === 0) apply(level, position);
+    else setConfirming({ level, position, top: pushed.top, next: pushed.next, count });
+  };
+  const columns: DataTableColumn<Level>[] = [
+    {
+      id: "number",
+      header: t("colNumber"),
+      cell: (level) => level.position,
+      className: "qualification-col-number",
+      cardLabel: false,
+    },
+    {
+      id: "name",
+      header: t("colName"),
+      rowHeader: true,
+      cell: (level) => (
+        <Link to={levelPath(level.id)} className="qualification-level-link">
+          {level.name}
+        </Link>
+      ),
+    },
+    { id: "limits", header: t("colLimits"), cell: (level) => <LimitChips limits={level.limits} /> },
+    {
+      id: "next",
+      header: t("colNext"),
+      cell: (level) =>
+        level.nextLevel ? (
+          <span className="qualification-next">
+            <span aria-hidden="true">→</span> <strong>{level.nextLevel.name}</strong>
+            <span className="qualification-muted">{needText(t, level.conditions, locale)}</span>
+          </span>
+        ) : (
+          <span className="qualification-muted">{t("top")}</span>
+        ),
+    },
+    {
+      id: "drivers",
+      header: t("colDrivers"),
+      align: "end",
+      cell: (level) => new Intl.NumberFormat(locale).format(level.driverCount),
+    },
+    ...(manage
+      ? [
+          {
+            id: "order",
+            header: t("colOrder"),
+            cardLabel: false as const,
+            cell: (level: Level) => (
+              <span className="qualification-row-actions">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  aria-label={t("moveUp", { name: level.name })}
+                  disabled={command.pending || level.position === 1}
+                  onClick={() => move(level, level.position - 1)}
+                >
+                  ↑
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  aria-label={t("moveDown", { name: level.name })}
+                  disabled={command.pending || level.position === levels.length}
+                  onClick={() => move(level, level.position + 1)}
+                >
+                  ↓
+                </Button>
+                <Button asChild size="xs" variant="outline">
+                  <Link
+                    to={`${levelPath(level.id)}/edit`}
+                    aria-label={t("editLevel", { name: level.name })}
+                  >
+                    {t("edit")}
+                  </Link>
+                </Button>
+              </span>
+            ),
+          },
+        ]
+      : []),
+  ];
   return (
     <>
-      <Card className="stack">
-        <h2>
-          {t("current")} · {game.toUpperCase()}
-        </h2>
-        {target && (
-          <p>
-            {target.nickname} {target.formerMember ? `· ${t("former")}` : ""}
+      {list?.mine && !manage && <MineCard mine={list.mine} game={game} />}
+      <Card className="stack qualification-ladder-card">
+        {manage && (
+          <div className="qualification-card-actions">
+            <Button asChild size="sm">
+              <Link to={`/account/qualifications/new?game=${game}`}>{t("add")}</Link>
+            </Button>
+          </div>
+        )}
+        {command.failure && (
+          <p role="alert" className="field-error">
+            {failureText(t, command.failure, levels)}
           </p>
         )}
-        {missing ? <p>{t("noAssignment")}</p> : <State query={progress} />}{" "}
-        {p && (
-          <>
-            <h3>{level?.name ?? p.assignment.levelId}</h3>
-            <p>
-              {t("currentInterval")}: <Time value={p.assignment.assignedAt} />
-            </p>
-            {p.reviewRequired && (
-              <div role="alert" className="qualification-callout">
-                <strong>{t("decisionNeeded")}</strong>
-                <p>{t("review")}</p>
-                <p>{t("levelKept")}</p>
-              </div>
-            )}
-            <div className="qualification-progress-heading">
-              <h3>{t("progress")}</h3>
-              {p.eligibleForConfirmation && !terminal && (
-                <Badge size="xs" className="badge-accepted">
-                  {t("ready")}
-                </Badge>
-              )}
-            </div>
-            <dl className="qualification-facts qualification-progress">
-              <Fact label={t("trips")}>
-                <ProgressValue
-                  percent={progressPercent(
-                    String(p.acceptedTrips),
-                    p.requiredTrips === null ? null : String(p.requiredTrips),
-                  )}
-                >
-                  {p.acceptedTrips} / {p.requiredTrips ?? absentMinimum}
-                </ProgressValue>
-              </Fact>
-              <Fact label={t("distance")}>
-                <ProgressValue percent={progressPercent(p.actualDistanceM, p.requiredDistanceM)}>
-                  {formatQuantity(p.actualDistanceM, "km", locale)} /{" "}
-                  {p.requiredDistanceM === null
-                    ? absentMinimum
-                    : formatQuantity(p.requiredDistanceM, "km", locale)}
-                </ProgressValue>
-              </Fact>
-            </dl>
-            <p>{t(promotionStatus)}</p>
-            <h3>{t("restrictions")}</h3>
-            {level?.ruleVersionId ? (
-              <>
-                <State query={currentRules} />
-                {currentRules.data && (
-                  <RulesView rules={currentRules.data.data.data.rules} game={game} />
-                )}
-              </>
-            ) : (
-              <p>
-                {t(hasEffectiveRuleAtProgress || !level ? "restrictionsUnavailable" : "noRules")}
-              </p>
-            )}
-          </>
-        )}
-      </Card>
-      {manage && (
-        <AssignmentEditor
-          game={game}
-          memberId={id}
-          memberName={target?.nickname ?? session.self?.member.nickname ?? t("own")}
-          levels={levels}
-          progress={p}
-          etag={progress.data?.etag ?? history.data?.etag ?? null}
-          former={target?.formerMember ?? false}
-          onRefresh={() => pages.restart()}
-        />
-      )}
-      <Card className="stack">
-        <h2>{t("history")}</h2>
-        <p>{t(manage ? "staffHistoryHelp" : "immutable")}</p>
-        <State
-          query={history}
-          refresh={() => {
-            pages.restart();
-            if (!pages.cursor) return history.refetch();
-          }}
-        />
-        {history.data && history.data.data.data.items.length === 0 && <p>{t("emptyHistory")}</p>}
-        {history.data?.data.data.items.map((a) => (
-          <article className="qualification-history" key={a.id}>
-            <strong>{a.levelName}</strong>
-            {manage && "purpose" in a && (
-              <>
-                <p>
-                  {t("purpose")}: {t(a.purpose)}
-                </p>
-                <p>
-                  {t("actor")}: <ActionActor actor={a.actor} />
-                </p>
-                {a.promotion && (
-                  <p>
-                    {t("promotionConfirmed")}: <Time value={a.promotion.confirmedAt} /> ·{" "}
-                    <code>{a.promotion.id}</code>
-                  </p>
-                )}
-              </>
-            )}
-            <p>
-              {manage && `${t("effectiveInterval")}: `}
-              <Time value={a.assignedAt} /> →{" "}
-              {a.endedAt ? (
-                <>
-                  <Time value={a.endedAt} /> ({t("exclusive")})
-                </>
-              ) : (
-                t("currentInterval")
-              )}
-            </p>
-            <small>
-              {t("assignmentId")}: <code>{a.id}</code>
-            </small>
-          </article>
-        ))}
-        <Pager
-          pages={pages}
-          nextCursor={history.data?.data.data.nextCursor}
-          label={t("historyPages")}
+        <DataTable
+          caption={t("levelsCaption", { game: game.toUpperCase() })}
+          columns={columns}
+          rows={query.data ? levels : undefined}
+          rowKey={(level) => level.id}
+          rowAttributes={(level) => ({
+            ...(list?.mine?.level?.id === level.id ? { "data-current": "true" } : {}),
+          })}
+          status={query.isPending ? "loading" : query.isError ? "error" : "ready"}
+          busy={command.pending}
+          error={t("loadFailed")}
+          onRetry={() => void query.refetch()}
+          empty={{ message: t("emptyLevels") }}
+          cardsBelow={800}
         />
       </Card>
+      {list?.mine && manage && <MineCard mine={list.mine} game={game} />}
+      <Dialog open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
+        <DialogContent>
+          <DialogTitle>{t("moveConfirmTitle", { name: confirming?.level.name ?? "" })}</DialogTitle>
+          <DialogDescription>
+            {confirming &&
+              (confirming.count === null
+                ? t("moveConfirmUnknown", {
+                    top: confirming.top.name,
+                    next: confirming.next.name,
+                  })
+                : t("moveConfirm", {
+                    count: confirming.count,
+                    top: confirming.top.name,
+                    next: confirming.next.name,
+                  }))}
+          </DialogDescription>
+          <div className="qualification-card-actions">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                {t("cancel")}
+              </Button>
+            </DialogClose>
+            <Button
+              type="button"
+              disabled={command.pending}
+              onClick={() => {
+                if (confirming) apply(confirming.level, confirming.position);
+                setConfirming(null);
+              }}
+            >
+              {t("moveConfirmSubmit")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
-/** Exact value text with a decorative bar; no bar when the requirement is unset. */
-function ProgressValue({ percent, children }: { percent: number | null; children: ReactNode }) {
+/** "My level" with progress toward the next level's conditions. */
+export function MineCard({ mine, game }: { mine: Mine; game: Game }) {
+  const { t } = useTranslation("qualifications"),
+    locale = useLocale(),
+    headingId = useId();
+  if (!mine.level)
+    return (
+      <Card aria-labelledby={headingId} className="stack qualification-mine">
+        <h2 id={headingId}>{t("mine")}</h2>
+        <p>{t("noLevel", { game: game.toUpperCase() })}</p>
+      </Card>
+    );
+  const rows = mine.nextLevel ? progressRows(t, mine.progress, mine.conditions, locale) : [];
   return (
-    <>
-      <span className="qualification-progress-value">{children}</span>
-      {percent !== null && (
-        <span className="qualification-bar" aria-hidden="true">
-          <span style={{ width: `${percent}%` }} />
-        </span>
+    <Card aria-labelledby={headingId} className="stack qualification-mine">
+      <div className="qualification-mine-head">
+        <h2 id={headingId}>{t("mine")}</h2>
+        <InfoTip label={t("progressLabel")}>
+          <p>{t("progressTip")}</p>
+        </InfoTip>
+      </div>
+      <p className="qualification-mine-level">
+        <Link to={levelPath(mine.level.id)}>{mine.level.name}</Link>
+        {mine.since && (
+          <span className="qualification-muted">
+            {" · "}
+            {t("since")} <Time value={mine.since} />
+          </span>
+        )}
+      </p>
+      {!mine.nextLevel ? (
+        <p className="qualification-muted">{t("progressTop")}</p>
+      ) : !hasConditions(mine.conditions) ? (
+        <p className="qualification-muted">{t("progressNone")}</p>
+      ) : (
+        <>
+          <p className="qualification-muted">{t("progressNext", { name: mine.nextLevel.name })}</p>
+          {rows.map((row) => (
+            <ProgressRow
+              key={row.key}
+              label={row.label}
+              value={row.value}
+              required={row.required}
+              text={row.text}
+            />
+          ))}
+        </>
       )}
-    </>
+    </Card>
   );
 }

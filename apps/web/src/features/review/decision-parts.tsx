@@ -22,15 +22,14 @@ import {
 import { Badge, Button } from "../../shared/ui/primitives.js";
 import { AccountFailure } from "../account/transport.js";
 import { evidenceContent } from "../manual-reports/fields.js";
+import { QualificationCheckList, ruleTexts } from "../qualifications/QualificationCheckList.js";
 import { Confirm, Failure, Fields, RecordedTelemetryFields } from "../trips/components.js";
 import { useTripCommand } from "../trips/queries.js";
 import { DecisionBadge } from "../trips/TripTable.js";
 import { type DTO, TripFailure } from "../trips/transport.js";
 import { stagedDecisionInput } from "./dispatch-model.js";
 import {
-  type CheckRow,
   type Choice,
-  checkRows,
   type DiffRow,
   decisionBody,
   decisionState,
@@ -438,87 +437,12 @@ export function EvidenceList({ evidence }: { evidence: DTO["Evidence"][] }) {
   );
 }
 
-function RuleDetail({ row, game }: { row: CheckRow; game: Game }) {
-  const { t } = useTranslation("trips"),
-    locale = useLocale();
-  if (row.observedMassKg && row.limitMassKg)
-    return (
-      <>
-        {t("massDetail", {
-          observed: formatQuantity(row.observedMassKg, "t", locale),
-          limit: formatQuantity(row.limitMassKg, "t", locale),
-        })}
-      </>
-    );
-  if (row.ruleType === "allowed_adr_categories" && row.entityIds.length)
-    return (
-      <>
-        {t("notAllowed")}{" "}
-        {row.entityIds.map((value) => t("catalogs:adrClass", { class: value })).join(", ")}
-      </>
-    );
-  if (row.entityIds.length)
-    return (
-      <>
-        {t("notAllowed")} <Entities ids={row.entityIds} game={game} kind="trailer" />
-      </>
-    );
-  return row.reasonCode ? <CodeLabel code={row.reasonCode} /> : null;
-}
-function Entities({ ids, game, kind }: { ids: string[]; game: Game; kind: Kind }) {
+/** The five level limits applied to the reviewed fact: the decision snapshot or a live check. */
+export function ReviewQualificationCheck({ check }: { check: DTO["QualificationCheck"] }) {
   return (
-    <>
-      {ids.map((id, index) => (
-        <span key={id}>
-          {index > 0 && ", "}
-          <EntityLabel entityId={id} game={game} kind={kind} />
-        </span>
-      ))}
-    </>
-  );
-}
-
-/** Historical qualification rules for the reviewed fact; every state has a symbol and text. */
-export function QualificationCheckList({
-  check,
-  game,
-}: {
-  check: DTO["QualificationCheck"];
-  game: Game;
-}) {
-  const { t } = useTranslation("trips"),
-    rows = checkRows(check);
-  return (
-    <ReviewSection title={t("check")} note={t("checkBasis")}>
-      {rows.length ? (
-        <ul className="review-checks">
-          {rows.map((row) => (
-            <li key={row.key} data-state={row.state}>
-              <span className="review-check-symbol" aria-hidden="true">
-                {row.symbol}
-              </span>
-              <span className="review-check-text">
-                <span className="review-check-title">
-                  <span className="visually-hidden">{t(`state_${row.state}`)}: </span>
-                  {row.ruleType ? t(row.ruleType) : t("state_unavailable")}
-                  {row.ruleType && (
-                    <small className="review-check-state" aria-hidden="true">
-                      {" · "}
-                      {t(`state_${row.state}`)}
-                    </small>
-                  )}
-                </span>
-                <span className="review-check-detail">
-                  <RuleDetail row={row} game={game} />
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="review-muted">{t("noRules")}</p>
-      )}
-    </ReviewSection>
+    <section className="review-section review-qualification">
+      <QualificationCheckList check={check} headingLevel={3} />
+    </section>
   );
 }
 
@@ -582,41 +506,20 @@ export function ReviewHistory({
   );
 }
 
-function LimitList({
-  id,
-  rules,
-  game,
-}: {
-  id?: string;
-  rules: DTO["QualificationRuleCheck"][];
-  game: Game;
-}) {
-  const { t } = useTranslation("trips"),
+function LimitList({ id, rules }: { id?: string; rules: DTO["QualificationRuleCheck"][] }) {
+  const { t } = useTranslation("qualifications"),
     locale = useLocale();
   return (
     <ul id={id} className="review-limits">
-      {rules.map((rule) => (
-        <li key={`${rule.ruleType}-${rule.reasonCode}`}>
-          {rule.ruleType === "max_mass" && rule.observedMassKg && rule.limitMassKg ? (
-            t("limitMass", {
-              observed: formatQuantity(rule.observedMassKg, "t", locale),
-              limit: formatQuantity(rule.limitMassKg, "t", locale),
-            })
-          ) : rule.entityIds.length &&
-            ["allowed_trailer_types", "allowed_adr_categories"].includes(rule.ruleType) ? (
-            <>
-              {t(rule.ruleType === "allowed_adr_categories" ? "limitAdr" : "limitTrailer")}{" "}
-              {rule.ruleType === "allowed_adr_categories" ? (
-                rule.entityIds.map((value) => t("catalogs:adrClass", { class: value })).join(", ")
-              ) : (
-                <Entities ids={rule.entityIds} game={game} kind="trailer" />
-              )}
-            </>
-          ) : (
-            <CodeLabel code={rule.reasonCode} />
-          )}
-        </li>
-      ))}
+      {rules.map((rule) => {
+        const text = ruleTexts(t, rule, locale);
+        return (
+          <li key={rule.rule}>
+            {text.label}: {t("observed", { value: text.observed })} ·{" "}
+            {t("limit", { value: text.limit })}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -662,7 +565,6 @@ export function DecisionForm({
       seconds: command.seconds,
       optionalAcceptReason: staged,
     }),
-    game = review.trip.summary.game,
     mode = review.acceptance.mode,
     decided = ["accepted", "rejected"].includes(review.trip.summary.decision);
   // A closing confirmation returns focus to its trigger, which may be disabled by then (for
@@ -813,7 +715,7 @@ export function DecisionForm({
             <span aria-hidden="true">! </span>
             {t("overTitle")}
           </legend>
-          <LimitList id={limitsId} rules={state.exceeded} game={game} />
+          <LimitList id={limitsId} rules={state.exceeded} />
           <p className="review-muted">{t("overHelp")}</p>
           <label className="review-check-option">
             <input
@@ -883,7 +785,7 @@ export function DecisionForm({
                 <p>
                   <strong>{t("overLimitsMarker")}</strong>
                 </p>
-                <LimitList rules={state.exceeded} game={game} />
+                <LimitList rules={state.exceeded} />
               </>
             )}
             <p className="review-multiline">{reason}</p>

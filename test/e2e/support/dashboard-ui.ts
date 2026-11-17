@@ -109,54 +109,27 @@ export function makeMemberProfileFixture(memberId: string) {
   };
 }
 
-export function makeProgressFixture(game: "ets2" | "ats") {
-  return {
-    data: {
-      assignment: {
-        id: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a5c",
-        periodId: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a5c",
-        game,
-        levelId: game === "ets2" ? levelIdEts2 : levelIdAts,
-        assignedAt: "2026-10-01T10:00:00.000Z",
-      },
-      acceptedTrips: 15,
-      actualDistanceM: "45000000",
-      requiredTrips: 20,
-      requiredDistanceM: "60000000",
-      eligibleForConfirmation: false,
-      reviewRequired: false,
-      computedAt: "2026-10-26T12:00:00.000Z",
-      projectionVersion: 1,
-      projectionPending: false as const,
-      reviewReasonCodes: [],
+/** The member's levels with progress: the shape `/me/qualifications` returns. */
+export function makeMyQualificationsFixture() {
+  const item = (game: "ets2" | "ats") => ({
+    game,
+    level: {
+      id: game === "ets2" ? levelIdEts2 : levelIdAts,
+      name: game === "ets2" ? "European Driver II" : "Pacific Driver III",
+      position: game === "ets2" ? 3 : 2,
     },
-    meta,
-  };
-}
-
-export function makeQualificationLevelsFixture(game: "ets2" | "ats") {
-  return {
-    data: {
-      items: [
-        {
-          id: game === "ets2" ? levelIdEts2 : levelIdAts,
-          game,
-          position: game === "ets2" ? 3 : 2,
-          terminal: false,
-          promotionConfigured: false,
-          name: game === "ets2" ? "European Driver II" : "Pacific Driver III",
-          version: 1,
-          ruleVersionId: null,
-          configured: false,
-          freightRuleSummary: null,
-          requiredTrips: null,
-          requiredDistanceM: null,
-        },
-      ],
-      nextCursor: null,
+    since: "2026-10-01T10:00:00.000Z",
+    progress: { trips: 15, distanceM: "45000000" },
+    conditions: { requiredTrips: 20, requiredDistanceM: "60000000" },
+    nextLevel: {
+      id: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a7f",
+      name: game === "ets2" ? "European Driver I" : "Pacific Driver II",
     },
+  });
+  return {
+    data: { items: [item("ets2"), item("ats")] },
     meta,
-  } satisfies components["schemas"]["EnvelopeListQualificationLevel"];
+  } satisfies components["schemas"]["EnvelopeMyQualificationList"];
 }
 
 export function makeTripSummaryListFixture(ownerId: string = member1Id) {
@@ -332,7 +305,7 @@ function endpointOf(method: string, url: URL): DashboardEndpoint | undefined {
       ? breakdownEndpoint[dimension]
       : undefined;
   }
-  if (path === "/api/v1/me/qualification-progress") return "progress";
+  if (path === "/api/v1/me/qualifications") return "progress";
   if (path === "/api/v1/me/upcoming-event") return "event";
   if (path === "/api/v1/me/workspace-summary") return "summary";
   if (path === "/api/v1/public/company-stats") return "stats";
@@ -352,7 +325,7 @@ export async function mockDashboardRoutes(
   page: Page,
   options: {
     emptyCompany?: boolean;
-    qualificationLevels?: "unavailable" | "missing";
+    qualifications?: "unavailable" | "missing";
     /** Answer analytics per requested game/granularity (see makeFilteredAnalyticsFixture). */
     filterAware?: boolean;
     failures?: Partial<Record<DashboardEndpoint, number>>;
@@ -555,16 +528,11 @@ export async function mockDashboardRoutes(
       replays.set(key, { body, etag: etagOf(state.response) });
       return route.fulfill({ json: body, headers: { ETag: etagOf(state.response) } });
     }
-    if (path === "/api/v1/me/qualification-progress") {
-      const game = (url.searchParams.get("game") ?? "ets2") as "ets2" | "ats";
-      return route.fulfill({ json: makeProgressFixture(game) });
-    }
-    if (path === "/api/v1/qualification-levels") {
-      if (options.qualificationLevels === "unavailable")
+    if (path === "/api/v1/me/qualifications") {
+      if (options.qualifications === "unavailable")
         return route.fulfill({ status: 503, json: { error: { code: "UNAVAILABLE" } } });
-      const game = url.searchParams.get("game") === "ats" ? "ats" : "ets2";
-      const fixture = makeQualificationLevelsFixture(game);
-      if (options.qualificationLevels === "missing") fixture.data.items = [];
+      const fixture = makeMyQualificationsFixture();
+      if (options.qualifications === "missing") fixture.data.items = [];
       return route.fulfill({ json: fixture });
     }
     if (path === "/api/v1/members") {
@@ -573,9 +541,8 @@ export async function mockDashboardRoutes(
     if (path.startsWith("/api/v1/members/") && path.endsWith("/analytics")) {
       return route.fulfill({ json: makeMemberAnalyticsFixture() });
     }
-    if (path.startsWith("/api/v1/members/") && path.endsWith("/qualification-progress")) {
-      const game = (url.searchParams.get("game") ?? "ets2") as "ets2" | "ats";
-      return route.fulfill({ json: makeProgressFixture(game) });
+    if (path.startsWith("/api/v1/members/") && path.endsWith("/qualifications")) {
+      return route.fulfill({ json: makeMyQualificationsFixture() });
     }
     if (path.startsWith("/api/v1/members/")) {
       const memberId = path.split("/").pop() ?? member1Id;

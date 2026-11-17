@@ -3,9 +3,24 @@ import type {
   Fact,
   NormalizedTripEvidence,
   TripEntity,
-} from "../../../apps/api/src/modules/sources/contracts/evidence.js";
-import type { EvaluationContext } from "../../../apps/api/src/modules/qualification-rules/contracts.js";
-import { SYNTHETIC_IDS } from "./synthetic-rules.js";
+} from "../../apps/api/src/modules/sources/contracts/evidence.js";
+
+/** Synthetic trip evidence shared by trip decision and event tests. */
+// Canonical synthetic UUIDs strictly conforming to UUID v4
+export const SYNTHETIC_IDS = {
+  TRAILER_STANDARD: "00000000-0000-4000-8000-000000000001",
+  TRAILER_HEAVY: "00000000-0000-4000-8000-000000000002",
+  TRAILER_DISALLOWED: "00000000-0000-4000-8000-000000000099",
+
+  CARGO_STANDARD: "00000000-0000-4000-8000-000000000201",
+  CARGO_PRESCRIBED: "00000000-0000-4000-8000-000000000202",
+  CARGO_MISMATCHED: "00000000-0000-4000-8000-000000000299",
+
+  EVENT_ID: "00000000-0000-4000-8000-000000000301",
+  EVENT_REVISION_ID: "00000000-0000-4000-8000-000000000302",
+  ATTENDANCE_REVISION_ID: "00000000-0000-4000-8000-000000000303",
+  ASSIGNMENT_ID: "00000000-0000-4000-8000-000000000402",
+} as const;
 
 export function knownFact<T>(
   value: T,
@@ -149,21 +164,6 @@ export function createSyntheticManualEvidence(
 
   return {
     ...defaultManual,
-    ...overrides,
-  };
-}
-
-/**
- * Creates a synthetic EvaluationContext.
- */
-export function createSyntheticEvaluationContext(
-  overrides: Partial<EvaluationContext> = {},
-): EvaluationContext {
-  return {
-    qualificationAssignmentId: SYNTHETIC_IDS.ASSIGNMENT_ID,
-    ruleVersionId: SYNTHETIC_IDS.RULE_VERSION_ID,
-    attributionBasis: "actual_start",
-    confirmedEvent: null,
     ...overrides,
   };
 }

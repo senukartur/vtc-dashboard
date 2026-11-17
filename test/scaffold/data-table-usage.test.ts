@@ -30,7 +30,6 @@ const pending: Record<string, Rule[]> = {
   "features/connections/ConnectionsSection.tsx": ["pager"],
   "features/dashboard/components.tsx": ["table-import"],
   "features/drivers/components.tsx": ["table-import"],
-  "features/qualifications/levels.tsx": ["table-import"],
   "features/review/decision-parts.tsx": ["table-markup"],
 };
 

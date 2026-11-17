@@ -3,7 +3,6 @@ import {
   type AnyMySqlColumn,
   boolean,
   check,
-  customType,
   foreignKey,
   index,
   int,
@@ -11,11 +10,12 @@ import {
   mysqlEnum,
   mysqlTable,
   primaryKey,
+  tinyint,
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
 import { decimalColumn, idColumn, utcColumn } from "../../core/values.js";
-import { auditEntries } from "../audit.js";
+import { catalogTrailers } from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
 
 export {
@@ -40,96 +40,88 @@ export { alias } from "drizzle-orm/mysql-core";
 
 const fk = (name: string, column: AnyMySqlColumn, target: AnyMySqlColumn) =>
   foreignKey({ name, columns: [column], foreignColumns: [target] }).onDelete("restrict");
-// Aggregate proofs may exceed one source quantity; preserve the exact widened sum.
-const totalDistanceColumn = customType<{ data: string; driverData: string }>({
-  dataType: () => "decimal(65,18)",
-  toDriver(value) {
-    if (!/^(0|[1-9]\d{0,46})(\.\d{1,18})?$/.test(value))
-      throw new Error("INVALID_AGGREGATE_DISTANCE");
-    return value;
-  },
-  fromDriver(value) {
-    if (!/^(0|[1-9]\d{0,46})(\.\d{1,18})?$/.test(value))
-      throw new Error("INVALID_AGGREGATE_DISTANCE");
-    return value;
-  },
-});
 const game = (name: string) => mysqlEnum(name, ["ets2", "ats"]);
 export const maxQualificationLevels = 25;
-const legacyLevelCodes = ["trainee", "driver_iii", "driver_ii", "driver_i"] as const;
+export const qualificationAdrClasses = ["1", "2", "3", "4", "6", "8"] as const;
+// One row per level of a game's ladder. position is null exactly when the level is deleted.
 export const qualificationLevels = mysqlTable(
   "qualification_levels",
   {
     id: idColumn("id").primaryKey(),
     game: game("game").notNull(),
-    code: mysqlEnum("code", legacyLevelCodes),
     name: varchar("name", { length: 128 }).notNull(),
     version: int("version", { unsigned: true }).notNull(),
-    activePosition: int("active_position", { unsigned: true }),
-    ladderRevision: int("ladder_revision", { unsigned: true }).notNull().default(1),
-    promotionGeneration: int("promotion_generation", { unsigned: true }).notNull().default(1),
-  },
-  (t) => [
-    uniqueIndex("qualification_level_code").on(t.game, t.code),
-    uniqueIndex("qualification_level_position").on(t.game, t.activePosition),
-    check("qual_level_version_positive", sql`${t.version} > 0`),
-    check(
-      "qual_level_position_range",
-      sql`${t.activePosition} IS NULL OR ${t.activePosition} BETWEEN 1 AND ${sql.raw(String(maxQualificationLevels))}`,
-    ),
-    check(
-      "qual_level_revisions_positive",
-      sql`${t.ladderRevision} > 0 AND ${t.promotionGeneration} > 0`,
-    ),
-  ],
-);
-export const qualificationRules = mysqlTable(
-  "qualification_rule_versions",
-  {
-    id: idColumn("id").primaryKey(),
-    levelId: idColumn("level_id").notNull(),
-    publishedAt: utcColumn("published_at").notNull(),
-    effectiveAt: utcColumn("effective_at").notNull(),
-    rules: json("rules").$type<unknown[]>().notNull(),
+    position: int("position", { unsigned: true }),
+    massMinKg: decimalColumn("mass_min_kg"),
+    massMaxKg: decimalColumn("mass_max_kg"),
+    distanceMinM: decimalColumn("distance_min_m"),
+    distanceMaxM: decimalColumn("distance_max_m"),
+    trailerMode: mysqlEnum("trailer_mode", ["any", "selected"]).notNull().default("any"),
+    adrMode: mysqlEnum("adr_mode", ["forbidden", "selected", "any"]).notNull().default("any"),
+    adrClasses: json("adr_classes").$type<string[]>(),
+    hardModeRequired: boolean("hard_mode_required").notNull().default(false),
     requiredTrips: int("required_trips", { unsigned: true }),
     requiredDistanceM: decimalColumn("required_distance_m"),
-    promotionGeneration: int("promotion_generation", { unsigned: true }).notNull().default(1),
-    actorId: idColumn("actor_id").notNull(),
-    reason: varchar("reason", { length: 2048 }),
+    deletedAt: utcColumn("deleted_at"),
   },
   (t) => [
-    fk("qual_rule_level_fk", t.levelId, qualificationLevels.id),
-    fk("qual_rule_actor_fk", t.actorId, membership.userId),
-    uniqueIndex("qualification_rule_effective").on(t.levelId, t.effectiveAt),
-    check("qual_rule_effective_publication", sql`${t.effectiveAt} >= ${t.publishedAt}`),
+    uniqueIndex("qualification_level_position").on(t.game, t.position),
+    uniqueIndex("qualification_level_id_game").on(t.id, t.game),
+    check("qual_level_version_positive", sql`${t.version} > 0`),
     check(
-      "qualification_threshold_distance",
-      sql`${t.requiredDistanceM} IS NULL OR ${t.requiredDistanceM} >= 0`,
+      "qual_level_position_bounds",
+      sql`${t.position} IS NULL OR ${t.position} BETWEEN 1 AND ${sql.raw(String(maxQualificationLevels))}`,
+    ),
+    check("qual_level_deleted", sql`(${t.position} IS NULL) = (${t.deletedAt} IS NOT NULL)`),
+    check(
+      "qual_level_mass_range",
+      sql`${t.massMinKg} IS NULL OR ${t.massMaxKg} IS NULL OR ${t.massMinKg} <= ${t.massMaxKg}`,
+    ),
+    check(
+      "qual_level_distance_range",
+      sql`${t.distanceMinM} IS NULL OR ${t.distanceMaxM} IS NULL OR ${t.distanceMinM} <= ${t.distanceMaxM}`,
+    ),
+    check(
+      "qual_level_adr_classes",
+      sql`(${t.adrMode} = 'selected') = (${t.adrClasses} IS NOT NULL)`,
+    ),
+    check("qual_level_required_trips", sql`${t.requiredTrips} IS NULL OR ${t.requiredTrips} > 0`),
+    check(
+      "qual_level_required_distance",
+      sql`${t.requiredDistanceM} IS NULL OR ${t.requiredDistanceM} > 0`,
     ),
   ],
 );
-// The legacy label is retained on the original evidence. New evidence uses the canonical level.
-export const initialQualifications = mysqlTable(
-  "qualification_initial_assignments",
+// Allowed trailer types of a level whose trailer mode is selected.
+export const qualificationLevelTrailers = mysqlTable(
+  "qualification_level_trailers",
   {
-    id: idColumn("id").notNull(),
-    userId: idColumn("user_id").notNull(),
+    levelId: idColumn("level_id").notNull(),
     game: game("game").notNull(),
-    level: mysqlEnum("level", ["trainee"]),
-    levelId: idColumn("level_id"),
-    assignedAt: utcColumn("assigned_at").notNull(),
+    trailerId: idColumn("trailer_id").notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.userId, t.game] }),
+    primaryKey({ columns: [t.levelId, t.trailerId] }),
     foreignKey({
-      name: "qualification_initial_member_fk",
-      columns: [t.userId],
-      foreignColumns: [membership.userId],
+      name: "qual_level_trailer_level_fk",
+      columns: [t.levelId, t.game],
+      foreignColumns: [qualificationLevels.id, qualificationLevels.game],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "qual_level_trailer_catalog_fk",
+      columns: [t.trailerId, t.game],
+      foreignColumns: [catalogTrailers.id, catalogTrailers.game],
     }).onDelete("restrict"),
-    uniqueIndex("qualification_initial_id").on(t.id),
-    fk("qual_initial_level_fk", t.levelId, qualificationLevels.id),
   ],
 );
+export const qualificationAssignmentKinds = [
+  "admission",
+  "promotion",
+  "manual",
+  "level_removed",
+  "reinstatement",
+] as const;
+// A member's level interval in one game; the open row (ended_at null) is the current level.
 export const qualificationAssignments = mysqlTable(
   "qualification_assignments",
   {
@@ -139,91 +131,30 @@ export const qualificationAssignments = mysqlTable(
     levelId: idColumn("level_id").notNull(),
     assignedAt: utcColumn("assigned_at").notNull(),
     endedAt: utcColumn("ended_at"),
-    revision: int("revision", { unsigned: true }).notNull().default(1),
-    purpose: mysqlEnum("purpose", [
-      "initial",
-      "reinstatement",
-      "historical_resolution",
-      "administrative_correction",
-      "promotion",
-      "ladder_archive_transfer",
-    ]).notNull(),
+    kind: mysqlEnum("kind", qualificationAssignmentKinds).notNull(),
     actorId: idColumn("actor_id"),
-    reason: varchar("reason", { length: 2048 }).notNull(),
+    comment: varchar("comment", { length: 2048 }),
+    previousAssignmentId: idColumn("previous_assignment_id"),
+    openMarker: tinyint("open_marker").generatedAlwaysAs(sql`IF(ended_at IS NULL, 1, NULL)`, {
+      mode: "stored",
+    }),
   },
   (t) => [
     fk("qual_assignment_member_fk", t.userId, membership.userId),
     fk("qual_assignment_actor_fk", t.actorId, membership.userId),
     fk("qual_assignment_level_fk", t.levelId, qualificationLevels.id),
-    check("qual_assignment_revision_positive", sql`${t.revision} > 0`),
+    foreignKey({
+      name: "qual_assignment_previous_fk",
+      columns: [t.previousAssignmentId],
+      foreignColumns: [t.id],
+    }).onDelete("restrict"),
+    uniqueIndex("qualification_assignment_previous").on(t.previousAssignmentId),
+    uniqueIndex("qualification_assignment_open").on(t.userId, t.game, t.openMarker),
+    index("qualification_assignment_level_open").on(t.levelId, t.openMarker),
     index("qualification_assignment_history").on(t.userId, t.game, t.assignedAt, t.id),
     check(
       "qualification_period_interval",
       sql`${t.endedAt} IS NULL OR ${t.endedAt} >= ${t.assignedAt}`,
     ),
-  ],
-);
-export const qualificationStates = mysqlTable(
-  "qualification_states",
-  {
-    userId: idColumn("user_id").notNull(),
-    game: game("game").notNull(),
-    assignmentId: idColumn("assignment_id"),
-    eligibleSince: utcColumn("eligible_since"),
-    eligibilityEvaluatedAt: utcColumn("eligibility_evaluated_at"),
-    version: int("version", { unsigned: true }).notNull(),
-  },
-  (t) => [
-    fk("qual_state_member_fk", t.userId, membership.userId),
-    fk("qual_state_assignment_fk", t.assignmentId, qualificationAssignments.id),
-    primaryKey({ columns: [t.userId, t.game] }),
-    index("qualification_state_game_members").on(t.game, t.userId, t.assignmentId),
-    check("qual_state_version_positive", sql`${t.version} > 0`),
-  ],
-);
-export const qualificationLadderHistory = mysqlTable(
-  "qualification_ladder_history",
-  {
-    auditId: idColumn("audit_id").primaryKey(),
-    reason: varchar("reason", { length: 2048 }).notNull(),
-  },
-  (t) => [fk("qual_ladder_history_audit_fk", t.auditId, auditEntries.id)],
-);
-export const qualificationPromotions = mysqlTable(
-  "qualification_promotions",
-  {
-    id: idColumn("id").primaryKey(),
-    sourceAssignmentId: idColumn("source_assignment_id").notNull(),
-    targetAssignmentId: idColumn("target_assignment_id").notNull(),
-    ruleVersionId: idColumn("rule_version_id").notNull(),
-    requiredTrips: int("required_trips", { unsigned: true }),
-    requiredDistanceM: decimalColumn("required_distance_m"),
-    acceptedTrips: int("accepted_trips", { unsigned: true }).notNull(),
-    actualDistanceM: totalDistanceColumn("actual_distance_m").notNull(),
-    periodRevision: int("period_revision", { unsigned: true }).notNull(),
-    confirmedAt: utcColumn("confirmed_at").notNull(),
-    actorId: idColumn("actor_id").notNull(),
-    reason: varchar("reason", { length: 2048 }).notNull(),
-  },
-  (t) => [
-    fk("qual_promotion_source_fk", t.sourceAssignmentId, qualificationAssignments.id),
-    fk("qual_promotion_target_fk", t.targetAssignmentId, qualificationAssignments.id),
-    fk("qual_promotion_rules_fk", t.ruleVersionId, qualificationRules.id),
-    fk("qual_promotion_actor_fk", t.actorId, membership.userId),
-    uniqueIndex("qualification_promotion_once").on(t.sourceAssignmentId),
-  ],
-);
-export const promotionReviews = mysqlTable(
-  "qualification_promotion_reviews",
-  {
-    promotionId: idColumn("promotion_id").primaryKey(),
-    reviewRequired: boolean("review_required").notNull(),
-    version: int("version", { unsigned: true }).notNull(),
-    checkedRevision: int("checked_revision", { unsigned: true }).notNull(),
-    checkedAt: utcColumn("checked_at").notNull(),
-  },
-  (t) => [
-    fk("qual_review_promotion_fk", t.promotionId, qualificationPromotions.id),
-    check("qual_review_versions_positive", sql`${t.version} > 0 AND ${t.checkedRevision} > 0`),
   ],
 );

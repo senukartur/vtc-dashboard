@@ -28,7 +28,7 @@ import {
   levelId,
   levelsFixture,
   profileFixture,
-  progressFixture,
+  qualificationsFixture,
   selfId,
   topId,
   tripsFixture,
@@ -161,7 +161,10 @@ describe("driver profile model", () => {
   });
 
   describe("level ladder", () => {
-    const all: Level[] = [...levelsFixture("ets2").data.items, ...levelsFixture("ats").data.items];
+    const all: Level[] = [
+      ...levelsFixture("ets2").data.levels,
+      ...levelsFixture("ats").data.levels,
+    ];
 
     it("orders one game's levels by position and ignores the other game", () => {
       expect(ladderFor(all, "ets2").map((level) => level.position)).toEqual([1, 2, 3, 4]);
@@ -275,7 +278,7 @@ describe("driver profile translations", () => {
     ])
       expect(present).not.toContain(`profile.${key}`);
     expect(present).toContain("states.forbidden");
-    expect(present).toContain("qualification.eligible");
+    expect(present).toContain("qualification.notConfigured");
     // The client-side directory and the trips-card lifetime line are gone (VTC-145).
     for (const key of [
       "directory.subtitle",
@@ -299,7 +302,7 @@ describe("driver profile fixtures match the browser contract", () => {
       for (const trips of ["on", "none", "off"] as const)
         expect(parses("EnvelopeMemberProfile", profileFixture(id, trips))).toBe(true);
     for (const game of ["ets2", "ats"] as const)
-      expect(parses("EnvelopeListQualificationLevel", levelsFixture(game))).toBe(true);
+      expect(parses("EnvelopeQualificationLevelList", levelsFixture(game))).toBe(true);
     for (const search of ["", "game=ats", "game=ets2"])
       expect(parses("EnvelopeAnalytics", analyticsFixture(new URLSearchParams(search)))).toBe(true);
     expect(
@@ -315,25 +318,24 @@ describe("driver profile fixtures match the browser contract", () => {
         ).toBe(true);
   });
 
-  it("serves public progress, which the private progress schema rejects", () => {
-    for (const [id, game] of [
-      [alphaId, "ets2"],
-      [alphaId, "ats"],
-      [selfId, "ets2"],
-      [topId, "ets2"],
-    ] as const) {
-      const fixture = progressFixture(id, game);
-      expect(parses("EnvelopeProgressPublic", fixture)).toBe(true);
-      expect(parses("EnvelopeProgress", fixture)).toBe(false);
+  it("serves public qualifications for assigned games only", () => {
+    for (const id of [alphaId, selfId, topId, formerId]) {
+      const fixture = qualificationsFixture(id);
+      expect(parses("EnvelopeMyQualificationList", fixture)).toBe(true);
+      expect(fixture.data.items.every((item) => item.level !== null)).toBe(true);
     }
-    expect(progressFixture(formerId, "ets2")).toBeNull();
+    expect(
+      qualificationsFixture(alphaId)
+        .data.items.map((item) => item.game)
+        .sort(),
+    ).toEqual(["ats", "ets2"]);
   });
 
   it("keeps fixtures free of private account data", () => {
     const serialized = JSON.stringify([
       profileFixture(alphaId),
       tripsFixture(new URLSearchParams("scope=company")),
-      progressFixture(alphaId, "ets2"),
+      qualificationsFixture(alphaId),
     ]);
     for (const secret of ["@example.invalid", "email", "password", "token", "evidence"])
       expect(serialized).not.toContain(secret);

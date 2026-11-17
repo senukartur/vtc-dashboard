@@ -16,7 +16,6 @@ export { refreshWorkspaceSummary } from "./workspace-summary-cache.js";
 
 export type WorkspaceSummary = DTO["WorkspaceSummary"] & {
   dispatch?: "stage3" | "legacy";
-  promotionsReady?: DTO["WorkspaceStage3Summary"]["promotionsReady"];
 };
 
 export function workspaceSummary(data: DTO["WorkspaceStage3Summary"]): WorkspaceSummary {

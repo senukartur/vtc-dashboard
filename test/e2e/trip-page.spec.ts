@@ -2,7 +2,6 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
-import { mockTrips } from "./support/trip-ui.ts";
 import {
   longCompanyName,
   longEventTitle,
@@ -21,6 +20,7 @@ import {
   tripPageId,
   withoutSources,
 } from "./support/trip-page-fixtures.ts";
+import { mockTrips } from "./support/trip-ui.ts";
 
 const tripPath = `/account/trips/${tripPageId}`;
 // A device zone other than UTC, so a saved zone and "as on the device" (null) render differently.
@@ -65,7 +65,7 @@ const fact = (scope: Locator, term: string) =>
 const logoRequests = (requests: string[]) => requests.filter((path) => path.endsWith("/logo"));
 
 test(
-  "F1 telemetry trip shows its source, companies, damage, event link and rule checks to the author",
+  "F1 telemetry trip shows its source, companies, damage, event link and five limits to the author",
   browserCase(["@functional"]),
   async ({ page }) => {
     const { state, requests } = await author(page, telemetryWithEvent());
@@ -107,22 +107,27 @@ test(
       `/account/events/${tripEventId}`,
     );
 
-    const rules = region(page, "Qualification check").getByRole("listitem");
-    await expect(rules).toHaveCount(3);
-    await expect(rules.nth(0)).toHaveAttribute("data-state", "pass");
-    await expect(rules.nth(0).locator(".trip-rule-symbol")).toHaveAttribute("aria-hidden", "true");
-    await expect(rules.nth(0)).toContainText("Maximum mass");
-    await expect(rules.nth(0)).toContainText("Passed");
-    await expect(rules.nth(0)).toContainText("19 t against the 20 t limit");
-    await expect(rules.nth(1)).toHaveAttribute("data-state", "fail");
-    await expect(rules.nth(1)).toContainText("Allowed trailer types");
-    await expect(rules.nth(1)).toContainText("Failed");
-    await expect(rules.nth(1)).toContainText("Allowed: Fictional Curtainsider and 2 more");
-    await expect(rules.nth(1)).toContainText("Not allowed: Fictional Tanker");
-    await expect(rules.nth(2)).toHaveAttribute("data-state", "bypassed");
-    await expect(rules.nth(2)).toContainText("Allowed ADR categories");
-    await expect(rules.nth(2)).toContainText("Bypassed by event");
-    await expect(rules.nth(2)).toContainText("Allowed: ADR class 2, ADR class 3");
+    const check = region(page, "Qualification check");
+    await expect(check).toContainText("Checked against “Fictional Trainee” · As at the decision");
+    const rules = check.getByRole("listitem");
+    await expect(rules).toHaveCount(5);
+    for (const [index, result] of ["pass", "pass", "fail", "pass", "pass"].entries())
+      await expect(rules.nth(index)).toHaveAttribute("data-result", result);
+    await expect(rules.nth(0).locator(".qualification-check-symbol")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    await expect(rules.nth(0)).toContainText("Cargo mass · Passes");
+    await expect(rules.nth(0)).toContainText("Trip: 19 t · Limit: up to 20 t");
+    await expect(rules.nth(1)).toContainText("Trip distance · Passes");
+    await expect(rules.nth(2)).toContainText("Trailer types · Outside the limit");
+    await expect(rules.nth(2)).toContainText(
+      "Trip: Fictional Tanker · Limit: Fictional Curtainsider",
+    );
+    await expect(rules.nth(3)).toContainText("Trip: not ADR · Limit: Forbidden");
+    await expect(rules.nth(4)).toContainText("Hard Mode · Passes");
+    await expect(rules.nth(4).locator("svg.flame-icon")).toBeVisible();
+    await expect(rules.nth(4)).toContainText("Trip: unknown · Limit: Not required");
 
     // The author sees no reviewer-only workspace or reconciliation data.
     await expect(page.getByRole("link", { name: "Review workspace", exact: true })).toHaveCount(0);
@@ -166,11 +171,9 @@ test(
     await expect(fact(delivery(page), "Event")).toHaveCount(0);
 
     const check = region(page, "Qualification check");
-    await expect(check.getByRole("listitem")).toHaveCount(1);
-    await expect(check.getByRole("listitem")).toHaveAttribute("data-state", "unavailable");
-    await expect(check).toContainText("Check unavailable");
-    await expect(check).toContainText("The rules that applied to this trip are unknown.");
-    await expect(page.getByText("historical_assignment_missing")).toHaveCount(0);
+    await expect(check).toContainText("The driver's level at trip time is unknown");
+    await expect(check.getByRole("listitem")).toHaveCount(0);
+    await expect(page.getByText("qualification_level_unknown")).toHaveCount(0);
 
     // Current production sends no check: nothing renders, not even an empty state.
     state.view = manualUnknown("no-check");
@@ -178,13 +181,13 @@ test(
     await loaded(page);
     await expect(region(page, "Sources")).toBeVisible();
     await expect(region(page, "Qualification check")).toHaveCount(0);
-    await expect(page.getByText("No qualification rules apply.", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Qualification check", { exact: true })).toHaveCount(0);
 
-    state.view = manualUnknown("no-rules");
+    state.view = manualUnknown("event-exempt");
     await page.reload();
     await loaded(page);
     await expect(region(page, "Qualification check")).toContainText(
-      "No qualification rules apply.",
+      "A company event trip — credited without the qualification check",
     );
     await expect(region(page, "Qualification check").getByRole("listitem")).toHaveCount(0);
 
@@ -252,12 +255,13 @@ test(
     await expect(history).toContainText(returnedReason);
     await expect(region(page, "Sources").getByRole("listitem")).toHaveCount(2);
     const rules = region(page, "Qualification check").getByRole("listitem");
-    await expect(rules).toHaveCount(3);
-    // Empty configured allowlists are stated, not omitted.
-    await expect(rules.nth(1)).toContainText("Allowed: none");
-    await expect(rules.nth(1)).toContainText("Not allowed: Fictional Tanker");
-    await expect(rules.nth(1)).not.toContainText("more");
-    await expect(rules.nth(2)).toContainText("Allowed: non-hazardous cargo only");
+    await expect(rules).toHaveCount(5);
+    // Selected limits without entries are named, never left blank.
+    await expect(rules.nth(2)).toContainText("Trip: Fictional Tanker · Limit: Only selected");
+    await expect(rules.nth(3)).toHaveAttribute("data-result", "fail");
+    await expect(rules.nth(3)).toContainText(
+      "Trip: 3 · Flammable liquids · Limit: Selected classes",
+    );
     await expect(fact(delivery(page), "Sender company")).toContainText("Fictional Logistics");
     await expect(
       page.getByRole("heading", { name: "Request correction", exact: true }),
@@ -328,14 +332,15 @@ test(
       const sources = region(page, labels.sources);
       const check = region(page, labels.check);
       await expect(sources.getByText(labels.effective, { exact: true })).toBeVisible();
-      await expect(check.getByRole("listitem")).toHaveCount(3);
+      await expect(check.getByRole("listitem")).toHaveCount(5);
       const sender = fact(delivery(page), labels.sender);
       await expect(sender).toContainText(longCompanyName);
       await expect(fact(delivery(page), locale === "en" ? "Event" : "Мероприятие")).toContainText(
         longEventTitle,
       );
-      await expect(check).toContainText(longTrailerLabel);
-      await expect(check).toContainText(locale === "en" ? "and 11 more" : "и ещё 11");
+      await expect(check).toContainText(`${longTrailerLabel}, ${longTrailerLabel}`);
+      await expect(check).toContainText(`${longTrailerLabel} Tanker`);
+      await expect(check.locator("svg.flame-icon")).toBeVisible();
 
       await page.evaluate(() => document.fonts.ready);
       expect(
@@ -356,9 +361,9 @@ test(
         plate.y < name.y + name.height;
       expect(overlaps).toBe(false);
 
-      // State texts and the effective badge never wrap inside themselves.
-      const states = page.locator(".trip-rule-state, .trip-source-effective");
-      await expect(states).toHaveCount(4);
+      // Result symbols and the effective badge never wrap inside themselves.
+      const states = page.locator(".qualification-check-symbol, .trip-source-effective");
+      await expect(states).toHaveCount(6);
       for (const lines of await states.evaluateAll((elements) =>
         elements.map((element) => {
           const range = document.createRange();

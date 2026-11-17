@@ -172,8 +172,8 @@ test(
     await expect(
       reasons.getByRole("option", { name: "Duplicate search is incomplete" }),
     ).toHaveAttribute("value", "candidate_search_overflow");
-    await reasons.selectOption("rule_mass_exceeded");
-    await expect.poll(() => mock.lists.at(-1)?.get("reasonCode")).toBe("rule_mass_exceeded");
+    await reasons.selectOption("qualification_cargo_mass");
+    await expect.poll(() => mock.lists.at(-1)?.get("reasonCode")).toBe("qualification_cargo_mass");
     await expect(reasons).toBeFocused();
     await expect(page.getByText("Waiting (4)", { exact: true })).toBeVisible();
     await page.goto("/account/review?tab=decided&order=asc");
@@ -888,8 +888,10 @@ test(
     const box$ = form(page).locator(".review-over-limits"),
       limits = box$.locator(".review-limits li");
     await expect(limits).toHaveCount(2);
-    await expect(limits.nth(0)).toHaveText("Cargo mass 34 t exceeds the 20 t limit");
-    await expect(limits.nth(1)).toContainText("Trailer type is not allowed: Fictional lowboy");
+    await expect(limits.nth(0)).toHaveText("Cargo mass: Trip: 34 t · Limit: up to 20 t");
+    await expect(limits.nth(1)).toHaveText(
+      "Trailer types: Trip: Fictional lowboy · Limit: Fictional curtainsider",
+    );
     const accept = form(page).getByRole("button", { name: "Accept trip", exact: true });
     await expect(accept).toBeDisabled();
     await page.locator("#review-reason").fill("   ");
@@ -898,7 +900,7 @@ test(
     await expect(accept).toBeDisabled();
     await expect(form(page).getByText("Confirm acceptance over the limits first.")).toBeVisible();
     const check = page.locator("#review-confirm-limits");
-    await expect(check).toHaveAccessibleDescription(/Cargo mass 34 t exceeds the 20 t limit/);
+    await expect(check).toHaveAccessibleDescription(/Cargo mass: Trip: 34 t · Limit: up to 20 t/);
     await check.check();
     await expect(accept).toBeEnabled();
     await capture(page, info, "review-over-limits-side-en");
@@ -1063,9 +1065,12 @@ test(
       ` ${entities.unknown}`,
     );
     await expect(diff.getByText("Fictional transformer").first()).toBeVisible();
-    const check = panel(page).locator(".review-checks li");
-    await expect(check.nth(1)).toHaveAttribute("data-state", "bypassed");
-    await expect(check.nth(1)).toContainText("Bypassed by event");
+    // A company event trip is credited without the level limits.
+    const check = panel(page).locator(".qualification-check");
+    await expect(check).toContainText(
+      "A company event trip — credited without the qualification check",
+    );
+    await expect(check.locator("li")).toHaveCount(0);
     await page.goto(`/account/review/${reviewIds.over}`);
     await settled(page);
     await expect(panel(page).locator(".review-diff thead th")).toHaveCount(2);
@@ -1076,8 +1081,8 @@ test(
     await expect(panel(page).getByRole("heading", { level: 3, name: "History" })).toBeVisible();
     await expect(panel(page).locator(".review-diff")).toHaveCount(0);
     await expect(panel(page).getByRole("heading", { name: "Evidence" })).toHaveCount(0);
-    await expect(panel(page).locator(".review-checks li")).toContainText(
-      "Qualification history is unknown",
+    await expect(panel(page).locator(".qualification-check")).toContainText(
+      "The driver's level at trip time is unknown",
     );
   },
 );
@@ -1285,7 +1290,9 @@ for (const locale of ["en", "ru"] as const)
       const hold = panel(page).locator(".review-hold");
       await expect(hold).toContainText(words.held);
       await expect(hold).toContainText(
-        locale === "en" ? "Qualification history is unknown" : "История квалификации неизвестна",
+        locale === "en"
+          ? "The driver had no qualification level"
+          : "У водителя не было уровня квалификации",
       );
       await expect(hold).toContainText(
         locale === "en"

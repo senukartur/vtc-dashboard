@@ -1288,7 +1288,7 @@
               "review": {
                 "hold": true,
                 "reasonCodes": [
-                  "rule_mass_exceeded"
+                  "qualification_cargo_mass"
                 ],
                 "createdAt": "2026-10-17T12:00:00.000Z",
                 "manualRevision": {
@@ -1562,7 +1562,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": null,
             "levelId": null,
-            "ruleVersionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -1570,8 +1569,11 @@
             "reportingAt": null
           },
           "qualificationCheck": {
-            "status": "unresolved",
-            "reasonCode": "qualification_history_unknown",
+            "status": "no_level",
+            "basis": "current",
+            "level": null,
+            "outcome": null,
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           },
           "acceptance": {
@@ -1643,7 +1645,7 @@
             "decisions": [],
             "pendingProposalId": null,
             "reviewReasonCodes": [
-              "rule_mass_exceeded"
+              "qualification_cargo_mass"
             ]
           },
           "factRevisionId": "41000000-0000-4000-8000-000000000001",
@@ -1652,7 +1654,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": "41000000-0000-4000-8000-000000000021",
             "levelId": "41000000-0000-4000-8000-000000000022",
-            "ruleVersionId": "41000000-0000-4000-8000-000000000023",
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": "2026-10-17T12:00:00.000Z",
@@ -1660,26 +1661,57 @@
             "reportingAt": "2026-10-17T12:00:00.000Z"
           },
           "qualificationCheck": {
-            "status": "resolved",
+            "status": "checked",
+            "basis": "decision",
+            "level": {
+              "id": "41570000-0000-4000-8000-000000000001",
+              "name": "Fictional Trainee"
+            },
+            "outcome": "fail",
             "reasonCode": null,
             "rules": [
               {
-                "ruleType": "max_mass",
-                "outcome": "fail",
-                "reasonCode": "rule_mass_exceeded",
-                "bypassedByEvent": false,
-                "observedMassKg": "21000",
-                "limitMassKg": "20000",
-                "entityIds": []
+                "rule": "cargo_mass",
+                "result": "fail",
+                "minKg": null,
+                "maxKg": "20000",
+                "observedKg": "21000"
               },
               {
-                "ruleType": "allowed_trailer_types",
-                "outcome": "pass",
-                "reasonCode": "rule_passed",
-                "bypassedByEvent": false,
-                "observedMassKg": null,
-                "limitMassKg": null,
-                "entityIds": []
+                "rule": "distance",
+                "result": "pass",
+                "minM": null,
+                "maxM": null,
+                "observedM": "412000"
+              },
+              {
+                "rule": "trailer_types",
+                "result": "pass",
+                "mode": "any",
+                "allowed": [],
+                "observed": [
+                  {
+                    "entityId": "41500000-0000-4000-8000-000000000330",
+                    "label": "Fictional Curtainsider",
+                    "requestedLocale": "en",
+                    "renderedLocale": "en",
+                    "englishFallback": false,
+                    "hidden": false
+                  }
+                ]
+              },
+              {
+                "rule": "adr",
+                "result": "pass",
+                "mode": "forbidden",
+                "allowedClasses": [],
+                "observed": "none"
+              },
+              {
+                "rule": "hard_mode",
+                "result": "pass",
+                "required": false,
+                "observed": null
               }
             ]
           },
@@ -1870,7 +1902,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": null,
             "levelId": null,
-            "ruleVersionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -1899,7 +1930,7 @@
           "id": "41000000-0000-4000-8000-000000000001",
           "outcome": "accepted",
           "reasonCodes": [
-            "rule_mass_exceeded",
+            "qualification_cargo_mass",
             "accepted_over_limits"
           ],
           "reason": "synthetic-example",
@@ -1919,7 +1950,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": "41000000-0000-4000-8000-000000000021",
             "levelId": "41000000-0000-4000-8000-000000000022",
-            "ruleVersionId": "41000000-0000-4000-8000-000000000023",
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": "2026-10-17T12:00:00.000Z",
@@ -1995,7 +2025,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": null,
             "levelId": null,
-            "ruleVersionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -2132,461 +2161,6 @@
       "request": {
         "primaryVersion": 1,
         "secondaryVersion": 1,
-        "reason": "synthetic-example"
-      }
-    },
-    {
-      "id": "listQualificationLevels:success",
-      "operationId": "listQualificationLevels",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "41000000-0000-4000-8000-000000000001",
-              "version": 1,
-              "game": "ets2",
-              "name": "synthetic-example",
-              "ruleVersionId": null,
-              "configured": false,
-              "requiredTrips": null,
-              "requiredDistanceM": null,
-              "position": 1,
-              "terminal": false,
-              "promotionConfigured": false,
-              "freightRuleSummary": null
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listQualificationLevels:empty",
-      "operationId": "listQualificationLevels",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listArchivedQualificationLevels:success",
-      "operationId": "listArchivedQualificationLevels",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "41000000-0000-4000-8000-000000000001",
-              "game": "ets2",
-              "name": "Fictional archived level"
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listArchivedQualificationLevels:empty",
-      "operationId": "listArchivedQualificationLevels",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listQualificationRuleVersions:success",
-      "operationId": "listQualificationRuleVersions",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "41000000-0000-4000-8000-000000000001",
-              "levelId": "41000000-0000-4000-8000-000000000001",
-              "game": "ets2",
-              "publishedAt": "2026-10-17T12:00:00.000Z",
-              "rules": [],
-              "requiredTrips": null,
-              "requiredDistanceM": null,
-              "effectiveAt": "2026-10-17T12:00:00.000Z"
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listQualificationRuleVersions:empty",
-      "operationId": "listQualificationRuleVersions",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "getQualificationRuleVersion:success",
-      "operationId": "getQualificationRuleVersion",
-      "status": 200,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "levelId": "41000000-0000-4000-8000-000000000001",
-          "game": "ets2",
-          "publishedAt": "2026-10-17T12:00:00.000Z",
-          "rules": [
-            {
-              "type": "max_mass",
-              "maxKg": "20000"
-            },
-            {
-              "type": "allowed_trailer_types",
-              "entityIds": [
-                "41000000-0000-4000-8000-000000000014"
-              ]
-            },
-            {
-              "type": "allowed_adr_categories",
-              "classes": [
-                "3"
-              ]
-            }
-          ],
-          "requiredTrips": null,
-          "requiredDistanceM": null,
-          "effectiveAt": "2026-10-17T12:00:00.000Z"
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "getQualificationProgress:success",
-      "operationId": "getQualificationProgress",
-      "status": 200,
-      "response": {
-        "data": {
-          "assignment": {
-            "id": "41000000-0000-4000-8000-000000000001",
-            "levelId": "41000000-0000-4000-8000-000000000001",
-            "game": "ets2",
-            "assignedAt": "2026-10-17T12:00:00.000Z",
-            "periodId": "41000000-0000-4000-8000-000000000001"
-          },
-          "acceptedTrips": 1,
-          "actualDistanceM": "12500.5",
-          "requiredTrips": null,
-          "requiredDistanceM": null,
-          "eligibleForConfirmation": false,
-          "computedAt": "2026-10-17T12:00:00.000Z",
-          "projectionVersion": 1,
-          "projectionPending": false
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "getMyQualificationProgress:success",
-      "operationId": "getMyQualificationProgress",
-      "status": 200,
-      "response": {
-        "data": {
-          "assignment": {
-            "id": "41000000-0000-4000-8000-000000000001",
-            "levelId": "41000000-0000-4000-8000-000000000001",
-            "game": "ets2",
-            "assignedAt": "2026-10-17T12:00:00.000Z",
-            "periodId": "41000000-0000-4000-8000-000000000001"
-          },
-          "acceptedTrips": 1,
-          "actualDistanceM": "12500.5",
-          "requiredTrips": null,
-          "requiredDistanceM": null,
-          "eligibleForConfirmation": false,
-          "reviewRequired": false,
-          "computedAt": "2026-10-17T12:00:00.000Z",
-          "projectionVersion": 1,
-          "projectionPending": false,
-          "reviewReasonCodes": []
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "getAdminQualificationProgress:success",
-      "operationId": "getAdminQualificationProgress",
-      "status": 200,
-      "response": {
-        "data": {
-          "assignment": {
-            "id": "41000000-0000-4000-8000-000000000001",
-            "levelId": "41000000-0000-4000-8000-000000000001",
-            "game": "ets2",
-            "assignedAt": "2026-10-17T12:00:00.000Z",
-            "periodId": "41000000-0000-4000-8000-000000000001"
-          },
-          "acceptedTrips": 1,
-          "actualDistanceM": "12500.5",
-          "requiredTrips": null,
-          "requiredDistanceM": null,
-          "eligibleForConfirmation": false,
-          "reviewRequired": false,
-          "computedAt": "2026-10-17T12:00:00.000Z",
-          "projectionVersion": 1,
-          "projectionPending": false,
-          "reviewReasonCodes": []
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listMyQualificationAssignments:success",
-      "operationId": "listMyQualificationAssignments",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "41000000-0000-4000-8000-000000000001",
-              "levelId": "41000000-0000-4000-8000-000000000001",
-              "game": "ets2",
-              "assignedAt": "2026-10-17T12:00:00.000Z",
-              "periodId": "41000000-0000-4000-8000-000000000001",
-              "endedAt": null,
-              "levelName": "Fictional first level"
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listMyQualificationAssignments:empty",
-      "operationId": "listMyQualificationAssignments",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listTripQualificationAssignments:success",
-      "operationId": "listTripQualificationAssignments",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "41000000-0000-4000-8000-000000000001",
-              "levelId": "41000000-0000-4000-8000-000000000001",
-              "game": "ets2",
-              "assignedAt": "2026-10-17T12:00:00.000Z",
-              "periodId": "41000000-0000-4000-8000-000000000001",
-              "endedAt": null,
-              "levelName": "Fictional first level"
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listTripQualificationAssignments:empty",
-      "operationId": "listTripQualificationAssignments",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listMemberQualificationAssignments:success",
-      "operationId": "listMemberQualificationAssignments",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "41000000-0000-4000-8000-000000000001",
-              "levelId": "41000000-0000-4000-8000-000000000001",
-              "game": "ets2",
-              "assignedAt": "2026-10-17T12:00:00.000Z",
-              "periodId": "41000000-0000-4000-8000-000000000001",
-              "endedAt": null,
-              "levelName": "Fictional first level"
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listMemberQualificationAssignments:empty",
-      "operationId": "listMemberQualificationAssignments",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "renameQualificationLevel:success",
-      "operationId": "renameQualificationLevel",
-      "status": 200,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "version": 1,
-          "game": "ets2",
-          "name": "synthetic-example",
-          "ruleVersionId": null,
-          "configured": false,
-          "requiredTrips": null,
-          "requiredDistanceM": null,
-          "position": 1,
-          "terminal": false,
-          "promotionConfigured": false,
-          "freightRuleSummary": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "name": "synthetic-example"
-      }
-    },
-    {
-      "id": "publishQualificationRules:success",
-      "operationId": "publishQualificationRules",
-      "status": 201,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "version": 1,
-          "game": "ets2",
-          "name": "synthetic-example",
-          "ruleVersionId": null,
-          "configured": false,
-          "requiredTrips": null,
-          "requiredDistanceM": null,
-          "position": 1,
-          "terminal": false,
-          "promotionConfigured": false,
-          "freightRuleSummary": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "rules": [],
-        "requiredTrips": null,
-        "requiredDistanceM": null,
-        "reason": "synthetic-example"
-      }
-    },
-    {
-      "id": "assignQualification:success",
-      "operationId": "assignQualification",
-      "status": 201,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "levelId": "41000000-0000-4000-8000-000000000001",
-          "game": "ets2",
-          "assignedAt": "2026-10-17T12:00:00.000Z",
-          "periodId": "41000000-0000-4000-8000-000000000001"
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "game": "ets2",
-        "levelId": "41000000-0000-4000-8000-000000000001",
-        "reason": "synthetic-example",
-        "purpose": "initial"
-      }
-    },
-    {
-      "id": "confirmPromotion:success",
-      "operationId": "confirmPromotion",
-      "status": 200,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "levelId": "41000000-0000-4000-8000-000000000001",
-          "game": "ets2",
-          "assignedAt": "2026-10-17T12:00:00.000Z",
-          "periodId": "41000000-0000-4000-8000-000000000001"
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "game": "ets2",
-        "assignmentId": "41000000-0000-4000-8000-000000000001",
-        "targetLevelId": "41000000-0000-4000-8000-000000000001",
         "reason": "synthetic-example"
       }
     },
@@ -3678,7 +3252,6 @@
                 "factRevisionId": "41000000-0000-4000-8000-000000000001",
                 "qualificationAssignmentId": null,
                 "levelId": null,
-                "ruleVersionId": null,
                 "eventId": null,
                 "attendanceRevisionId": null,
                 "attributionAt": null,
@@ -5354,172 +4927,6 @@
       }
     },
     {
-      "id": "listQualificationMembers:success",
-      "operationId": "listQualificationMembers",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "d3100000-0000-4000-8000-000000000001",
-              "nickname": "Fictional Qualification Member",
-              "formerMember": false,
-              "roles": [
-                "driver",
-                "dispatcher"
-              ]
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-qualification-workspace"
-        }
-      }
-    },
-    {
-      "id": "previewQualificationRules:success",
-      "operationId": "previewQualificationRules",
-      "status": 200,
-      "request": {
-        "game": "ets2",
-        "rules": [
-          {
-            "type": "max_mass",
-            "maxKg": "10"
-          }
-        ],
-        "sample": {
-          "cargoMassKg": "10.000000000000000001",
-          "trailerTypeIds": [],
-          "trailersComplete": false,
-          "adr": {
-            "status": "unknown",
-            "adrClass": null
-          }
-        }
-      },
-      "response": {
-        "data": {
-          "outcome": "fail",
-          "ruleResults": [
-            {
-              "ruleType": "max_mass",
-              "outcome": "fail",
-              "reasonCode": "rule_mass_exceeded"
-            }
-          ]
-        },
-        "meta": {
-          "requestId": "synthetic-qualification-workspace"
-        }
-      }
-    },
-    {
-      "id": "listQualificationMembers:empty",
-      "operationId": "listQualificationMembers",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-qualification-workspace"
-        }
-      }
-    },
-    {
-      "id": "listQualificationActionHistory:success",
-      "operationId": "listQualificationActionHistory",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "00000000-0000-4000-8000-000000000001",
-              "periodId": "00000000-0000-4000-8000-000000000001",
-              "game": "ets2",
-              "levelId": "00000000-0000-4000-8000-000000000001",
-              "assignedAt": "2026-10-20T12:00:00.000Z",
-              "endedAt": null,
-              "purpose": "promotion",
-              "actor": {
-                "id": "00000000-0000-4000-8000-000000000001",
-                "nickname": "Fictional current operator"
-              },
-              "promotion": {
-                "id": "00000000-0000-4000-8000-000000000001",
-                "confirmedAt": "2026-10-20T12:00:00.000Z"
-              },
-              "levelName": "Fictional first level"
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-qualification-attribution"
-        }
-      }
-    },
-    {
-      "id": "listQualificationActionHistory:empty",
-      "operationId": "listQualificationActionHistory",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-qualification-attribution"
-        }
-      }
-    },
-    {
-      "id": "listQualificationRuleHistory:success",
-      "operationId": "listQualificationRuleHistory",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "00000000-0000-4000-8000-000000000001",
-              "levelId": "00000000-0000-4000-8000-000000000001",
-              "game": "ets2",
-              "publishedAt": "2026-10-20T12:00:00.000Z",
-              "effectiveAt": "2026-10-20T12:00:00.000Z",
-              "rules": [],
-              "requiredTrips": null,
-              "requiredDistanceM": null,
-              "publisher": {
-                "id": "00000000-0000-4000-8000-000000000001",
-                "nickname": "Fictional current operator"
-              }
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-qualification-attribution"
-        }
-      }
-    },
-    {
-      "id": "listQualificationRuleHistory:empty",
-      "operationId": "listQualificationRuleHistory",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-qualification-attribution"
-        }
-      }
-    },
-    {
       "id": "getSourceCapabilities:success",
       "operationId": "getSourceCapabilities",
       "status": 200,
@@ -6805,7 +6212,7 @@
               "review": {
                 "hold": true,
                 "reasonCodes": [
-                  "rule_mass_exceeded"
+                  "qualification_cargo_mass"
                 ],
                 "createdAt": "2026-10-17T12:00:00.000Z",
                 "manualRevision": {
@@ -7594,7 +7001,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": null,
             "levelId": null,
-            "ruleVersionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -7602,14 +7008,17 @@
             "reportingAt": null
           },
           "qualificationCheck": {
-            "status": "unresolved",
-            "reasonCode": "qualification_history_unknown",
+            "status": "no_level",
+            "basis": "current",
+            "level": null,
+            "outcome": null,
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           },
           "acceptance": {
             "mode": "unavailable",
             "blockedReasonCodes": [
-              "qualification_history_unknown"
+              "qualification_level_unknown"
             ]
           },
           "canDecide": false,
@@ -8169,39 +7578,6 @@
         "meta": {
           "requestId": "synthetic-stage-one"
         }
-      }
-    },
-    {
-      "id": "publishQualificationRules:without-reason",
-      "operationId": "publishQualificationRules",
-      "status": 201,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "version": 2,
-          "game": "ets2",
-          "name": "synthetic-example",
-          "ruleVersionId": "54000000-0000-4000-8000-000000000011",
-          "configured": true,
-          "requiredTrips": null,
-          "requiredDistanceM": null,
-          "position": 1,
-          "terminal": false,
-          "promotionConfigured": true,
-          "freightRuleSummary": {
-            "maxMassKg": null,
-            "allowedTrailerTypeCount": null,
-            "allowedAdrCategoryCount": null
-          }
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "rules": [],
-        "requiredTrips": null,
-        "requiredDistanceM": null
       }
     },
     {
@@ -9681,7 +9057,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": null,
             "levelId": null,
-            "ruleVersionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -9689,14 +9064,17 @@
             "reportingAt": null
           },
           "qualificationCheck": {
-            "status": "unresolved",
-            "reasonCode": "qualification_history_unknown",
+            "status": "no_level",
+            "basis": "current",
+            "level": null,
+            "outcome": null,
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           },
           "acceptance": {
             "mode": "unavailable",
             "blockedReasonCodes": [
-              "qualification_history_unknown"
+              "qualification_level_unknown"
             ]
           },
           "canDecide": false,
@@ -9799,7 +9177,6 @@
             "factRevisionId": "e1390000-0000-4000-8000-000000000041",
             "qualificationAssignmentId": null,
             "levelId": null,
-            "ruleVersionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": "2026-10-20T09:07:00.000Z",
@@ -9807,14 +9184,17 @@
             "reportingAt": "2026-10-20T10:05:00.000Z"
           },
           "qualificationCheck": {
-            "status": "unresolved",
-            "reasonCode": "qualification_history_unknown",
+            "status": "no_level",
+            "basis": "current",
+            "level": null,
+            "outcome": null,
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           },
           "acceptance": {
             "mode": "unavailable",
             "blockedReasonCodes": [
-              "qualification_history_unknown"
+              "qualification_level_unknown"
             ]
           },
           "canDecide": false,
@@ -9974,7 +9354,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": null,
             "levelId": null,
-            "ruleVersionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": "2026-10-20T12:05:00.000Z",
@@ -9982,15 +9361,18 @@
             "reportingAt": "2026-10-20T12:05:00.000Z"
           },
           "qualificationCheck": {
-            "status": "unresolved",
-            "reasonCode": "qualification_history_unknown",
+            "status": "no_level",
+            "basis": "current",
+            "level": null,
+            "outcome": null,
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           },
           "acceptance": {
             "mode": "unavailable",
             "blockedReasonCodes": [
               "cargo_unknown",
-              "qualification_history_unknown"
+              "qualification_level_unknown"
             ]
           },
           "canDecide": false,
@@ -10179,7 +9561,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": null,
             "levelId": null,
-            "ruleVersionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -10222,7 +9603,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": null,
             "levelId": null,
-            "ruleVersionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -10265,7 +9645,6 @@
             "factRevisionId": "41000000-0000-4000-8000-000000000001",
             "qualificationAssignmentId": null,
             "levelId": null,
-            "ruleVersionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -10392,245 +9771,6 @@
       }
     },
     {
-      "id": "listPromotionCandidates:stage-3-eligible",
-      "operationId": "listPromotionCandidates",
-      "status": 200,
-      "query": {
-        "game": "ets2",
-        "status": "eligible"
-      },
-      "response": {
-        "data": {
-          "items": [
-            {
-              "member": {
-                "id": "d3100000-0000-4000-8000-000000000001",
-                "nickname": "Fictional Qualification Member",
-                "formerMember": false,
-                "roles": [
-                  "driver",
-                  "dispatcher"
-                ]
-              },
-              "game": "ets2",
-              "assignmentId": "e1390000-0000-4000-8000-000000000005",
-              "version": 3,
-              "currentLevel": {
-                "id": "e1390000-0000-4000-8000-000000000003",
-                "name": "Trainee"
-              },
-              "nextLevel": {
-                "id": "e1390000-0000-4000-8000-000000000004",
-                "name": "Driver III"
-              },
-              "acceptedTrips": 10,
-              "actualDistanceM": "3000000.25",
-              "requiredTrips": 10,
-              "requiredDistanceM": null,
-              "eligible": true,
-              "eligibleSince": "2026-01-04T12:00:00.125Z"
-            }
-          ],
-          "nextCursor": null,
-          "total": 1
-        },
-        "meta": {
-          "requestId": "synthetic-stage-3"
-        }
-      }
-    },
-    {
-      "id": "listPromotionCandidates:stage-3-all",
-      "operationId": "listPromotionCandidates",
-      "status": 200,
-      "query": {
-        "game": "ats",
-        "status": "all"
-      },
-      "response": {
-        "data": {
-          "items": [
-            {
-              "member": {
-                "id": "d3100000-0000-4000-8000-000000000001",
-                "nickname": "Fictional Qualification Member",
-                "formerMember": false,
-                "roles": [
-                  "driver",
-                  "dispatcher"
-                ]
-              },
-              "game": "ats",
-              "assignmentId": "e1390000-0000-4000-8000-000000000007",
-              "version": 1,
-              "currentLevel": {
-                "id": "e1390000-0000-4000-8000-000000000004",
-                "name": "Driver III"
-              },
-              "nextLevel": null,
-              "acceptedTrips": 0,
-              "actualDistanceM": "0",
-              "requiredTrips": null,
-              "requiredDistanceM": null,
-              "eligible": false,
-              "eligibleSince": null
-            }
-          ],
-          "nextCursor": null,
-          "total": 1
-        },
-        "meta": {
-          "requestId": "synthetic-stage-3"
-        }
-      }
-    },
-    {
-      "id": "listQualificationMembers:stage-3-search",
-      "operationId": "listQualificationMembers",
-      "operationExtension": "x-stage-3-operation",
-      "status": 200,
-      "query": {
-        "view": "stage3",
-        "search": "Fictional Qualification Member"
-      },
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "d3100000-0000-4000-8000-000000000001",
-              "nickname": "Fictional Qualification Member",
-              "formerMember": false,
-              "roles": [
-                "driver",
-                "dispatcher"
-              ]
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-stage-3"
-        }
-      }
-    },
-    {
-      "id": "listQualificationActionHistory:stage-3-history",
-      "operationId": "listQualificationActionHistory",
-      "operationExtension": "x-stage-3-operation",
-      "status": 200,
-      "query": {
-        "view": "stage3",
-        "game": "ets2"
-      },
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "00000000-0000-4000-8000-000000000001",
-              "periodId": "00000000-0000-4000-8000-000000000001",
-              "game": "ets2",
-              "levelId": "00000000-0000-4000-8000-000000000001",
-              "assignedAt": "2026-10-20T12:00:00.000Z",
-              "endedAt": null,
-              "purpose": "promotion",
-              "actor": {
-                "id": "00000000-0000-4000-8000-000000000001",
-                "nickname": "Fictional current operator"
-              },
-              "promotion": {
-                "id": "e1390000-0000-4000-8000-000000000008",
-                "confirmedAt": "2026-01-05T12:00:00.125Z",
-                "actor": {
-                  "id": "e1390000-0000-4000-8000-000000000006",
-                  "nickname": "Fictional reviewer"
-                },
-                "reason": "Fictional promotion confirmed."
-              },
-              "assignmentReason": "Fictional adjustment."
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-stage-3"
-        }
-      }
-    },
-    {
-      "id": "listPromotionHistory:stage-3-history",
-      "operationId": "listPromotionHistory",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "kind": "promotion",
-              "id": "e1390000-0000-4000-8000-000000000008",
-              "member": {
-                "id": "d3100000-0000-4000-8000-000000000001",
-                "nickname": "Fictional Qualification Member",
-                "formerMember": false,
-                "roles": [
-                  "driver",
-                  "dispatcher"
-                ]
-              },
-              "game": "ets2",
-              "sourceAssignmentId": "e1390000-0000-4000-8000-000000000005",
-              "targetAssignmentId": "e1390000-0000-4000-8000-000000000007",
-              "sourceLevel": {
-                "id": "e1390000-0000-4000-8000-000000000003",
-                "name": "Trainee"
-              },
-              "targetLevel": {
-                "id": "e1390000-0000-4000-8000-000000000004",
-                "name": "Driver III"
-              },
-              "confirmedAt": "2026-01-05T12:00:00.125Z",
-              "actor": {
-                "id": "e1390000-0000-4000-8000-000000000006",
-                "nickname": "Fictional reviewer"
-              },
-              "reason": "Fictional promotion confirmed.",
-              "acceptedTrips": 10,
-              "actualDistanceM": "3000000.25",
-              "requiredTrips": 10,
-              "requiredDistanceM": null
-            },
-            {
-              "kind": "assignment",
-              "id": "e1390000-0000-4000-8000-000000000005",
-              "member": {
-                "id": "d3100000-0000-4000-8000-000000000001",
-                "nickname": "Fictional Qualification Member",
-                "formerMember": false,
-                "roles": [
-                  "driver",
-                  "dispatcher"
-                ]
-              },
-              "game": "ets2",
-              "assignmentId": "e1390000-0000-4000-8000-000000000005",
-              "level": {
-                "id": "e1390000-0000-4000-8000-000000000003",
-                "name": "Trainee"
-              },
-              "assignedAt": "2026-01-04T12:00:00.125Z",
-              "endedAt": "2026-01-05T12:00:00.125Z",
-              "purpose": "initial",
-              "actor": null,
-              "reason": null
-            }
-          ],
-          "nextCursor": null,
-          "total": 2
-        },
-        "meta": {
-          "requestId": "synthetic-stage-3"
-        }
-      }
-    },
-    {
       "id": "getMyWorkspaceSummary:stage-3-promotions",
       "operationId": "getMyWorkspaceSummary",
       "operationExtension": "x-stage-3-operation",
@@ -10680,11 +9820,7 @@
             "oldestAgeSeconds": 86400,
             "duplicateCount": 1
           },
-          "newApplicationsCount": 2,
-          "promotionsReady": {
-            "ets2": 1,
-            "ats": 0
-          }
+          "newApplicationsCount": 2
         },
         "meta": {
           "requestId": "synthetic-stage-3"
@@ -10729,10 +9865,6 @@
           "legacyReviewQueue": {
             "count": 2,
             "oldestAgeSeconds": 86400
-          },
-          "promotionsReady": {
-            "ets2": 1,
-            "ats": 0
           }
         },
         "meta": {
@@ -10826,112 +9958,6 @@
         "meta": {
           "requestId": "synthetic-stage-3"
         }
-      }
-    },
-    {
-      "id": "getQualificationLadder:success",
-      "operationId": "getQualificationLadder",
-      "status": 200,
-      "response": {
-        "data": {
-          "game": "ets2",
-          "revision": 2,
-          "asOf": "2026-10-17T12:00:00.000Z",
-          "ladderEditsEnabled": true,
-          "levels": [
-            {
-              "id": "41000000-0000-4000-8000-000000000001",
-              "version": 1,
-              "game": "ets2",
-              "name": "synthetic-example",
-              "ruleVersionId": null,
-              "configured": false,
-              "requiredTrips": null,
-              "requiredDistanceM": null,
-              "position": 1,
-              "terminal": false,
-              "promotionConfigured": false,
-              "currentDriverCount": 3,
-              "effectiveRule": null,
-              "freightRuleSummary": null
-            },
-            {
-              "id": "41000000-0000-4000-8000-000000000002",
-              "version": 1,
-              "game": "ets2",
-              "name": "Fictional second level",
-              "ruleVersionId": null,
-              "configured": false,
-              "requiredTrips": null,
-              "requiredDistanceM": null,
-              "position": 2,
-              "terminal": true,
-              "promotionConfigured": false,
-              "currentDriverCount": 0,
-              "effectiveRule": null,
-              "freightRuleSummary": null
-            }
-          ]
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "addQualificationLadderLevel:success",
-      "operationId": "addQualificationLadderLevel",
-      "status": 201,
-      "response": {
-        "data": {
-          "game": "ets2",
-          "revision": 2
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "name": "Fictional second level",
-        "position": 2
-      }
-    },
-    {
-      "id": "reorderQualificationLadder:success",
-      "operationId": "reorderQualificationLadder",
-      "status": 200,
-      "response": {
-        "data": {
-          "game": "ets2",
-          "revision": 2
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "levelIds": [
-          "41000000-0000-4000-8000-000000000002",
-          "41000000-0000-4000-8000-000000000001"
-        ]
-      }
-    },
-    {
-      "id": "archiveQualificationLadderLevel:success",
-      "operationId": "archiveQualificationLadderLevel",
-      "status": 200,
-      "response": {
-        "data": {
-          "game": "ets2",
-          "revision": 2
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "targetLevelId": "41000000-0000-4000-8000-000000000002",
-        "observedDriverCount": 3
       }
     },
     {
@@ -11367,21 +10393,34 @@
             }
           ],
           "qualificationCheck": {
-            "status": "resolved",
+            "status": "checked",
+            "basis": "decision",
+            "level": {
+              "id": "41570000-0000-4000-8000-000000000001",
+              "name": "Fictional Trainee"
+            },
+            "outcome": "fail",
             "reasonCode": null,
             "rules": [
               {
-                "ruleType": "max_mass",
-                "outcome": "pass",
-                "bypassedByEvent": false,
-                "limitMassKg": "20000",
-                "observedMassKg": "19000"
+                "rule": "cargo_mass",
+                "result": "pass",
+                "minKg": null,
+                "maxKg": "20000",
+                "observedKg": "19000"
               },
               {
-                "ruleType": "allowed_trailer_types",
-                "outcome": "fail",
-                "bypassedByEvent": false,
-                "allowedTrailerTypes": [
+                "rule": "distance",
+                "result": "pass",
+                "minM": null,
+                "maxM": null,
+                "observedM": "412000"
+              },
+              {
+                "rule": "trailer_types",
+                "result": "fail",
+                "mode": "selected",
+                "allowed": [
                   {
                     "entityId": "41500000-0000-4000-8000-000000000330",
                     "label": "Fictional Curtainsider",
@@ -11391,27 +10430,29 @@
                     "hidden": false
                   }
                 ],
-                "allowedTrailerTypeCount": 1,
-                "offendingTrailerTypes": [
+                "observed": [
                   {
                     "entityId": "41500000-0000-4000-8000-000000000331",
                     "label": "Fictional Tanker",
                     "requestedLocale": "en",
                     "renderedLocale": "en",
                     "englishFallback": false,
-                    "hidden": true
+                    "hidden": false
                   }
                 ]
               },
               {
-                "ruleType": "allowed_adr_categories",
-                "outcome": "unknown",
-                "bypassedByEvent": true,
-                "allowedAdrClasses": [
-                  "2",
-                  "3"
-                ],
-                "observedAdrClass": null
+                "rule": "adr",
+                "result": "pass",
+                "mode": "forbidden",
+                "allowedClasses": [],
+                "observed": "none"
+              },
+              {
+                "rule": "hard_mode",
+                "result": "pass",
+                "required": false,
+                "observed": null
               }
             ]
           }
@@ -11494,8 +10535,11 @@
             }
           ],
           "qualificationCheck": {
-            "status": "unresolved",
-            "reasonCode": "historical_assignment_missing",
+            "status": "no_level",
+            "basis": "current",
+            "level": null,
+            "outcome": null,
+            "reasonCode": "qualification_level_unknown",
             "rules": []
           }
         },
@@ -12561,6 +11605,1172 @@
         },
         "meta": {
           "requestId": "synthetic-stage-4"
+        }
+      }
+    },
+    {
+      "id": "listQualificationLevels:success",
+      "operationId": "listQualificationLevels",
+      "status": 200,
+      "query": {
+        "game": "ets2"
+      },
+      "response": {
+        "data": {
+          "game": "ets2",
+          "canManage": false,
+          "levels": [
+            {
+              "id": "41570000-0000-4000-8000-000000000001",
+              "name": "Fictional Trainee",
+              "game": "ets2",
+              "position": 1,
+              "version": 3,
+              "limits": {
+                "massMinKg": null,
+                "massMaxKg": "20000",
+                "distanceMinM": null,
+                "distanceMaxM": "800000",
+                "trailers": {
+                  "mode": "selected",
+                  "types": [
+                    {
+                      "entityId": "41500000-0000-4000-8000-000000000330",
+                      "label": "Fictional Curtainsider",
+                      "requestedLocale": "en",
+                      "renderedLocale": "en",
+                      "englishFallback": false,
+                      "hidden": false
+                    }
+                  ]
+                },
+                "adr": {
+                  "mode": "forbidden",
+                  "classes": []
+                },
+                "hardModeRequired": false
+              },
+              "conditions": {
+                "requiredTrips": 10,
+                "requiredDistanceM": "5000000"
+              },
+              "nextLevel": {
+                "id": "41570000-0000-4000-8000-000000000002",
+                "name": "Fictional Driver"
+              },
+              "driverCount": 1
+            },
+            {
+              "id": "41570000-0000-4000-8000-000000000002",
+              "name": "Fictional Driver",
+              "game": "ets2",
+              "position": 2,
+              "version": 1,
+              "limits": {
+                "massMinKg": null,
+                "massMaxKg": null,
+                "distanceMinM": null,
+                "distanceMaxM": null,
+                "trailers": {
+                  "mode": "any",
+                  "types": []
+                },
+                "adr": {
+                  "mode": "selected",
+                  "classes": [
+                    "2",
+                    "3"
+                  ]
+                },
+                "hardModeRequired": true
+              },
+              "conditions": {
+                "requiredTrips": null,
+                "requiredDistanceM": null
+              },
+              "nextLevel": null,
+              "driverCount": 0
+            }
+          ],
+          "mine": {
+            "game": "ets2",
+            "level": {
+              "id": "41570000-0000-4000-8000-000000000001",
+              "name": "Fictional Trainee",
+              "position": 1
+            },
+            "since": "2026-11-01T10:00:00.000Z",
+            "progress": {
+              "trips": 4,
+              "distanceM": "1820000"
+            },
+            "conditions": {
+              "requiredTrips": 10,
+              "requiredDistanceM": "5000000"
+            },
+            "nextLevel": {
+              "id": "41570000-0000-4000-8000-000000000002",
+              "name": "Fictional Driver"
+            }
+          }
+        },
+        "meta": {
+          "requestId": "example-request"
+        }
+      }
+    },
+    {
+      "id": "listQualificationLevels:no-level",
+      "operationId": "listQualificationLevels",
+      "status": 200,
+      "response": {
+        "data": {
+          "game": "ats",
+          "canManage": true,
+          "levels": [],
+          "mine": {
+            "game": "ats",
+            "level": null,
+            "since": null,
+            "progress": {
+              "trips": 0,
+              "distanceM": "0"
+            },
+            "conditions": null,
+            "nextLevel": null
+          }
+        },
+        "meta": {
+          "requestId": "example-request"
+        }
+      }
+    },
+    {
+      "id": "getQualificationLevel:manager",
+      "operationId": "getQualificationLevel",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41570000-0000-4000-8000-000000000001",
+          "name": "Fictional Trainee",
+          "game": "ets2",
+          "position": 1,
+          "version": 3,
+          "limits": {
+            "massMinKg": null,
+            "massMaxKg": "20000",
+            "distanceMinM": null,
+            "distanceMaxM": "800000",
+            "trailers": {
+              "mode": "selected",
+              "types": [
+                {
+                  "entityId": "41500000-0000-4000-8000-000000000330",
+                  "label": "Fictional Curtainsider",
+                  "requestedLocale": "en",
+                  "renderedLocale": "en",
+                  "englishFallback": false,
+                  "hidden": false
+                }
+              ]
+            },
+            "adr": {
+              "mode": "forbidden",
+              "classes": []
+            },
+            "hardModeRequired": false
+          },
+          "conditions": {
+            "requiredTrips": 10,
+            "requiredDistanceM": "5000000"
+          },
+          "nextLevel": {
+            "id": "41570000-0000-4000-8000-000000000002",
+            "name": "Fictional Driver"
+          },
+          "driverCount": 1,
+          "levelCount": 2,
+          "canManage": true,
+          "mine": {
+            "game": "ets2",
+            "level": {
+              "id": "41570000-0000-4000-8000-000000000001",
+              "name": "Fictional Trainee",
+              "position": 1
+            },
+            "since": "2026-11-01T10:00:00.000Z",
+            "progress": {
+              "trips": 4,
+              "distanceM": "1820000"
+            },
+            "conditions": {
+              "requiredTrips": 10,
+              "requiredDistanceM": "5000000"
+            },
+            "nextLevel": {
+              "id": "41570000-0000-4000-8000-000000000002",
+              "name": "Fictional Driver"
+            }
+          },
+          "drivers": [
+            {
+              "memberId": "41570000-0000-4000-8000-000000000101",
+              "displayName": "Fictional Driver One",
+              "since": "2026-11-01T10:00:00.000Z",
+              "credited": {
+                "trips": 4,
+                "distanceM": "1820000"
+              }
+            }
+          ],
+          "history": [
+            {
+              "at": "2026-11-02T09:00:00.000Z",
+              "actor": {
+                "id": "41570000-0000-4000-8000-000000000102",
+                "displayName": "Fictional Director"
+              },
+              "operation": "edited",
+              "changes": [
+                "limits",
+                "conditions"
+              ],
+              "position": 1,
+              "transferLevel": null,
+              "values": {
+                "before": {
+                  "name": "Fictional Trainee",
+                  "position": 1,
+                  "limits": {
+                    "massMinKg": null,
+                    "massMaxKg": "25000",
+                    "distanceMinM": null,
+                    "distanceMaxM": "800000",
+                    "trailers": {
+                      "mode": "any",
+                      "types": []
+                    },
+                    "adr": {
+                      "mode": "forbidden",
+                      "classes": []
+                    },
+                    "hardModeRequired": false
+                  },
+                  "conditions": {
+                    "requiredTrips": 8,
+                    "requiredDistanceM": "5000000"
+                  }
+                },
+                "after": {
+                  "name": "Fictional Trainee",
+                  "position": 1,
+                  "limits": {
+                    "massMinKg": null,
+                    "massMaxKg": "20000",
+                    "distanceMinM": null,
+                    "distanceMaxM": "800000",
+                    "trailers": {
+                      "mode": "selected",
+                      "types": [
+                        {
+                          "entityId": "41500000-0000-4000-8000-000000000330",
+                          "label": "Fictional Curtainsider",
+                          "requestedLocale": "en",
+                          "renderedLocale": "en",
+                          "englishFallback": false,
+                          "hidden": false
+                        }
+                      ]
+                    },
+                    "adr": {
+                      "mode": "forbidden",
+                      "classes": []
+                    },
+                    "hardModeRequired": false
+                  },
+                  "conditions": {
+                    "requiredTrips": 10,
+                    "requiredDistanceM": "5000000"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "example-request"
+        }
+      }
+    },
+    {
+      "id": "getQualificationLevel:driver",
+      "operationId": "getQualificationLevel",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41570000-0000-4000-8000-000000000002",
+          "name": "Fictional Driver",
+          "game": "ets2",
+          "position": 2,
+          "version": 1,
+          "limits": {
+            "massMinKg": null,
+            "massMaxKg": null,
+            "distanceMinM": null,
+            "distanceMaxM": null,
+            "trailers": {
+              "mode": "any",
+              "types": []
+            },
+            "adr": {
+              "mode": "selected",
+              "classes": [
+                "2",
+                "3"
+              ]
+            },
+            "hardModeRequired": true
+          },
+          "conditions": {
+            "requiredTrips": null,
+            "requiredDistanceM": null
+          },
+          "nextLevel": null,
+          "driverCount": 0,
+          "levelCount": 2,
+          "canManage": false,
+          "mine": {
+            "game": "ets2",
+            "level": {
+              "id": "41570000-0000-4000-8000-000000000001",
+              "name": "Fictional Trainee",
+              "position": 1
+            },
+            "since": "2026-11-01T10:00:00.000Z",
+            "progress": {
+              "trips": 4,
+              "distanceM": "1820000"
+            },
+            "conditions": {
+              "requiredTrips": 10,
+              "requiredDistanceM": "5000000"
+            },
+            "nextLevel": {
+              "id": "41570000-0000-4000-8000-000000000002",
+              "name": "Fictional Driver"
+            }
+          },
+          "drivers": [],
+          "history": null
+        },
+        "meta": {
+          "requestId": "example-request"
+        }
+      }
+    },
+    {
+      "id": "listMyQualifications:success",
+      "operationId": "listMyQualifications",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "game": "ets2",
+              "level": {
+                "id": "41570000-0000-4000-8000-000000000001",
+                "name": "Fictional Trainee",
+                "position": 1
+              },
+              "since": "2026-11-01T10:00:00.000Z",
+              "progress": {
+                "trips": 4,
+                "distanceM": "1820000"
+              },
+              "conditions": {
+                "requiredTrips": 10,
+                "requiredDistanceM": "5000000"
+              },
+              "nextLevel": {
+                "id": "41570000-0000-4000-8000-000000000002",
+                "name": "Fictional Driver"
+              }
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "example-request"
+        }
+      }
+    },
+    {
+      "id": "listMemberQualifications:success",
+      "operationId": "listMemberQualifications",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "game": "ets2",
+              "level": {
+                "id": "41570000-0000-4000-8000-000000000001",
+                "name": "Fictional Trainee",
+                "position": 1
+              },
+              "since": "2026-11-01T10:00:00.000Z",
+              "progress": {
+                "trips": 4,
+                "distanceM": "1820000"
+              },
+              "conditions": {
+                "requiredTrips": 10,
+                "requiredDistanceM": "5000000"
+              },
+              "nextLevel": {
+                "id": "41570000-0000-4000-8000-000000000002",
+                "name": "Fictional Driver"
+              }
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "example-request"
+        }
+      }
+    },
+    {
+      "id": "createQualificationLevel:success",
+      "operationId": "createQualificationLevel",
+      "status": 201,
+      "request": {
+        "game": "ets2",
+        "position": 1,
+        "name": "Fictional Trainee",
+        "limits": {
+          "massMinKg": null,
+          "massMaxKg": "20000",
+          "distanceMinM": null,
+          "distanceMaxM": "800000",
+          "trailers": {
+            "mode": "selected",
+            "typeIds": [
+              "41500000-0000-4000-8000-000000000330"
+            ]
+          },
+          "adr": {
+            "mode": "forbidden",
+            "classes": []
+          },
+          "hardModeRequired": false
+        },
+        "conditions": {
+          "requiredTrips": 10,
+          "requiredDistanceM": "5000000"
+        }
+      },
+      "response": {
+        "data": {
+          "level": {
+            "id": "41570000-0000-4000-8000-000000000001",
+            "name": "Fictional Trainee",
+            "game": "ets2",
+            "position": 1,
+            "version": 3,
+            "limits": {
+              "massMinKg": null,
+              "massMaxKg": "20000",
+              "distanceMinM": null,
+              "distanceMaxM": "800000",
+              "trailers": {
+                "mode": "selected",
+                "types": [
+                  {
+                    "entityId": "41500000-0000-4000-8000-000000000330",
+                    "label": "Fictional Curtainsider",
+                    "requestedLocale": "en",
+                    "renderedLocale": "en",
+                    "englishFallback": false,
+                    "hidden": false
+                  }
+                ]
+              },
+              "adr": {
+                "mode": "forbidden",
+                "classes": []
+              },
+              "hardModeRequired": false
+            },
+            "conditions": {
+              "requiredTrips": 10,
+              "requiredDistanceM": "5000000"
+            },
+            "nextLevel": {
+              "id": "41570000-0000-4000-8000-000000000002",
+              "name": "Fictional Driver"
+            },
+            "driverCount": 1,
+            "levelCount": 2,
+            "canManage": true,
+            "mine": {
+              "game": "ets2",
+              "level": {
+                "id": "41570000-0000-4000-8000-000000000001",
+                "name": "Fictional Trainee",
+                "position": 1
+              },
+              "since": "2026-11-01T10:00:00.000Z",
+              "progress": {
+                "trips": 4,
+                "distanceM": "1820000"
+              },
+              "conditions": {
+                "requiredTrips": 10,
+                "requiredDistanceM": "5000000"
+              },
+              "nextLevel": {
+                "id": "41570000-0000-4000-8000-000000000002",
+                "name": "Fictional Driver"
+              }
+            },
+            "drivers": [
+              {
+                "memberId": "41570000-0000-4000-8000-000000000101",
+                "displayName": "Fictional Driver One",
+                "since": "2026-11-01T10:00:00.000Z",
+                "credited": {
+                  "trips": 4,
+                  "distanceM": "1820000"
+                }
+              }
+            ],
+            "history": [
+              {
+                "at": "2026-11-02T09:00:00.000Z",
+                "actor": {
+                  "id": "41570000-0000-4000-8000-000000000102",
+                  "displayName": "Fictional Director"
+                },
+                "operation": "edited",
+                "changes": [
+                  "limits",
+                  "conditions"
+                ],
+                "position": 1,
+                "transferLevel": null,
+                "values": {
+                  "before": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "25000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "any",
+                        "types": []
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 8,
+                      "requiredDistanceM": "5000000"
+                    }
+                  },
+                  "after": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "20000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "selected",
+                        "types": [
+                          {
+                            "entityId": "41500000-0000-4000-8000-000000000330",
+                            "label": "Fictional Curtainsider",
+                            "requestedLocale": "en",
+                            "renderedLocale": "en",
+                            "englishFallback": false,
+                            "hidden": false
+                          }
+                        ]
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 10,
+                      "requiredDistanceM": "5000000"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "promotedCount": 0
+        },
+        "meta": {
+          "requestId": "example-request"
+        }
+      }
+    },
+    {
+      "id": "updateQualificationLevel:promoted",
+      "operationId": "updateQualificationLevel",
+      "status": 200,
+      "request": {
+        "expectedVersion": 2,
+        "name": "Fictional Trainee",
+        "limits": {
+          "massMinKg": null,
+          "massMaxKg": "20000",
+          "distanceMinM": null,
+          "distanceMaxM": "800000",
+          "trailers": {
+            "mode": "selected",
+            "typeIds": [
+              "41500000-0000-4000-8000-000000000330"
+            ]
+          },
+          "adr": {
+            "mode": "forbidden",
+            "classes": []
+          },
+          "hardModeRequired": false
+        },
+        "conditions": {
+          "requiredTrips": 10,
+          "requiredDistanceM": "5000000"
+        }
+      },
+      "response": {
+        "data": {
+          "level": {
+            "id": "41570000-0000-4000-8000-000000000001",
+            "name": "Fictional Trainee",
+            "game": "ets2",
+            "position": 1,
+            "version": 3,
+            "limits": {
+              "massMinKg": null,
+              "massMaxKg": "20000",
+              "distanceMinM": null,
+              "distanceMaxM": "800000",
+              "trailers": {
+                "mode": "selected",
+                "types": [
+                  {
+                    "entityId": "41500000-0000-4000-8000-000000000330",
+                    "label": "Fictional Curtainsider",
+                    "requestedLocale": "en",
+                    "renderedLocale": "en",
+                    "englishFallback": false,
+                    "hidden": false
+                  }
+                ]
+              },
+              "adr": {
+                "mode": "forbidden",
+                "classes": []
+              },
+              "hardModeRequired": false
+            },
+            "conditions": {
+              "requiredTrips": 10,
+              "requiredDistanceM": "5000000"
+            },
+            "nextLevel": {
+              "id": "41570000-0000-4000-8000-000000000002",
+              "name": "Fictional Driver"
+            },
+            "driverCount": 1,
+            "levelCount": 2,
+            "canManage": true,
+            "mine": {
+              "game": "ets2",
+              "level": {
+                "id": "41570000-0000-4000-8000-000000000001",
+                "name": "Fictional Trainee",
+                "position": 1
+              },
+              "since": "2026-11-01T10:00:00.000Z",
+              "progress": {
+                "trips": 4,
+                "distanceM": "1820000"
+              },
+              "conditions": {
+                "requiredTrips": 10,
+                "requiredDistanceM": "5000000"
+              },
+              "nextLevel": {
+                "id": "41570000-0000-4000-8000-000000000002",
+                "name": "Fictional Driver"
+              }
+            },
+            "drivers": [
+              {
+                "memberId": "41570000-0000-4000-8000-000000000101",
+                "displayName": "Fictional Driver One",
+                "since": "2026-11-01T10:00:00.000Z",
+                "credited": {
+                  "trips": 4,
+                  "distanceM": "1820000"
+                }
+              }
+            ],
+            "history": [
+              {
+                "at": "2026-11-02T09:00:00.000Z",
+                "actor": {
+                  "id": "41570000-0000-4000-8000-000000000102",
+                  "displayName": "Fictional Director"
+                },
+                "operation": "edited",
+                "changes": [
+                  "limits",
+                  "conditions"
+                ],
+                "position": 1,
+                "transferLevel": null,
+                "values": {
+                  "before": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "25000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "any",
+                        "types": []
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 8,
+                      "requiredDistanceM": "5000000"
+                    }
+                  },
+                  "after": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "20000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "selected",
+                        "types": [
+                          {
+                            "entityId": "41500000-0000-4000-8000-000000000330",
+                            "label": "Fictional Curtainsider",
+                            "requestedLocale": "en",
+                            "renderedLocale": "en",
+                            "englishFallback": false,
+                            "hidden": false
+                          }
+                        ]
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 10,
+                      "requiredDistanceM": "5000000"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "promotedCount": 1
+        },
+        "meta": {
+          "requestId": "example-request"
+        }
+      }
+    },
+    {
+      "id": "moveQualificationLevel:success",
+      "operationId": "moveQualificationLevel",
+      "status": 200,
+      "request": {
+        "expectedVersion": 3,
+        "position": 1
+      },
+      "response": {
+        "data": {
+          "level": {
+            "id": "41570000-0000-4000-8000-000000000001",
+            "name": "Fictional Trainee",
+            "game": "ets2",
+            "position": 1,
+            "version": 3,
+            "limits": {
+              "massMinKg": null,
+              "massMaxKg": "20000",
+              "distanceMinM": null,
+              "distanceMaxM": "800000",
+              "trailers": {
+                "mode": "selected",
+                "types": [
+                  {
+                    "entityId": "41500000-0000-4000-8000-000000000330",
+                    "label": "Fictional Curtainsider",
+                    "requestedLocale": "en",
+                    "renderedLocale": "en",
+                    "englishFallback": false,
+                    "hidden": false
+                  }
+                ]
+              },
+              "adr": {
+                "mode": "forbidden",
+                "classes": []
+              },
+              "hardModeRequired": false
+            },
+            "conditions": {
+              "requiredTrips": 10,
+              "requiredDistanceM": "5000000"
+            },
+            "nextLevel": {
+              "id": "41570000-0000-4000-8000-000000000002",
+              "name": "Fictional Driver"
+            },
+            "driverCount": 1,
+            "levelCount": 2,
+            "canManage": true,
+            "mine": {
+              "game": "ets2",
+              "level": {
+                "id": "41570000-0000-4000-8000-000000000001",
+                "name": "Fictional Trainee",
+                "position": 1
+              },
+              "since": "2026-11-01T10:00:00.000Z",
+              "progress": {
+                "trips": 4,
+                "distanceM": "1820000"
+              },
+              "conditions": {
+                "requiredTrips": 10,
+                "requiredDistanceM": "5000000"
+              },
+              "nextLevel": {
+                "id": "41570000-0000-4000-8000-000000000002",
+                "name": "Fictional Driver"
+              }
+            },
+            "drivers": [
+              {
+                "memberId": "41570000-0000-4000-8000-000000000101",
+                "displayName": "Fictional Driver One",
+                "since": "2026-11-01T10:00:00.000Z",
+                "credited": {
+                  "trips": 4,
+                  "distanceM": "1820000"
+                }
+              }
+            ],
+            "history": [
+              {
+                "at": "2026-11-02T09:00:00.000Z",
+                "actor": {
+                  "id": "41570000-0000-4000-8000-000000000102",
+                  "displayName": "Fictional Director"
+                },
+                "operation": "edited",
+                "changes": [
+                  "limits",
+                  "conditions"
+                ],
+                "position": 1,
+                "transferLevel": null,
+                "values": {
+                  "before": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "25000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "any",
+                        "types": []
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 8,
+                      "requiredDistanceM": "5000000"
+                    }
+                  },
+                  "after": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "20000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "selected",
+                        "types": [
+                          {
+                            "entityId": "41500000-0000-4000-8000-000000000330",
+                            "label": "Fictional Curtainsider",
+                            "requestedLocale": "en",
+                            "renderedLocale": "en",
+                            "englishFallback": false,
+                            "hidden": false
+                          }
+                        ]
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 10,
+                      "requiredDistanceM": "5000000"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "promotedCount": 0
+        },
+        "meta": {
+          "requestId": "example-request"
+        }
+      }
+    },
+    {
+      "id": "removeQualificationLevel:success",
+      "operationId": "removeQualificationLevel",
+      "status": 200,
+      "request": {
+        "expectedVersion": 1,
+        "transferLevelId": "41570000-0000-4000-8000-000000000001"
+      },
+      "response": {
+        "data": {
+          "transferLevel": {
+            "id": "41570000-0000-4000-8000-000000000001",
+            "name": "Fictional Trainee",
+            "game": "ets2",
+            "position": 1,
+            "version": 3,
+            "limits": {
+              "massMinKg": null,
+              "massMaxKg": "20000",
+              "distanceMinM": null,
+              "distanceMaxM": "800000",
+              "trailers": {
+                "mode": "selected",
+                "types": [
+                  {
+                    "entityId": "41500000-0000-4000-8000-000000000330",
+                    "label": "Fictional Curtainsider",
+                    "requestedLocale": "en",
+                    "renderedLocale": "en",
+                    "englishFallback": false,
+                    "hidden": false
+                  }
+                ]
+              },
+              "adr": {
+                "mode": "forbidden",
+                "classes": []
+              },
+              "hardModeRequired": false
+            },
+            "conditions": {
+              "requiredTrips": 10,
+              "requiredDistanceM": "5000000"
+            },
+            "nextLevel": {
+              "id": "41570000-0000-4000-8000-000000000002",
+              "name": "Fictional Driver"
+            },
+            "driverCount": 1,
+            "levelCount": 2,
+            "canManage": true,
+            "mine": {
+              "game": "ets2",
+              "level": {
+                "id": "41570000-0000-4000-8000-000000000001",
+                "name": "Fictional Trainee",
+                "position": 1
+              },
+              "since": "2026-11-01T10:00:00.000Z",
+              "progress": {
+                "trips": 4,
+                "distanceM": "1820000"
+              },
+              "conditions": {
+                "requiredTrips": 10,
+                "requiredDistanceM": "5000000"
+              },
+              "nextLevel": {
+                "id": "41570000-0000-4000-8000-000000000002",
+                "name": "Fictional Driver"
+              }
+            },
+            "drivers": [
+              {
+                "memberId": "41570000-0000-4000-8000-000000000101",
+                "displayName": "Fictional Driver One",
+                "since": "2026-11-01T10:00:00.000Z",
+                "credited": {
+                  "trips": 4,
+                  "distanceM": "1820000"
+                }
+              }
+            ],
+            "history": [
+              {
+                "at": "2026-11-02T09:00:00.000Z",
+                "actor": {
+                  "id": "41570000-0000-4000-8000-000000000102",
+                  "displayName": "Fictional Director"
+                },
+                "operation": "edited",
+                "changes": [
+                  "limits",
+                  "conditions"
+                ],
+                "position": 1,
+                "transferLevel": null,
+                "values": {
+                  "before": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "25000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "any",
+                        "types": []
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 8,
+                      "requiredDistanceM": "5000000"
+                    }
+                  },
+                  "after": {
+                    "name": "Fictional Trainee",
+                    "position": 1,
+                    "limits": {
+                      "massMinKg": null,
+                      "massMaxKg": "20000",
+                      "distanceMinM": null,
+                      "distanceMaxM": "800000",
+                      "trailers": {
+                        "mode": "selected",
+                        "types": [
+                          {
+                            "entityId": "41500000-0000-4000-8000-000000000330",
+                            "label": "Fictional Curtainsider",
+                            "requestedLocale": "en",
+                            "renderedLocale": "en",
+                            "englishFallback": false,
+                            "hidden": false
+                          }
+                        ]
+                      },
+                      "adr": {
+                        "mode": "forbidden",
+                        "classes": []
+                      },
+                      "hardModeRequired": false
+                    },
+                    "conditions": {
+                      "requiredTrips": 10,
+                      "requiredDistanceM": "5000000"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "promotedCount": 0
+        },
+        "meta": {
+          "requestId": "example-request"
+        }
+      }
+    },
+    {
+      "id": "changeMemberQualification:success",
+      "operationId": "changeMemberQualification",
+      "status": 200,
+      "request": {
+        "levelId": "41570000-0000-4000-8000-000000000001",
+        "reason": "Fictional evaluation drive passed."
+      },
+      "response": {
+        "data": {
+          "qualification": {
+            "game": "ets2",
+            "level": {
+              "id": "41570000-0000-4000-8000-000000000001",
+              "name": "Fictional Trainee",
+              "position": 1
+            },
+            "since": "2026-11-01T10:00:00.000Z",
+            "progress": {
+              "trips": 4,
+              "distanceM": "1820000"
+            },
+            "conditions": {
+              "requiredTrips": 10,
+              "requiredDistanceM": "5000000"
+            },
+            "nextLevel": {
+              "id": "41570000-0000-4000-8000-000000000002",
+              "name": "Fictional Driver"
+            }
+          }
+        },
+        "meta": {
+          "requestId": "example-request"
         }
       }
     }

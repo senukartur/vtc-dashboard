@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createUnitOfWork, runMigrations, type UnitOfWork } from "@vtc/db";
 import { catalogDlcs, catalogTrailers } from "@vtc/db/catalogs-schema";
 import { company, eq } from "@vtc/db/identity-schema";
-import { and, qualificationAssignments, qualificationStates } from "@vtc/db/qualifications-schema";
+import { and, qualificationAssignments } from "@vtc/db/qualifications-schema";
 import { sql, tripContributions, trips } from "@vtc/db/trips-schema";
 import type { Connection } from "mysql2/promise";
 import { expect, test, afterAll as vitestAfterAll, beforeAll as vitestBeforeAll } from "vitest";
@@ -18,10 +18,9 @@ import {
   demoId,
   demoMembers,
 } from "../../apps/api/src/demo-dataset.ts";
-import { seedDashboard } from "../../apps/api/src/demo-seed.ts";
+import { createSeedIdentity, seedDashboard } from "../../apps/api/src/demo-seed.ts";
 import { createAnalytics } from "../../apps/api/src/modules/analytics/service.ts";
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
-import { catalogConfig } from "../fixtures/catalogs/synthetic.ts";
 import { createEvents } from "../../apps/api/src/modules/events/service.ts";
 import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
 import {
@@ -34,6 +33,7 @@ import { createTrips } from "../../apps/api/src/modules/trips/service.ts";
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
+import { catalogConfig } from "../fixtures/catalogs/synthetic.ts";
 import {
   guardedSettings,
   reset,
@@ -105,7 +105,7 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
   const tripService = createTrips(unit, { cursorKey }, { identity, catalogs });
   const qualifications = createQualifications(
     unit,
-    { cursorKey },
+    {},
     { identity, trips: tripService },
     () => now,
   );
@@ -141,11 +141,13 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
     expect(directory.statusCode).toBe(200);
     expect(directory.json().data.items).toHaveLength(8);
     expect(directory.body).not.toContain("@example.invalid");
-    for (const game of ["ets2", "ats"]) {
-      const progress = await get(`/api/v1/me/qualification-progress?game=${game}`);
-      expect(progress.statusCode).toBe(200);
-      expect(progress.json().data.acceptedTrips).toBeGreaterThan(0);
-    }
+    const mine = await get("/api/v1/me/qualifications");
+    expect(mine.statusCode).toBe(200);
+    const items: { game: string; level: unknown; progress: { trips: number } }[] =
+      mine.json().data.items;
+    expect(items.map((item) => item.game).sort()).toEqual(["ats", "ets2"]);
+    expect(items.every((item) => item.level !== null)).toBe(true);
+    expect(items.some((item) => item.progress.trips > 0)).toBe(true);
     const upcoming = await get("/api/v1/me/upcoming-event");
     expect(upcoming.statusCode).toBe(200);
     expect(upcoming.json().data.title).toContain("Demo");
@@ -190,13 +192,48 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
       await client.delete(catalogTrailers).where(eq(catalogTrailers.id, demoId("entity/ets2/3")));
       await client.execute(sql`SET FOREIGN_KEY_CHECKS = 1`);
     });
+    // A rerun whose credit crosses the trainee's condition promotes them and ends the trainee
+    // role, which appends an access change through the seed entries' identity.
+    const trainee = demoMembers.find((member) => member.roles.includes("trainee"));
+    if (!trainee) throw new Error("DEMO_TRAINEE_MISSING");
+    const traineeState = () =>
+      unit.run(async (tx) => {
+        const client = unit.client(tx);
+        const [[level]] = (await client.execute(sql`
+          SELECT l.position FROM qualification_assignments a
+          JOIN qualification_levels l ON l.id = a.level_id
+          WHERE a.user_id = ${trainee.id} AND a.game = 'ets2' AND a.ended_at IS NULL`)) as unknown as [
+          { position: number }[],
+        ];
+        const [roleRows] = (await client.execute(
+          sql`SELECT role FROM identity_roles WHERE user_id = ${trainee.id} ORDER BY role`,
+        )) as unknown as [{ role: string }[]];
+        const [[events]] = (await client.execute(sql`
+          SELECT count(*) AS count FROM outbox_events
+          WHERE type = 'member.access_changed' AND aggregate_id = ${trainee.id}`)) as unknown as [
+          { count: number }[],
+        ];
+        return {
+          position: level?.position,
+          roles: roleRows.map((row) => row.role),
+          accessEvents: Number(events?.count),
+        };
+      });
+    expect(await traineeState()).toEqual({ position: 1, roles: ["trainee"], accessEvents: 0 });
+    await unit.run((tx) =>
+      unit.client(tx).execute(sql`
+        UPDATE qualification_levels SET required_trips = 1, required_distance_m = NULL,
+          version = version + 1
+        WHERE game = 'ets2' AND position = 1`),
+    );
     const later = await seedDashboard(
       unit,
-      identity,
+      createSeedIdentity(unit, "http://127.0.0.1:4173"),
       credential.passwordHash,
       new Date(now.getTime() + 86400000),
     );
     expect(later.addedTrips).toBeGreaterThan(0);
+    expect(await traineeState()).toEqual({ position: 2, roles: ["driver"], accessEvents: 1 });
   } finally {
     await app.close();
   }
@@ -282,29 +319,26 @@ test("stage profile validates in production, adopts a bootstrapped company and a
 
     const { userId: directorId } = await start();
     // As in real attribution, no credit from an assignment newer than the fixture trips (ets2)
-    // or from the empty state that opening the qualifications page creates first (ats).
+    // or from a level period that has already ended (ats).
     await unit.run(async (tx) => {
       const c = unit.client(tx),
-        assignmentId = randomUUID();
-      await c.insert(qualificationAssignments).values({
-        id: assignmentId,
-        userId: directorId,
-        game: "ets2",
-        levelId: structuralLevels.ets2[0],
-        assignedAt: new Date().toISOString(),
-        endedAt: null,
-        purpose: "initial",
-        actorId: null,
-        reason: "Fictional assignment newer than the fixture trips",
-      });
+        at = Date.now();
       await c
-        .insert(qualificationStates)
-        .values({ userId: directorId, game: "ets2", assignmentId, version: 1 })
-        .onDuplicateKeyUpdate({ set: { assignmentId } });
-      await c
-        .insert(qualificationStates)
-        .values({ userId: directorId, game: "ats", assignmentId: null, version: 1 })
-        .onDuplicateKeyUpdate({ set: { assignmentId: null } });
+        .delete(qualificationAssignments)
+        .where(eq(qualificationAssignments.userId, directorId));
+      await c.insert(qualificationAssignments).values(
+        (["ets2", "ats"] as const).map((game) => ({
+          id: randomUUID(),
+          userId: directorId,
+          game,
+          levelId: structuralLevels[game][0],
+          assignedAt: new Date(at).toISOString(),
+          endedAt: game === "ats" ? new Date(at + 1000).toISOString() : null,
+          kind: "admission" as const,
+          actorId: null,
+          comment: null,
+        })),
+      );
     });
     const expected = demoDataset(new Date());
     expect(

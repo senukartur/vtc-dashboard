@@ -91,10 +91,7 @@ interface Ports {
     | "acknowledgeNotificationsInTransaction"
     | "notificationReminderCondition"
   >;
-  qualifications: Pick<
-    Qualifications,
-    "notificationAssignmentInTransaction" | "notificationPromotionReviewInTransaction"
-  >;
+  qualifications: Pick<Qualifications, "notificationAssignmentInTransaction">;
   decisions: Pick<
     TripDecisions,
     "notificationDecisionInTransaction" | "notificationCurrentDecisionsInTransaction"
@@ -600,51 +597,24 @@ export function createNotifications(
         game: trip.game,
       };
     }
-    if (
-      e.type === "qualification.assigned" ||
-      e.type === "qualification.promoted" ||
-      e.type === "qualification.progress_changed" ||
-      e.type === "promotion.review_required"
-    ) {
+    if (e.type === "qualification.assigned" || e.type === "qualification.promoted") {
       const assignment = await ports.qualifications.notificationAssignmentInTransaction(
         tx,
         e.data.assignmentId as string,
       );
       if (assignment.userId !== e.data.userId)
         throw new Error("NOTIFICATION_ASSIGNMENT_REFERENCE_CONFLICT");
-      if (
-        e.type !== "promotion.review_required" &&
-        (assignment.endedAt !== null || assignment.purpose === "historical_resolution")
-      )
-        return null;
-      if (e.type === "qualification.assigned" && assignment.purpose === "promotion") return null;
-      if (
-        e.type === "qualification.progress_changed" &&
-        (e.aggregate.version !== assignment.revision || !assignment.eligible)
-      )
-        return null;
-      if (
-        e.type === "promotion.review_required" &&
-        !(await ports.qualifications.notificationPromotionReviewInTransaction(
-          tx,
-          e.aggregate.id,
-          e.aggregate.version,
-          assignment.id,
-        ))
-      )
-        return null;
+      // A level that already changed again is not worth a notice.
+      if (assignment.endedAt !== null) return null;
       return {
         ...base,
-        category: e.type === "qualification.progress_changed" ? "promotion.eligible" : e.type,
+        category: e.type,
         preference: "qualificationChanges",
         access: "qualifications.manage",
         ownerId: assignment.userId,
         subjectKind: "qualification",
         subjectId: assignment.id,
-        effectKey:
-          e.type === "qualification.progress_changed"
-            ? `eligible:${assignment.id}`
-            : `${e.type}:${e.aggregate.id}:${e.aggregate.version}`,
+        effectKey: `${e.type}:${e.aggregate.id}:${e.aggregate.version}`,
         game: assignment.game,
       };
     }

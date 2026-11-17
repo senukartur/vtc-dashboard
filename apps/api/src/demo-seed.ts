@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { UnitOfWork } from "@vtc/db";
 import {
   catalogCargoes,
@@ -16,8 +16,7 @@ import {
   lte,
   or,
   qualificationAssignments,
-  qualificationRules,
-  qualificationStates,
+  qualificationLevels,
 } from "@vtc/db/qualifications-schema";
 import {
   sourceMessages,
@@ -27,14 +26,29 @@ import {
   trips,
 } from "@vtc/db/trips-schema";
 import { demoDataset, demoEpoch, demoId, demoMembers, games } from "./demo-dataset.js";
-import type { Identity } from "./modules/identity/service.js";
-import { activeLevels } from "./modules/qualifications/ladder.js";
+import { createIdentity, type Identity } from "./modules/identity/service.js";
+import { activeLevels, hasConditions } from "./modules/qualifications/ladder.js";
+import { createAssignments } from "./modules/qualifications/promotion.js";
 import type { Fact, NormalizedTripEvidence } from "./modules/sources/contracts/evidence.js";
 import { createContributionRegister } from "./modules/trips/contributions.js";
 import { createFactRepository } from "./modules/trips/facts.js";
+import { identityAccessEvents } from "./platform/outbox/events.js";
 
 // Explicit fixture writer: application startup and the worker never import it. It runs only through
 // the guarded local CLI (scripts/demo/cli.ts) and the root stage operation (stage-seed.ts).
+
+/**
+ * The identity both seed entries use. A rerun whose credit promotes the demo trainee ends the
+ * trainee role, which appends an access change, so the seed needs the access events port.
+ */
+export function createSeedIdentity(unit: UnitOfWork, origin: string) {
+  return createIdentity(
+    unit,
+    { secret: randomBytes(32).toString("hex"), origin, production: false },
+    { accessEvents: identityAccessEvents(unit) },
+  );
+}
+
 export async function seedDashboard(
   unit: UnitOfWork,
   identity: Identity,
@@ -115,28 +129,28 @@ export async function seedDashboard(
           .where(eq(company.singleton, 1));
       for (const game of games) {
         const ladder = levels.filter((row) => row.game === game);
-        for (const [rank, level] of ladder.entries()) {
-          const terminal = rank === ladder.length - 1;
-          await c.insert(qualificationRules).values({
-            id: demoId(`rule/${game}/${rank}`),
-            levelId: level.id,
-            actorId: director.id,
-            publishedAt: demoEpoch,
-            effectiveAt: demoEpoch,
-            rules: [],
-            requiredTrips: terminal ? null : 20 + rank * 10,
-            requiredDistanceM: terminal ? null : String((12000 + rank * 8000) * 1000),
-            promotionGeneration: level.promotionGeneration,
-            reason: "Synthetic local demo thresholds; not company launch configuration",
-          });
-        }
+        // Synthetic demo thresholds only fill levels without any; configured ones stay untouched.
+        for (const [rank, level] of ladder.entries())
+          if (rank < ladder.length - 1 && !hasConditions(level))
+            await c
+              .update(qualificationLevels)
+              .set({
+                requiredTrips: 20 + rank * 10,
+                requiredDistanceM: String((12000 + rank * 8000) * 1000),
+                version: level.version + 1,
+              })
+              .where(eq(qualificationLevels.id, level.id));
         for (const member of members) {
           const [held] = await c
-            .select({ userId: qualificationStates.userId })
-            .from(qualificationStates)
+            .select({ id: qualificationAssignments.id })
+            .from(qualificationAssignments)
             .where(
-              and(eq(qualificationStates.userId, member.id), eq(qualificationStates.game, game)),
-            );
+              and(
+                eq(qualificationAssignments.userId, member.id),
+                eq(qualificationAssignments.game, game),
+              ),
+            )
+            .limit(1);
           if (held) continue;
           const assignmentId = demoId(`assignment/${member.id}/${game}`);
           const levelId = ladder[Math.min(member.rank, ladder.length - 1)]?.id;
@@ -148,15 +162,9 @@ export async function seedDashboard(
             levelId,
             assignedAt: demoEpoch,
             endedAt: member.former ? demoEpoch : null,
-            purpose: "initial",
+            kind: "admission",
             actorId: null,
-            reason: "Synthetic local dashboard fixture",
-          });
-          await c.insert(qualificationStates).values({
-            userId: member.id,
-            game,
-            assignmentId: member.former ? null : assignmentId,
-            version: 1,
+            comment: null,
           });
         }
       }
@@ -233,18 +241,7 @@ export async function seedDashboard(
         .orderBy(desc(qualificationAssignments.assignedAt))
         .limit(2);
       if (!current || overlapping) return null;
-      const [rule] = await c
-        .select({ id: qualificationRules.id })
-        .from(qualificationRules)
-        .where(
-          and(
-            eq(qualificationRules.levelId, current.levelId),
-            lte(qualificationRules.effectiveAt, start),
-          ),
-        )
-        .orderBy(desc(qualificationRules.effectiveAt))
-        .limit(1);
-      return rule ? { assignmentId: current.id, ruleVersionId: rule.id } : null;
+      return { assignmentId: current.id };
     }
     let addedTrips = 0,
       addedEvents = 0;
@@ -373,13 +370,18 @@ export async function seedDashboard(
         context,
         {
           assignmentId: credit?.assignmentId ?? null,
-          ruleVersionId: credit?.ruleVersionId ?? null,
           attributionBasis: accepted ? "actual_start" : "unresolved",
           attributionAt: accepted ? trip.start : null,
         },
         trip.end,
       );
       addedTrips++;
+    }
+    // Promote anyone the seeded credit already qualifies, exactly as a real credit would.
+    if (addedTrips) {
+      const assignments = createAssignments(unit, { identity, totals: contributions });
+      for (const game of games)
+        await assignments.recheckGameInTransaction(tx, game, existing?.id ?? demoId("company"));
     }
     // Keep existing future fixtures; add replacements once both convoys have passed.
     for (const event of dataset.events) {

@@ -452,6 +452,7 @@ export function createIdentity(
     current: Company,
     change: AccessAuditChange = { operation: "membership.changed" },
     occurredAt: string = now().toISOString(),
+    systemReason: "initial_setup" | "automatic_promotion" = "initial_setup",
   ) {
     if (!ports.accessEvents) throw identityError(503);
     const [member] = await client(tx).select().from(membership).where(eq(membership.userId, id));
@@ -464,7 +465,7 @@ export function createIdentity(
       subjectId: id,
       companyId: current.id,
       occurredAt,
-      reason: actorId ? "operator_request" : "initial_setup",
+      reason: actorId ? "operator_request" : systemReason,
     });
     await ports.accessEvents.append(tx, {
       eventId: newId(),
@@ -2129,6 +2130,65 @@ export function createIdentity(
           after: membershipSnapshot(member.status, ["driver"]),
         },
       });
+    },
+    // Leaving the first qualification level ends the trainee role (VTC-157). The caller already
+    // holds the company and member locks of its qualification command. actorId is the staff
+    // member of a manual change or removal, or null for an automatic promotion.
+    async completeTraineeAsSystemInTransaction(
+      tx: TxContext,
+      targetId: string,
+      actorId: string | null = null,
+    ) {
+      const current = await lockCompany(tx);
+      const locked = await lockMembers(tx, [targetId]);
+      const member = locked.get(targetId);
+      if (member?.status !== "active") return;
+      const assigned = await memberRoles(tx, targetId, current);
+      if (!assigned.includes("trainee")) return;
+      await client(tx)
+        .delete(roles)
+        .where(and(eq(roles.userId, targetId), eq(roles.role, "trainee")));
+      if (!assigned.includes("driver"))
+        await client(tx).insert(roles).values({ userId: targetId, role: "driver" });
+      await client(tx)
+        .update(membership)
+        .set({ version: member.version + 1 })
+        .where(eq(membership.userId, targetId));
+      await changed(
+        tx,
+        actorId,
+        targetId,
+        current,
+        {
+          operation: "membership.changed",
+          details: {
+            before: membershipSnapshot(member.status, assigned),
+            after: membershipSnapshot(member.status, ["driver"]),
+          },
+        },
+        undefined,
+        "automatic_promotion",
+      );
+    },
+    /** Active members among ids (at most 100) who hold the Trainee role, read under share locks. */
+    async traineeIdsInTransaction(tx: TxContext, ids: readonly string[]) {
+      const unique = [...new Set(ids)].map(applicationId);
+      if (unique.length > 100) throw new Error("TRAINEE_LOOKUP_BOUND_EXCEEDED");
+      if (!unique.length) return [];
+      const rows = await client(tx)
+        .select({ userId: roles.userId })
+        .from(roles)
+        .innerJoin(membership, eq(membership.userId, roles.userId))
+        .where(
+          and(
+            inArray(roles.userId, unique),
+            eq(roles.role, "trainee"),
+            eq(membership.status, "active"),
+          ),
+        )
+        .orderBy(roles.userId)
+        .for("share");
+      return rows.map((row) => row.userId);
     },
     // Transaction-scoped seam for future source/qualification coordinators. Current state is authoritative.
     async authorizeInTransaction(tx: TxContext, actor: Actor, capability: string) {

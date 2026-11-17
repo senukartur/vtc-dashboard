@@ -89,11 +89,9 @@ interface NormalizedTripEvidence {
 }
 interface EvaluationContext {
   qualificationAssignmentId: Id;
-  ruleVersionId: Id;
+  levelId: Id; // its current five limits; the decision stores a snapshot of them
   attributionBasis: "actual_start" | "manual_confirmation" | "staff_resolution";
-  confirmedEvent: null | { eventId: Id; eventRevisionId: Id; attendanceRevisionId: Id;
-    prescribedCargoId: Id | null; prescribedMassKg: DecimalString | null;
-    prescribedTrailerTypeId: Id | null };
+  confirmedEvent: null | { eventId: Id; eventRevisionId: Id; attendanceRevisionId: Id };
 }
 type RuleResult = { outcome: "pass" | "fail" | "unknown";
   reasons: readonly { code: string; field: string }[] };
@@ -101,9 +99,9 @@ type RuleResult = { outcome: "pass" | "fail" | "unknown";
 
 A known normalized actual start/end requires supported lifecycle evidence, not a numeric checkpoint or client flag alone. Manual source times are unknown; confirmation time belongs to the **decision**, not the source. Incomplete distance retains its measured segment separately and leaves actual trip distance unknown. Pinned trailer types preserve body/chain classification; an incomplete list cannot satisfy an allowlist check. ADR comes from supported pinned catalog facts, not a translated cargo label. Raw money, fuel, damage, mode/build/locale and source identities remain available in the immutable telemetry snapshot; this minimal rule boundary does not erase or reinterpret them.
 
-The coordinator obtains historical qualification/rule versions and confirmed event attendance through owning facades; a source adapter cannot supply trusted acceptance, qualification or exception flags. If qualification is unknown, create review work rather than inventing an `EvaluationContext`. Staff resolution records supported facts/attribution explicitly; it cannot silently reuse today's qualification for an old trip.
+The coordinator obtains the qualification level held at attribution time and confirmed event attendance through owning facades; a source adapter cannot supply trusted acceptance, qualification or exception flags. If qualification is unknown, create review work rather than inventing an `EvaluationContext`. Staff resolution records supported facts/attribution explicitly; it cannot silently reuse today's qualification for an old trip.
 
-Rule evaluators are registered pure functions over evidence, context and typed immutable config. Initial configs are max mass, allowed trailer types and allowed ADR categories as declared in OpenAPI. Proven failure returns `fail`, insufficient facts return `unknown`, and all required supported checks passing returns `pass`. Only the confirmed event-prescribed matching load can bypass those three qualification restrictions; it never bypasses ownership, lifecycle, completeness or timing checks. No arbitrary JavaScript expression or unknown rule type executes from stored JSON.
+The qualification check is one pure function (`checkTrip` in `apps/api/src/modules/qualifications/check.ts`) over the evidence and the level's five limits: cargo mass, actual distance, trailer types, ADR and Hard Mode. A proven failure returns `fail`, insufficient facts return `unknown`, and every set limit passing returns `pass`. A trip with confirmed event attendance is exempt from the whole check; the exemption never bypasses ownership, lifecycle, completeness or timing checks. No arbitrary JavaScript expression or unknown rule type executes from stored JSON.
 
 ## Adapter rules
 

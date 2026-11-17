@@ -1,11 +1,12 @@
 import { describe, expect, test } from "vitest";
+import type { QualificationLimits } from "../../apps/api/src/modules/qualifications/check.ts";
 import type { AdrClass } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import {
   acceptance,
   classify,
   evaluationSnapshot,
   type Historical,
-  qualificationCheck,
+  qualificationSnapshot,
 } from "../../apps/api/src/modules/trip-decisions/evaluation.ts";
 import {
   createSyntheticManualEvidence,
@@ -13,20 +14,36 @@ import {
   knownFact,
   pinnedEntityFact,
   unknownFact,
-} from "../fixtures/qualification-rules/fixtures.ts";
-import { SYNTHETIC_IDS } from "../fixtures/qualification-rules/synthetic-rules.ts";
+} from "../fixtures/trip-evidence.ts";
+import { SYNTHETIC_IDS } from "../fixtures/trip-evidence.ts";
 
-const history: Historical = {
+const open: QualificationLimits = {
+  massMinKg: null,
+  massMaxKg: null,
+  distanceMinM: null,
+  distanceMaxM: null,
+  trailers: { mode: "any", typeIds: [] },
+  adr: { mode: "any", classes: [] },
+  hardModeRequired: false,
+};
+const level = (limits: Partial<QualificationLimits> = {}): Historical => ({
   status: "resolved",
   assignmentId: "assignment",
   levelId: "level",
-  ruleVersionId: "rules",
-  rules: [{ type: "max_mass", maxKg: "20000" }],
-  assignedAt: "2026-01-01T00:00:00.000Z",
-  endedAt: null,
+  levelName: "Fictional level",
+  editVersion: 1,
+  limits: { ...open, massMaxKg: "20000", ...limits },
   attributionAt: "2026-10-21T10:00:00.000Z",
   attributionBasis: "actual_start",
-};
+});
+const history = level();
+const tight = level({ massMaxKg: "1" });
+const unresolved = (attributionBasis: Historical["attributionBasis"]): Historical => ({
+  status: "unresolved",
+  reasonCode: "qualification_level_unknown",
+  attributionBasis,
+  attributionAt: null,
+});
 describe("trip decision knowledge/lifecycle gates", () => {
   test("accepts supported completion, rejects proven violations and keeps uncontested open unassessed", () => {
     const e = createSyntheticTripEvidence();
@@ -62,10 +79,7 @@ describe("trip decision knowledge/lifecycle gates", () => {
     };
     expect(classify(unreliable, history, null).decision).toBe("pending_review");
     expect(classify(unreliable, history, null).reasons).not.toContain("actual_time_order_invalid");
-    expect(
-      classify(unreliable, { ...history, rules: [{ type: "max_mass", maxKg: "1" }] }, null)
-        .decision,
-    ).toBe("rejected");
+    expect(classify(unreliable, tight, null).decision).toBe("rejected");
   });
   test("open zero-distance snapshots remain nonterminal when reconciliation requires review", () => {
     const e = createSyntheticTripEvidence();
@@ -91,9 +105,7 @@ describe("trip decision knowledge/lifecycle gates", () => {
       recording: "partial" as const,
     };
     expect(classify(e, history, null).decision).toBe("pending_review");
-    expect(
-      classify(e, { ...history, rules: [{ type: "max_mass", maxKg: "1" }] }, null).decision,
-    ).toBe("rejected");
+    expect(classify(e, tight, null).decision).toBe("rejected");
   });
   test.each([
     "recording",
@@ -117,18 +129,9 @@ describe("trip decision knowledge/lifecycle gates", () => {
     expect(classify({ ...e, ...patch }, history, null).decision).toBe("pending_review");
   });
   test("unresolved history and reconciliation ambiguity never accept using current rules", () => {
-    expect(
-      classify(
-        createSyntheticTripEvidence(),
-        {
-          status: "unresolved",
-          reasonCode: "qualification_history_unknown",
-          attributionBasis: "actual_start",
-          attributionAt: null,
-        },
-        null,
-      ).decision,
-    ).toBe("pending_review");
+    expect(classify(createSyntheticTripEvidence(), unresolved("actual_start"), null).decision).toBe(
+      "pending_review",
+    );
     expect(
       classify(createSyntheticTripEvidence(), history, null, ["ambiguous_sources"]).decision,
     ).toBe("pending_review");
@@ -136,21 +139,16 @@ describe("trip decision knowledge/lifecycle gates", () => {
   test("manual-only always requires a different human, even when checks fail", () => {
     const e = createSyntheticManualEvidence();
     expect(classify(e, history, null).decision).toBe("pending_review");
-    expect(
-      classify(e, { ...history, rules: [{ type: "max_mass", maxKg: "1" }] }, null).decision,
-    ).toBe("pending_review");
+    expect(classify(e, tight, null).decision).toBe("pending_review");
     expect(classify(e, history, null, [], true).decision).toBe("accepted");
   });
   test("pending manual group requires a human even when complete selected telemetry passes or fails", () => {
     const e = createSyntheticTripEvidence();
     expect(classify(e, history, null, [], false, true).decision).toBe("pending_review");
-    expect(
-      classify(e, { ...history, rules: [{ type: "max_mass", maxKg: "1" }] }, null, [], false, true)
-        .decision,
-    ).toBe("pending_review");
+    expect(classify(e, tight, null, [], false, true).decision).toBe("pending_review");
     expect(classify(e, history, null, [], true, true).decision).toBe("accepted");
   });
-  test("event only bypasses prescribed matching ordinary restrictions with current confirmed attendance", () => {
+  test("a confirmed company event trip is credited without the level limits", () => {
     const e = createSyntheticTripEvidence(),
       event = {
         eventId: "event",
@@ -158,17 +156,21 @@ describe("trip decision knowledge/lifecycle gates", () => {
         attendanceRevisionId: "attendance",
         attendanceStatus: "confirmed" as const,
         prescribedCargoId: null,
-        prescribedMassKg: "18000",
+        prescribedMassKg: null,
         prescribedTrailerTypeId: null,
-      },
-      restricted = { ...history, rules: [{ type: "max_mass", maxKg: "1" }] };
-    expect(classify(e, restricted, event).decision).toBe("accepted");
-    expect(classify(e, restricted, { ...event, attendanceStatus: "unconfirmed" }).decision).toBe(
+      };
+    expect(classify(e, tight, event).decision).toBe("accepted");
+    expect(classify(e, tight, { ...event, attendanceStatus: "unconfirmed" }).decision).toBe(
       "rejected",
     );
-    expect(classify({ ...e, recording: "partial" }, restricted, event).decision).toBe(
-      "pending_review",
-    );
+    // Knowledge gates still apply to event trips.
+    expect(classify({ ...e, recording: "partial" }, tight, event).decision).toBe("pending_review");
+    expect(qualificationSnapshot(e, tight, event)).toMatchObject({
+      levelId: "level",
+      eventExempt: true,
+      outcome: null,
+      rules: [],
+    });
   });
   test("manual confirmation stays decision time and staff telemetry timing remains explicit", () => {
     const e = createSyntheticManualEvidence(),
@@ -185,67 +187,45 @@ describe("trip decision knowledge/lifecycle gates", () => {
   });
 });
 
-describe("over-limit acceptance and qualification check details", () => {
+describe("over-limit acceptance and the qualification snapshot", () => {
   const ids = SYNTHETIC_IDS,
-    limits: Historical = {
-      ...history,
-      rules: [
-        { type: "max_mass", maxKg: "20000" },
-        { type: "allowed_trailer_types", entityIds: [ids.TRAILER_STANDARD] },
-        { type: "allowed_adr_categories", classes: ["2"] },
-      ],
+    selected = {
+      trailers: { mode: "selected" as const, typeIds: [ids.TRAILER_STANDARD] },
+      adr: { mode: "selected" as const, classes: ["2" as const] },
     },
+    limits = level(selected),
     manualOnly = { hasTelemetrySource: false, eventInvalid: false, eventReviewRequired: false },
     mass = (value: string) => knownFact(value, "manual.cargoMassKg"),
-    overMass = () => createSyntheticManualEvidence({ cargoMassKg: mass("21000") }),
-    event = {
-      eventId: ids.EVENT_ID,
-      eventRevisionId: ids.EVENT_REVISION_ID,
-      attendanceRevisionId: ids.ATTENDANCE_REVISION_ID,
-      attendanceStatus: "confirmed" as const,
-      prescribedCargoId: null,
-      prescribedMassKg: "21000",
-      prescribedTrailerTypeId: null,
-    };
+    overMass = () => createSyntheticManualEvidence({ cargoMassKg: mass("21000") });
   test("a manual report breaking only the mass limit is acceptable over limits with exact details", () => {
     const e = overMass();
     expect(acceptance(e, limits, null, manualOnly)).toEqual({
       mode: "over_limits",
-      exceeded: ["rule_mass_exceeded"],
+      exceeded: ["qualification_cargo_mass"],
       blockedReasonCodes: [],
     });
-    expect(qualificationCheck(e, limits, null)).toEqual({
-      status: "resolved",
+    const snapshot = qualificationSnapshot(e, limits, null);
+    expect(snapshot).toMatchObject({
+      levelId: "level",
+      levelName: "Fictional level",
+      editVersion: 1,
+      eventExempt: false,
+      outcome: "fail",
       reasonCode: null,
-      rules: [
-        {
-          ruleType: "max_mass",
-          outcome: "fail",
-          reasonCode: "rule_mass_exceeded",
-          bypassedByEvent: false,
-          observedMassKg: "21000",
-          limitMassKg: "20000",
-          entityIds: [],
-        },
-        {
-          ruleType: "allowed_trailer_types",
-          outcome: "pass",
-          reasonCode: "rule_passed",
-          bypassedByEvent: false,
-          observedMassKg: null,
-          limitMassKg: null,
-          entityIds: [],
-        },
-        {
-          ruleType: "allowed_adr_categories",
-          outcome: "pass",
-          reasonCode: "rule_passed",
-          bypassedByEvent: false,
-          observedMassKg: null,
-          limitMassKg: null,
-          entityIds: [],
-        },
-      ],
+    });
+    expect(snapshot.rules.map((rule) => [rule.rule, rule.result])).toEqual([
+      ["cargo_mass", "fail"],
+      ["distance", "pass"],
+      ["trailer_types", "pass"],
+      ["adr", "pass"],
+      ["hard_mode", "pass"],
+    ]);
+    expect(snapshot.rules[0]).toEqual({
+      rule: "cargo_mass",
+      result: "fail",
+      minKg: null,
+      maxKg: "20000",
+      observedKg: "21000",
     });
     expect(acceptance(createSyntheticManualEvidence(), limits, null, manualOnly)).toEqual({
       mode: "ordinary",
@@ -253,7 +233,7 @@ describe("over-limit acceptance and qualification check details", () => {
       blockedReasonCodes: [],
     });
   });
-  test("every exceeded limit is listed with the offending trailer and ADR entities", () => {
+  test("every exceeded limit is listed, including trailer, ADR and Hard Mode", () => {
     const e = createSyntheticManualEvidence({
       cargoMassKg: mass("21000"),
       trailers: {
@@ -264,28 +244,35 @@ describe("over-limit acceptance and qualification check details", () => {
         ],
       },
       adrCategory: knownFact<AdrClass>("6", "snapshot.adr"),
+      recordedTelemetry: {
+        jobType: "freight-market",
+        gameMode: "single-player",
+        hardModeResult: "not-qualified",
+      },
     });
-    expect(acceptance(e, limits, null, manualOnly)).toEqual({
+    const hard = level({ ...selected, hardModeRequired: true });
+    expect(acceptance(e, hard, null, manualOnly)).toEqual({
       mode: "over_limits",
       exceeded: [
-        "rule_adr_category_disallowed",
-        "rule_mass_exceeded",
-        "rule_trailer_type_disallowed",
+        "qualification_adr",
+        "qualification_cargo_mass",
+        "qualification_hard_mode",
+        "qualification_trailer",
       ],
       blockedReasonCodes: [],
     });
-    const rules = qualificationCheck(e, limits, null).rules;
-    expect(rules.map((r) => [r.ruleType, r.outcome, r.entityIds])).toEqual([
-      ["max_mass", "fail", []],
-      ["allowed_trailer_types", "fail", [ids.TRAILER_DISALLOWED]],
-      ["allowed_adr_categories", "fail", ["6"]],
-    ]);
+    const rules = qualificationSnapshot(e, hard, null).rules;
+    expect(rules.find((r) => r.rule === "trailer_types")).toMatchObject({
+      result: "fail",
+      observedIds: [ids.TRAILER_STANDARD, ids.TRAILER_DISALLOWED].sort(),
+    });
+    expect(rules.find((r) => r.rule === "adr")).toMatchObject({ result: "fail", observed: "6" });
   });
   test("a telemetry source, an event review or a non-limit violation makes acceptance unavailable", () => {
     const e = overMass();
     expect(acceptance(e, limits, null, { ...manualOnly, hasTelemetrySource: true })).toEqual({
       mode: "unavailable",
-      exceeded: ["rule_mass_exceeded"],
+      exceeded: ["qualification_cargo_mass"],
       blockedReasonCodes: ["telemetry_source_present"],
     });
     expect(
@@ -313,75 +300,57 @@ describe("over-limit acceptance and qualification check details", () => {
       }).mode,
     ).toBe("ordinary");
   });
-  test("unknown limits, missing facts and unresolved history block acceptance even beside a proven breach", () => {
+  test("unknown limits, missing facts and an unresolved level block acceptance even beside a breach", () => {
     const e = createSyntheticManualEvidence({
       cargoMassKg: mass("21000"),
       adrCategory: unknownFact<AdrClass>("data_unknown"),
     });
-    expect(classify(e, limits, null, [], true).reasons).toEqual(["rule_mass_exceeded"]);
+    expect(classify(e, limits, null, [], true).reasons).toEqual(["qualification_cargo_mass"]);
     expect(acceptance(e, limits, null, manualOnly)).toEqual({
       mode: "unavailable",
-      exceeded: ["rule_mass_exceeded"],
-      blockedReasonCodes: ["rule_adr_category_unknown"],
+      exceeded: ["qualification_cargo_mass"],
+      blockedReasonCodes: ["qualification_unknown"],
     });
     expect(
       acceptance({ ...overMass(), origin: unknownFact() }, limits, null, manualOnly)
         .blockedReasonCodes,
     ).toEqual(["origin_unknown"]);
-    const unresolved: Historical = {
-      status: "unresolved",
-      reasonCode: "qualification_history_unknown",
-      attributionBasis: "manual_confirmation",
-      attributionAt: null,
-    };
-    expect(acceptance(overMass(), unresolved, null, manualOnly)).toEqual({
+    const none = unresolved("manual_confirmation");
+    expect(acceptance(overMass(), none, null, manualOnly)).toEqual({
       mode: "unavailable",
       exceeded: [],
-      blockedReasonCodes: ["qualification_history_unknown"],
+      blockedReasonCodes: ["qualification_level_unknown"],
     });
-    expect(qualificationCheck(overMass(), unresolved, null)).toEqual({
-      status: "unresolved",
-      reasonCode: "qualification_history_unknown",
+    expect(qualificationSnapshot(overMass(), none, null)).toEqual({
+      levelId: null,
+      levelName: null,
+      editVersion: null,
+      limits: null,
+      eventExempt: false,
+      outcome: null,
+      reasonCode: "qualification_level_unknown",
       rules: [],
     });
-    const unknownMass = qualificationCheck(
+    const unknownMass = qualificationSnapshot(
       createSyntheticManualEvidence({ cargoMassKg: unknownFact("data_unknown") }),
       limits,
       null,
     ).rules[0];
-    expect(unknownMass).toMatchObject({
-      outcome: "unknown",
-      observedMassKg: null,
-      limitMassKg: "20000",
-    });
+    expect(unknownMass).toMatchObject({ result: "unknown", observedKg: null, maxKg: "20000" });
   });
-  test("a full event exception accepts ordinarily while a partial exception blocks the override", () => {
-    const full = overMass();
-    expect(acceptance(full, limits, event, manualOnly).mode).toBe("ordinary");
-    expect(qualificationCheck(full, limits, event).rules[0]).toEqual({
-      ruleType: "max_mass",
-      outcome: "pass",
-      reasonCode: "event_prescribed_load_bypass",
-      bypassedByEvent: true,
-      observedMassKg: "21000",
-      limitMassKg: "20000",
-      entityIds: [],
+  test("an unknown Hard Mode result sends an otherwise passing trip to staff review", () => {
+    const hard = level({ hardModeRequired: true });
+    expect(classify(createSyntheticManualEvidence(), hard, null, [], true)).toEqual({
+      decision: "pending_review",
+      reasons: ["qualification_unknown"],
     });
-    const partial = createSyntheticManualEvidence({
-      cargoMassKg: mass("21000"),
-      trailers: {
-        complete: true,
-        items: [pinnedEntityFact(ids.TRAILER_DISALLOWED, "trailer_type")],
+    const telemetry = createSyntheticTripEvidence({
+      recordedTelemetry: {
+        jobType: "freight-market",
+        gameMode: "single-player",
+        hardModeResult: "qualified",
       },
     });
-    expect(acceptance(partial, limits, event, manualOnly)).toEqual({
-      mode: "unavailable",
-      exceeded: ["rule_trailer_type_disallowed"],
-      blockedReasonCodes: ["event_exception_applied"],
-    });
-    // Without any bypass the same associated event does not prevent an override.
-    expect(acceptance(partial, limits, { ...event, prescribedMassKg: "1" }, manualOnly).mode).toBe(
-      "over_limits",
-    );
+    expect(classify(telemetry, hard, null).decision).toBe("accepted");
   });
 });

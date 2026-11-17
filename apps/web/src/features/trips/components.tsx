@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../../shared/ui/dialog.js";
+import { FlameIcon } from "../../shared/ui/flame-icon.js";
 import { Badge, Button, Card } from "../../shared/ui/primitives.js";
 import type { AccountFailure } from "../account/transport.js";
 import { referenceFields } from "../manual-reports/model.js";
@@ -274,7 +275,9 @@ export function RecordedTelemetryFields({
         ] as const
       ).map(([label, category, value]) => (
         <div key={label}>
-          <dt>{t(label)}</dt>
+          <dt>
+            {label === "recordedHardModeResult" && <FlameIcon size={12} />} {t(label)}
+          </dt>
           <dd>{t(value && value !== "unknown" ? `${category}_${value}` : "recordedUnknown")}</dd>
         </div>
       ))}

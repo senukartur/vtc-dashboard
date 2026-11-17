@@ -25,33 +25,48 @@ export function levelId(game: Game, code: (typeof codes)[number]) {
   return `52000000-0000-4000-8000-0000000000${game === "ets2" ? "1" : "2"}${codes.indexOf(code) + 1}`;
 }
 
-export function levelsFixture(game: Game): DTO["EnvelopeListQualificationLevel"] {
+const openLimits: DTO["QualificationLimits"] = {
+  massMinKg: null,
+  massMaxKg: null,
+  distanceMinM: null,
+  distanceMaxM: null,
+  trailers: { mode: "any", types: [] },
+  adr: { mode: "any", classes: [] },
+  hardModeRequired: false,
+};
+const ladderConditions = [
+  { requiredTrips: 10, requiredDistanceM: "5000000" },
+  { requiredTrips: 80, requiredDistanceM: "100000000" },
+  { requiredTrips: 50, requiredDistanceM: "60000000" },
+  { requiredTrips: null, requiredDistanceM: null },
+];
+const levelRef = (game: Game, index: number) => {
+  const code = codes[index];
+  return code ? { id: levelId(game, code), name: levelNames[game][index] ?? code } : null;
+};
+
+export function levelsFixture(game: Game): DTO["EnvelopeQualificationLevelList"] {
   // Deliberately unsorted: the profile orders the ladder by position.
   const order = [2, 0, 3, 1];
   return {
     data: {
-      items: order.map((index) => {
+      game,
+      canManage: false,
+      levels: order.map((index) => {
         const code = codes[index] ?? "trainee";
         return {
           id: levelId(game, code),
           game,
           position: index + 1,
-          terminal: index === 3,
-          promotionConfigured: index !== 3,
           name: levelNames[game][index] ?? code,
           version: 1,
-          ruleVersionId: null,
-          configured: true,
-          freightRuleSummary: {
-            maxMassKg: null,
-            allowedTrailerTypeCount: null,
-            allowedAdrCategoryCount: null,
-          },
-          requiredTrips: null,
-          requiredDistanceM: null,
-        };
+          limits: openLimits,
+          conditions: ladderConditions[index] ?? ladderConditions[3],
+          nextLevel: levelRef(game, index + 1),
+          driverCount: 1,
+        } as DTO["QualificationLevelSummary"];
       }),
-      nextCursor: null,
+      mine: null,
     },
     meta,
   };
@@ -154,35 +169,30 @@ export function profileFixture(
   };
 }
 
-/** Public progress (no review fields): the shape `/members/{id}/qualification-progress` returns. */
-export function progressFixture(id: string, game: Game): DTO["EnvelopeProgressPublic"] | null {
-  const current = assignmentsOf(id).find((item) => item.game === game);
-  if (!current) return null;
-  const values =
+/** Public qualifications: the shape `/members/{id}/qualifications` returns. */
+export function qualificationsFixture(id: string): DTO["EnvelopeMyQualificationList"] {
+  const progressOf = (game: Game) =>
     id === alphaId && game === "ets2"
-      ? { acceptedTrips: 41, actualDistanceM: "52300000", requiredTrips: 80 as number | null }
+      ? { trips: 41, distanceM: "52300000" }
       : id === alphaId
-        ? { acceptedTrips: 50, actualDistanceM: "61200000", requiredTrips: 50 as number | null }
+        ? { trips: 50, distanceM: "61200000" }
         : id === topId
-          ? { acceptedTrips: 12, actualDistanceM: "9800000", requiredTrips: null }
-          : { acceptedTrips: 3, actualDistanceM: "1250500", requiredTrips: 10 as number | null };
-  const requiredDistanceM =
-    id === alphaId && game === "ets2"
-      ? "100000000"
-      : id === alphaId
-        ? "60000000"
-        : id === topId
-          ? null
-          : "5000000";
+          ? { trips: 12, distanceM: "9800000" }
+          : { trips: 3, distanceM: "1250500" };
   return {
     data: {
-      assignment: current,
-      ...values,
-      requiredDistanceM,
-      eligibleForConfirmation: id === alphaId && game === "ats",
-      computedAt: "2026-11-15T11:00:00.000Z",
-      projectionVersion: 3,
-      projectionPending: false,
+      items: assignmentsOf(id).map((current) => {
+        const index = codes.findIndex((code) => levelId(current.game, code) === current.levelId);
+        const level = levelRef(current.game, index);
+        return {
+          game: current.game,
+          level: level ? { ...level, position: index + 1 } : null,
+          since: current.assignedAt,
+          progress: progressOf(current.game),
+          conditions: ladderConditions[index] ?? null,
+          nextLevel: levelRef(current.game, index + 1),
+        };
+      }),
     },
     meta,
   };

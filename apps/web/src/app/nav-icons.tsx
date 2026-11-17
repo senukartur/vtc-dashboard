@@ -9,11 +9,12 @@ const shapes: Record<NavItemId | "plus" | "collapse" | "expand" | "check" | "mor
   events: "M4 6h16v14H4zM4 10h16M8 3v5M16 3v5",
   drivers:
     "M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6M3 20c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 0 1 0 6M18 15c2 1 3 3 3 5",
-  qualifications: "M12 3l2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8z",
+  // A medal: ribbon, ring and star.
+  qualifications:
+    "M8 3l2.5 6M16 3l-2.5 6M12 21a6 6 0 1 0 0-12 6 6 0 0 0 0 12M12 12.5l1 2 2.2.3-1.6 1.5.4 2.2-2-1-2 1 .4-2.2-1.6-1.5 2.2-.3z",
   dispatch: "M4 5h16v11H4zM9 20h6M12 16v4M8 10l2 2 4-4",
   reconciliation: "M7 7h10l-3-3M17 17H7l3 3M5 7v4M19 17v-4",
   applications: "M5 4h14v16H5zM9 9h6M9 13h6M9 17h3",
-  promotions: "M4 19h16M7 16v-3M12 16v-6M17 16V6m-4 3 4-4 4 4",
   members: "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6M2 20c0-3 3-5 6-5s6 2 6 5M17 8v6M14 11h6",
   catalogs: "M4 5h7v14H4zM13 5h7v14h-7zM6 9h3M15 9h3",
   settings:

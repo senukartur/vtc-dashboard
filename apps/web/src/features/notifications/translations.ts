@@ -92,9 +92,6 @@ export const notificationTranslations = {
       "event.reminder": "Starting in about one hour: {{event}}",
       "qualification.assigned": "Qualification assigned · {{game}}",
       "qualification.promoted": "Qualification promoted · {{game}}",
-      "promotion.eligible": "Promotion requirements met · {{game}}",
-      "promotion.review_required":
-        "Promotion proof needs review; the assigned qualification is retained · {{game}}",
       "application.submitted": "A membership application was submitted",
       "application.decided": "A membership application was reviewed",
       "member.access_changed": "Member access changed: {{actor}}",
@@ -198,9 +195,6 @@ export const notificationTranslations = {
       "event.reminder": "Начало примерно через час: {{event}}",
       "qualification.assigned": "Назначена квалификация · {{game}}",
       "qualification.promoted": "Квалификация повышена · {{game}}",
-      "promotion.eligible": "Выполнены условия повышения · {{game}}",
-      "promotion.review_required":
-        "Основания повышения требуют проверки; назначенная квалификация сохранена · {{game}}",
       "application.submitted": "Подана заявка на вступление",
       "application.decided": "Заявка на вступление рассмотрена",
       "member.access_changed": "Доступ участника изменён: {{actor}}",

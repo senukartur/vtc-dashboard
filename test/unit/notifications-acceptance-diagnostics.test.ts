@@ -210,12 +210,12 @@ test("denied immutable read exposes only registered operation/table/lock and fac
   const diagnostic = acceptanceDiagnostic(
     {
       query:
-        "select * from `private_schema_value`.`qualification_rule_versions` where reason=? for update",
+        "select * from `private_schema_value`.`qualification_levels` where reason=? for update",
       params: ["private reason"],
       cause: {
         errno: 1142,
         sqlMessage:
-          "SELECT command denied to user 'private_account'@'private_host' for table 'qualification_rule_versions'",
+          "SELECT command denied to user 'private_account'@'private_host' for table 'qualification_levels'",
       },
     },
     "source_store",
@@ -225,9 +225,9 @@ test("denied immutable read exposes only registered operation/table/lock and fac
     step: "source_store",
     nativeErrno: 1142,
     sqlOperation: "select",
-    sqlTables: ["qualification_rule_versions"],
+    sqlTables: ["qualification_levels"],
     lockingMode: "for_update",
-    deniedTable: "qualification_rule_versions",
+    deniedTable: "qualification_levels",
   });
   for (const forbidden of [
     "private_schema_value",

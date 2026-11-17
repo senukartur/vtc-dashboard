@@ -23,7 +23,7 @@ import {
   catalogTrailers,
 } from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
-import { qualificationAssignments, qualificationRules } from "../qualifications/index.js";
+import { qualificationAssignments } from "../qualifications/index.js";
 
 export { and, asc, desc, eq, gt, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
@@ -335,7 +335,6 @@ export const tripContributions = mysqlTable(
     credited: boolean("credited").notNull(),
     aliasOf: idColumn("alias_of").references(() => trips.id, { onDelete: "restrict" }),
     assignmentId: idColumn("assignment_id"),
-    ruleVersionId: idColumn("rule_version_id"),
     attributionBasis: mysqlEnum("attribution_basis", [
       "actual_start",
       "manual_confirmation",
@@ -353,17 +352,12 @@ export const tripContributions = mysqlTable(
       columns: [t.assignmentId],
       foreignColumns: [qualificationAssignments.id],
     }).onDelete("restrict"),
-    foreignKey({
-      name: "trip_credit_rules_fk",
-      columns: [t.ruleVersionId],
-      foreignColumns: [qualificationRules.id],
-    }).onDelete("restrict"),
     index("trip_contribution_period").on(t.assignmentId, t.credited, t.tripId),
     check("trip_credit_version_positive", sql`${t.version} > 0`),
     check("trip_credit_alias_distinct", sql`${t.aliasOf} IS NULL OR ${t.aliasOf} <> ${t.tripId}`),
     check(
-      "trip_credit_shape",
-      sql`${t.credited} = 0 OR (${t.accepted} = 1 AND ${t.aliasOf} IS NULL AND ${t.assignmentId} IS NOT NULL AND ${t.ruleVersionId} IS NOT NULL AND ${t.attributionAt} IS NOT NULL AND ${t.actualDistanceM} > 0)`,
+      "trip_credit_shape_v2",
+      sql`${t.credited} = 0 OR (${t.accepted} = 1 AND ${t.aliasOf} IS NULL AND ${t.assignmentId} IS NOT NULL AND ${t.attributionAt} IS NOT NULL AND ${t.actualDistanceM} > 0)`,
     ),
   ],
 );

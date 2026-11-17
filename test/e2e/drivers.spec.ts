@@ -4,8 +4,7 @@ import {
   betaId,
   formerId,
   levelId,
-  levelsFixture,
-  progressFixture,
+  qualificationsFixture,
   selfId,
   topId,
   tripsFixture,
@@ -146,7 +145,7 @@ test.describe("Compact driver profile", () => {
         "1,482 kmTrips: 5 · November 2026",
       ]);
 
-      // Qualification cards with public progress, ladder and eligibility.
+      // Qualification cards with public progress toward the current level's conditions and the ladder.
       const ets2 = qualification(page, "ETS2");
       await expect(ets2.getByRole("heading", { level: 2 })).toHaveText("ETS2 · Driver II");
       await expect(ets2.getByText("Next: Driver I")).toBeVisible();
@@ -164,18 +163,16 @@ test.describe("Compact driver profile", () => {
       await expect(ets2.locator('[aria-current="step"] .driver-ladder-name')).toHaveText(
         "Driver II",
       );
-      await expect(ets2.getByRole("definition")).toHaveText(["41 / 80", "52,300 / 100,000 km"]);
-      await expect(ets2.getByText(/Requirements met/)).toHaveCount(0);
-      await expect(ets2.getByText("Progress since 20 Aug 2026, 09:00 (UTC)")).toBeVisible();
+      await expect(ets2.getByRole("definition")).toHaveText(["41 / 50", "52,300 / 60,000 km"]);
+      await expect(ets2.getByText("On the level since 20 Aug 2026, 09:00 (UTC)")).toBeVisible();
       const ats = qualification(page, "ATS");
       await expect(ats.getByRole("heading", { level: 2 })).toHaveText("ATS · Highway Driver III");
       await expect(ats.getByText("Next: Highway Driver II")).toBeVisible();
-      await expect(ats.getByRole("definition")).toHaveText(["50 / 50", "61,200 / 60,000 km"]);
+      await expect(ats.getByRole("definition")).toHaveText(["50 / 80", "61,200 / 100,000 km"]);
+      // Promotion is automatic, so there is no eligibility or confirmation state to show.
+      await expect(page.getByText(/Requirements met|awaiting confirmation/)).toHaveCount(0);
       await expect(
-        ats.getByText("Requirements met — awaiting confirmation by the director or a deputy"),
-      ).toBeVisible();
-      await expect(
-        page.getByText(/^Progress counts accepted trips and actual distance/),
+        page.getByText(/^Progress counts credited trips and actual distance on the current level/),
       ).toBeVisible();
 
       // The accepted history is scoped to this member and retains exact all-game totals.
@@ -300,10 +297,9 @@ test.describe("Compact driver profile", () => {
         [
           `/api/v1/members/${alphaId}`,
           `/api/v1/members/${alphaId}/analytics?fromDate=2025-12-01&toDateExclusive=2026-12-01&granularity=month`,
-          `/api/v1/members/${alphaId}/qualification-progress?game=ets2`,
-          `/api/v1/members/${alphaId}/qualification-progress?game=ats`,
-          "/api/v1/qualification-levels?game=ets2&limit=25",
-          "/api/v1/qualification-levels?game=ats&limit=25",
+          `/api/v1/members/${alphaId}/qualifications`,
+          "/api/v1/qualification-levels?game=ets2",
+          "/api/v1/qualification-levels?game=ats",
           `/api/v1/trips?scope=company&ownerId=${alphaId}&limit=10&order=completion_desc&locale=en`,
         ].sort(),
       );
@@ -520,13 +516,11 @@ test.describe("Compact driver profile", () => {
       ).toBeVisible();
       state.emptyAnalytics = false;
 
-      state.failures.progressAts = 503;
+      state.failures.qualifications = 503;
       await open(page, alphaId);
       await expect(qualification(page, "ATS").getByText("Progress unavailable")).toBeVisible();
-      await expect(qualification(page, "ETS2").getByRole("definition").first()).toHaveText(
-        "41 / 80",
-      );
-      delete state.failures.progressAts;
+      await expect(qualification(page, "ETS2").getByText("Progress unavailable")).toBeVisible();
+      delete state.failures.qualifications;
 
       state.failures.levels = 503;
       await open(page, alphaId);
@@ -537,7 +531,7 @@ test.describe("Compact driver profile", () => {
         "ETS2 · Level unavailable",
       );
       await expect(qualification(page, "ETS2").getByRole("definition").first()).toHaveText(
-        "41 / 80",
+        "41 / 50",
       );
       await expect(qualification(page, "ETS2").getByRole("list")).toHaveCount(0);
       delete state.failures.levels;
@@ -568,28 +562,21 @@ test.describe("Compact driver profile", () => {
       await expect(ets2.getByRole("heading", { level: 2 })).toHaveText("ETS2 · Driver I");
       await expect(ets2.getByText("Top level")).toBeVisible();
       await expect(ets2.getByRole("definition")).toHaveText(["12", "9,800 km"]);
-      const warning = ets2.getByText("Promotion thresholds are not configured.");
+      const warning = ets2.getByText("No promotion conditions are set.");
       await expect(warning).toHaveCount(0);
       await expect(ets2.locator(".driver-bar")).toHaveCount(0);
 
       let configured = true;
-      await page.route("**/api/v1/qualification-levels?game=ets2*", (route) => {
-        const fixture = levelsFixture("ets2");
-        const level = fixture.data.items.find((item) => item.id === levelId("ets2", "driver_ii"));
-        if (!level) throw new Error("SYNTHETIC_LEVEL_MISSING");
-        level.promotionConfigured = configured;
+      await page.route(`**/api/v1/members/${alphaId}/qualifications`, (route) => {
+        const fixture = qualificationsFixture(alphaId);
+        const item = fixture.data.items.find((entry) => entry.game === "ets2");
+        if (!item) throw new Error("SYNTHETIC_QUALIFICATION_MISSING");
+        item.conditions = {
+          requiredTrips: null,
+          requiredDistanceM: configured ? "100000000" : null,
+        };
         return route.fulfill({ json: fixture });
       });
-      await page.route(
-        `**/api/v1/members/${alphaId}/qualification-progress?game=ets2*`,
-        (route) => {
-          const fixture = progressFixture(alphaId, "ets2");
-          if (!fixture) throw new Error("SYNTHETIC_PROGRESS_MISSING");
-          fixture.data.requiredTrips = null;
-          fixture.data.requiredDistanceM = configured ? "100000000" : null;
-          return route.fulfill({ json: fixture });
-        },
-      );
       await open(page, alphaId);
       await expect(ets2.getByRole("definition")).toHaveText(["41", "52,300 / 100,000 km"]);
       await expect(ets2.locator(".driver-bar")).toHaveCount(1);
@@ -721,7 +708,7 @@ test.describe("Compact driver profile", () => {
       const back = page.getByRole("link", { name: "All drivers", exact: true });
       await back.focus();
       const order: string[] = [];
-      for (let step = 0; step < 9; step += 1) {
+      for (let step = 0; step < 10; step += 1) {
         order.push(
           await page.evaluate(() => {
             const active = document.activeElement as HTMLElement | null;
@@ -738,6 +725,8 @@ test.describe("Compact driver profile", () => {
         "Гамбург → Берлин",
         "Прага → Вена",
         "All my trips",
+        // The current level name links to its level page.
+        "Trainee",
         "Chart",
         "Table",
       ]);

@@ -192,7 +192,8 @@ test("validates settings navigation and audit filters against the registered act
   expect(settingsTab(null)).toBe("general");
   expect(settingsTab("GENERAL")).toBe("general");
   expect(settingsTab("audit")).toBe("audit");
-  expect(settingsTab("qualifications")).toBe("qualifications");
+  // The retired qualifications tab falls back to General (VTC-157).
+  expect(settingsTab("qualifications")).toBe("general");
   expect(Object.keys(auditActions).sort()).toEqual([...auditOperations].sort());
   for (const label of Object.values(auditActions)) {
     expect(administrationTranslations.en.auditActions[label]).toBeTruthy();

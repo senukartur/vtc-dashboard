@@ -528,16 +528,6 @@
   border-radius: inherit;
   background: var(--focus);
 }
-.driver-profile-page .driver-eligible {
-  margin: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--accepted);
-  border-radius: var(--radius-control);
-  background: var(--accepted-surface);
-  color: var(--accepted);
-  font-size: var(--font-small);
-  overflow-wrap: break-word;
-}
 
 /* Distance by month: the body keeps one height in every view and state. */
 .driver-profile-page .driver-meta {

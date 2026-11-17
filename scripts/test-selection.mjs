@@ -233,9 +233,8 @@ const areas = [
   {
     paths: [
       "apps/api/src/modules/qualifications/",
-      "apps/api/src/modules/qualification-rules/",
       "apps/web/src/features/qualifications/",
-      "test/fixtures/qualification-rules/",
+      "test/fixtures/trip-evidence.ts",
     ],
     tests: ["qualification"],
   },

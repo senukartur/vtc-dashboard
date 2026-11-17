@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { applicationId, utcDateTime } from "@vtc/db";
-import { type Actor, identityError } from "../identity/service.js";
-import { canonicalJson } from "../sources/contracts/canonical.js";
+import { type Actor, identityError } from "../../modules/identity/service.js";
+import { canonicalJson } from "../../modules/sources/contracts/canonical.js";
 export interface Page {
   limit?: number;
   cursor?: string;

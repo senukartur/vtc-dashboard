@@ -9,10 +9,13 @@ import {
   trips,
 } from "@vtc/db/trips-schema";
 import { identityError } from "../identity/service.js";
-import type { QualificationProgressTotals } from "../qualification-rules/contracts.js";
-import { canonicalDecimal, compareDecimal } from "../qualification-rules/decimal.js";
 import { canonicalJson, contentHash, decimal } from "../sources/contracts/canonical.js";
+import { canonicalDecimal, compareDecimal } from "../sources/contracts/decimal.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
+export interface QualificationProgressTotals {
+  readonly completedTrips: number;
+  readonly completedDistanceM: string;
+}
 import { createFactRepository } from "./facts.js";
 import { createTripGroups } from "./groups.js";
 export interface ContributionChange {
@@ -25,7 +28,6 @@ export interface ContributionChange {
 }
 export interface Attribution {
   assignmentId: string | null;
-  ruleVersionId: string | null;
   attributionBasis: "actual_start" | "manual_confirmation" | "staff_resolution" | "unresolved";
   attributionAt: string | null;
 }
@@ -169,7 +171,6 @@ export function createContributionRegister(unit: UnitOfWork) {
         accepted &&
         !change.aliasOf &&
         attribution.assignmentId !== null &&
-        attribution.ruleVersionId !== null &&
         attribution.attributionAt !== null &&
         evidence.outcome === "delivered" &&
         (evidence.provider === "manual" ||

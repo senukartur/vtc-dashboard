@@ -29,7 +29,6 @@
   "generatedKeys": [
     "CATALOGS_CURSOR_KEY",
     "TRIPS_CURSOR_KEY",
-    "QUALIFICATIONS_CURSOR_KEY",
     "TELEMETRY_CURSOR_KEY",
     "MANUAL_REPORTS_KEY",
     "EVENTS_CURSOR_KEY",
@@ -50,7 +49,6 @@
   },
   "grants": {
     "runtime": {
-      "audit_entries": ["SELECT"],
       "external_steam_accounts": ["UPDATE(created_at)"],
       "event_revision_details": ["SELECT", "INSERT"],
       "event_revision_dlcs": ["SELECT", "INSERT"],
@@ -128,7 +126,7 @@
       ],
       "identity_company": ["UPDATE(version)"],
       "identity_memberships": ["UPDATE(version)"],
-      "identity_roles": ["SELECT"],
+      "identity_roles": ["SELECT", "INSERT", "DELETE"],
       "manual_blob_generations": ["SELECT", "INSERT", "UPDATE"],
       "manual_correction_requests": ["SELECT"],
       "manual_draft_evidence": ["SELECT"],
@@ -141,12 +139,9 @@
       "notifications": ["SELECT", "INSERT"],
       "outbox_routing": ["SELECT", "INSERT", "DELETE"],
       "outbox_routing_scans": ["SELECT", "INSERT", "UPDATE"],
-      "qualification_assignments": ["SELECT", "UPDATE(revision)"],
+      "qualification_assignments": ["SELECT", "INSERT", "UPDATE(ended_at)"],
+      "qualification_level_trailers": ["SELECT"],
       "qualification_levels": ["SELECT"],
-      "qualification_promotion_reviews": ["SELECT", "INSERT", "UPDATE"],
-      "qualification_promotions": ["SELECT"],
-      "qualification_rule_versions": ["SELECT"],
-      "qualification_states": ["SELECT", "INSERT", "UPDATE(version)"],
       "reconciliation_candidates": ["SELECT", "INSERT", "UPDATE(active)"],
       "reconciliation_rules": ["SELECT", "INSERT"],
       "reconciliation_searches": [

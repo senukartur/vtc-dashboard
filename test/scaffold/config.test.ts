@@ -22,7 +22,6 @@ test("notifications remain off by default and require the complete workflow plus
     TRIPS_ENABLED: "true",
     TRIPS_CURSOR_KEY: "1".repeat(64),
     QUALIFICATIONS_ENABLED: "true",
-    QUALIFICATIONS_CURSOR_KEY: "2".repeat(64),
     CATALOGS_ENABLED: "true",
     CATALOGS_CURSOR_KEY: "3".repeat(64),
     MANUAL_REPORTS_ENABLED: "true",
@@ -209,7 +208,7 @@ test("external identities activation is explicit and requires valid identity con
   );
 });
 
-test("qualification activation requires identity/trips and an independent cursor key without numeric defaults", () => {
+test("qualification activation requires identity and trips and has no other settings", () => {
   assert.equal(readConfig(fixture).qualifications, undefined);
   const input = {
     ...fixture,
@@ -219,58 +218,13 @@ test("qualification activation requires identity/trips and an independent cursor
     TRIPS_ENABLED: "true",
     TRIPS_CURSOR_KEY: "a".repeat(64),
     QUALIFICATIONS_ENABLED: "true",
-    QUALIFICATIONS_CURSOR_KEY: "b".repeat(64),
   };
-  assert.deepEqual(readConfig(input).qualifications, { cursorKey: "b".repeat(64) });
-  assert.deepEqual(
-    readConfig({ ...input, QUALIFICATION_LADDER_EDITS_ENABLED: "true" }).qualifications,
-    { cursorKey: "b".repeat(64), ladderEditsEnabled: true },
-  );
-  const cutoff = "2026-01-02T03:04:05.678Z";
-  const tracking = {
-    QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED: "true",
-    QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE: cutoff,
-  };
-  assert.equal(
-    readConfig({ ...input, ...tracking }).qualifications?.eligibilityTrackingSince,
-    cutoff,
-  );
-  assert.deepEqual(
-    readConfig({ ...input, ...tracking, QUALIFICATION_LADDER_EDITS_ENABLED: "true" })
-      .qualifications,
-    { cursorKey: "b".repeat(64), ladderEditsEnabled: true, eligibilityTrackingSince: cutoff },
-  );
-  for (const off of [
-    { ...tracking, QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED: "false" },
-    { QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE: "" },
-  ])
-    assert.equal(
-      readConfig({ ...input, ...off }).qualifications?.eligibilityTrackingSince,
-      undefined,
-    );
-  for (const changes of [
-    { QUALIFICATIONS_ENABLED: "false" },
-    { QUALIFICATIONS_ELIGIBILITY_TRACKING_ENABLED: "yes" },
-    ...[
-      "",
-      "2026-02-30T03:04:05.678Z",
-      "2026-01-02T03:04:05.678+00:00",
-      "9999-01-01T00:00:00.000Z",
-    ].map((value) => ({ QUALIFICATIONS_ELIGIBILITY_TRACKING_SINCE: value })),
-  ])
-    assert.throws(
-      () => readConfig({ ...input, ...tracking, ...changes }),
-      /QUALIFICATIONS_ELIGIBILITY_TRACKING/,
-    );
+  assert.deepEqual(readConfig(input).qualifications, {});
+  assert.equal(readConfig({ ...input, QUALIFICATIONS_ENABLED: "false" }).qualifications, undefined);
   for (const changes of [
     { QUALIFICATIONS_ENABLED: "yes" },
-    { QUALIFICATION_LADDER_EDITS_ENABLED: "yes" },
-    { QUALIFICATIONS_ENABLED: "false", QUALIFICATION_LADDER_EDITS_ENABLED: "true" },
     { IDENTITY_ENABLED: "false" },
     { TRIPS_ENABLED: "false" },
-    { QUALIFICATIONS_CURSOR_KEY: "" },
-    { QUALIFICATIONS_CURSOR_KEY: "a".repeat(64) },
-    { MANUAL_REPORTS_KEY: "b".repeat(64) },
   ])
-    assert.throws(() => readConfig({ ...input, ...changes }));
+    assert.throws(() => readConfig({ ...input, ...changes }), /Invalid environment fields/);
 });

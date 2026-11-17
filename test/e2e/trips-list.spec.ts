@@ -474,8 +474,10 @@ test(
     const shared = panel(page, colleague);
     await expect(shared.getByText("Decision history is not included in this view.")).toBeVisible();
     await expect(shared).not.toContainText(reason);
-    for (const field of ["Job type", "Game mode", "Hard Mode result"])
-      await expect(shared.getByText(field, { exact: true })).toHaveCount(0);
+    for (const field of ["Job type", "Game mode", "Hard Mode"])
+      await expect(
+        shared.locator("dt").filter({ hasText: new RegExp(`^\\s*${field}$`) }),
+      ).toHaveCount(0);
     await expect(table(page)).toContainText("Fictional Colleague");
     expect(others).toEqual([]);
 
@@ -1106,7 +1108,7 @@ test(
         [
           ["Job type", "Cargo market"],
           ["Game mode", "Unknown"],
-          ["Hard Mode result", "Unknown"],
+          ["Hard Mode", "Unknown"],
         ],
       ],
       [
@@ -1114,13 +1116,15 @@ test(
         [
           ["Тип заказа", "Рынок грузов для своего прицепа"],
           ["Режим игры", "Неизвестно"],
-          ["Результат сложного режима", "Неизвестно"],
+          // Hard Mode keeps its English name in both languages.
+          ["Hard Mode", "Неизвестно"],
         ],
       ],
     ] as const) {
       await catalogLanguage(page, locale);
       for (const [label, value] of rows) {
-        const term = detail.getByText(label, { exact: true });
+        // Only the audit term: the qualification check can name Hard Mode too.
+        const term = detail.locator("dt").filter({ hasText: new RegExp(`^\\s*${label}$`) });
         await expect(term).toBeVisible();
         await expect(term.locator("xpath=following-sibling::dd")).toHaveText(value);
       }

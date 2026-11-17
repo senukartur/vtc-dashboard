@@ -98,7 +98,7 @@ const password = "Fictional-reconciliation-passphrase-42",
   origin = "http://127.0.0.1:4173",
   identityConfig = { secret: randomBytes(32).toString("hex"), origin, production: false },
   tripConfig = { cursorKey: randomBytes(32).toString("hex") },
-  qualConfig = { cursorKey: randomBytes(32).toString("hex") },
+  qualConfig = {},
   config = {
     key: randomBytes(32).toString("hex"),
     rule: { version: 1, startToleranceMs: 1000, endToleranceMs: 1000, distanceToleranceM: "0.01" },
@@ -181,16 +181,33 @@ beforeAll(async () => {
     { identity, trips: tripService, qualifications, manual },
     now,
   );
-  const levels = await qualifications.levels(director, "ets2"),
-    level = levels.items.find((v) => v.id === structuralLevels.ets2[0]);
-  if (!level) throw new Error("SYNTHETIC_LEVEL_MISSING");
-  await qualifications.publish(director, level.id, newId(), level.version, {
-    rules: [{ type: "max_mass", maxKg: "20000" }],
-    requiredTrips: 1,
-    requiredDistanceM: "100",
-    reason: "Fictional test configuration",
-  });
+  // A mass limit to break, and conditions far enough away that nobody is promoted by accident.
+  await configureFirstLevel(1000);
 }, SCHEMA_SETUP_TIMEOUT_MS);
+async function configureFirstLevel(requiredTrips: number) {
+  const level = await qualifications.detail(director, structuralLevels.ets2[0]);
+  await qualifications.update(director, level.id, {
+    expectedVersion: level.version,
+    name: level.name,
+    limits: {
+      massMinKg: null,
+      massMaxKg: "20000",
+      distanceMinM: null,
+      distanceMaxM: null,
+      trailers: { mode: "any", typeIds: [] },
+      adr: { mode: "any", classes: [] },
+      hardModeRequired: false,
+    },
+    conditions: { requiredTrips, requiredDistanceM: "100" },
+  });
+}
+async function currentLevel(who: Actor) {
+  const mine = await qualifications.memberQualifications(who, who.userId),
+    ets2 = mine.items.find((item) => item.game === "ets2");
+  if (!ets2) throw new Error("SYNTHETIC_QUALIFICATION_MISSING");
+  return ets2;
+}
+const creditedTrips = async (who: Actor = owner) => (await currentLevel(who)).progress.trips;
 beforeEach(async () => {
   await control.query("UPDATE manual_reports SET current_revision_id=NULL");
   await control.query("UPDATE trips SET alias_of=NULL");
@@ -217,8 +234,6 @@ beforeEach(async () => {
     "manual_evidence",
     "trip_contribution_history",
     "trip_contributions",
-    "qualification_promotion_reviews",
-    "qualification_promotions",
     "trip_history",
     "trip_fact_trailers",
     "trip_facts",
@@ -469,7 +484,6 @@ async function workerCli(enabled: boolean) {
     TRIPS_ENABLED: "true",
     TRIPS_CURSOR_KEY: tripConfig.cursorKey,
     QUALIFICATIONS_ENABLED: "true",
-    QUALIFICATIONS_CURSOR_KEY: qualConfig.cursorKey,
     RECONCILIATION_ENABLED: String(enabled),
     RECONCILIATION_KEY: config.key,
     RECONCILIATION_RULE_VERSION: String(config.rule.version),
@@ -1967,13 +1981,9 @@ test("accepted duplicate credits replace atomically and reversal restores histor
     b = await receive();
   await accepted(a.tripId);
   await accepted(b.tripId);
-  expect(
-    (await qualifications.progress(owner, owner.userId, "ets2", "owner")).data.acceptedTrips,
-  ).toBe(2);
+  expect(await creditedTrips()).toBe(2);
   const one = await merge(a.tripId, b.tripId);
-  expect(
-    (await qualifications.progress(owner, owner.userId, "ets2", "owner")).data.acceptedTrips,
-  ).toBe(1);
+  expect(await creditedTrips()).toBe(1);
   const alias = await unit.run(
     async (tx) =>
       (
@@ -1986,9 +1996,7 @@ test("accepted duplicate credits replace atomically and reversal restores histor
   );
   expect(alias?.credited).toBe(false);
   await reverse(one.data.id);
-  expect(
-    (await qualifications.progress(owner, owner.userId, "ets2", "owner")).data.acceptedTrips,
-  ).toBe(2);
+  expect(await creditedTrips()).toBe(2);
   const restored = await unit.run(
     async (tx) =>
       (
@@ -2516,43 +2524,37 @@ test("audit failure rolls back the entire membership/history/credit/outbox comma
   );
   expect(Number(rows[0]?.n)).toBe(0);
 });
-test("duplicate correction invalidates historical promotion proof without demotion and reversal restores its support", async () => {
+test("duplicate correction never demotes an automatically promoted driver and reversal keeps the level", async () => {
   instant -= 120000;
   const who = await member();
   instant += 120000;
-  const level = (await qualifications.levels(director, "ets2")).items.find(
-    (l) => l.id === structuralLevels.ets2[0],
-  );
-  if (!level) throw new Error("SYNTHETIC_LEVEL_MISSING");
-  await qualifications.publish(director, level.id, newId(), level.version, {
-    rules: [{ type: "max_mass", maxKg: "20000" }],
-    requiredTrips: 2,
-    requiredDistanceM: "100",
-    reason: "Fictional duplicate-proof threshold",
-  });
-  const a = await receive(payload(), who),
-    b = await receive(payload(), who);
-  await accepted(a.tripId, undefined, who);
-  await accepted(b.tripId, undefined, who);
-  const before = await qualifications.progress(who, who.userId, "ets2", "owner");
-  await qualifications.promote(director, who.userId, newId(), before.version, {
-    game: "ets2",
-    assignmentId: before.data.assignment.id,
-    targetLevelId: structuralLevels.ets2[1],
-    reason: "Fictional promotion proof",
-  });
-  const promoted = await qualifications.progress(who, who.userId, "ets2", "owner"),
-    one = await merge(a.tripId, b.tripId);
-  const current = await qualifications.progress(who, who.userId, "ets2", "owner");
-  expect(current.data.assignment.id).toBe(promoted.data.assignment.id);
-  const [proof] = await control.query<RowDataPacket[]>(
-    "SELECT review_required FROM qualification_promotion_reviews",
-  );
-  expect(proof.some((r) => Boolean(r.review_required))).toBe(true);
-  await reverse(one.data.id);
-  expect((await qualifications.progress(who, who.userId, "ets2", "owner")).data.assignment.id).toBe(
-    promoted.data.assignment.id,
-  );
+  await configureFirstLevel(2);
+  try {
+    const a = await receive(payload(), who),
+      b = await receive(payload(), who);
+    await accepted(a.tripId, undefined, who);
+    expect((await currentLevel(who)).level?.id).toBe(structuralLevels.ets2[0]);
+    await accepted(b.tripId, undefined, who);
+    const promoted = await currentLevel(who);
+    expect(promoted.level?.id).toBe(structuralLevels.ets2[1]);
+    const [kinds] = await control.query<RowDataPacket[]>(
+      "SELECT kind FROM qualification_assignments WHERE user_id=? AND game='ets2' ORDER BY assigned_at, kind",
+      [Buffer.from(who.userId)],
+    );
+    expect(kinds.map((row) => row.kind)).toEqual(["admission", "promotion"]);
+    // Removing one of the two credits that met the conditions keeps the new level.
+    const one = await merge(a.tripId, b.tripId);
+    expect(await currentLevel(who)).toEqual(promoted);
+    await reverse(one.data.id);
+    expect(await currentLevel(who)).toEqual(promoted);
+    const [count] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM qualification_assignments WHERE user_id=? AND game='ets2' AND kind='promotion'",
+      [Buffer.from(who.userId)],
+    );
+    expect(Number(count[0]?.n)).toBe(1);
+  } finally {
+    await configureFirstLevel(1000);
+  }
 });
 
 test("an unassessed or rejected primary cannot erase an accepted secondary; differing accepted contexts retain the primary reviewed result", async () => {

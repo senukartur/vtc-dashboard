@@ -34,7 +34,7 @@ import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/que
 import { type CompanyEvent, closed, createOutbox } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
-import type { ConfirmedEventContext } from "../qualification-rules/contracts.js";
+import type { ConfirmedEventContext } from "./contracts.js";
 import { canonicalJson, decimal } from "../sources/contracts/canonical.js";
 import { createEventDrafts } from "./drafts.js";
 import { type Page, pagination } from "./pagination.js";

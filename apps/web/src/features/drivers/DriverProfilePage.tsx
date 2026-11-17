@@ -22,7 +22,7 @@ import {
   useMemberAcceptedTrips,
   useMemberAnalytics,
   useMemberProfile,
-  useMemberProgress,
+  useMemberQualifications,
 } from "./queries.js";
 import "./drivers.css";
 
@@ -91,24 +91,21 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
   // fallback-dates key from an earlier visit.
   const analyticsView = untilAnchored(analyticsQuery, anchored);
   const tripsQuery = useMemberAcceptedTrips(memberId, { isSelf, game: effectiveGame });
-  const progress = {
-    ets2: useMemberProgress(memberId, "ets2", !!assignments.ets2),
-    ats: useMemberProgress(memberId, "ats", !!assignments.ats),
-  };
-  // Same request and cache key as the overview; only games with an assignment ask for names.
+  const qualifications = useMemberQualifications(memberId, !!(assignments.ets2 || assignments.ats));
+  // The qualifications page read; only games with a level ask for it.
   const ets2Levels = useQualificationQuery(
-    "/qualification-levels?game=ets2&limit=25",
-    "EnvelopeListQualificationLevel",
+    "/qualification-levels?game=ets2",
+    "EnvelopeQualificationLevelList",
     !!assignments.ets2,
   );
   const atsLevels = useQualificationQuery(
-    "/qualification-levels?game=ats&limit=25",
-    "EnvelopeListQualificationLevel",
+    "/qualification-levels?game=ats",
+    "EnvelopeQualificationLevelList",
     !!assignments.ats,
   );
   const levels: Record<"ets2" | "ats", LevelsState> = {
-    ets2: { levels: ets2Levels.data?.data.data.items, pending: ets2Levels.isPending },
-    ats: { levels: atsLevels.data?.data.data.items, pending: atsLevels.isPending },
+    ets2: { levels: ets2Levels.data?.data.data.levels, pending: ets2Levels.isPending },
+    ats: { levels: atsLevels.data?.data.data.levels, pending: atsLevels.isPending },
   };
 
   /**
@@ -205,7 +202,7 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
                 key={g}
                 game={g}
                 assignment={assignments[g]}
-                progress={progress[g]}
+                qualifications={qualifications}
                 levels={levels[g]}
                 locale={locale}
                 displayTimezone={displayTimezone}

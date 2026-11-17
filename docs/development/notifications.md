@@ -29,8 +29,6 @@ All categories retain only a registered message key, nickname/game/event title w
 | `event.changed` / `event.start_changed`, `event.route_changed`, `event.cancelled` | Participants reconstructed immediately before the material change, with current active access | `eventChanges` | Still-effective material state; one effect per recipient/material definition |
 | One-hour / `event.reminder` | Current active member with `events.respond` and Participating RSVP | `eventReminders` | Event + normalized start + response identity; current start/status/access checked |
 | `qualification.assigned`, `qualification.promoted` | Owner or current `qualifications.manage` staff | `qualificationChanges` | Current assignment only; a promotion's assignment signal is coalesced into promoted |
-| `qualification.progress_changed` / `promotion.eligible` | Owner or current `qualifications.manage` staff | `qualificationChanges` | Current eligible period revision; once per assignment |
-| `promotion.review_required` | Owner or current `qualifications.manage` staff | `qualificationChanges` | Current invalidated promotion-proof review version; never changes qualification |
 | `application.submitted`, `application.decided` | Current `applications.manage` staff | `newApplications` | Current application version/status; no applicant details |
 | `member.access_changed` | Current `members.manage` staff | `eventChanges` | Current access epoch; safe nickname only |
 

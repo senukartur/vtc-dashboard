@@ -86,13 +86,13 @@ function DriversDirectory() {
   const invitedCount = useInvitationCount(canInvite);
   const levelReads = {
     ets2: useQualificationQuery(
-      "/qualification-levels?game=ets2&limit=25",
-      "EnvelopeListQualificationLevel",
+      "/qualification-levels?game=ets2",
+      "EnvelopeQualificationLevelList",
       listTab === "active",
     ),
     ats: useQualificationQuery(
-      "/qualification-levels?game=ats&limit=25",
-      "EnvelopeListQualificationLevel",
+      "/qualification-levels?game=ats",
+      "EnvelopeQualificationLevelList",
       listTab === "active",
     ),
   };
@@ -175,7 +175,7 @@ function DriversDirectory() {
   ];
   const levelOptions = (game: "ets2" | "ats") => {
     const read = levelReads[game];
-    const levels = read.data?.data.data.items;
+    const levels = read.data?.data.data.levels;
     // Without Qualifications the rows carry no levels and the level filter would answer 422.
     const qualificationsOff = !!list?.items.length && list.items.every((entry) => !entry.levels);
     return {

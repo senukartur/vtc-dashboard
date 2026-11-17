@@ -199,12 +199,12 @@ export function useMyQualificationProgress(
 ) {
   const session = useSession();
   const { i18n } = useTranslation();
-  const path = `/me/qualification-progress?game=${game}`;
+  const path = "/me/qualifications";
 
+  // Both games read one list: the shared key makes them one request, and `select` picks the game.
   return useQuery({
     queryKey: [
       "dashboard-my-progress",
-      game,
       session.self?.member.id,
       session.generation,
       session.self?.identityEpoch,
@@ -219,7 +219,7 @@ export function useMyQualificationProgress(
     staleTime: 30000,
     queryFn: async ({ signal }) => {
       try {
-        return (await dashboardRead(path, "EnvelopeProgress", signal)).data.data;
+        return (await dashboardRead(path, "EnvelopeMyQualificationList", signal)).data.data.items;
       } catch (error) {
         if (error instanceof AccountFailure && !signal.aborted) {
           if (error.kind === "unauthorized") await session.confirmSessionLoss(signal);
@@ -227,6 +227,7 @@ export function useMyQualificationProgress(
         throw error;
       }
     },
+    select: (items) => items.find((item) => item.game === game && item.level) ?? null,
   });
 }
 

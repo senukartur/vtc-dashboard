@@ -8,7 +8,6 @@ import {
   safeBrowserFailure,
   safeBrowserTiming,
   safeFailureLocation,
-  safeQualificationAnnotations,
 } from "../../scripts/browser-diagnostics.mjs";
 import { fileTimingLine, safeFileTiming } from "../../scripts/ci-result.mjs";
 
@@ -66,18 +65,7 @@ export default class SafeBrowserReporter implements Reporter {
       status: result.status,
       ...failureAt(result),
     });
-    let phase: ReturnType<typeof safeQualificationAnnotations>;
-    if (failure?.kind === "test" && failure.file === "qualifications") {
-      try {
-        phase = safeQualificationAnnotations(result.annotations);
-      } catch {
-        /* Invalid metadata keeps the coarse failure. */
-      }
-    }
-    this.emit(
-      (phase && safeBrowserFailure({ ...failure, ...phase })) ??
-        failure ?? { kind: "global", category: "unmapped-test", status: result.status },
-    );
+    this.emit(failure ?? { kind: "global", category: "unmapped-test", status: result.status });
   }
   onError() {
     this.emit({ kind: "global", category: "runner-error", status: "failed" });

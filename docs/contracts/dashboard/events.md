@@ -24,9 +24,8 @@ This is a fictional example. Do not add emails, decline reasons, screenshots, ra
 | `source.snapshot_stored` | Sources | Normalize/process the immutable source revision; does not directly increment stats or create start/end toasts |
 | `trip.lifecycle_changed` | Trips | Derive one canonical start/end transition; suppress backfill/stale/redundant snapshot toasts |
 | `trip.decision_changed` / `trip.reconciled` | Acceptance / trips coordinator | Replace the canonical contribution at its new version, recompute affected progress/totals, notify permitted recipients once |
-| `qualification.assigned` / `promotion.review_required` | Qualifications | Update versioned progress period or notify administrators; never automatically demote |
+| `qualification.assigned` / `qualification.promoted` | Qualifications | Notify the member and qualification staff of a new level; never automatically demote |
 | `event.changed` / `event.response_changed` / `event.attendance_changed` | Events | Invalidate/reschedule reminder generations, notify signed-up members of approved change categories, evaluate pending exception-related review |
-| `qualification.rules_published` | Qualifications | Invalidate eligible lookup caches and schedule explicit review; never mutate historical rule/fact snapshots |
 
 An event draft has no domain event. Publishing it creates the first scheduled definition revision with category `published`. The schema-v1 `event.changed` message uses the existing `created` category at version and change sequence 1. It begins normal reminder and event-trip processing and does not introduce a new notification category.
 
@@ -52,7 +51,7 @@ VTC-022 registers `source.snapshot_stored`, `trip.lifecycle_changed` and `trip.f
 
 ## Implemented qualification safe events
 
-VTC-028 registers schema-v1 `qualification.rules_changed`, `qualification.assigned`, `qualification.promoted`, `qualification.progress_changed` and `promotion.review_required`. Aggregate is `{kind:"qualification",id,version}` and closed data is exactly `{userId,assignmentId}`; both references are null only for level configuration events. Aggregate IDs refer to a level, assignment or immutable promotion proof respectively; versions describe that level/state/period/private review transition. Events carry no rules, thresholds, staff reason, evidence or private explanation. A correction emits a promotion alert only on an invalidating review-state transition and never demotes. All events commit with domain state. Enabled `notifications.v1` consumes assignment, promotion, progress and promotion-review families; rule configuration events remain outside that subscription.
+Since VTC-157 Qualifications emits only schema-v1 `qualification.assigned` (admission, manual change, removal transfer, reinstatement) and `qualification.promoted` (automatic promotion). Aggregate is `{kind:"qualification",id,version}` for the new assignment and closed data is exactly `{userId,assignmentId}`. Events carry no limits, conditions, comment or evidence and commit with domain state. `notifications.v1` consumes both; a notice for an assignment that has already ended is skipped. Migration `0035` removes queued rows of the retired types.
 
 ## Implemented Events safe events
 
