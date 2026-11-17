@@ -122,7 +122,7 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
               )}
             </div>
             {own && (
-              <aside className="trip-detail-aside">
+              <aside className="trip-detail-aside" aria-label={t("asideLabel")}>
                 <TripHistory view={own} />
                 <TripQualificationCheck check={own.qualificationCheck} />
               </aside>

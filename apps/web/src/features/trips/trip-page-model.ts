@@ -247,16 +247,24 @@ export function tripTimes(
   return null;
 }
 
-/** Cargo damage of the effective fact, else the damage the report states; unknown stays null. */
+export type TripDamage = { value: number; reported: boolean };
+
+/**
+ * Cargo damage of the effective fact. The report's damage stands in, marked as reported, only when
+ * there is no effective fact or it carries no damage field: an explicit null from the server means
+ * unknown and stays null, because the server already applies the manual value when that fact wins.
+ */
 export function reportedDamage(
   facts: Facts | null | undefined,
   revision: DTO["ManualRevisionRead"] | null | undefined,
-): number | null {
-  const effective = damageValue(facts);
-  if (effective !== null) return effective;
+): TripDamage | null {
+  if (facts && "cargoDamagePercent" in facts) {
+    const effective = damageValue(facts);
+    return effective === null ? null : { value: effective, reported: false };
+  }
   const reported =
     revision && "representation" in revision ? revision.fields.cargoDamagePercent : undefined;
-  return typeof reported === "number" ? reported : null;
+  return typeof reported === "number" ? { value: reported, reported: true } : null;
 }
 
 /** Why a recorded value is unknown: the trip has no telemetry at all, or telemetry missed it. */
@@ -299,7 +307,10 @@ const rank: Record<HistoryEntry["kind"], number> = {
   rejected: 2,
 };
 
-/** Author-safe trip history, oldest first; at the same instant a submission precedes a decision. */
+/**
+ * Author-safe trip history, oldest first; at the same instant a submission precedes a decision. A
+ * reviewer's rejection reads as returned for fixes only for a report-backed (revisable) revision.
+ */
 export function tripHistory(view: Private): HistoryEntry[] {
   const entries: HistoryEntry[] = [];
   const telemetry = view.sources?.find((source) => source.kind === "ets2telemetry");
@@ -334,7 +345,7 @@ export function tripHistory(view: Private): HistoryEntry[] {
     const kind =
       decision.outcome === "accepted"
         ? "accepted"
-        : decision.reviewer && revision
+        : decision.reviewer && revision && "reportId" in revision
           ? "returned"
           : "rejected";
     entries.push({

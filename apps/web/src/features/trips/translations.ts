@@ -614,6 +614,10 @@ export const tripTranslations = {
     eventNone: "Not linked",
     reportedTime: "by the report",
     reportedInfoLabel: "About times from the report",
+    reportedValueLabel: "About values from the report",
+    reportedValueHelp:
+      "The driver stated this in the manual report. Staff confirmation determines reporting and qualification.",
+    asideLabel: "Trip history and check",
     unknownInfoLabel: "Why is this unknown?",
     unknownHelpNoTelemetry: "Manual report: telemetry did not record this trip.",
     unknownHelpTelemetry: "Telemetry did not record this value.",
@@ -1248,6 +1252,10 @@ export const tripTranslations = {
     eventNone: "Не привязан",
     reportedTime: "по отчёту",
     reportedInfoLabel: "О времени из отчёта",
+    reportedValueLabel: "О данных из отчёта",
+    reportedValueHelp:
+      "Это указал водитель в ручном отчёте. Учёт и квалификацию определяет подтверждение сотрудника.",
+    asideLabel: "История и проверка рейса",
     unknownInfoLabel: "Почему неизвестно?",
     unknownHelpNoTelemetry: "Ручной отчёт: телеметрия не записала этот рейс.",
     unknownHelpTelemetry: "Телеметрия не записала это значение.",

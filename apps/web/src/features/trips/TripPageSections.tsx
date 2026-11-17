@@ -150,6 +150,24 @@ function placeCompany(
   ) : null;
 }
 
+/** "by the report" with an explanation: the value comes from the driver's report, not the fact. */
+function ReportedMark({ times = false }: { times?: boolean }) {
+  const { t } = useTranslation("trips"),
+    { timezone } = useTripDisplay();
+  return (
+    <>
+      <span className="trip-muted">· {t("reportedTime")}</span>
+      <InfoTip label={t(times ? "reportedInfoLabel" : "reportedValueLabel")}>
+        <p>{times ? t("referenceHelp", { timezone }) : t("reportedValueHelp")}</p>
+      </InfoTip>
+    </>
+  );
+}
+
+/**
+ * Trailers of the effective fact. The trailer type the report selected stands in, marked as
+ * reported, only when there is no effective fact; an empty or unknown fact stays unknown.
+ */
 function Trailers({
   facts,
   fields,
@@ -159,8 +177,9 @@ function Trailers({
   fields: DTO["ManualReportReadFields"] | null;
   game: DTO["TripSummary"]["game"];
 }) {
-  const pins = facts?.trailers ?? [];
-  if (pins.length)
+  if (facts) {
+    const pins = facts.trailers;
+    if (!pins.length) return <UnknownValue />;
     return (
       <span className="trip-detail-list">
         {pins.map((pin, i) => (
@@ -170,10 +189,20 @@ function Trailers({
         ))}
       </span>
     );
+  }
   const selection = fields?.trailerType;
-  if (selection?.status === "resolved") return <TrailerName id={selection.entityId} game={game} />;
-  if (selection?.status === "unresolved") return <span>{selection.label}</span>;
-  return <UnknownValue />;
+  if (selection?.status !== "resolved" && selection?.status !== "unresolved")
+    return <UnknownValue />;
+  return (
+    <span className="trip-detail-inline">
+      {selection.status === "resolved" ? (
+        <TrailerName id={selection.entityId} game={game} />
+      ) : (
+        <span>{selection.label}</span>
+      )}
+      <ReportedMark />
+    </span>
+  );
 }
 
 function Time({
@@ -185,20 +214,12 @@ function Time({
   reported: boolean;
   hint: string;
 }) {
-  const { t } = useTranslation("trips"),
-    { locale, timezone } = useTripDisplay();
+  const { locale, timezone } = useTripDisplay();
   if (!value) return <UnknownValue hint={hint} />;
   return (
     <span className="trip-detail-inline">
       <time dateTime={value}>{formatUtc(value, locale, timezone)}</time>
-      {reported && (
-        <>
-          <span className="trip-muted">· {t("reportedTime")}</span>
-          <InfoTip label={t("reportedInfoLabel")}>
-            <p>{t("referenceHelp", { timezone })}</p>
-          </InfoTip>
-        </>
-      )}
+      {reported && <ReportedMark times />}
     </span>
   );
 }
@@ -250,8 +271,13 @@ export function TripFacts({
       "factDamage",
       damage === null ? (
         <UnknownValue hint="unknownHelpGeneric" />
+      ) : damage.reported ? (
+        <span className="trip-detail-inline">
+          <span>{t("damageOfCargo", { value: formatDamage(damage.value, locale) })}</span>
+          <ReportedMark />
+        </span>
       ) : (
-        t("damageOfCargo", { value: formatDamage(damage, locale) })
+        t("damageOfCargo", { value: formatDamage(damage.value, locale) })
       ),
     );
   }
