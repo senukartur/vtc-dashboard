@@ -7803,13 +7803,35 @@
               "type": "null"
             }
           ],
-          "description": "Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized."
+          "description": "Legacy common-model identity retained for existing variant-based qualifications. Catalog lists show every original body type."
         },
         "variantCount": {
           "type": "integer",
           "minimum": 1,
           "maximum": 9007199254740991,
           "description": "Number of stored body-type variants in this trailer group, including hidden variants."
+        },
+        "trailerTypeId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trailerType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -8386,7 +8408,19 @@
               "type": "null"
             }
           ],
-          "description": "Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized."
+          "description": "Legacy common-model identity retained for existing variant-based qualifications. Catalog lists show every original body type."
+        },
+        "trailerTypeId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -8546,7 +8580,19 @@
               "type": "null"
             }
           ],
-          "description": "Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized."
+          "description": "Legacy common-model identity retained for existing variant-based qualifications. Catalog lists show every original body type."
+        },
+        "trailerTypeId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "minProperties": 1,
@@ -16918,6 +16964,14 @@
                 "$ref": "#/$defs/CatalogLabel"
               },
               "maxItems": 100
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "variant",
+                "type"
+              ],
+              "description": "Omitted means legacy variant rules. New selections use semantic types; changing basis is an explicit qualification edit."
             }
           },
           "required": [
@@ -17036,6 +17090,14 @@
               },
               "maxItems": 100,
               "uniqueItems": true
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "variant",
+                "type"
+              ],
+              "description": "Omitted means legacy variant rules. New selections use semantic types; changing basis is an explicit qualification edit."
             }
           },
           "required": [

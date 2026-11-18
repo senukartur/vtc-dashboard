@@ -243,6 +243,7 @@ export async function registerCatalogRoutes(
     untranslated?: "true";
     dlc?: string;
     regionId?: string;
+    trailerTypeId?: string;
     locale?: "en" | "ru";
     limit?: number;
     cursor?: string;
@@ -263,6 +264,43 @@ export async function registerCatalogRoutes(
     async (request) =>
       envelope(request, await catalogs.summary(await actor(request), request.query.game)),
   );
+  app.get<{
+    Querystring: {
+      game: Game;
+      locale?: "en" | "ru";
+      search?: string;
+      limit?: number;
+      cursor?: string;
+    };
+  }>(
+    "/api/v1/catalogs/trailer-types",
+    {
+      schema: {
+        querystring: object(
+          { ...page, game, locale, search: { type: "string", minLength: 1, maxLength: 128 } },
+          ["game"],
+        ),
+        response: { 200: ref("EnvelopeCatalogItemList") },
+      },
+    },
+    async (request) =>
+      envelope(request, await catalogs.trailerTypes(await actor(request), request.query)),
+  );
+  app.get<{ Params: { id: string }; Querystring: { locale?: "en" | "ru" } }>(
+    "/api/v1/catalogs/trailer-types/:id",
+    {
+      schema: {
+        params: object({ id: uuid }, ["id"]),
+        querystring: object({ locale }),
+        response: { 200: ref("EnvelopeCatalogItem") },
+      },
+    },
+    async (request) =>
+      envelope(
+        request,
+        await catalogs.trailerType(await actor(request), request.params.id, request.query.locale),
+      ),
+  );
   for (const list of catalogLists) {
     app.get<{ Querystring: ListQuery & { logo?: "missing" } }>(
       `/api/v1/catalogs/${list}`,
@@ -279,6 +317,9 @@ export async function registerCatalogRoutes(
               ...(list === "companies" ? { logo: { type: "string", const: "missing" } } : {}),
               ...(list === "dlcs" ? {} : { dlc: { anyOf: [{ const: "base" }, uuid] } }),
               ...(list === "cities" ? { regionId: uuid } : {}),
+              ...(list === "trailers"
+                ? { trailerTypeId: { anyOf: [{ const: "undefined" }, uuid] } }
+                : {}),
             },
             ["game"],
           ),

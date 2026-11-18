@@ -24,7 +24,7 @@ The owner approved an explicit English-name fallback when a Russian translation 
 
 On 2026-11-12 the owner decided that DLCs, companies and therefore depots use only their canonical name: no Russian name, translation filter or fallback mark. A company option shows the name on the left and the code on the right, like the city picker, so same-name companies stay distinct.
 
-Body-type variants may share an explicitly verified common game trailer key. Catalogs and pickers show one entry per common trailer in each game; original body codes and row IDs remain recognizable. Selecting a grouped trailer permits its recognized variants for level checks. Grouping must not infer equivalence from identical names or chassis alone. Membership edits affect future checks, while completed decision snapshots and credited trips remain unchanged.
+On 2026-11-18 the owner selected semantic trailer types. The catalog retains every body-type variant with a Type column and filter; new report, correction and qualification selections use the separate per-game type dictionary. Assign a type only from verified game definitions or an explicit staff correction, never from similar names, prefixes or chassis alone. An unclassified variant displays “Not determined”; it requires review when a selected-type qualification cannot be checked. Original body codes, row IDs, source evidence and completed decisions remain unchanged. Existing variant/common-model allowances retain their original basis until staff explicitly replaces the selection with types; migration never broadens them automatically. Classification edits affect future evaluations and invalidate stale review/proposal support, while saved decision snapshots retain the mapping used.
 
 ### Catalog source use basis
 

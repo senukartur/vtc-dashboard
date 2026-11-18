@@ -50,6 +50,7 @@ export interface CatalogFilters {
   q: string;
   dlc: string;
   region: string;
+  trailerType?: string;
   /** Depots only: show the cities of this company. */
   company: string;
   /** Depots only: show the companies in this city. */
@@ -80,6 +81,10 @@ export function parseFilters(params: URLSearchParams): CatalogFilters {
     company: uuid.safeParse(params.get("company")).success ? (params.get("company") as string) : "",
     city: uuid.safeParse(params.get("city")).success ? (params.get("city") as string) : "",
     maintenance,
+    ...(tab === "trailers" &&
+    (params.get("type") === "undefined" || uuid.safeParse(params.get("type")).success)
+      ? { trailerType: params.get("type") as string }
+      : {}),
   };
 }
 /** URL params carrying only non-default filters, in a stable order. */
@@ -88,6 +93,7 @@ export function filterParams(filters: CatalogFilters): URLSearchParams {
   if (filters.game !== "ets2") next.set("game", filters.game);
   if (filters.tab !== "cities") next.set("tab", filters.tab);
   if (filters.q) next.set("q", filters.q);
+  if (filters.tab === "trailers" && filters.trailerType) next.set("type", filters.trailerType);
   if (filters.tab !== "dlcs" && filters.dlc) next.set("dlc", filters.dlc);
   if (filters.tab === "cities" && filters.region) next.set("region", filters.region);
   if (filters.tab === "depots" && filters.company) next.set("company", filters.company);
@@ -112,6 +118,7 @@ export function catalogListParams(filters: CatalogFilters, locale: "ru" | "en") 
     logo: maintenance === "missingLogo" && tab === "companies" ? "missing" : undefined,
     dlc: tab !== "dlcs" ? dlc || undefined : undefined,
     regionId: tab === "cities" ? region || undefined : undefined,
+    trailerTypeId: tab === "trailers" ? filters.trailerType || undefined : undefined,
     companyId: tab === "depots" ? company || undefined : undefined,
     cityId: tab === "depots" ? city || undefined : undefined,
     locale,
@@ -130,6 +137,7 @@ const importFieldKeys = new Map([
   ["name_ru", "fieldNameRu"],
   ["name_native", "fieldNameNative"],
   ["common_trailer", "fieldCommonTrailer"],
+  ["trailer_type_code", "fieldType"],
   ["steam_app_id", "fieldSteam"],
   ["adr_class", "fieldAdr"],
   ["dlc_code", "fieldDlc"],
@@ -217,7 +225,15 @@ export const importColumns: Record<CatalogTab, readonly string[]> = {
   companies: ["game", "code", "name_en", "dlc_code"],
   depots: ["game", "company_code", "city_code", "dlc_code"],
   cargoes: ["game", "code", "name_en", "name_ru", "adr_class", "dlc_code"],
-  trailers: ["game", "code", "name_en", "name_ru", "dlc_code", "common_trailer"],
+  trailers: [
+    "game",
+    "code",
+    "name_en",
+    "name_ru",
+    "dlc_code",
+    "common_trailer",
+    "trailer_type_code",
+  ],
 };
 export function templateCsv(list: CatalogTab) {
   return `${importColumns[list].join(",")}\r\n`;

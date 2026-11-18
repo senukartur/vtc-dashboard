@@ -44,12 +44,23 @@ export async function mockTrips(page: Page) {
           legacyReviewQueue: { count: 0, oldestAgeSeconds: null },
         }),
       });
-    const catalogRow = /^\/api\/v1\/catalogs\/(cities|cargoes|trailers)(?:\/([^/]+))?$/.exec(path);
+    const catalogRow =
+      /^\/api\/v1\/catalogs\/(cities|cargoes|trailers|trailer-types)(?:\/([^/]+))?$/.exec(path);
     if (catalogRow) {
       const name = catalogRow[1],
         locale = url.searchParams.get("locale") === "ru" ? "ru" : "en",
-        selectedId = name === "cargoes" ? cargoId : name === "trailers" ? trailerId : entityId,
-        label = name === "cargoes" ? "cargo" : name === "trailers" ? "trailer_type" : "city",
+        selectedId =
+          name === "cargoes"
+            ? cargoId
+            : name === "trailers" || name === "trailer-types"
+              ? trailerId
+              : entityId,
+        label =
+          name === "cargoes"
+            ? "cargo"
+            : name === "trailers" || name === "trailer-types"
+              ? "trailer_type"
+              : "city",
         item = catalogItem(selectedId, `Fictional ${label}`, locale);
       return route.fulfill({ json: catalogRow[2] ? envelope(item) : catalogList([item]) });
     }

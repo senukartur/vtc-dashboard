@@ -81,7 +81,9 @@
     "notification_commands": ["INSERT", "SELECT"],
     "outbox_routing": ["INSERT"],
     "notification_acceptance": ["SELECT", "UPDATE(refs)"],
-    "outbox_routing_scans": ["SELECT"]
+    "outbox_routing_scans": ["SELECT"],
+    "catalog_trailer_types": ["SELECT"],
+    "qualification_level_trailer_types": ["DELETE", "INSERT", "SELECT"]
   },
   "jobs": {
     "durable_jobs": ["INSERT", "SELECT", "UPDATE"],
@@ -152,6 +154,8 @@
       "SELECT",
       "UPDATE(trip_id,generation,root_version,rule_hash,epoch,phase,cursor,finished,complete,evidence_complete,updated_at)"
     ],
-    "notification_acceptance": ["SELECT"]
+    "notification_acceptance": ["SELECT"],
+    "catalog_trailer_types": ["SELECT"],
+    "qualification_level_trailer_types": ["SELECT"]
   }
 }

@@ -88,7 +88,13 @@ export const manualAdapter: TripSourceAdapter = {
       if (!row || row.game !== p.game || row.kind !== kind)
         throw new Error("INVALID_MANUAL_SELECTION");
       if (kind === "cargo") cargoClass = row.adrClass;
-      return known({ entityId: selection.entityId }, field);
+      return known(
+        {
+          entityId: selection.entityId,
+          ...(row.identityKind ? { identityKind: row.identityKind } : {}),
+        },
+        field,
+      );
     }
     const origin = await selected("city", "originId", source.fields.origin),
       destination = await selected("city", "destinationId", source.fields.destination),
