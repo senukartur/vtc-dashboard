@@ -5,7 +5,9 @@ import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { accountTimeZone, type Locale } from "../../shared/formatting.js";
+import { isRateLimited, rateLimitSeconds } from "../../shared/rate-limit.js";
 import { Button, Card, Select } from "../../shared/ui/primitives.js";
+import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { TripBreakdowns } from "./breakdowns.js";
 import {
@@ -117,6 +119,7 @@ export function CompanyOverview() {
   const pending = analyticsPending || leaderboardPending;
   // A failed background refresh keeps the last data; the alert is only for having none.
   const analyticsFailed = anchored && analyticsQuery.isError && !analytics;
+  const analyticsLimited = analyticsFailed && isRateLimited(analyticsQuery.error);
   const previous = previousPeriod(
     previousRange,
     anchored ? previousQuery : { data: undefined, isError: false },
@@ -179,8 +182,13 @@ export function CompanyOverview() {
       </header>
 
       {analyticsFailed ? (
-        <Card className="dashboard-error" role="alert">
-          <p>{t("states.error")}</p>
+        // A read still rate limited explains the wait in a status notice, never inside an alert.
+        <Card className="dashboard-error" role={analyticsLimited ? undefined : "alert"}>
+          {analyticsLimited ? (
+            <RateLimitNotice seconds={rateLimitSeconds(analyticsQuery.error)} />
+          ) : (
+            <p>{t("states.error")}</p>
+          )}
           <Button
             type="button"
             variant="outline"

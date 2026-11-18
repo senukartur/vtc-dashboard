@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { accountTimeZone, formatQuantity, formatUtc } from "../../shared/formatting.js";
+import { isRateLimited, rateLimitSeconds } from "../../shared/rate-limit.js";
 import {
   Dialog,
   DialogClose,
@@ -14,6 +15,7 @@ import {
   DialogTrigger,
 } from "../../shared/ui/dialog.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
+import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import type { AccountFailure } from "../account/transport.js";
 import { referenceFields } from "../manual-reports/model.js";
 import { OutcomeBadge, RecordingBadge } from "./badges.js";
@@ -37,19 +39,29 @@ export function Failure({ error, seconds = 0 }: { error: unknown; seconds?: numb
     </div>
   );
 }
+/**
+ * A read's loading or failure with its Refresh. With `rateLimitNotice` a read still rate limited
+ * after its automatic retry explains the wait in a status notice instead of the failure alert.
+ */
 export function State({
   query,
   refresh,
+  rateLimitNotice = false,
 }: {
   refresh?: () => unknown;
   query: { isPending: boolean; isError: boolean; error: unknown; refetch: () => unknown };
+  rateLimitNotice?: boolean;
 }) {
   const { t } = useTranslation("trips");
   return query.isPending ? (
     <p role="status">{t("loading")}</p>
   ) : query.isError ? (
     <>
-      <Failure error={query.error} />
+      {rateLimitNotice && isRateLimited(query.error) ? (
+        <RateLimitNotice seconds={rateLimitSeconds(query.error)} />
+      ) : (
+        <Failure error={query.error} />
+      )}
       <Button type="button" variant="outline" onClick={() => void (refresh ?? query.refetch)()}>
         {t("refresh")}
       </Button>
