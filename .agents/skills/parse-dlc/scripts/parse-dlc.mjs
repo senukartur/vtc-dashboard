@@ -4,11 +4,25 @@
 // Usage: see ../SKILL.md. No dependencies; needs the sk-zk Extractor for .scs archives.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { deflateSync } from "node:zlib";
+import {
+  prepareRegionCorrections,
+  readRegionEvidence,
+  resolveRegionSource,
+} from "./region-sources.mjs";
+import { parseUnits, registered, siiValue, stripComment } from "./sii.mjs";
 
 const GAMES = {
   ets2: { title: "Euro Truck Simulator 2", folder: "Euro Truck Simulator 2", steam: "227300" },
@@ -36,6 +50,8 @@ const { values: opts, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     game: { type: "string" },
+    "region-evidence": { type: "string" },
+    hosted: { type: "string" },
     dlc: { type: "string" },
     out: { type: "string" },
     known: { type: "string", multiple: true, default: [] },
@@ -108,77 +124,6 @@ function extract(archive, dest, partial) {
 
 // ---------- SII ----------
 
-function stripComment(line) {
-  let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"' && line[i - 1] !== "\\") quoted = !quoted;
-    else if (!quoted && (ch === "#" || (ch === "/" && line[i + 1] === "/")))
-      return line.slice(0, i);
-  }
-  return line;
-}
-function siiValue(text) {
-  // Unquoted values are tokens, which the game compares case-insensitively.
-  if (!text.startsWith('"')) return text.split(/\s/)[0].toLowerCase();
-  let out = "";
-  for (let i = 1; i < text.length; i++) {
-    if (text[i] === "\\" && i + 1 < text.length) out += text[++i];
-    else if (text[i] === '"') return out;
-    else out += text[i];
-  }
-  return out;
-}
-// Simple `type : id { field: value }` units; arrays (`key[]:`) collect in order.
-function parseUnits(file) {
-  const units = [];
-  let unit = null;
-  let pending = null;
-  for (const raw of readFileSync(file, "utf8").split(/\r?\n/)) {
-    const line = stripComment(raw).trim();
-    if (!line) continue;
-    if (!unit) {
-      const head = /^([A-Za-z_]\w*)\s*:\s*([^\s{]+)\s*(\{)?$/.exec(line);
-      if (head) {
-        pending = { type: head[1], id: head[2].toLowerCase(), file, fields: {}, arrays: {} };
-        if (head[3]) [unit, pending] = [pending, null];
-      } else if (line === "{" && pending) [unit, pending] = [pending, null];
-      continue;
-    }
-    if (line === "}") {
-      units.push(unit);
-      unit = null;
-      continue;
-    }
-    const field = /^([A-Za-z_]\w*)(\[\d*\])?\s*:\s*(.*)$/.exec(line);
-    if (!field) continue;
-    const value = siiValue(field[3]);
-    if (field[2]) {
-      unit.arrays[field[1]] ??= [];
-      unit.arrays[field[1]].push(value);
-    } else unit.fields[field[1]] = value;
-  }
-  return units;
-}
-// An include path starting with "/" is relative to the archive root, otherwise to the file.
-function includes(file, root, seen = new Set()) {
-  if (seen.has(file) || !existsSync(file)) return [];
-  seen.add(file);
-  const out = [file];
-  for (const m of readFileSync(file, "utf8").matchAll(/^\s*@include\s+"([^"]+)"/gm))
-    out.push(...includes(join(m[1].startsWith("/") ? root : dirname(file), m[1]), root, seen));
-  return out;
-}
-// Units registered by def/<name>.sii or def/<name>.<suffix>.sii, keyed by id.
-function registered(defDir, name, type) {
-  const units = new Map();
-  if (!existsSync(defDir)) return units;
-  const re = new RegExp(`^${name}(\\.[^.]+)?\\.sii$`);
-  for (const reg of readdirSync(defDir).filter((f) => re.test(f)))
-    for (const file of includes(join(defDir, reg), dirname(defDir)))
-      for (const u of parseUnits(file)) if (u.type === type) units.set(u.id, u);
-  return units;
-}
 const walk = (dir) =>
   existsSync(dir)
     ? readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -458,9 +403,21 @@ const cacheDir = (game) =>
 function privatePath(path, option) {
   let probe = path;
   while (!existsSync(probe) && dirname(probe) !== probe) probe = dirname(probe);
-  const git = (args) => spawnSync("git", ["-C", probe, ...args], { encoding: "utf8" });
-  if (git(["rev-parse", "--is-inside-work-tree"]).stdout.trim() !== "true") return path;
-  if (git(["check-ignore", "-q", "--no-index", path]).status === 0) return path;
+  const actualPath = resolve(realpathSync(probe), relative(probe, path));
+  let ancestor = realpathSync(probe);
+  while (!existsSync(join(ancestor, ".git")) && dirname(ancestor) !== ancestor)
+    ancestor = dirname(ancestor);
+  if (!existsSync(join(ancestor, ".git"))) return path;
+  const checked = spawnSync(
+    "git",
+    ["-C", ancestor, "check-ignore", "-q", "--no-index", actualPath],
+    {
+      encoding: "utf8",
+    },
+  );
+  if (checked.error)
+    throw new UsageError("Git is required to verify private output inside a repository");
+  if (checked.status === 0) return path;
   throw new UsageError(`${option} ${path} is not ignored by Git; use a folder under .local/`);
 }
 
@@ -481,6 +438,12 @@ function buildCommand() {
   const fail = (m) => failures.push(m);
   const warn = (m) => warnings.push(m);
 
+  if (!opts["region-evidence"])
+    throw new UsageError(
+      "build needs --region-evidence: country definitions do not prove map availability",
+    );
+  const evidence = readRegionEvidence(resolve(opts["region-evidence"]), game);
+  const regionSources = new Map();
   const dlc = resolveDlc(manifests(game, dir, raw), opts.dlc);
   const known = knownRows(opts.known, game);
   const haveKnown = opts.known.length > 0;
@@ -564,13 +527,34 @@ function buildCommand() {
   });
 
   const addRegion = (code, why) => {
-    if (rows.regions.has(code) || isKnown("regions", code)) return;
+    const source = resolveRegionSource(evidence, code);
+    regionSources.set(code, source);
+    if (rows.regions.has(code)) return;
+    if (isKnown("regions", code)) {
+      if (!["base-present", "unique-dlc", "primary-dlc"].includes(source.status))
+        warn(`known region ${code}: ${source.status} (${source.reasons.join(", ")}); preserved`);
+      return;
+    }
+    if (!["base-present", "unique-dlc", "primary-dlc"].includes(source.status))
+      return fail(
+        `region ${code} (${why}): ${source.status} (${source.reasons.join(", ")}); supply complete verified region evidence`,
+      );
+    if (source.dlcCode && source.dlcCode !== dlc.code && !isKnown("dlcs", source.dlcCode))
+      return fail(
+        `region ${code}: verified source ${source.dlcCode} must be imported first and supplied in --known`,
+      );
     const hit = lookup("countries", code);
     if (!hit)
       return fail(`region ${code} (${why}) is neither in the DLC, the base game nor --known`);
     const f = hit.unit.fields;
     const n = name(token(f.name_localized) ?? code, f.name);
-    rows.regions.set(code, { game, code, name_en: n.en, name_ru: n.ru, dlc_code: hit.dlc_code });
+    rows.regions.set(code, {
+      game,
+      code,
+      name_en: n.en,
+      name_ru: n.ru,
+      dlc_code: source.dlcCode ?? "",
+    });
   };
   const unnamed = { en: [], ru: [] };
   const addCity = (code, hit) => {
@@ -578,7 +562,14 @@ function buildCommand() {
     const n = name(token(f.city_name_localized), f.city_name);
     if (!loc.en.get(token(f.city_name_localized))) unnamed.en.push(code);
     if (!n.ru) unnamed.ru.push(code);
-    if (f.country) addRegion(f.country, `city ${code}`);
+    if (f.country) {
+      const registeredCity = evidence.cities.find(
+        (city) => city.code === code && city.country === f.country && city.dlcCode === hit.dlc_code,
+      );
+      if (!registeredCity)
+        fail(`city ${code}: current registration is missing from verified region evidence`);
+      addRegion(f.country, `city ${code}`);
+    }
     rows.cities.set(code, {
       game,
       code,
@@ -754,10 +745,22 @@ function buildCommand() {
     alreadyKnown: Object.fromEntries(
       Object.entries(rows).map(([k, m]) => [k, [...m.keys()].filter((c) => isKnown(k, c)).length]),
     ),
+    regionEvidence: {
+      complete: evidence.complete,
+      gaps: evidence.gaps,
+      conflicts: evidence.conflicts,
+    },
+    regionSources: [...regionSources.values()].sort((a, b) =>
+      a.code < b.code ? -1 : a.code > b.code ? 1 : 0,
+    ),
     fromBaseGame: Object.fromEntries(
       ["regions", "cities", "companies", "cargoes"].map((k) => [
         k,
-        [...rows[k].values()].filter((r) => !r.dlc_code).map((r) => r.code),
+        [...rows[k].values()]
+          .filter((r) =>
+            k === "regions" ? regionSources.get(r.code)?.status === "base-present" : !r.dlc_code,
+          )
+          .map((r) => r.code),
       ]),
     ),
     logos: { written: logos.written.length, missing: logos.missing },
@@ -768,6 +771,51 @@ function buildCommand() {
   writeFileSync(join(out, "report.json"), `${JSON.stringify(report, null, 1)}\n`);
   console.log(JSON.stringify(report, null, 1));
   if (failures.length) process.exitCode = 1;
+}
+
+function auditRegionsCommand() {
+  const game = requireGame();
+  if (!opts["region-evidence"] || !opts.hosted || !opts.out)
+    throw new UsageError("audit-regions needs --region-evidence, --hosted and --out");
+  const out = privatePath(resolve(opts.out), "--out");
+  if (existsSync(out))
+    throw new UsageError("--out already exists; choose a new private audit directory");
+  const evidence = readRegionEvidence(resolve(opts["region-evidence"]), game);
+  const hosted = JSON.parse(readFileSync(resolve(opts.hosted), "utf8"));
+  const prepared = prepareRegionCorrections(evidence, hosted);
+  checkRows("regions", prepared.rows, (message) => {
+    throw new UsageError(message);
+  });
+  const bytes = csv("regions", prepared.rows);
+  if (Buffer.byteLength(bytes) > LIMITS.bytes)
+    throw new UsageError("regions.csv exceeds import limit");
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(out, "regions.csv"), bytes);
+  const report = {
+    game,
+    complete: evidence.complete,
+    gaps: evidence.gaps,
+    conflicts: evidence.conflicts,
+    regionSources: prepared.regionSources,
+    corrections: prepared.rows.length,
+    excluded: prepared.excluded,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    acceptance:
+      "Preview on the intended host must show zero additions/errors and source-only changes; hosted import needs separate owner approval.",
+  };
+  writeFileSync(join(out, "report.json"), `${JSON.stringify(report, null, 1)}\n`);
+  // Full diagnostics and exact codes stay in the private report.
+  console.log(
+    JSON.stringify({
+      game,
+      complete: report.complete,
+      corrections: report.corrections,
+      excluded: report.excluded.length,
+      gaps: report.gaps.length,
+      conflicts: report.conflicts.length,
+      sha256: report.sha256,
+    }),
+  );
 }
 
 // One run per cache: parallel runs extracting into the same folder lose files.
@@ -788,9 +836,11 @@ function withCacheLock(fn) {
 }
 
 try {
-  if (positionals[0] === "list") withCacheLock(listCommand);
+  if (positionals[0] === "audit-regions") auditRegionsCommand();
+  else if (positionals[0] === "list") withCacheLock(listCommand);
   else if (positionals[0] === "build") withCacheLock(buildCommand);
-  else throw new UsageError("usage: parse-dlc.mjs list|build --game ets2|ats [options]");
+  else
+    throw new UsageError("usage: parse-dlc.mjs list|build|audit-regions --game ets2|ats [options]");
 } catch (e) {
   console.error(e instanceof UsageError ? e.message : (e.stack ?? String(e)));
   process.exitCode = 2;

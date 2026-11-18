@@ -833,6 +833,141 @@ test("import rejects a newly linked hidden parent but keeps an unchanged hidden 
   });
 });
 
+test.each(["ets2", "ats"] as const)(
+  "%s region source correction preserves identity, names, visibility and city links on a fresh repeated import",
+  async (game) => {
+    const pack = await catalogs.create(director, "dlcs", newId(), {
+      game,
+      code: "fictional_map",
+      nameEn: "Fictional map",
+    });
+    const region = await catalogs.create(director, "regions", newId(), {
+      game,
+      code: "fictional_region",
+      nameEn: "Exact hosted region",
+      nameRu: "Сохранённый регион",
+    });
+    const linked = await city("fictional_city", game, { regionId: region.id });
+    await catalogs.patch(director, "regions", region.id, newId(), { hidden: true });
+    const before = await catalogs.get(director, "regions", region.id);
+    const cityBefore = await catalogs.get(director, "cities", linked.id);
+    const file = csv(
+      "game,code,name_en,name_ru,dlc_code",
+      `${game},${region.code},${region.nameEn},${region.nameRu},${pack.code}`,
+    );
+    instant += 123;
+    const preview = await catalogs.previewImport(director, "regions", file);
+    expect(preview).toMatchObject({
+      added: 0,
+      changed: 1,
+      unchanged: 0,
+      errors: 0,
+      lines: [{ code: region.code, status: "changed", changedFields: ["dlc_code"] }],
+    });
+    expect(await catalogs.get(director, "regions", region.id)).toEqual(before);
+    await catalogs.applyImport(director, "regions", file, newId(), preview.token as string);
+    const corrected = await catalogs.get(director, "regions", region.id);
+    expect(corrected).toMatchObject({
+      id: region.id,
+      game,
+      code: region.code,
+      nameEn: before.nameEn,
+      nameRu: before.nameRu,
+      hidden: true,
+      dlcId: pack.id,
+      updatedAt: now().toISOString(),
+    });
+    expect(await catalogs.get(director, "cities", linked.id)).toEqual(cityBefore);
+    instant += 123;
+    // A new preview and a new key prove no-op import semantics independently of replay.
+    const fresh = await catalogs.previewImport(director, "regions", file);
+    expect(fresh).toMatchObject({ added: 0, changed: 0, unchanged: 1, errors: 0 });
+    await expect(
+      catalogs.applyImport(director, "regions", file, newId(), fresh.token as string),
+    ).resolves.toMatchObject({ added: 0, changed: 0, unchanged: 1 });
+    expect(await catalogs.get(director, "regions", region.id)).toEqual(corrected);
+    expect(await catalogs.get(director, "cities", linked.id)).toEqual(cityBefore);
+    const blank = csv(
+      "game,code,name_en,name_ru,dlc_code",
+      `${game},${region.code},${region.nameEn},,`,
+    );
+    const preserved = await catalogs.previewImport(director, "regions", blank);
+    expect(preserved).toMatchObject({ added: 0, changed: 0, unchanged: 1 });
+    await catalogs.applyImport(director, "regions", blank, newId(), preserved.token as string);
+    expect(await catalogs.get(director, "regions", region.id)).toEqual(corrected);
+  },
+);
+
+test.each(["hidden", "unknown", "other-game"] as const)(
+  "region correction rejects a newly linked %s DLC without writes",
+  async (kind) => {
+    const pack = await catalogs.create(director, "dlcs", newId(), {
+      game: kind === "other-game" ? "ats" : "ets2",
+      code: "fictional_parent",
+      nameEn: "Fictional source",
+    });
+    if (kind === "hidden")
+      await catalogs.patch(director, "dlcs", pack.id, newId(), { hidden: true });
+    const region = await catalogs.create(director, "regions", newId(), {
+      game: "ets2",
+      code: "fictional_region",
+      nameEn: "Preserved region",
+      nameRu: "Сохранено",
+    });
+    const before = await catalogs.get(director, "regions", region.id);
+    const file = csv(
+      "game,code,name_en,name_ru,dlc_code",
+      `ets2,${region.code},${region.nameEn},,${kind === "unknown" ? "absent_parent" : pack.code}`,
+    );
+    const preview = await catalogs.previewImport(director, "regions", file);
+    expect(preview).toMatchObject({ added: 0, changed: 0, errors: 1, token: null });
+    expect(preview.lines).toMatchObject([
+      {
+        status: "error",
+        issues: [
+          {
+            field: "dlc_code",
+            reason: kind === "hidden" ? "hidden_reference" : "unknown_reference",
+          },
+        ],
+      },
+    ]);
+    expect(await catalogs.get(director, "regions", region.id)).toEqual(before);
+    expect(await auditCount("catalog.imported")).toBe(0);
+  },
+);
+
+test("region source apply revalidates a newly hidden DLC and rolls back every correction", async () => {
+  const pack = await catalogs.create(director, "dlcs", newId(), {
+    game: "ets2",
+    code: "fictional_parent",
+    nameEn: "Fictional source",
+  });
+  const regions = await Promise.all(
+    ["one", "two"].map((code) =>
+      catalogs.create(director, "regions", newId(), {
+        game: "ets2",
+        code,
+        nameEn: `Region ${code}`,
+      }),
+    ),
+  );
+  const file = csv(
+    "game,code,name_en,name_ru,dlc_code",
+    ...regions.map((region) => `ets2,${region.code},${region.nameEn},,${pack.code}`),
+  );
+  const preview = await catalogs.previewImport(director, "regions", file);
+  expect(preview).toMatchObject({ added: 0, changed: 2, errors: 0 });
+  await catalogs.patch(director, "dlcs", pack.id, newId(), { hidden: true });
+  instant += 123;
+  await expect(
+    catalogs.applyImport(director, "regions", file, newId(), preview.token as string),
+  ).rejects.toMatchObject({ statusCode: 422, publicCode: "CATALOG_IMPORT_INVALID" });
+  for (const region of regions)
+    expect(await catalogs.get(director, "regions", region.id)).toEqual(region);
+  expect(await auditCount("catalog.imported")).toBe(0);
+});
+
 test("import updates only named values, never deletes and keeps parents and hidden state", async () => {
   const dlc = await catalogs.create(director, "dlcs", newId(), {
     game: "ets2",

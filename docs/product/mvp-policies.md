@@ -18,6 +18,8 @@ The owner chose on 2026-11-08 to replace the versioned catalog system (staged im
 
 Rows are matched to telemetry by exact `(game, code)`. Trailers are identified by telemetry body type, and a coupling takes its first trailer's type. A cargo's ADR class is one of 1, 2, 3, 4, 6 or 8 or empty for non-hazardous cargo; it travels with the trip as evaluated, so a later edit does not rewrite past results. Cities, cargo and trailer types are selected by canonical row IDs; changing language changes labels only. Hidden rows stay readable but leave new selections; a rule or event can keep a row that has since been hidden.
 
+A region has one catalog source. Verified active base-map city presence keeps the region in Base game even when DLCs extend it. A DLC-only region with several verified contributors may use an explicitly owner-reviewed primary DLC from those contributors after a complete source survey; later expansions stay on their cities' sources. Missing/conflicting evidence or a split without such a decision stays unresolved/ambiguous, never an inferred base or first-pack assignment.
+
 The owner approved an explicit English-name fallback when a Russian translation is missing; complete Russian translation is not a launch prerequisite. Mark the fallback visibly.
 
 On 2026-11-12 the owner decided that DLCs, companies and therefore depots use only their canonical name: no Russian name, translation filter or fallback mark. A company option shows the name on the left and the code on the right, like the city picker, so same-name companies stay distinct.
