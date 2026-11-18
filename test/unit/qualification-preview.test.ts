@@ -115,7 +115,7 @@ test("known disallowed previous bodies outrank unresolved holes and groups prese
     ],
   };
   const facts = await previewFacts({} as TxContext, id, value, {
-    resolveInTransaction: async () => ({ status: "resolved", id: variant, adrClass: null }),
+    resolveCurrentInTransaction: async () => ({ status: "resolved", id: variant, adrClass: null }),
   });
   const custom = { ...limits, trailers: { mode: "selected" as const, typeIds: [allowed] } };
   expect(
@@ -131,7 +131,7 @@ test("confirmed non-ADR always passes restricted ADR, missing catalog classifica
   const value = input();
   value.cargo = { availability: "known", code: "fixture_cargo" };
   const facts = await previewFacts({} as TxContext, id, value, {
-    resolveInTransaction: async () => ({ status: "resolved", id, adrClass: null }),
+    resolveCurrentInTransaction: async () => ({ status: "resolved", id, adrClass: null }),
   });
   const custom = { ...limits, adr: { mode: "forbidden" as const, classes: [] } };
   expect(

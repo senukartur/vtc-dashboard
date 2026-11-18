@@ -4,6 +4,12 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { expect, test } from "vitest";
 import type { companionComponents } from "@vtc/contracts";
+import type { TxContext } from "@vtc/db";
+import {
+  checkPreview,
+  previewDistanceEnvelope,
+  previewFacts,
+} from "../../apps/api/src/modules/qualifications/preview.ts";
 import { compareDecimal } from "../../apps/api/src/modules/sources/contracts/decimal.ts";
 
 const schemas = JSON.parse(
@@ -84,6 +90,115 @@ test("positive fixtures agree with their exact rule observations and selected tr
       if (rule.rule === "hard_mode" && rule.required)
         expect(rule.observed, fixture.name).toBe("qualified");
     }
+  }
+});
+test("every paired preview fixture reproduces its observations, finality, reasons and applicability", async () => {
+  // This separately asserted input is a later client observation, not an issued response pair.
+  for (const fixture of fixtures.filter(
+    (f) => f.schema === "PreviewInput" && f.name !== "maximum-crossed-after-issued-lease",
+  )) {
+    const responseName = fixture.name.endsWith("-body-code-input")
+      ? fixture.name.slice(0, -"-body-code-input".length)
+      : fixture.name === "fictional-PreviewInput-5"
+        ? "fictional-Preview-6"
+        : null;
+    const response = fixtures.find((f) => f.name === responseName && f.schema === "Preview");
+    expect(response, `missing explicit pair: ${fixture.name}`).toBeDefined();
+    if (!response) throw new Error("PREVIEW_PAIR_REQUIRED");
+    const input = fixture.value as unknown as companionComponents["schemas"]["PreviewInput"],
+      value = response.value as unknown as companionComponents["schemas"]["Preview"];
+    expect([value.requestId, value.contextRevision, value.evidenceRevision], fixture.name).toEqual([
+      input.requestId,
+      input.contextRevision,
+      input.evidenceRevision,
+    ]);
+    if (!value.assignment) throw new Error("PAIRED_ASSIGNMENT_REQUIRED");
+    const facts = await previewFacts({} as TxContext, input.requestId, input, {
+      resolveCurrentInTransaction: async (_tx, code) => {
+        const row = value.trailerDisplay.find(
+          (row) =>
+            code.kind === "trailer" && row.identityKind === "variant" && row.code === code.code,
+        );
+        return row
+          ? { status: "resolved", id: row.id, adrClass: null }
+          : { status: "unknown", reasonCode: "fictional_catalog_unavailable" };
+      },
+    });
+    const groups = Object.fromEntries(
+      value.trailerDisplay.flatMap((row) => {
+        if (value.assignment!.limits.trailers.basis === "type")
+          return [
+            [
+              row.id,
+              row.identityKind === "type"
+                ? `type:${row.id}`
+                : row.classification.state === "classified"
+                  ? `type:${row.classification.typeId}`
+                  : "undefined",
+            ],
+          ];
+        return row.groupCode === null
+          ? []
+          : [[row.id, `common:${input.game}:${Buffer.from(row.groupCode).toString("hex")}`]];
+      }),
+    );
+    const checked = checkPreview(value.assignment.limits, facts, input, groups, value.eventExempt);
+    expect(
+      { outcome: value.outcome, rules: value.rules, reasons: value.reasons },
+      fixture.name,
+    ).toEqual(checked);
+    expect(value.applicability, fixture.name).toMatchObject({
+      contextRevision: input.contextRevision,
+      ...previewDistanceEnvelope(input, value.assignment.limits, value.eventExempt),
+    });
+    const leaseMs = Date.parse(value.applicability.expiresAt) - Date.parse(value.evaluatedAt);
+    expect(leaseMs, fixture.name).toBeGreaterThan(0);
+    expect(leaseMs, fixture.name).toBeLessThanOrEqual(5000);
+  }
+});
+test("the later maximum-crossing input invalidates its issued positive lease and proves a new failure", async () => {
+  const issued = fixtures.find((f) => f.name === "maximum-guard-delayed-positive")!
+      .value as unknown as companionComponents["schemas"]["Preview"],
+    later = fixtures.find((f) => f.name === "maximum-crossed-after-issued-lease")!
+      .value as unknown as companionComponents["schemas"]["PreviewInput"];
+  expect(issued.outcome).toBe("pass");
+  expect([later.requestId, later.contextRevision]).toEqual([
+    issued.requestId,
+    issued.contextRevision,
+  ]);
+  expect(later.evidenceRevision).toBeGreaterThan(issued.evidenceRevision);
+  expect(later.actualDistance.support).toBe("whole-trip");
+  expect(
+    compareDecimal(later.actualDistance.metres!, issued.applicability.maximumDistanceM!),
+  ).toBeGreaterThan(0);
+  const facts = await previewFacts({} as TxContext, later.requestId, later);
+  const checked = checkPreview(issued.assignment!.limits, facts, later, {}, false);
+  expect(checked.outcome).toBe("fail");
+  expect(checked.rules.find((rule) => rule.rule === "distance")).toMatchObject({
+    observedM: later.actualDistance.metres,
+    result: "fail",
+    reasons: ["limit_mismatch"],
+  });
+});
+test("terminal qualification fixtures never invent promotion goals", () => {
+  const terminal = fixtures
+    .filter((fixture) => fixture.schema === "Qualification")
+    .filter(
+      (fixture) =>
+        (fixture.value as unknown as companionComponents["schemas"]["Qualification"]).progress
+          ?.terminal,
+    );
+  expect(terminal.length).toBeGreaterThan(0);
+  for (const fixture of terminal) {
+    const value = fixture.value as unknown as companionComponents["schemas"]["Qualification"];
+    expect(value.progress, fixture.name).toMatchObject({
+      conditions: { requiredTrips: null, requiredDistanceM: null },
+      remainingTrips: null,
+      remainingDistanceM: null,
+      conditionsMet: false,
+      nextLevel: null,
+      terminal: true,
+    });
   }
 });
 test("receipt and current-assessment fixtures certify the exact requested immutable envelope", () => {

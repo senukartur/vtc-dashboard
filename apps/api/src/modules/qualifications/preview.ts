@@ -114,7 +114,7 @@ export async function previewFacts(
   tx: TxContext,
   ownerId: string,
   input: S["PreviewInput"],
-  catalogs?: Pick<Catalogs, "resolveInTransaction">,
+  catalogs?: Pick<Catalogs, "resolveCurrentInTransaction">,
 ): Promise<NormalizedTripEvidence> {
   const unknown = <T>(reasonCode = "preview_unavailable"): Fact<T> => ({
     status: "unknown",
@@ -128,7 +128,9 @@ export async function previewFacts(
     sourceField: "companion_preview",
   });
   const entity = async (code: string | null, kind: "cargo" | "trailer") =>
-    code && catalogs ? catalogs.resolveInTransaction(tx, { game: input.game, kind, code }) : null;
+    code && catalogs
+      ? catalogs.resolveCurrentInTransaction(tx, { game: input.game, kind, code })
+      : null;
   const cargo =
     input.cargo.availability === "known" ? await entity(input.cargo.code, "cargo") : null;
   const trailers: Fact<TripEntity>[] = [];

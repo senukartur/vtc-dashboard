@@ -958,6 +958,102 @@ test("a conditional read waiting behind an identity epoch change is denied under
   }
 });
 
+for (const kind of ["trailer", "cargo"] as const)
+  test(`preview resolves current ${kind} code and classification after authentication waits for a catalog writer`, async () => {
+    const catalog = createCatalogs(unit, catalogConfig(), { identity: modules.identity });
+    const input = preview(),
+      oldCode = `fictional_race_${kind}_old`,
+      newCode = `fictional_race_${kind}_new`;
+    const types = (await catalog.trailerTypes(director, { game: "ets2", limit: 100 })).items;
+    const allowed = types[0]!,
+      disallowed = types[1]!;
+    const row = await catalog.create(
+      director,
+      kind === "trailer" ? "trailers" : "cargoes",
+      newId(),
+      {
+        game: "ets2",
+        code: oldCode,
+        nameEn: `Fictional current ${kind}`,
+        ...(kind === "trailer" ? { trailerTypeId: disallowed.id } : { adrClass: null }),
+      },
+    );
+    if (kind === "trailer") {
+      input.trailers = { complete: true, items: [{ code: oldCode, provenance: "attached" }] };
+      await configure({ trailers: { mode: "selected", basis: "type", typeIds: [allowed.id] } });
+    } else {
+      input.cargo = { availability: "known", code: oldCode };
+      await configure({ adr: { mode: "forbidden", classes: [] } });
+    }
+    const rule = kind === "trailer" ? "trailer_types" : "adr";
+    const initial = await modules.telemetryCompanion!.preview(authorization, ip, input);
+    expect(initial.rules.find((r) => r.rule === rule)?.result).toBe(
+      kind === "trailer" ? "fail" : "pass",
+    );
+    const locked = deferred<void>(),
+      release = deferred<void>(),
+      authenticated = deferred<void>();
+    const writer = createCatalogs(unit, catalogConfig(), {
+      identity: {
+        ...modules.identity,
+        authorizeInTransaction: async (tx, actor, capability) => {
+          const current = await modules.identity.authorizeInTransaction(tx, actor, capability);
+          locked.resolve();
+          await bounded(release.promise, "catalog-preview-writer-release");
+          return current;
+        },
+      },
+    });
+    const external = createExternalIdentities(unit, modules.identity);
+    const telemetry = createTelemetry(unit, modules.telemetry!.config, {
+      identity: modules.identity,
+      trips: modules.trips!,
+      external: {
+        captureCredential: external.captureCredential,
+        credentialEligible: async (tx, credential) => {
+          // authenticate has already read the token without a lock, establishing its RR snapshot.
+          authenticated.resolve();
+          return external.credentialEligible(tx, credential);
+        },
+      },
+    });
+    const companion = createTelemetryCompanion({
+      telemetry,
+      trips: modules.trips!,
+      qualifications: modules.qualifications!,
+      catalogs: catalog,
+    });
+    const changing = writer.patch(
+      director,
+      kind === "trailer" ? "trailers" : "cargoes",
+      row.id,
+      newId(),
+      kind === "trailer" ? { code: newCode, trailerTypeId: allowed.id } : { adrClass: "1" },
+    );
+    let waiting: Promise<C["Preview"]> | undefined;
+    try {
+      await bounded(locked.promise, "catalog-preview-company-held");
+      waiting = companion.preview(authorization, ip, input);
+      await bounded(authenticated.promise, "catalog-preview-auth-snapshot");
+      release.resolve();
+      await changing;
+      const current = await waiting;
+      expect(current.outcome).toBe(kind === "trailer" ? "unknown" : "fail");
+      expect(current.rules.find((r) => r.rule === rule)).toMatchObject({
+        result: kind === "trailer" ? "unknown" : "fail",
+        ...(kind === "trailer" ? { observedIds: [] } : { observed: "1" }),
+      });
+      expect(await modules.telemetryCompanion!.preview(authorization, ip, input)).toMatchObject({
+        outcome: current.outcome,
+        rules: current.rules,
+      });
+    } finally {
+      release.resolve();
+      await changing.catch(() => undefined);
+      await waiting?.catch(() => undefined);
+    }
+  });
+
 test("safe HTTP failures retain no-store, Retry-After and the companion error shape", async () => {
   const missing = await app.inject({ url: `${prefix}/unsupported`, headers: { authorization } });
   expect(missing.statusCode).toBe(404);

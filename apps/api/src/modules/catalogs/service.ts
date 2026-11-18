@@ -45,6 +45,7 @@ import { inspectPng, logoCodeFromName, PngError } from "./png.js";
 
 type S = components["schemas"];
 type Locale = "en" | "ru";
+type CodeResolution = { game: Game; kind: CatalogKind; code: string };
 type ListFilters = {
   hidden?: "only";
   includeHidden?: boolean;
@@ -471,9 +472,10 @@ export function createCatalogs(
     }[list];
     if (Object.keys(input).some((key) => !allowed.includes(key))) throw identityError(422);
   }
-  async function resolveInTransaction(
+  async function resolveCode(
     tx: TxContext,
-    input: { game: Game; kind: CatalogKind; code: string },
+    input: CodeResolution,
+    current: boolean,
   ): Promise<
     | { status: "resolved"; id: string; adrClass: AdrClass | null }
     | { status: "unknown"; reasonCode: string }
@@ -481,10 +483,12 @@ export function createCatalogs(
     if (!validCode(input.code)) return { status: "unknown", reasonCode: "unknown_source_id" };
     const table = kindTables[input.kind];
     const adr = input.kind === "cargo" ? catalogCargoes.adrClass : sql<AdrClass | null>`NULL`;
-    const [row] = await c(tx)
+    const query = c(tx)
       .select({ id: table.id, adrClass: adr })
       .from(table)
-      .where(and(eq(table.game, input.game), eq(table.code, Buffer.from(input.code))));
+      .where(and(eq(table.game, input.game), eq(table.code, Buffer.from(input.code))))
+      .$dynamic();
+    const [row] = await (current ? query.for("share") : query);
     if (!row) return { status: "unknown", reasonCode: "unknown_source_id" };
     return { status: "resolved", id: row.id, adrClass: (row.adrClass as AdrClass | null) ?? null };
   }
@@ -2042,7 +2046,11 @@ export function createCatalogs(
         return result as unknown as S["CatalogImportResult"];
       });
     },
-    resolveInTransaction,
+    /** Frozen ingestion keeps its existing consistent-read resolution. */
+    resolveInTransaction: (tx: TxContext, input: CodeResolution) => resolveCode(tx, input, false),
+    /** Current preview facts share the company fence and classification's locking-read view. */
+    resolveCurrentInTransaction: (tx: TxContext, input: CodeResolution) =>
+      resolveCode(tx, input, true),
     selectionsInTransaction,
     /** Published Events need safe canonical route facts without touching company logos. */
     async eventRouteCatalogInTransaction(
