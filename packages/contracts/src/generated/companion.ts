@@ -69,6 +69,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         Assessment: {
+            assessedSource: components["schemas"]["SourceIdentity"] | null;
             assignmentId: string | null;
             /** @enum {string} */
             availability: "retained" | "historical_unavailable";
@@ -89,6 +90,7 @@ export interface components {
             sourceEventId: string | null;
             sourceMessageId: string | null;
             sourceRevision: number | null;
+            trailerDisplay: components["schemas"]["TrailerDisplay"][];
         };
         Assignment: {
             /** Format: uuid */
@@ -97,6 +99,7 @@ export interface components {
             limits: components["schemas"]["Limits"];
             /** Format: date-time */
             startedAt: string;
+            trailerDisplay: components["schemas"]["TrailerDisplay"][];
         };
         Capabilities: {
             /** @constant */
@@ -194,6 +197,7 @@ export interface components {
             requestId: string;
             rules: components["schemas"]["Rule"][];
             securityScope: components["schemas"]["SecurityScope"];
+            trailerDisplay: components["schemas"]["TrailerDisplay"][];
         };
         PreviewInput: {
             actualDistance: {
@@ -315,6 +319,7 @@ export interface components {
             maxKg: string | null;
             minKg: string | null;
             observedKg: string | null;
+            reasons: ("within_limits" | "unrestricted" | "limit_mismatch" | "fact_unavailable" | "below_minimum_growing" | "hard_mode_not_final" | "unsupported_distance" | "event_attendance_exemption")[];
             /** @enum {string} */
             result: "pass" | "fail" | "unknown";
             /** @constant */
@@ -323,6 +328,7 @@ export interface components {
             maxM: string | null;
             minM: string | null;
             observedM: string | null;
+            reasons: ("within_limits" | "unrestricted" | "limit_mismatch" | "fact_unavailable" | "below_minimum_growing" | "hard_mode_not_final" | "unsupported_distance" | "event_attendance_exemption")[];
             /** @enum {string} */
             result: "pass" | "fail" | "unknown";
             /** @constant */
@@ -332,6 +338,7 @@ export interface components {
             /** @enum {string} */
             mode: "any" | "selected";
             observedIds: string[];
+            reasons: ("within_limits" | "unrestricted" | "limit_mismatch" | "fact_unavailable" | "below_minimum_growing" | "hard_mode_not_final" | "unsupported_distance" | "event_attendance_exemption")[];
             /** @enum {string} */
             result: "pass" | "fail" | "unknown";
             /** @constant */
@@ -341,12 +348,14 @@ export interface components {
             /** @enum {string} */
             mode: "any" | "forbidden" | "selected";
             observed: ("1" | "2" | "3" | "4" | "6" | "8" | "none") | null;
+            reasons: ("within_limits" | "unrestricted" | "limit_mismatch" | "fact_unavailable" | "below_minimum_growing" | "hard_mode_not_final" | "unsupported_distance" | "event_attendance_exemption")[];
             /** @enum {string} */
             result: "pass" | "fail" | "unknown";
             /** @constant */
             rule: "adr";
         } | {
             observed: ("qualified" | "not-qualified" | "unknown") | null;
+            reasons: ("within_limits" | "unrestricted" | "limit_mismatch" | "fact_unavailable" | "below_minimum_growing" | "hard_mode_not_final" | "unsupported_distance" | "event_attendance_exemption")[];
             required: boolean;
             /** @enum {string} */
             result: "pass" | "fail" | "unknown";
@@ -369,6 +378,18 @@ export interface components {
             ifVersion?: components["schemas"]["ResultVersion"];
             revision: number;
             source: components["schemas"]["SourceIdentity"];
+        };
+        TrailerDisplay: {
+            /** Format: date-time */
+            asOf: string;
+            /** @constant */
+            basis: "current_catalog";
+            code: string | null;
+            groupCode: string | null;
+            /** Format: uuid */
+            id: string;
+            nameEn: string | null;
+            nameRu: string | null;
         };
     };
     responses: never;

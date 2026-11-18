@@ -2,7 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "VTCDashboard telemetry companion",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "description": "Success responses are bounded to 1048576 UTF-8 bytes. Exact source revisions preserve the frozen safe-integer maximum 9007199254740991."
   },
   "paths": {
     "/api/telemetry/companion/v1/capabilities": {
@@ -511,7 +512,7 @@
           "revision": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 2147483647
+            "maximum": 9007199254740991
           },
           "eventId": {
             "type": "string",
@@ -721,13 +722,21 @@
           },
           "limits": {
             "$ref": "#/components/schemas/Limits"
+          },
+          "trailerDisplay": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrailerDisplay"
+            },
+            "maxItems": 100
           }
         },
         "required": [
           "id",
           "startedAt",
           "level",
-          "limits"
+          "limits",
+          "trailerDisplay"
         ],
         "additionalProperties": false
       },
@@ -1237,6 +1246,24 @@
                     "type": "null"
                   }
                 ]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "within_limits",
+                    "unrestricted",
+                    "limit_mismatch",
+                    "fact_unavailable",
+                    "below_minimum_growing",
+                    "hard_mode_not_final",
+                    "unsupported_distance",
+                    "event_attendance_exemption"
+                  ]
+                },
+                "minItems": 1,
+                "maxItems": 3
               }
             },
             "required": [
@@ -1244,7 +1271,8 @@
               "result",
               "minKg",
               "maxKg",
-              "observedKg"
+              "observedKg",
+              "reasons"
             ],
             "additionalProperties": false
           },
@@ -1298,6 +1326,24 @@
                     "type": "null"
                   }
                 ]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "within_limits",
+                    "unrestricted",
+                    "limit_mismatch",
+                    "fact_unavailable",
+                    "below_minimum_growing",
+                    "hard_mode_not_final",
+                    "unsupported_distance",
+                    "event_attendance_exemption"
+                  ]
+                },
+                "minItems": 1,
+                "maxItems": 3
               }
             },
             "required": [
@@ -1305,7 +1351,8 @@
               "result",
               "minM",
               "maxM",
-              "observedM"
+              "observedM",
+              "reasons"
             ],
             "additionalProperties": false
           },
@@ -1348,6 +1395,24 @@
                   "pattern": "^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
                 },
                 "maxItems": 10
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "within_limits",
+                    "unrestricted",
+                    "limit_mismatch",
+                    "fact_unavailable",
+                    "below_minimum_growing",
+                    "hard_mode_not_final",
+                    "unsupported_distance",
+                    "event_attendance_exemption"
+                  ]
+                },
+                "minItems": 1,
+                "maxItems": 3
               }
             },
             "required": [
@@ -1355,7 +1420,8 @@
               "result",
               "mode",
               "allowedIds",
-              "observedIds"
+              "observedIds",
+              "reasons"
             ],
             "additionalProperties": false
           },
@@ -1415,6 +1481,24 @@
                     "type": "null"
                   }
                 ]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "within_limits",
+                    "unrestricted",
+                    "limit_mismatch",
+                    "fact_unavailable",
+                    "below_minimum_growing",
+                    "hard_mode_not_final",
+                    "unsupported_distance",
+                    "event_attendance_exemption"
+                  ]
+                },
+                "minItems": 1,
+                "maxItems": 3
               }
             },
             "required": [
@@ -1422,7 +1506,8 @@
               "result",
               "mode",
               "allowedClasses",
-              "observed"
+              "observed",
+              "reasons"
             ],
             "additionalProperties": false
           },
@@ -1458,13 +1543,32 @@
                     "type": "null"
                   }
                 ]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "within_limits",
+                    "unrestricted",
+                    "limit_mismatch",
+                    "fact_unavailable",
+                    "below_minimum_growing",
+                    "hard_mode_not_final",
+                    "unsupported_distance",
+                    "event_attendance_exemption"
+                  ]
+                },
+                "minItems": 1,
+                "maxItems": 3
               }
             },
             "required": [
               "rule",
               "result",
               "required",
-              "observed"
+              "observed",
+              "reasons"
             ],
             "additionalProperties": false
           }
@@ -1612,6 +1716,13 @@
           "provisional": {
             "type": "boolean",
             "const": true
+          },
+          "trailerDisplay": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrailerDisplay"
+            },
+            "maxItems": 110
           }
         },
         "required": [
@@ -1628,7 +1739,8 @@
           "reasons",
           "eventExempt",
           "applicability",
-          "provisional"
+          "provisional",
+          "trailerDisplay"
         ],
         "additionalProperties": false
       },
@@ -1679,7 +1791,7 @@
               {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 2147483647
+                "maximum": 9007199254740991
               },
               {
                 "type": "null"
@@ -1777,6 +1889,23 @@
               ]
             },
             "maxItems": 10
+          },
+          "trailerDisplay": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrailerDisplay"
+            },
+            "maxItems": 100
+          },
+          "assessedSource": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SourceIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1795,7 +1924,9 @@
           "outcome",
           "rules",
           "eventExempt",
-          "reasons"
+          "reasons",
+          "trailerDisplay",
+          "assessedSource"
         ],
         "additionalProperties": false
       },
@@ -1808,7 +1939,7 @@
           "requestedRevision": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 2147483647
+            "maximum": 9007199254740991
           },
           "requestedEventId": {
             "type": "string",
@@ -1859,7 +1990,7 @@
               {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 2147483647
+                "maximum": 9007199254740991
               },
               {
                 "type": "null"
@@ -2145,6 +2276,83 @@
         "required": [
           "error",
           "requestId"
+        ],
+        "additionalProperties": false
+      },
+      "TrailerDisplay": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "code": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "groupCode": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nameEn": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nameRu": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "basis": {
+            "type": "string",
+            "const": "current_catalog"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "groupCode",
+          "nameEn",
+          "nameRu",
+          "basis",
+          "asOf"
         ],
         "additionalProperties": false
       }
