@@ -23,7 +23,9 @@ test("interrupted trailer grouping DDL preserves body rows and requires recovery
       [id, Buffer.from("_fiction_body")],
     );
     const journal = JSON.parse(await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"));
+    journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx <= 36);
     const entry = journal.entries.at(-1);
+    expect(entry.tag).toBe("0036_trailer_groups");
     const sql = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8");
     const first = sql.split("--> statement-breakpoint")[0];
     await writeFile(
@@ -49,7 +51,7 @@ test("interrupted trailer grouping DDL preserves body rows and requires recovery
     );
     // Only this disposable allocation is reset to its known empty baseline.
     await reset(control);
-    expect(await runMigrations(settings)).toBe(37);
+    expect(await runMigrations(settings)).toBe(38);
     expect(await runMigrations(settings)).toBe(0);
   } finally {
     await control.end();

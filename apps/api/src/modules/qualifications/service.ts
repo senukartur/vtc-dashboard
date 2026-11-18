@@ -42,6 +42,7 @@ import {
   type QualificationLimits,
   type QualificationSnapshot,
 } from "./check.js";
+import { createCompanionQualifications } from "./companion.js";
 import {
   type ActiveLevel,
   activeLevels,
@@ -72,7 +73,10 @@ interface Ports {
     | "authorizeInTransaction"
   >;
   trips: Pick<Trips, "contributions">;
-  catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction"> &
+  catalogs?: Pick<
+    Catalogs,
+    "selectionsInTransaction" | "labelsInTransaction" | "companionTrailerDisplayInTransaction"
+  > &
     Partial<Pick<Catalogs, "trailerGroupsInTransaction">>;
   events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
@@ -590,6 +594,13 @@ export function createQualifications(
     transferLevelId: string | null = null,
     occurredAt = at(),
   ) {
+    const owners = await c(tx)
+      .selectDistinct({ userId: qualificationAssignments.userId })
+      .from(qualificationAssignments)
+      .where(eq(qualificationAssignments.game, level.game))
+      .orderBy(qualificationAssignments.userId);
+    for (const owner of owners)
+      await ports.trips.contributions.companionRevision.bump(tx, owner.userId);
     await audit.append(tx, {
       actorKind: "user",
       actorId: actor.userId,
@@ -998,6 +1009,7 @@ export function createQualifications(
         return { qualification: await mine(tx, target, selected) };
       });
     },
+    companion: createCompanionQualifications(unit, ports.trips.contributions, ports.catalogs, now),
     lookupInTransaction: lookup,
     async prepareInTransaction(
       tx: TxContext,

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   type AnyMySqlColumn,
+  bigint,
   boolean,
   check,
   customType,
@@ -35,6 +36,14 @@ const reviewReasonCode = customType<{ data: string; driverData: string }>({
   dataType: () => "varchar(128) CHARACTER SET ascii COLLATE ascii_bin",
 });
 const medium = customType<{ data: string; driverData: string }>({ dataType: () => "mediumtext" });
+
+// Owner ordering survives root changes, merge/unmerge and process restart. No read creates rows.
+export const tripOwnerRevisions = mysqlTable("trip_owner_revisions", {
+  ownerId: idColumn("owner_id")
+    .primaryKey()
+    .references(() => membership.userId, { onDelete: "restrict" }),
+  revision: bigint("revision", { mode: "bigint", unsigned: true }).notNull(),
+});
 
 export const trips = mysqlTable(
   "trips",

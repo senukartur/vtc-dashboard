@@ -11,6 +11,7 @@ import {
   analyticsPriorFolder,
   catalogTimestampsPriorFolder,
   companyCatalogsPriorFolder,
+  companionPriorFolder,
   decisionsPriorFolder,
   EXTENDED_TEST_TIMEOUT_MS,
   eventStage2PriorFolder,
@@ -102,6 +103,65 @@ async function recoveryTest(
 }
 
 await recoveryTest(
+  "companion partial DDL preserves old token schema and published history while refusing blind replay",
+  async () => {
+    const connection = await testConnection(),
+      settings = guardedSettings();
+    let folder: string | undefined;
+    try {
+      await reset(connection);
+      folder = await companionPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 37);
+      await connection.query(
+        "INSERT INTO audit_entries(id,actor_kind,actor_id,operation,subject_kind,subject_id,occurred_at,reason,company_id) VALUES ('16400000-0000-4000-8000-000000000001','system',NULL,'configuration.changed','company','16400000-0000-4000-8000-000000000002','2026-01-01 00:00:00.000','operator_request',NULL)",
+      );
+      const [prefix] = await connection.query<RowDataPacket[]>(
+        "SELECT version,hash,state FROM _vtc_migrations ORDER BY version",
+      );
+      const journal = JSON.parse(
+          await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+        ),
+        entry = journal.entries.at(-1);
+      assert.equal(entry.idx, 37);
+      const original = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8"),
+        statements = original.split("--> statement-breakpoint");
+      assert.equal(statements.length, 3);
+      await writeFile(
+        join(folder, `${entry.tag}.sql`),
+        `${statements[0]}\n--> statement-breakpoint\nALTER TABLE synthetic_companion_missing ADD COLUMN fault INT;`,
+      );
+      await writeFile(join(folder, "meta/_journal.json"), JSON.stringify(journal));
+      await assert.rejects(runMigrations(settings, { folder }), hasCode("ER_NO_SUCH_TABLE"));
+      const [history] = await connection.query<RowDataPacket[]>(
+        "SELECT version,hash,state FROM _vtc_migrations ORDER BY version",
+      );
+      assert.deepEqual(history.slice(0, 37), prefix);
+      assert.equal(history.at(-1)!.state, "applying");
+      const [tables] = await connection.query<RowDataPacket[]>(
+        "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='trip_owner_revisions'",
+      );
+      assert.equal(tables[0]!.ENGINE, "InnoDB");
+      const [columns] = await connection.query<RowDataPacket[]>(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='telemetry_tokens' AND COLUMN_NAME='companion'",
+      );
+      assert.equal(columns.length, 0);
+      const [sentinel] = await connection.query<RowDataPacket[]>(
+        "SELECT COUNT(*) n FROM audit_entries WHERE id='16400000-0000-4000-8000-000000000001'",
+      );
+      assert.equal(String(sentinel[0]!.n), "1");
+      await assert.rejects(
+        runMigrations(settings, { lockTimeoutSeconds: 0 }),
+        /MIGRATION_RECOVERY_REQUIRED/,
+      );
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true, force: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
   "separate disposable partial-DDL and consistent-baseline recovery rehearsal",
   async () => {
     const settings = guardedSettings();
@@ -140,7 +200,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 37);
+      assert.equal(await runMigrations(settings), 38);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -197,7 +257,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 37);
+      assert.equal(await runMigrations(settings), 38);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -380,7 +440,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 37);
+      assert.equal(await runMigrations(guardedSettings()), 38);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_adr_requires_cargo','trip_trailer_shape')",
@@ -475,7 +535,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 37);
+        assert.equal(await runMigrations(settings), 38);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -533,7 +593,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 37);
+      assert.equal(await runMigrations(guardedSettings()), 38);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -588,7 +648,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 37);
+      assert.equal(await runMigrations(guardedSettings()), 38);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -642,7 +702,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 37);
+      assert.equal(await runMigrations(guardedSettings()), 38);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -725,7 +785,7 @@ await recoveryTest(
       // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
       // This is not a live backup/restore procedure and never stamps or replays the partial schema.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 37);
+      assert.equal(await runMigrations(settings), 38);
       assert.equal(await runMigrations(settings), 0);
       const [columns] = await connection.query<RowDataPacket[]>(
         "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
@@ -1169,7 +1229,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 19);
       await seedCatalogUpgradeRows(connection);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_facts"), 1);
-      assert.equal(await runMigrations(settings), 18);
+      assert.equal(await runMigrations(settings), 19);
       assert.equal(await runMigrations(settings), 0);
 
       for (const table of [
@@ -1251,7 +1311,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 37);
+      assert.equal(history.length, 38);
       assert.ok(history.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -2572,12 +2632,12 @@ await recoveryTest(
     try {
       // Reconstruct the known empty synthetic baseline used by the sticky-failure case.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 37);
+      assert.equal(await runMigrations(settings), 38);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(recovered.length, 37);
+      assert.equal(recovered.length, 38);
       assert.ok(recovered.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -2828,7 +2888,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings), 5);
       assert.equal(await runMigrations(settings), 0);
       const applied = await history();
-      assert.equal(applied.length, 37);
+      assert.equal(applied.length, 38);
       assert.deepEqual(applied.slice(0, -5), prefix);
       assert.deepEqual(
         applied.slice(-5).map((row) => row.state),
@@ -3078,7 +3138,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings), 4);
       assert.equal(await runMigrations(settings), 0);
       const applied = await read("SELECT version,hash,state FROM _vtc_migrations ORDER BY version");
-      assert.equal(applied.length, 37);
+      assert.equal(applied.length, 38);
       assert.deepEqual(applied.slice(0, -4), prefix);
       assert.deepEqual(
         applied.slice(-4).map((row) => row.state),
@@ -3257,7 +3317,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings), 3);
       assert.equal(await runMigrations(settings), 0);
       const applied = await history();
-      assert.equal(applied.length, 37);
+      assert.equal(applied.length, 38);
       assert.deepEqual(applied.slice(0, -3), prefix);
       assert.deepEqual(
         applied.slice(-3).map((row) => row.state),

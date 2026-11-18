@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 102 tables including the ledger and 37 migrations.
+// Fresh full-schema preparation now covers 103 tables including the ledger and 38 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -140,6 +140,7 @@ export async function reset(connection: Connection) {
     "telemetry_installations",
     "telemetry_limits",
     "telemetry_tokens",
+    "trip_owner_revisions",
     "trip_contribution_history",
     "trip_contributions",
     "qualification_level_trailers",
@@ -290,7 +291,8 @@ async function publishedPrefixFolder(
     | 33
     | 34
     | 35
-    | 36,
+    | 36
+    | 37,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -515,6 +517,10 @@ export async function notificationToggleRecopyPriorFolder(): Promise<string> {
 /** Every published migration through 0034, before the VTC-157 qualification simplification. */
 export async function simpleQualificationsPriorFolder(): Promise<string> {
   return publishedPrefixFolder(35);
+}
+
+export async function companionPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(37);
 }
 
 export async function trailerGroupingPriorFolder(): Promise<string> {

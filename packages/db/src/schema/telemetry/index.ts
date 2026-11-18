@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   int,
   mysqlEnum,
@@ -27,6 +28,7 @@ export const telemetryTokens = mysqlTable(
     credentialEpoch: int("credential_epoch", { unsigned: true }).notNull(),
     secretHash: opaqueColumn("secret_hash", { length: 32 }).notNull(),
     scope: mysqlEnum("scope", ["ingest"]).notNull(),
+    companion: boolean("companion").notNull().default(false),
     label: varchar("label", { length: 128 }).notNull(),
     createdAt: utcColumn("created_at").notNull(),
     lastUsedAt: utcColumn("last_used_at"),

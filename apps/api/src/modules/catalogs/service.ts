@@ -1024,6 +1024,40 @@ export function createCatalogs(
 
   return {
     config,
+    async companionTrailerDisplayInTransaction(
+      tx: TxContext,
+      game: Game,
+      ids: readonly string[],
+      asOf: string,
+    ) {
+      if (ids.length > 110) throw new Error("COMPANION_TRAILER_BOUND");
+      const unique = [...new Set(ids)].sort();
+      if (!unique.length) return [];
+      const rows = await c(tx)
+        .select({
+          id: catalogTrailers.id,
+          code: catalogTrailers.code,
+          group: catalogTrailers.commonTrailer,
+          nameEn: catalogTrailers.nameEn,
+          nameRu: catalogTrailers.nameRu,
+        })
+        .from(catalogTrailers)
+        .where(and(eq(catalogTrailers.game, game), inArray(catalogTrailers.id, unique)))
+        .for("share");
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      return unique.map((id) => {
+        const row = byId.get(id);
+        return {
+          id,
+          code: row?.code.toString() ?? null,
+          groupCode: row?.group?.toString() ?? null,
+          nameEn: row?.nameEn ?? null,
+          nameRu: row?.nameRu ?? null,
+          basis: "current_catalog" as const,
+          asOf,
+        };
+      });
+    },
     /** Group membership for qualification comparison. IDs/facts remain unchanged, including hidden rows. */
     async trailerGroupsInTransaction(tx: TxContext, game: Game, ids: readonly string[]) {
       if (ids.length > 1010) throw new Error("CATALOG_TRAILER_BATCH_BOUND_EXCEEDED");

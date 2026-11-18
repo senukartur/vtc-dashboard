@@ -19,6 +19,7 @@ import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
+import { createOwnerRevision } from "./owner-revision.js";
 import { queueClock, syncReviewReasons } from "./review-queue.js";
 import { ingestionConflictCodes } from "./service.js";
 export interface GroupSnapshot {
@@ -133,6 +134,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stag
   async function write(tx: TxContext, row: TripState, patch: Partial<TripState>) {
     if (row.version >= 2147483647) throw identityError(409);
     const at = now().toISOString();
+    await createOwnerRevision(unit).bump(tx, row.ownerId);
     await c(tx)
       .update(trips)
       .set({
@@ -383,6 +385,8 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stag
     },
     async searchStatus(tx: TxContext, id: string, pending: boolean) {
       const row = await groups.resolve(tx, id, true);
+      if (row.reviewReasons.includes("candidate_search_overflow") !== pending)
+        await createOwnerRevision(unit).bump(tx, row.ownerId);
       // Diagnostic state changes neither the fact/version epoch nor adjudication/credit.
       const reasons = row.reviewReasons.filter((r) => r !== "candidate_search_overflow");
       if (pending) reasons.push("candidate_search_overflow");

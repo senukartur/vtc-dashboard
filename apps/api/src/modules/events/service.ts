@@ -34,8 +34,8 @@ import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/que
 import { type CompanyEvent, closed, createOutbox } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
-import type { ConfirmedEventContext } from "./contracts.js";
 import { canonicalJson, decimal } from "../sources/contracts/canonical.js";
+import type { ConfirmedEventContext } from "./contracts.js";
 import { createEventDrafts } from "./drafts.js";
 import { type Page, pagination } from "./pagination.js";
 import {
@@ -189,6 +189,11 @@ interface Ports {
   catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction"> &
     Partial<Pick<RouteCatalogs, "eventRouteCatalogInTransaction">>;
   outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
+  companionChanged?: (
+    tx: TxContext,
+    memberIds: readonly string[],
+    eventId: string,
+  ) => Promise<void>;
   tripChanged?: (tx: TxContext, eventId: string, generation: number) => Promise<void>;
   attendanceTripIds?: (
     tx: TxContext,
@@ -1105,6 +1110,21 @@ export function createEvents(
         );
     }
     if (type !== "event.response_changed") {
+      if (ports.companionChanged) {
+        const affected = await c(tx)
+          .select({ memberId: eventAttendances.memberId })
+          .from(eventAttendances)
+          .where(eq(eventAttendances.eventId, event.id))
+          .orderBy(eventAttendances.memberId)
+          .limit(1001)
+          .for("share");
+        if (affected.length > 1000) throw identityError(409);
+        await ports.companionChanged(
+          tx,
+          affected.map((row) => row.memberId),
+          event.id,
+        );
+      }
       await c(tx)
         .update(events)
         .set({

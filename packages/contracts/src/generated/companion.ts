@@ -227,6 +227,7 @@ export interface components {
                 /** Format: date-time */
                 utc: string;
             } | null;
+            /** @description Bounded distinct coupling/configuration observations, current and previous. One item per configuration, not per physical trailer slot. code is exact SDK trailers.items[0].bodyType for that configuration, matching frozen ingestion. Null holes and incomplete history remain explicit. */
             trailers: {
                 complete: boolean;
                 items: {

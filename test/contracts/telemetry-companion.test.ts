@@ -35,13 +35,39 @@ test("positive fixtures agree with their exact rule observations and selected tr
   for (const fixture of fixtures.filter((f) => f.schema === "Preview")) {
     const value = fixture.value as unknown as companionComponents["schemas"]["Preview"];
     expect(value.outcome, fixture.name).toBe(
-      value.rules.some((r) => r.result === "fail")
-        ? "fail"
-        : value.rules.some((r) => r.result === "unknown")
-          ? "unknown"
-          : "pass",
+      value.basis === "unavailable"
+        ? "unknown"
+        : value.rules.some((r) => r.result === "fail")
+          ? "fail"
+          : value.rules.some((r) => r.result === "unknown")
+            ? "unknown"
+            : "pass",
     );
     for (const rule of value.rules) {
+      if (value.assignment) {
+        const limits = value.assignment.limits;
+        if (rule.rule === "cargo_mass")
+          expect([rule.minKg, rule.maxKg], fixture.name).toEqual([
+            limits.massMinKg,
+            limits.massMaxKg,
+          ]);
+        if (rule.rule === "distance")
+          expect([rule.minM, rule.maxM], fixture.name).toEqual([
+            limits.distanceMinM,
+            limits.distanceMaxM,
+          ]);
+        if (rule.rule === "adr")
+          expect([rule.mode, rule.allowedClasses], fixture.name).toEqual([
+            limits.adr.mode,
+            limits.adr.classes,
+          ]);
+        if (rule.rule === "hard_mode")
+          expect(rule.required, fixture.name).toBe(limits.hardModeRequired);
+      }
+      if (value.eventExempt) {
+        expect(rule.result, fixture.name).toBe("pass");
+        expect(rule.reasons, fixture.name).toContain("event_attendance_exemption");
+      }
       if (rule.rule === "trailer_types" && value.assignment) {
         expect(rule.mode, fixture.name).toBe(value.assignment.limits.trailers.mode);
         expect(rule.allowedIds, fixture.name).toEqual(value.assignment.limits.trailers.typeIds);
@@ -59,6 +85,25 @@ test("positive fixtures agree with their exact rule observations and selected tr
     }
   }
 });
+test("receipt and current-assessment fixtures certify the exact requested immutable envelope", () => {
+  for (const fixture of fixtures.filter((f) => f.schema === "ResultBatch"))
+    for (const item of (fixture.value as unknown as companionComponents["schemas"]["ResultBatch"])
+      .items) {
+      if (item.receipt === "received") {
+        expect(item.requestedSourceMessageId, fixture.name).not.toBeNull();
+        expect(item.canonicalTripId, fixture.name).not.toBeNull();
+        expect(item.latestSourceRevision, fixture.name).toBeGreaterThanOrEqual(
+          item.requestedRevision,
+        );
+      }
+      if (item.assessmentBasis === "current" && item.assessment) {
+        expect(item.assessment.sourceEventId, fixture.name).toBe(item.requestedEventId);
+        expect(item.assessment.sourceRevision, fixture.name).toBe(item.requestedRevision);
+        expect(item.assessment.sourceMessageId, fixture.name).toBe(item.requestedSourceMessageId);
+        expect(item.assessment.assessedSource, fixture.name).toEqual(item.source);
+      }
+    }
+});
 test("exact decimal and batch bounds reject rounding, invented targets and oversized work", () => {
   const decimal = ajv.compile({ $ref: "urn:vtc:companion:v1#/$defs/Decimal" });
   for (const value of ["0", "0.000000000000000001", "99999999999999999999.999999999999999999"])
@@ -73,9 +118,11 @@ test("exact decimal and batch bounds reject rounding, invented targets and overs
     "0.0000000000000000001",
   ])
     expect(decimal(value)).toBe(false);
-  const input = fixtures.find((f) => f.schema === "ResultBatchInput")?.value;
+  const fixture = fixtures.find((f) => f.schema === "ResultBatchInput");
+  if (!fixture) throw new Error("SYNTHETIC_BATCH_FIXTURE_REQUIRED");
+  const input = fixture.value;
   const validate = ajv.compile({ $ref: "urn:vtc:companion:v1#/$defs/ResultBatchInput" });
   expect(validate({ ...input, items: [] })).toBe(false);
-  expect(validate({ ...input, items: Array(26).fill((input?.items as unknown[])[0]) })).toBe(false);
+  expect(validate({ ...input, items: Array(26).fill((input.items as unknown[])[0]) })).toBe(false);
   expect(validate({ ...input, memberId: "foreign" })).toBe(false);
 });

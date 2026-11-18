@@ -20,7 +20,7 @@ export type AssignmentKind = Assignment["kind"];
 
 interface Ports {
   identity: Pick<Identity, "completeTraineeAsSystemInTransaction" | "traineeIdsInTransaction">;
-  totals?: Pick<ContributionRegister, "totalsByAssignment">;
+  totals?: Pick<ContributionRegister, "totalsByAssignment" | "companionRevision">;
   events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
 
@@ -113,6 +113,7 @@ export function createAssignments(
     },
   ) {
     const at = input.at ?? now();
+    await ports.totals?.companionRevision.bump(tx, input.userId);
     const previous =
       input.previous === undefined ? await openFor(tx, input.userId, input.game) : input.previous;
     if (previous) {
