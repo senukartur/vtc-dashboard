@@ -2331,8 +2331,8 @@ test(
 );
 
 test(
-  "companion opt-in is keyboard accessible, translated, initially off and reset by the identity scope",
-  browserCase(["@functional", "@smoke-account"]),
+  "companion opt-in renders RU/EN without overflow and preserves keyboard access, default state and identity reset",
+  browserCase(["@layout"]),
   async ({ page }, info) => {
     const state = await settingsWorkspace(page);
     state.self.data.steamVerified = true;

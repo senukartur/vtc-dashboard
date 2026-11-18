@@ -149,10 +149,19 @@ await recoveryTest(
         "SELECT COUNT(*) n FROM audit_entries WHERE id='16400000-0000-4000-8000-000000000001'",
       );
       assert.equal(String(sentinel[0]!.n), "1");
+      // Matching interrupted bytes reach the dirty-state guard; canonical bytes differ in hash.
       await assert.rejects(
-        runMigrations(settings, { lockTimeoutSeconds: 0 }),
+        runMigrations(settings, { folder, lockTimeoutSeconds: 0 }),
         /MIGRATION_RECOVERY_REQUIRED/,
       );
+      await assert.rejects(
+        runMigrations(settings, { lockTimeoutSeconds: 0 }),
+        /MIGRATION_HISTORY_DRIFT/,
+      );
+      const [afterRetries] = await connection.query<RowDataPacket[]>(
+        "SELECT version,hash,state FROM _vtc_migrations ORDER BY version",
+      );
+      assert.deepEqual(afterRetries, history);
     } finally {
       await connection.end();
       if (folder) await rm(folder, { recursive: true, force: true });
