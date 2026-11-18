@@ -1570,9 +1570,10 @@ test(
         expect(selected.query.get("scope")).toBe("company");
         expectOnlyAcceptedCompanyTrip(selected.data, completed.tripId, fixture.userId);
         await expect(visitor.getByText("Found 1", { exact: true })).toBeVisible();
-        await expect(visitor.locator(`#trip-link-${completed.tripId}`)).toContainText(
-          `#${trip.number}`,
-        );
+        const companyRow = visitor.getByRole("row").filter({
+          has: visitor.locator(`#trip-link-${completed.tripId}`),
+        });
+        await expect(companyRow.locator(".trips-number")).toHaveText(`#${trip.number}`);
         await expect(visitor.locator(`#trip-link-${active.tripId}`)).toHaveCount(0);
       } finally {
         await company.close();
