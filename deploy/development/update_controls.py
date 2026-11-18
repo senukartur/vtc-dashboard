@@ -17,6 +17,9 @@ def notifications_install(source, restore=False):
     o.require(os.geteuid() == 0 and o.BASE.is_dir() and o.BASE.stat().st_uid == 0 and
               not o.BASE.stat().st_mode & 0o022, 'INSTALLATION_INVALID')
     with o.lock():
+        handoff = o.BASE / 'state/release-handoff.json'
+        o.require(not handoff.exists() or json.loads(handoff.read_text()).get('pending') is not True,
+                  'CONTROLS_RELEASE_PENDING')
         active = o.current()
         o.require(active is not None, 'RELEASE_REQUIRED')
         o.require(not any((o.BASE / f'state/{name}').exists() for name in
@@ -156,6 +159,9 @@ def install(source):
     o.require(o.BASE.is_dir() and o.BASE.stat().st_uid == 0 and not o.BASE.stat().st_mode & 0o022,
               'INSTALLATION_INVALID')
     with o.lock():
+        handoff = o.BASE / 'state/release-handoff.json'
+        o.require(not handoff.exists() or json.loads(handoff.read_text()).get('pending') is not True,
+                  'CONTROLS_RELEASE_PENDING')
         active = o.current()
         o.require(active is not None, 'RELEASE_REQUIRED')
         o.require(not any((o.BASE / f'state/{name}').exists() for name in
@@ -235,6 +241,9 @@ def install(source):
             os.chmod(o.BASE / name, 0o755 if name == 'receive.sh' else 0o644)
         state['complete'] = True
         o.atomic_json(marker, state)
+        # An explicit release handoff needs positive updater ownership, not a generic
+        # recovery fence. Repeating this exact update repairs an interrupted final write.
+        o.atomic_json(recovery, {'owner': 'controls-update', 'state': state})
         # activation apply consumes this exact owned fence; no mixed settings are resumed.
 
 
