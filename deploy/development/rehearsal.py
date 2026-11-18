@@ -838,6 +838,11 @@ def core():
                         tables_by_role = ({'runtime': draft_tables} if phase == 'drafts' else
                                           {role: {table: route_matrix[role][table] for table in tables}
                                            for role, tables in previous_route_tables.items()})
+                        if phase == 'drafts':
+                            # Exercise catalog import with mutable variants and SELECT-only types.
+                            # The existing finally revokes exactly these temporary profile deltas.
+                            profile = json.loads((base / ops.activation.STAGE_PROFILE).read_text())
+                            tables_by_role['runtime']['catalog_trailers'] = profile['grants']['runtime']['catalog_trailers']
                         for role, tables in tables_by_role.items():
                             for table, permissions in tables.items():
                                 assert re.fullmatch('[a-z_]+', table)

@@ -541,13 +541,17 @@ export function createCatalogs(
     type Existing = ListRow;
     const existing = new Map<string, Existing>();
     for (const game of games) {
-      let query = c(tx).select(selectColumns(list)).from(t).$dynamic();
+      // Import planning only needs the stored type ID. Keep the read-only dictionary
+      // out of this exclusive lock; its reference rows are share-locked below.
+      let query = c(tx)
+        .select({
+          ...selectColumns(list),
+          typeEn: sql<string | null>`NULL`,
+          typeRu: sql<string | null>`NULL`,
+        })
+        .from(t)
+        .$dynamic();
       if (list !== "dlcs") query = query.leftJoin(dlcParent, eq(t.dlcId, dlcParent.id));
-      if (list === "trailers")
-        query = query.leftJoin(
-          catalogTrailerTypes,
-          eq(catalogTrailers.trailerTypeId, catalogTrailerTypes.id),
-        );
       if (list === "cities")
         query = query.leftJoin(regionParent, eq(catalogCities.regionId, regionParent.id));
       query = query.where(eq(t.game, game));

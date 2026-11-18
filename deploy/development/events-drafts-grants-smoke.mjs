@@ -63,6 +63,69 @@ try {
       "Fictional-manual-rehearsal-passphrase-42",
     );
     const cookie = login.cookies.map((part) => part.split(";", 1)[0]).join("; ");
+    if (phase === "drafts") {
+      const actor = await identity.authenticate(new Headers({ cookie }));
+      const rollback = new Error("CATALOG_IMPORT_PROOF_ROLLBACK");
+      const code = `synthetic_type_import_${proof}`;
+      const dictionaryWrites = [
+        "UPDATE catalog_trailer_types SET name_en=name_en WHERE FALSE",
+        "DELETE FROM catalog_trailer_types WHERE FALSE",
+      ];
+      for (const statement of dictionaryWrites)
+        await assert.rejects(connection.query(statement), denied);
+      try {
+        await unit.run(async (tx) => {
+          const scoped = {
+            run: (command) => command(tx),
+            client: unit.client,
+            close: async () => {},
+          };
+          const probe = createCatalogs(scoped, { cursorKey: key() }, { identity });
+          const types = await probe.trailerTypes(actor, { game: "ets2", limit: 100 });
+          const type = types.items.find((row) => row.code === "dryvan");
+          assert.ok(type);
+          const variant = await probe.create(actor, "trailers", newId(), {
+            game: "ets2",
+            code,
+            nameEn: "Fictional restricted import body",
+          });
+          const bytes = Buffer.from(`game,code,trailer_type_code\nets2,${code},dryvan\n`);
+          const preview = await probe.previewImport(actor, "trailers", bytes);
+          assert.equal(preview.errors, 0);
+          assert.equal(preview.added, 0);
+          assert.equal(preview.changed, 1);
+          const commandKey = newId();
+          const result = await probe.applyImport(
+            actor,
+            "trailers",
+            bytes,
+            commandKey,
+            preview.token,
+          );
+          assert.deepEqual(
+            await probe.applyImport(actor, "trailers", bytes, commandKey, preview.token),
+            result,
+          );
+          const imported = await probe.get(actor, "trailers", variant.id);
+          assert.equal(imported.code, code);
+          assert.equal(imported.trailerTypeId, type.id);
+          const unchanged = await probe.previewImport(actor, "trailers", bytes);
+          assert.equal(unchanged.errors, 0);
+          assert.equal(unchanged.changed, 0);
+          assert.equal(unchanged.unchanged, 1);
+          throw rollback;
+        });
+      } catch (error) {
+        if (error !== rollback) throw error;
+      }
+      const [retained] = await connection.query(
+        "SELECT COUNT(*) n FROM catalog_trailers WHERE code=?",
+        [code],
+      );
+      assert.equal(Number(retained[0].n), 0);
+      for (const statement of dictionaryWrites)
+        await assert.rejects(connection.query(statement), denied);
+    }
     const me = await app.inject({ url: "/api/v1/me", headers: { cookie } });
     assert.equal(me.statusCode, 200);
     assert.equal(me.headers["x-vtc-events-stage2"], "1");
