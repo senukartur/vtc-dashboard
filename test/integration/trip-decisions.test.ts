@@ -5462,6 +5462,76 @@ test("HTTP author trip read serializes sources and the qualification check", asy
   }
 });
 
+test("pending typed manual reports accept compatible attached telemetry including Hard Mode without equating wrong or unclassified bodies", async () => {
+  const types = (await catalogs.trailerTypes(director, { game: "ets2", limit: 100 })).items;
+  const box = types.find((row) => row.code === "dryvan")!,
+    cold = types.find((row) => row.code === "refrigerated")!;
+  const on = composedModules(undefined, true);
+  if (!on.trips || !on.manualReports || !on.tripDecisions)
+    throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+  ids.set("semantic_attached_box", box.id);
+  await configureFirstLevel({
+    trailers: { basis: "type", mode: "selected", typeIds: [box.id] },
+    hardModeRequired: true,
+  });
+  try {
+    for (const classification of [box.id, cold.id, null]) {
+      const variant = await catalogs.create(director, "trailers", newId(), {
+        game: "ets2",
+        code: `_typed_attached_${newId()}`,
+        nameEn: "Fictional attached body",
+        trailerTypeId: classification,
+      });
+      const author = await member();
+      const submitted = await report(author, on.manualReports, {
+        trailerType: "semantic_attached_box",
+      });
+      const p = payload();
+      p.contract.minor = 1;
+      p.snapshot.hardModeResult = "qualified";
+      p.snapshot.trailers.items[0]!.bodyType = { available: true, value: variant.code };
+      const before = await state(submitted.tripId);
+      const incoming = await retryTransaction(unit, (tx) =>
+        on.trips!.storeInTransaction(tx, "ets2telemetry", p, {
+          ownerUserId: author.userId,
+          connection: { state: "unknown", referenceId: null },
+          canonical: { tripId: submitted.tripId, expectedVersion: before!.version },
+        }),
+      );
+      const evidence = await unit.run((tx) =>
+        on.trips!.sourceEvidenceInTransaction(tx, incoming.sourceRecordId),
+      );
+      if (classification === box.id) {
+        expect(evidence?.reasonCodes).not.toContain("trailer_context_conflict");
+        const review = await on.tripDecisions.reviewStage3(dispatcher, submitted.tripId);
+        expect(review.data.acceptance.mode).toBe("ordinary");
+        expect(review.data.factRevisionId).toBe(evidence?.factRevisionId);
+        await on.tripDecisions.decide(
+          dispatcher,
+          submitted.tripId,
+          newId(),
+          review.version,
+          {
+            decision: "accept",
+            proposalId: null,
+            factRevisionId: review.data.factRevisionId,
+            reviewedRevisionId: submitted.currentRevision.id,
+            reason: "Fictional compatible type approval",
+          },
+          true,
+        );
+        expect((await credit(submitted.tripId))?.credited).toBe(true);
+      } else {
+        expect(evidence?.reasonCodes).toContain("trailer_context_conflict");
+        expect((await state(submitted.tripId))?.decision).toBe("pending_review");
+        expect(await credit(submitted.tripId)).toBeUndefined();
+      }
+    }
+  } finally {
+    await configureFirstLevel({ massMaxKg: "20000" });
+  }
+});
+
 test("typed allowances accept original body variants and typed manual facts, preserve history and fence reclassification", async () => {
   const types = (await catalogs.trailerTypes(director, { game: "ets2", limit: 100 })).items;
   const box = types.find((row) => row.code === "dryvan")!,

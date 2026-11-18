@@ -774,7 +774,7 @@ async function fill(page: Page, unresolved = false, initialReads?: TripReadSnaps
     step = "destination";
     await chooseCatalogRow(page, "Destination city", "Fictional fixture_south", "fixture_south");
     step = "trailer";
-    await chooseCatalogRow(page, "Trailer type", "Fictional fixture_box", "fixture_box");
+    await chooseCatalogRow(page, "Trailer type", "Box trailer", "dryvan");
     step = "cargo";
     if (unresolved) {
       await page.getByRole("combobox", { name: "Cargo", exact: true }).click();
@@ -799,7 +799,7 @@ async function fill(page: Page, unresolved = false, initialReads?: TripReadSnaps
     const selections: [string, string][] = [
       ["Origin city", "Fictional fixture_north"],
       ["Destination city", "Fictional fixture_south"],
-      ["Trailer type", "Fictional fixture_box"],
+      ["Trailer type", "Box trailer"],
     ];
     if (!unresolved) selections.push(["Cargo", "Fictional fixture_crates"]);
     for (const [label, rowName] of selections) {

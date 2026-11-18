@@ -327,7 +327,16 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
     if (path.startsWith("/api/v1/catalogs/trailer-types")) {
       const rows = options.trailerTypes ?? [],
         id = path.split("/")[5];
-      return json(id ? envelope(rows.find((row) => row.id === id)) : catalogList(rows));
+      const game = url.searchParams.get("game") === "ats" ? "ats" : "ets2";
+      const legacy = [
+        ...(options.rows?.ets2?.trailers ?? defaultRows(locale).trailers),
+        ...(options.rows?.ats?.trailers ?? []),
+      ];
+      return json(
+        id
+          ? envelope([...rows, ...legacy].find((row) => row.id === id))
+          : catalogList(rows.filter((row) => row.game === game)),
+      );
     }
     const match =
       /^\/api\/v1\/catalogs\/(dlcs|regions|cities|companies|cargoes|trailers)(?:\/([^/]+))?$/.exec(

@@ -27,7 +27,7 @@ import { createOutbox, type TripEvent } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import type { Events } from "../events/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
-import { selectQuality } from "../reconciliation/quality.js";
+import { sameTrailerContext, selectQuality } from "../reconciliation/quality.js";
 import { canonicalJson, contentHash, decimal, sourceKey } from "../sources/contracts/canonical.js";
 import type {
   CompanyFact,
@@ -102,7 +102,13 @@ export interface TripsPorts {
     "resolveInTransaction" | "selectionsInTransaction" | "labelsInTransaction"
   > &
     Partial<
-      Pick<Catalogs, "labelSearchCondition" | "depotInTransaction" | "depotRefsInTransaction">
+      Pick<
+        Catalogs,
+        | "labelSearchCondition"
+        | "depotInTransaction"
+        | "depotRefsInTransaction"
+        | "trailerGroupsInTransaction"
+      >
     >;
   eventTitles?: Events["tripTitlesInTransaction"];
   eventAssociations?: (tx: TxContext, tripIds: string[]) => Promise<Map<string, string>>;
@@ -187,6 +193,7 @@ function differing(
   // Within one source lineage: every distinct proven trailer chain of that source trip's lower
   // revisions, including held ones.
   progression?: { proven: NormalizedTripEvidence["trailers"][] },
+  trailerTypes: Readonly<Record<string, string>> = {},
 ): string[] {
   const reasons: string[] = [];
   if (previous.outcome !== "open" && previous.outcome !== next.outcome)
@@ -233,10 +240,7 @@ function differing(
     )
       reasons.push("trailer_context_conflict");
   } else if (provenTrailers(previous.trailers)) {
-    if (
-      !next.trailers.complete ||
-      canonicalJson(trailerIds(previous.trailers)) !== canonicalJson(after)
-    )
+    if (!next.trailers.complete || !sameTrailerContext(previous, next, trailerTypes))
       reasons.push("trailer_context_conflict");
   }
   return reasons;
@@ -627,6 +631,8 @@ export function createTrips(
       existing && baseRevision !== null && baseRevision < key.revision && !terminal
         ? { proven: await provenChains(tx, existing.id, key.revision) }
         : undefined;
+    const trailerTypes =
+      previous && !supersede ? await trailerTypesInTransaction(tx, [previous, fact]) : {};
     const quality =
       previous && !supersede
         ? selectQuality(
@@ -635,12 +641,13 @@ export function createTrips(
             lineage
               ? { fromFactId: previous.factRevisionId, toFactId: fact.factRevisionId }
               : undefined,
+            trailerTypes,
           )
         : null;
     const conflicts =
       previous && !supersede && (newer || fact.outcome !== "open")
         ? [
-            ...differing(previous, fact, lineage),
+            ...differing(previous, fact, lineage, trailerTypes),
             ...(terminal ? differing(terminal, fact) : []),
             ...(ports.sourceStored ? (quality?.reasons ?? []) : []),
             ...(ports.sourceStored && quality?.selected?.factRevisionId !== fact.factRevisionId
@@ -865,7 +872,43 @@ export function createTrips(
       ],
     ]);
   }
-  const reconciliation = createTripReconciliation(unit, now, config.dispatchReviewStage3Enabled);
+  async function trailerTypesInTransaction(
+    tx: TxContext,
+    evidence: readonly NormalizedTripEvidence[],
+  ) {
+    if (
+      new Set(evidence.map((f) => f.provider)).size < 2 ||
+      !evidence.some((f) =>
+        f.trailers.items.some(
+          (item) => item.status === "known" && item.value.identityKind === "type",
+        ),
+      )
+    )
+      return {};
+    const game = evidence[0]?.game;
+    if (!game || evidence.some((f) => f.game !== game))
+      throw new Error("TRAILER_COMPARISON_GAME_MISMATCH");
+    const ids = [
+      ...new Set(
+        evidence.flatMap((f) =>
+          f.trailers.items.flatMap((item) =>
+            item.status === "known" ? [item.value.entityId] : [],
+          ),
+        ),
+      ),
+    ];
+    const mapping =
+      (await ports.catalogs?.trailerGroupsInTransaction?.(tx, game, ids, "type")) ?? {};
+    return Object.fromEntries(
+      Object.entries(mapping).filter(([, value]) => value.startsWith("type:")),
+    );
+  }
+  const reconciliation = createTripReconciliation(
+    unit,
+    now,
+    config.dispatchReviewStage3Enabled,
+    trailerTypesInTransaction,
+  );
   // Display reference of a company fact; a depot outside the effective city stays unresolved.
   function companyRef(
     fact: CompanyFact | undefined,
@@ -997,6 +1040,7 @@ export function createTrips(
   }
   return {
     config,
+    trailerTypesInTransaction,
     groups,
     reviewQueueRepair: createReviewQueueRepair(unit),
     adjudication: createTripAdjudication(

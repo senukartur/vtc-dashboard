@@ -49,9 +49,22 @@ for (const locale of ["ru", "en"] as const) {
       const type = catalogItem(cargoRowId, locale === "ru" ? "Фургон" : "Box trailer", locale, {
         code: "dryvan",
       });
+      const atsType = catalogItem(companyRowId, "Refrigerated trailer", locale, {
+        game: "ats",
+        code: "refrigerated",
+      });
+      const atsBody = catalogItem(regionId, "Fictional ATS body", locale, {
+        game: "ats",
+        code: "_fiction_ats_body",
+        trailerTypeId: atsType.id,
+        trailerType: atsType.display,
+      });
       await mockCatalogs(page, true, {
-        rows: { ets2: { ...defaultRows(locale), trailers: [item, other] } },
-        trailerTypes: [type],
+        rows: {
+          ets2: { ...defaultRows(locale), trailers: [item, other] },
+          ats: { trailers: [atsBody] },
+        },
+        trailerTypes: [type, atsType],
       });
       await open(page, locale, "?tab=trailers");
       const row = rowOf(page, item.nameEn);
@@ -77,6 +90,12 @@ for (const locale of ["ru", "en"] as const) {
         "trailer.fiction_common",
       );
       await expect(form.getByLabel(c.fieldCode, { exact: true })).toHaveValue("_fiction_body_a");
+      await page.keyboard.press("Escape");
+      await expect(form).toHaveCount(0);
+      await page.getByRole("button", { name: "ATS", exact: true }).click();
+      await expect(page.getByRole("combobox", { name: c.fieldType, exact: true })).toHaveValue("");
+      await expect(rowOf(page, atsBody.nameEn)).toBeVisible();
+      expect(new URL(page.url()).searchParams.has("type")).toBe(false);
     },
   );
 }
