@@ -107,7 +107,7 @@ async function tooltip(page: Page, label: string, body: string) {
 /** The Hard Mode label keeps its English name in both languages and carries the flame icon. */
 async function hardModeLabel(label: Locator) {
   await expect(label).toContainText("Hard Mode");
-  const flame = label.locator("svg.flame-icon");
+  const flame = label.locator("svg.lucide-flame");
   await expect(flame).toBeVisible();
   await expect(flame).toHaveAttribute("aria-hidden", "true");
   const icon = await box(flame);
@@ -133,7 +133,7 @@ for (const locale of ["en", "ru"] as const)
       await expect(ladder(page).locator("[data-current='true']").first()).toContainText(
         "Fictional Trainee",
       );
-      await hardModeLabel(ladder(page).locator(".badge-hard-mode"));
+      await hardModeLabel(ladder(page).locator(".badge-ok").filter({ hasText: "Hard Mode" }));
       const mine = page.locator(".qualification-mine");
       await expect(mine.getByRole("heading", { name: s.mine })).toBeVisible();
       await expect(mine.getByRole("link", { name: "Fictional Trainee" })).toBeVisible();

@@ -1,3 +1,4 @@
+import { ArrowRight } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -54,9 +55,13 @@ function AuditChange({ row }: { row: Row }) {
               <dt>{t("settingsUi.audit.before")}</dt>
               <dd>
                 {auditSnapshot(row, "before", t)}
-                <span aria-hidden="true" className="settings-audit-arrow">
-                  →
-                </span>
+                <ArrowRight
+                  size={14}
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                  focusable="false"
+                  className="settings-audit-arrow"
+                />
               </dd>
             </div>
             <div>

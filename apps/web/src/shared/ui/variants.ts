@@ -25,8 +25,19 @@ export const selectVariants = cva("select", {
 });
 
 export const badgeVariants = cva("badge", {
-  variants: { size: { xs: "badge-xs", sm: "" } },
-  defaultVariants: { size: "sm" },
+  variants: {
+    size: { xs: "", sm: "" },
+    tone: {
+      neutral: "badge-neutral",
+      ok: "badge-ok",
+      warn: "badge-warn",
+      error: "badge-error",
+      info: "badge-info",
+      ets2: "badge-ets2",
+      ats: "badge-ats",
+    },
+  },
+  defaultVariants: { size: "sm", tone: "neutral" },
 });
 
 export const tableVariants = cva("table", {

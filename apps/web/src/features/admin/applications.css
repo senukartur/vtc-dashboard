@@ -109,24 +109,6 @@
   flex-wrap: wrap;
   gap: 4px;
 }
-.applications-page .applications-status.applications-tone-pending {
-  background: var(--pending-surface);
-}
-.applications-page .applications-status.applications-tone-accepted {
-  background: var(--accepted-surface);
-}
-.applications-page .applications-status.applications-tone-rejected {
-  background: var(--rejected-surface);
-}
-.applications-page .applications-tone-pending {
-  color: var(--pending);
-}
-.applications-page .applications-tone-accepted {
-  color: var(--accepted);
-}
-.applications-page .applications-tone-rejected {
-  color: var(--destructive);
-}
 
 /* Detail card. */
 .applications-page .applications-detail {

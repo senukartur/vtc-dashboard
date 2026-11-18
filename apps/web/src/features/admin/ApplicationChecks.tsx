@@ -1,3 +1,14 @@
+import {
+  Ban,
+  Building2,
+  CircleHelp,
+  Clock,
+  EyeOff,
+  ShieldCheck,
+  TriangleAlert,
+  UserX,
+  X,
+} from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
@@ -214,11 +225,24 @@ export function ReferralFact({ fields }: { fields: DTO["ApplicationInput"] }) {
 /** List badge of one application's check; text and symbol, not colour, carry the state. */
 export function TruckersmpBadge({ check }: { check: TruckersmpCheck | null | undefined }) {
   const { t } = useTranslation("applicationChecks"),
-    { group, label } = checkBadge(check),
-    { symbol } = checkBadgeLook[group];
+    { group, label } = checkBadge(check);
+  const icons = {
+    noBans: ShieldCheck,
+    hasBans: Ban,
+    bansHidden: EyeOff,
+    notFound: UserX,
+    inVtc: Building2,
+    failed: X,
+    checking: Clock,
+    notChecked: CircleHelp,
+  };
   return (
-    <Badge size="xs" className={`applications-check-badge applications-check-${group}`}>
-      <span aria-hidden="true">{symbol}</span>
+    <Badge
+      size="xs"
+      tone={checkBadgeLook[group].tone}
+      icon={icons[label]}
+      className="applications-check-badge"
+    >
       {t(`badge.${label}`)}
     </Badge>
   );
@@ -234,12 +258,28 @@ export function TruckersmpLegend() {
       <InfoTip label={t("legendLabel")} title={t("legendTitle")}>
         {legendGroups.map((group) => (
           <p key={group}>
-            <span
-              aria-hidden="true"
-              className={`applications-check-symbol applications-check-${group}`}
+            <Badge
+              tone={checkBadgeLook[group].tone}
+              icon={
+                group === "passed"
+                  ? ShieldCheck
+                  : group === "attention"
+                    ? TriangleAlert
+                    : group === "failed"
+                      ? X
+                      : CircleHelp
+              }
             >
-              {checkBadgeLook[group].symbol}
-            </span>{" "}
+              {t(
+                group === "passed"
+                  ? "badge.noBans"
+                  : group === "attention"
+                    ? "badge.hasBans"
+                    : group === "failed"
+                      ? "badge.failed"
+                      : "badge.notChecked",
+              )}
+            </Badge>{" "}
             {t(`legend.${group}`)}
           </p>
         ))}

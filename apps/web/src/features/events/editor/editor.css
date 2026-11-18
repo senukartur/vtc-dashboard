@@ -244,16 +244,7 @@
   opacity: 0.55;
   cursor: default;
 }
-.event-stage2-editor .event-editor-tag {
-  display: inline-block;
-  padding: 1px 6px;
-  border: 1px solid var(--selection-border);
-  border-radius: var(--radius-badge);
-  background: var(--accent-soft);
-  color: var(--foreground);
-  font-size: var(--font-small);
-  font-weight: 600;
-}
+
 .event-stage2-editor .event-editor-caption {
   display: grid;
   align-content: start;
@@ -384,12 +375,7 @@
   flex-wrap: wrap;
   gap: 4px;
 }
-.event-stage2-editor .event-editor-preview-dlcs .event-editor-tag,
-.event-stage2-editor .event-editor-dlc-trigger .event-editor-tag {
-  background: var(--pending-surface);
-  border-color: transparent;
-  color: var(--pending);
-}
+
 .event-stage2-editor .event-editor-date-tile {
   display: grid;
   flex: 0 0 auto;
@@ -462,8 +448,4 @@
 
 .dialog-content.event-dialog.event-editor-dialog {
   width: min(76rem, calc(100vw - 2rem));
-}
-
-.event-stage2-editor .event-editor-dlc-trigger .event-editor-tag {
-  font-weight: inherit;
 }

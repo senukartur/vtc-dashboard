@@ -75,17 +75,6 @@ export function tripStatus(
   return "unassessed";
 }
 
-/** Decorative symbols beside the status text, so status never relies on colour alone. */
-export const statusSymbol: Record<TripStatus, string | null> = {
-  accepted: "✓",
-  pending_review: "●",
-  needs_fix: "!",
-  rejected: "✕",
-  in_progress: "→",
-  unassessed: null,
-  cancelled: "–",
-};
-
 const instant = (value: string) => {
   const time = Date.parse(value);
   return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;

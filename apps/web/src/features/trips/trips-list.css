@@ -294,23 +294,6 @@
   align-items: center;
   gap: 4px;
 }
-.trip-page .trips-hard-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 4px;
-  border: 1px solid color-mix(in srgb, var(--accepted), transparent 65%);
-  border-radius: var(--radius-badge);
-  color: var(--accepted);
-  background: var(--accepted-surface);
-  font-size: var(--font-badge);
-  font-weight: 600;
-}
-.trip-page .trips-hard-mode[data-result="not-qualified"] {
-  color: var(--destructive);
-  background: var(--rejected-surface);
-  border-color: color-mix(in srgb, var(--destructive), transparent 65%);
-}
 .trip-page td.trips-muted {
   color: var(--secondary);
   font-variant-numeric: tabular-nums;
@@ -322,13 +305,6 @@
 }
 .trip-page .trips-cell-stack > .trips-row-meta {
   padding: 0;
-}
-.trip-page .trips-mode {
-  color: var(--muted);
-  font-size: var(--font-small);
-}
-.trip-page .trips-mode[data-mode="haulmp"] {
-  color: var(--accepted);
 }
 .trip-page .trips-cargo-name,
 .trip-page .trips-distance {
@@ -377,46 +353,6 @@
   display: block;
   color: var(--muted);
   font-size: var(--font-small);
-}
-.trip-page .trips-game {
-  display: inline-flex;
-  flex-shrink: 0;
-  padding: 1px 5px;
-  border: 1px solid var(--selection-border);
-  border-radius: var(--radius-badge);
-  background: var(--accent-soft);
-  color: var(--focus);
-  font-size: var(--font-badge);
-  font-weight: 600;
-  line-height: 1.5;
-}
-.trip-page .trips-decision,
-.trip-page .trips-outcome,
-.trip-page .trips-recording {
-  max-width: 100%;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-active);
-  color: var(--secondary);
-  font-weight: 500;
-}
-.trip-page .trips-decision[data-decision="accepted"],
-.trip-page .trips-outcome[data-outcome="delivered"],
-.trip-page .trips-recording[data-recording="complete"] {
-  border-color: color-mix(in srgb, var(--accepted), transparent 65%);
-  background: var(--accepted-surface);
-  color: var(--accepted);
-}
-.trip-page .trips-decision[data-decision="pending_review"],
-.trip-page .trips-recording[data-recording="partial"] {
-  border-color: color-mix(in srgb, var(--pending), transparent 65%);
-  background: var(--pending-surface);
-  color: var(--pending);
-}
-.trip-page .trips-decision[data-decision="rejected"],
-.trip-page .trips-outcome[data-outcome="cancelled"] {
-  border-color: color-mix(in srgb, var(--destructive), transparent 65%);
-  background: var(--rejected-surface);
-  color: var(--destructive);
 }
 .trip-page .trips-chevron {
   color: var(--muted);
@@ -481,6 +417,9 @@
   .trip-page .trips-table .trips-col-open {
     display: none;
   }
+  .trip-page .trips-table .trips-col-job {
+    grid-column: 1 / -1;
+  }
   .trip-page .trips-cell-link {
     display: none;
   }
@@ -496,16 +435,54 @@
 .trip-page .trips-col-job {
   width: 9%;
 }
-.trip-page .trips-job {
-  display: inline-flex;
-  padding: 2px 6px;
-  border-radius: var(--radius-badge);
-  background: var(--surface-active);
-  color: var(--secondary);
-  font-size: var(--font-small);
-  line-height: 1.4;
+
+/* Fixed metadata widths keep unbroken badges inside their cells; the table scrolls as a unit. */
+@media (min-width: 801px) {
+  .trip-page .trips-table .table {
+    min-width: 2120px;
+  }
+  .trip-page .trips-col-number {
+    width: 60px;
+  }
+  .trip-page .trips-col-time {
+    width: 140px;
+  }
+  .trip-page .trips-col-game {
+    width: 180px;
+  }
+  .trip-page .trips-col-cargo {
+    width: 210px;
+  }
+  .trip-page .trips-col-job {
+    width: 200px;
+  }
+  .trip-page .trips-col-route {
+    width: 310px;
+  }
+  .trip-page .trips-col-distance {
+    width: 100px;
+  }
+  .trip-page .trips-col-revenue {
+    width: 180px;
+  }
+  .trip-page .trips-col-outcome {
+    width: 140px;
+  }
+  .trip-page .trips-col-recording {
+    width: 130px;
+  }
+  .trip-page .trips-col-decision {
+    width: 170px;
+  }
+  .trip-page .trips-col-source {
+    width: 150px;
+  }
+  .trip-page .trips-col-open {
+    width: 30px;
+  }
 }
-.trip-page .trips-job[data-job="world-of-trucks"] {
-  color: var(--focus);
-  background: var(--accent-soft);
+@media (min-width: 801px) and (max-width: 1399px) {
+  .trip-page .trips-table .table {
+    min-width: 1850px;
+  }
 }

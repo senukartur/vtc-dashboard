@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { Flame } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import {
@@ -7,7 +8,6 @@ import {
   formatUtc,
   type Locale,
 } from "../../shared/formatting.js";
-import { FlameIcon } from "../../shared/ui/flame-icon.js";
 import { Badge } from "../../shared/ui/primitives.js";
 import { percent, setLimits } from "./model.js";
 
@@ -124,8 +124,7 @@ export function LimitChips({ limits }: { limits: Limits }) {
         </Badge>
       ))}
       {set.hardMode && (
-        <Badge className="badge-hard-mode">
-          <FlameIcon size={12} />
+        <Badge tone="ok" icon={Flame}>
           {t("hardMode")}
         </Badge>
       )}
@@ -183,7 +182,7 @@ export function LimitList({ limits }: { limits: Limits }) {
       </div>
       <div>
         <dt className="qualification-hard-mode">
-          <FlameIcon />
+          <Flame size={13} strokeWidth={1.8} aria-hidden="true" />
           {t("hardMode")}
         </dt>
         <dd>{t(limits.hardModeRequired ? "hardModeRequired" : "hardModeOptional")}</dd>

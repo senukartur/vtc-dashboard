@@ -130,7 +130,7 @@ test(
     await catalogLanguage(page);
     await loaded(page);
 
-    await expect(status(page)).toHaveText("✓Accepted");
+    await expect(status(page)).toHaveText("Accepted");
     await expect(page.locator(".trip-detail-meta")).toHaveText(
       "ETS2 · Telemetry · completed 10 Nov, 18:00",
     );
@@ -218,7 +218,7 @@ test(
     );
     await expect(rules.nth(3)).toContainText("Trip: not ADR · Limit: Forbidden");
     await expect(rules.nth(4)).toContainText("Hard Mode · Passes");
-    await expect(rules.nth(4).locator("svg.flame-icon")).toBeVisible();
+    await expect(rules.nth(4).locator("svg.lucide-flame")).toBeVisible();
     await expect(rules.nth(4)).toContainText("Trip: unknown · Limit: Not required");
 
     // The author sees no reviewer-only workspace, technical details or reconciliation data.
@@ -246,7 +246,7 @@ test(
     await catalogLanguage(page);
     await loaded(page);
 
-    await expect(status(page)).toHaveText("●Pending review");
+    await expect(status(page)).toHaveText("Pending review");
     await expect(tile(page, "Distance")).toContainText("500 km");
     await expect(tile(page, "Distance")).toContainText("by the report · no telemetry");
     await expect(tile(page, "Credited")).toContainText("Not yet");
@@ -392,7 +392,7 @@ test(
     await loaded(page);
 
     // Without a report to revise the trip is rejected, not returned for fixes.
-    await expect(status(page)).toHaveText("✕Rejected");
+    await expect(status(page)).toHaveText("Rejected");
     await expect(page.getByRole("link", { name: "Fix the report", exact: true })).toHaveCount(0);
     await expect(tile(page, "Credited")).toContainText("No");
     await expect(tile(page, "What next")).toContainText("Not counted");
@@ -422,7 +422,7 @@ test(
     state.view = needsFixManual();
     await page.reload();
     await loaded(page);
-    await expect(status(page)).toHaveText("!Needs fixes");
+    await expect(status(page)).toHaveText("Needs fixes");
     const returned = region(page, "History").getByRole("listitem");
     await expect(returned).toHaveCount(3);
     await expect(returned.nth(0)).toContainText("Report submitted");
@@ -578,7 +578,7 @@ test(
     );
     await expect(page.getByRole("link", { name: "Fix the report", exact: true })).toHaveCount(0);
     // Staff read the same status and credit as the owner; only the owner can act on the fix.
-    await expect(status(page)).toHaveText("!Needs fixes");
+    await expect(status(page)).toHaveText("Needs fixes");
     await expect(page.locator(".trip-detail-meta")).toContainText("Driver: Fictional Other Driver");
     await expect(tile(page, "What next")).toContainText("Waiting for the driver's fix");
     await expect(tile(page, "What next")).toContainText(
@@ -640,7 +640,7 @@ const labels = {
       ["На проверке", "Ничего не нужно", "Пока нет"],
       ["Нужно исправить", "Исправьте отчёт", "Пока нет"],
       ["Отклонён", "Не засчитан", "Нет"],
-      ["В пути", "Завершите доставку", "Пока нет"],
+      ["Выполняется", "Завершите доставку", "Пока нет"],
       ["Ещё не проверен", "Ещё не проверен", "Пока нет"],
       ["Отменён", "Доставка отменена", "Нет"],
     ],
@@ -728,7 +728,7 @@ test(
           await expect(card).toContainText(longEventTitle);
           await expect(check).toContainText(`${longTrailerLabel}, ${longTrailerLabel}`);
           await expect(check).toContainText(`${longTrailerLabel} Tanker`);
-          await expect(check.locator("svg.flame-icon")).toBeVisible();
+          await expect(check.locator("svg.lucide-flame")).toBeVisible();
           const plate = await sender.locator(".company-logo").boundingBox();
           const company = await sender.locator(".trip-company-name").boundingBox();
           if (!plate || !company) throw new Error("COMPANY_NOT_RENDERED");
@@ -766,13 +766,19 @@ test(
         if (width >= 1100) expect(new Set(tiles).size).toBe(1);
         if (width < 600) expect(new Set(tiles).size).toBe(3);
 
-        // Result symbols, the effective badge and the status never wrap inside themselves.
-        const states = page.locator(".qualification-check-symbol, .trip-source-effective");
+        // Lucide paths have independent rectangles; only text rectangles determine wrapping.
+        const states = page.locator(".trip-source-effective");
         for (const lines of await states.evaluateAll((elements) =>
           elements.map((element) => {
-            const range = document.createRange();
-            range.selectNodeContents(element);
-            return new Set(Array.from(range.getClientRects(), (rect) => Math.round(rect.top))).size;
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+            const tops: number[] = [];
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              if (!node.textContent?.trim()) continue;
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              tops.push(...Array.from(range.getClientRects(), (rect) => Math.round(rect.top)));
+            }
+            return new Set(tops).size;
           }),
         ))
           expect(lines).toBe(1);

@@ -98,7 +98,7 @@ function LevelView({ levelId }: { levelId: string }) {
       <header className="qualification-header">
         <div className="qualification-title stack">
           <div className="qualification-title-row">
-            <Badge className="badge-neutral">{level.game.toUpperCase()}</Badge>
+            <Badge tone={level.game}>{level.game.toUpperCase()}</Badge>
             <h1>{level.name}</h1>
           </div>
           <p className="qualification-muted">

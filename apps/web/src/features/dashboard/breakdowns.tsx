@@ -5,7 +5,7 @@ import { Fragment, type ReactNode, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { formatDecimal, type Locale } from "../../shared/formatting.js";
-import { Card } from "../../shared/ui/primitives.js";
+import { Badge, Card } from "../../shared/ui/primitives.js";
 import { KeepFocusButton } from "../events/components.js";
 import { useBlockRetry } from "./blocks.js";
 import { Skeleton } from "./components.js";
@@ -136,7 +136,11 @@ function RankedItems({
           {view.rows.map((row) => (
             <li key={row.key} className="dashboard-breakdown-row">
               <div className="dashboard-breakdown-line">
-                {view.chips && <span className="dashboard-game">{row.game.toUpperCase()}</span>}
+                {view.chips && (
+                  <Badge tone={row.game} className="dashboard-game">
+                    {row.game.toUpperCase()}
+                  </Badge>
+                )}
                 <span className="dashboard-breakdown-label">
                   {row.labels.map(({ role, label }) => (
                     <Fragment key={role}>

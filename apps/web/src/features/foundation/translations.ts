@@ -1,5 +1,6 @@
 export const foundationTranslations = {
   en: {
+    badgeExamples: "Badge states",
     unitKm: "km",
     eyebrow: "UI foundation / synthetic examples",
     title: "A shared language for the road",
@@ -102,6 +103,7 @@ export const foundationTranslations = {
     controlsLogText: "Log panel with fictional history content.",
   },
   ru: {
+    badgeExamples: "Состояния бейджей",
     unitKm: "км",
     eyebrow: "Основа интерфейса / синтетические примеры",
     title: "Общий язык в пути",

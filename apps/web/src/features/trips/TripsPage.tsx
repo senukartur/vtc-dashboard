@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
@@ -253,7 +254,8 @@ export function TripsPage() {
                     change("ownerId", "");
                   }}
                 >
-                  {driver ?? t("selectedDriver")} <span aria-hidden="true">×</span>
+                  {driver ?? t("selectedDriver")}{" "}
+                  <X size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
                 </Button>
               )}
               <small className="trips-timezone">{t("timesIn", { timezone })}</small>

@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 // Adapted from shadcn/ui d2fba50; see third_party/shadcn-ui/LICENSE.
 // Class names map to semantic calendar-* rules in date-time-field.css; the react-day-picker
 // stylesheet is not imported.
@@ -73,24 +74,22 @@ function CalendarRoot({ className, rootRef, ...props }: RootProps) {
 }
 
 function CalendarChevron({ className, orientation }: ChevronProps) {
+  const Icon =
+    orientation === "left"
+      ? ChevronLeft
+      : orientation === "right"
+        ? ChevronRight
+        : orientation === "up"
+          ? ChevronUp
+          : ChevronDown;
   return (
-    <svg
-      className={cn("calendar-chevron", className)}
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
+    <Icon
+      size={16}
+      strokeWidth={1.8}
       aria-hidden="true"
       focusable="false"
-    >
-      <path
-        d={orientation === "left" ? "M10 3 5 8l5 5" : "m6 3 5 5-5 5"}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+      className={cn("calendar-chevron", className)}
+    />
   );
 }
 

@@ -1,3 +1,4 @@
+import { Flame, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -5,7 +6,6 @@ import { useSession } from "../../app/Session.js";
 import { adrClasses, itemSchema } from "../../shared/catalog-selectors/contracts.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
-import { FlameIcon } from "../../shared/ui/flame-icon.js";
 import { InfoTip } from "../../shared/ui/info-tip.js";
 import { Badge, Button, Card, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
@@ -308,7 +308,7 @@ function Editor({
         <span aria-current="page">{detail ? t("edit") : t("newTitle")}</span>
       </nav>
       <header className="qualification-title-row">
-        <Badge className="badge-neutral">{game.toUpperCase()}</Badge>
+        <Badge tone={game}>{game.toUpperCase()}</Badge>
         <h1>{title}</h1>
       </header>
       <form
@@ -520,7 +520,7 @@ function Editor({
             </fieldset>
             <fieldset className="qualification-fieldset">
               <legend className="qualification-hard-mode">
-                <FlameIcon />
+                <Flame size={13} strokeWidth={1.8} aria-hidden="true" />
                 {t("hardMode")}
                 <InfoTip label={t("hardModeTipLabel")} title={t("hardMode")}>
                   <p>{t("hardModeTip1")}</p>
@@ -664,18 +664,16 @@ function TrailerChip({
     if (trailer.label === null && fetched) onLabel(fetched);
   }, [trailer.label, fetched, onLabel]);
   return (
-    <li>
-      <Badge className="badge-neutral">
-        {name}
-        <button
-          type="button"
-          className="qualification-chip-remove"
-          aria-label={t("trailerRemove", { name })}
-          onClick={onRemove}
-        >
-          ×
-        </button>
-      </Badge>
+    <li className="qualification-selected-chip">
+      <Badge>{name}</Badge>
+      <button
+        type="button"
+        className="qualification-chip-remove"
+        aria-label={t("trailerRemove", { name })}
+        onClick={onRemove}
+      >
+        <X size={14} strokeWidth={1.8} aria-hidden="true" />
+      </button>
     </li>
   );
 }

@@ -29,24 +29,7 @@
   position: absolute;
   top: 0;
   right: -2px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 3px;
-  border: 2px solid var(--chrome);
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--foreground);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
   font-variant-numeric: tabular-nums;
-}
-.notification-badge-unknown {
-  background: var(--surface-active);
-  color: var(--muted);
 }
 
 /* Shared message pieces: words wrap only between words unless one word cannot fit a line. */
@@ -437,10 +420,7 @@
   color: var(--muted);
   font-size: var(--font-small);
 }
-.notification-meta .badge {
-  background: var(--accent-soft);
-  color: var(--focus);
-}
+
 .notification-note {
   margin: 0;
   color: var(--muted);

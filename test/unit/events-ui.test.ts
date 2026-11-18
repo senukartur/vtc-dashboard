@@ -62,18 +62,18 @@ test("compact times and the timezone label carry the offset at that instant", ()
   );
 });
 
-test("response symbols stay within the font coverage set and pair with a text label", () => {
-  const allowed = new Set(["✓", "✕", "◇"]);
+test("response icons pair with a localized text label", () => {
+  const allowed = new Set(["check", "x", "circle-help"]);
   for (const response of ["participating", "declined", "unanswered"] as const) {
     const tone = responseTone(response);
     expect(tone.tone).toBe(response);
-    expect(allowed.has(tone.symbol)).toBe(true);
+    expect(allowed.has(tone.icon)).toBe(true);
     for (const locale of ["en", "ru"] as const)
       expect(eventTranslations[locale][responseChoiceKey(response)]).toBeTruthy();
   }
-  expect(responseTone("participating").symbol).toBe("✓");
-  expect(responseTone("declined").symbol).toBe("✕");
-  expect(responseTone("unanswered").symbol).toBe("◇");
+  expect(responseTone("participating").icon).toBe("check");
+  expect(responseTone("declined").icon).toBe("x");
+  expect(responseTone("unanswered").icon).toBe("circle-help");
   expect(eventTranslations.ru.choiceDeclined).toBe("Не смогу");
   expect(eventTranslations.ru.choiceUnanswered).toBe("Без ответа");
 });

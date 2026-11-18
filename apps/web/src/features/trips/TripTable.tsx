@@ -1,8 +1,8 @@
+import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
-import { FlameIcon } from "../../shared/ui/flame-icon.js";
 import { DataTable, type DataTableColumn, type DataTableProps } from "../../shared/ui/DataTable.js";
 import { Badge } from "../../shared/ui/primitives.js";
 import { shortDate } from "../review/review-model.js";
@@ -15,13 +15,17 @@ import {
 import type { DTO } from "./transport.js";
 import "./trips-list.css";
 
+import {
+  GameModeBadge,
+  HardModeBadge,
+  JobTypeBadge,
+  OutcomeBadge,
+  RecordingBadge,
+  SourceBadge,
+  StatusBadge,
+} from "./badges.js";
+
 type Decision = DTO["TripSummary"]["decision"];
-const decisionSymbol: Record<Decision, string | null> = {
-  unassessed: null,
-  pending_review: "●",
-  accepted: "✓",
-  rejected: "✕",
-};
 
 export function CatalogName({ value }: { value: DTO["CatalogLabel"] | null }) {
   const { t } = useTranslation("trips");
@@ -38,21 +42,14 @@ export function CatalogName({ value }: { value: DTO["CatalogLabel"] | null }) {
 
 export function GameChip({ game }: { game: DTO["TripSummary"]["game"] }) {
   return (
-    <span className="trips-game" data-game={game}>
+    <Badge tone={game} className="trips-game" data-game={game}>
       {game.toUpperCase()}
-    </span>
+    </Badge>
   );
 }
 
 export function DecisionBadge({ decision }: { decision: Decision }) {
-  const { t } = useTranslation("trips"),
-    symbol = decisionSymbol[decision];
-  return (
-    <Badge className="trips-decision" data-decision={decision}>
-      {symbol && <span aria-hidden="true">{symbol}</span>}
-      {t(decision)}
-    </Badge>
-  );
+  return <StatusBadge status={decision} className="trips-decision" />;
 }
 
 export function sourceNames(trip: DTO["TripSummary"], t: (key: string) => string) {
@@ -64,36 +61,6 @@ export type TripTableState = Pick<
   DataTableProps<Trip, "completion">,
   "status" | "busy" | "error" | "onRetry" | "empty" | "filtered" | "pagination"
 >;
-
-function OutcomeBadge({ trip }: { trip: Trip }) {
-  const { t } = useTranslation("trips");
-  return (
-    <Badge className="trips-outcome" data-outcome={trip.outcome}>
-      <span aria-hidden="true">
-        {trip.outcome === "delivered" ? "✓" : trip.outcome === "cancelled" ? "✕" : "◇"}
-      </span>
-      {t(trip.outcome === "open" ? "status_in_progress" : trip.outcome)}
-    </Badge>
-  );
-}
-
-function RecordingBadge({ trip }: { trip: Trip }) {
-  const { t } = useTranslation("trips");
-  return (
-    <Badge className="trips-recording" data-recording={trip.recording ?? "unknown"}>
-      <span aria-hidden="true">
-        {trip.recording === "complete" ? "✓" : trip.recording === "partial" ? "△" : "◇"}
-      </span>
-      {t(
-        trip.recording === "complete"
-          ? "complete"
-          : trip.recording === "partial"
-            ? "partialRecording"
-            : "unknownRecording",
-      )}
-    </Badge>
-  );
-}
 
 export function TripTable({
   items,
@@ -152,25 +119,9 @@ export function TripTable({
         <span className="trips-cell-stack">
           <span className="trips-game-line">
             <GameChip game={trip.game} />
-            {trip.hardModeResult && trip.hardModeResult !== "unknown" && (
-              <span
-                className="trips-hard-mode"
-                data-result={trip.hardModeResult}
-                role="img"
-                aria-label={`Hard Mode: ${t(`telemetryAudit_${trip.hardModeResult}`)}`}
-              >
-                <FlameIcon size={12} /> HM
-                {trip.hardModeResult === "not-qualified" && <span aria-hidden="true">✕</span>}
-              </span>
-            )}
+            <HardModeBadge result={trip.hardModeResult} compact />
           </span>
-          {trip.gameMode && (
-            <span className="trips-mode" data-mode={trip.gameMode}>
-              {t(
-                trip.gameMode === "unknown" ? "recordedUnknown" : `telemetryMode_${trip.gameMode}`,
-              )}
-            </span>
-          )}
+          <GameModeBadge mode={trip.gameMode} />
         </span>
       ),
     },
@@ -191,13 +142,7 @@ export function TripTable({
       header: t("recordedJobType"),
       className: "trips-col-job",
       cell: (trip) =>
-        trip.jobType && trip.jobType !== "unknown" ? (
-          <span className="trips-job" data-job={trip.jobType}>
-            {t(`telemetryJob_${trip.jobType}`)}
-          </span>
-        ) : (
-          <span className="trips-muted">—</span>
-        ),
+        trip.jobType ? <JobTypeBadge job={trip.jobType} /> : <span className="trips-muted">—</span>,
     },
     {
       id: "route",
@@ -276,13 +221,13 @@ export function TripTable({
       id: "outcome",
       header: t("listOutcome"),
       className: "trips-col-outcome",
-      cell: (trip) => <OutcomeBadge trip={trip} />,
+      cell: (trip) => <OutcomeBadge outcome={trip.outcome} />,
     },
     {
       id: "recording",
       header: t("recording"),
       className: "trips-col-recording",
-      cell: (trip) => <RecordingBadge trip={trip} />,
+      cell: (trip) => <RecordingBadge recording={trip.recording} />,
     },
     {
       id: "decision",
@@ -292,8 +237,8 @@ export function TripTable({
         <span className="trips-cell-stack">
           <DecisionBadge decision={trip.decision} />
           <span className="trips-secondary-status">
-            <OutcomeBadge trip={trip} />
-            <RecordingBadge trip={trip} />
+            <OutcomeBadge outcome={trip.outcome} />
+            <RecordingBadge recording={trip.recording} />
           </span>
         </span>
       ),
@@ -302,7 +247,13 @@ export function TripTable({
       id: "source",
       header: t("source"),
       className: "trips-col-source trips-muted",
-      cell: (trip) => <span>{sourceNames(trip, t)}</span>,
+      cell: (trip) => (
+        <span className="trips-cell-stack">
+          {trip.sourceKinds.map((source) => (
+            <SourceBadge key={source} source={source} />
+          ))}
+        </span>
+      ),
     },
     {
       id: "open",
@@ -310,9 +261,7 @@ export function TripTable({
       cardLabel: false,
       className: "trips-col-open",
       cell: () => (
-        <span aria-hidden="true" className="trips-chevron">
-          ›
-        </span>
+        <ChevronRight aria-hidden="true" size={16} strokeWidth={1.8} className="trips-chevron" />
       ),
     },
   ];

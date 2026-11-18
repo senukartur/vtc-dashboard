@@ -1,3 +1,4 @@
+import { Check, Clock, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
@@ -100,10 +101,14 @@ function useDates() {
 }
 function StatusBadge({ status }: { status: ApplicationStatus }) {
   const { t } = useTranslation("administration"),
-    { tone, symbol } = applicationTone(status);
+    { tone, icon } = applicationTone(status);
   return (
-    <Badge size="xs" className={`applications-status applications-tone-${tone}`}>
-      <span aria-hidden="true">{symbol}</span>
+    <Badge
+      size="xs"
+      tone={tone}
+      icon={{ clock: Clock, check: Check, x: X }[icon]}
+      className="applications-status"
+    >
       {t(`applicationsUi.appStatus.${status}`)}
     </Badge>
   );
@@ -158,7 +163,18 @@ function Invitation({ id }: { id: string }) {
       <div className="applications-section-head">
         <h3>{t("invitation")}</h3>
         {view && (
-          <Badge size="xs" className={`applications-invite applications-invite-${view.badge}`}>
+          <Badge
+            size="xs"
+            tone={view.badge === "active" ? "ok" : view.badge === "expired" ? "warn" : "neutral"}
+            icon={
+              view.badge === "active" || view.badge === "used"
+                ? Check
+                : view.badge === "revoked"
+                  ? X
+                  : Clock
+            }
+            className="applications-invite"
+          >
             {t(`applicationsUi.${inviteBadge[view.badge]}`)}
           </Badge>
         )}
@@ -325,15 +341,14 @@ function ApplicationDetail({ id, back }: { id: string; back: () => void }) {
       query.data?.etag,
     ));
   }
-  const games = app?.fields.games.map((game) => t(game)).join(", "),
-    tone = app && applicationTone(app.status);
+  const games = app?.fields.games.map((game) => t(game)).join(", ");
   return (
     <Card className="admin-detail applications-detail stack">
       <Button className="admin-mobile-back" variant="ghost" onClick={back}>
         {t("back")}
       </Button>
       <QueryState pending={query.isPending} error={query.isError} retry={query.refetch} />
-      {app && tone && (
+      {app && (
         <>
           <div className="applications-detail-head">
             <div className="applications-title">
@@ -398,7 +413,7 @@ function ApplicationDetail({ id, back }: { id: string; back: () => void }) {
                   <span aria-hidden="true">·</span>
                   <StatusBadge status={previous.status} />
                   {previous.id === app.id && (
-                    <Badge size="xs" className="applications-current">
+                    <Badge size="xs" tone="info" className="applications-current">
                       {t("applicationsUi.thisApplication")}
                     </Badge>
                   )}
@@ -489,9 +504,11 @@ function ApplicationDetail({ id, back }: { id: string; back: () => void }) {
             ) : (
               <>
                 <p className="applications-summary">
-                  <span aria-hidden="true" className={`applications-tone-${tone.tone}`}>
-                    {tone.symbol}
-                  </span>{" "}
+                  {app.status === "rejected" ? (
+                    <X aria-hidden="true" size={14} strokeWidth={1.8} />
+                  ) : (
+                    <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+                  )}{" "}
                   {t(
                     app.status === "rejected"
                       ? "applicationsUi.rejectedSummary"
@@ -614,7 +631,7 @@ function Applications() {
                     {[
                       <span key="games" className="applications-games">
                         {app.fields.games.map((game) => (
-                          <Badge key={game} size="xs">
+                          <Badge key={game} size="xs" tone={game}>
                             {t(`applicationsUi.gameShort.${game}`)}
                           </Badge>
                         ))}

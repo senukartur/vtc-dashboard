@@ -1,3 +1,4 @@
+import { Check, Flame } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -5,22 +6,16 @@ import { useSession } from "../../app/Session.js";
 import { type CatalogList, itemSchema } from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
 import { accountTimeZone, formatQuantity, formatUtc } from "../../shared/formatting.js";
-import { FlameIcon } from "../../shared/ui/flame-icon.js";
 import { InfoTip } from "../../shared/ui/info-tip.js";
 import { Badge, Card } from "../../shared/ui/primitives.js";
 import { CompanyLogo } from "../catalogs/CompanyLogo.js";
 import { formatDamage } from "../manual-reports/model.js";
 import { QualificationCheckList } from "../qualifications/QualificationCheckList.js";
 import { EvidenceViewer } from "../review/decision-parts.js";
+import { GameModeBadge, JobTypeBadge, OutcomeBadge, SourceBadge } from "./badges.js";
 import { CatalogName } from "./TripTable.js";
-import { type DTO, revisionFields, tripSourceLabels } from "./transport.js";
-import {
-  recordedValueKey,
-  reportedDamage,
-  sourceOutcomeKey,
-  tripTimes,
-  unknownHintKey,
-} from "./trip-page-model.js";
+import { type DTO, revisionFields } from "./transport.js";
+import { recordedValueKey, reportedDamage, tripTimes, unknownHintKey } from "./trip-page-model.js";
 import "../catalogs/catalogs.css";
 
 /** Interface language and the viewer's display time zone ("as on the device" when unset). */
@@ -302,10 +297,18 @@ export function TripFacts({
     for (const [key, value] of conditions)
       add(
         key,
-        value ? t(value) : <UnknownValue label={t("recordedUnknown")} hint={hint} />,
+        key === "recordedGameMode" ? (
+          <GameModeBadge mode={recorded?.gameMode ?? summary.gameMode ?? "unknown"} />
+        ) : key === "recordedJobType" ? (
+          <JobTypeBadge job={recorded?.jobType ?? "unknown"} />
+        ) : value ? (
+          t(value)
+        ) : (
+          <UnknownValue label={t("recordedUnknown")} hint={hint} />
+        ),
         key === "recordedHardModeResult" ? (
           <>
-            <FlameIcon size={12} /> {t(key)}
+            <Flame size={12} strokeWidth={1.8} aria-hidden="true" /> {t(key)}
           </>
         ) : (
           t(key)
@@ -378,9 +381,11 @@ export function TripSources({ sources }: { sources: DTO["TripStage4Source"][] | 
             {sources.map((source) => (
               <li key={source.kind}>
                 <div className="trip-source-head">
-                  <strong>{t(tripSourceLabels[source.kind])}</strong>
+                  <SourceBadge source={source.kind} />
                   {source.effective && (
-                    <Badge className="trip-source-effective">{t("sourceEffective")}</Badge>
+                    <Badge tone="info" icon={Check} className="trip-source-effective">
+                      {t("sourceEffective")}
+                    </Badge>
                   )}
                 </div>
                 <dl className="trip-facts trip-source-facts">
@@ -394,7 +399,9 @@ export function TripSources({ sources }: { sources: DTO["TripStage4Source"][] | 
                   </div>
                   <div>
                     <dt>{t("outcome")}</dt>
-                    <dd>{t(sourceOutcomeKey(source.state))}</dd>
+                    <dd>
+                      <OutcomeBadge outcome={source.state} />
+                    </dd>
                   </div>
                 </dl>
               </li>

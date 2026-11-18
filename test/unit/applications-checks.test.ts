@@ -233,9 +233,9 @@ describe("checkBadge", () => {
     expect(checkBadge(undefined)).toEqual(notChecked);
     expect(checkBadge(null)).toEqual(notChecked);
   });
-  test("the four groups have distinct symbols and tones, and every label is translated", () => {
+  test("the four groups have distinct icons and tones, and every label is translated", () => {
     const looks = Object.values(checkBadgeLook);
-    expect(new Set(looks.map((look) => look.symbol)).size).toBe(4);
+    expect(new Set(looks.map((look) => look.icon)).size).toBe(4);
     expect(new Set(looks.map((look) => look.tone)).size).toBe(4);
     const labels = [
       "noBans",

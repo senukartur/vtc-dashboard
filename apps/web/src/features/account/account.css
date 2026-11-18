@@ -201,10 +201,6 @@
 .account-settings .settings-status-saved {
   color: var(--accepted);
 }
-.account-settings .badge-pending {
-  background: var(--pending-surface);
-  color: var(--pending);
-}
 
 /* Disabled-but-focusable actions keep their explanation reachable by keyboard. */
 .account-settings .button[aria-disabled="true"] {

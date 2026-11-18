@@ -1,3 +1,4 @@
+import { CalendarDays } from "lucide-react";
 import { Fragment, type KeyboardEvent, useId, useRef, useState } from "react";
 import type { Matcher, Modifiers } from "react-day-picker";
 import { enUS } from "react-day-picker/locale/en-US";
@@ -119,27 +120,7 @@ const fromLocalDate = (date: Date) =>
   isoDate(date.getFullYear(), date.getMonth() + 1, date.getDate());
 
 function CalendarIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
-      <rect
-        x="2.5"
-        y="3.5"
-        width="11"
-        height="10"
-        rx="1.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M2.5 6.5h11M5.5 2v3M10.5 2v3"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
+  return <CalendarDays size={16} strokeWidth={1.8} aria-hidden="true" focusable="false" />;
 }
 
 /**

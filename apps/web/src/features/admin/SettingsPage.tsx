@@ -1,3 +1,4 @@
+import { Check, Circle, CircleHelp, Clock, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate, useNavigationType } from "react-router-dom";
@@ -66,8 +67,7 @@ function TimezoneEditor({
           <Label className="settings-row-title" htmlFor="company-timezone">
             {t("reportingTimezone")}
           </Label>
-          <Badge size="xs" className={`settings-tone-${set ? "accepted" : "pending"}`}>
-            <span aria-hidden="true">{set ? "✓" : "●"}</span>
+          <Badge size="xs" tone={set ? "ok" : "warn"} icon={set ? Check : CircleHelp}>
             {t(set ? "settingsUi.set" : "settingsUi.notSet")}
           </Badge>
         </div>
@@ -176,12 +176,11 @@ function Readiness({ data }: { data: DTO["CompanySettings"] }) {
       <ul className="settings-checks">
         {items.map((item) => (
           <li key={item.code}>
-            <span
-              aria-hidden="true"
-              className={`settings-tone-${item.ok ? "accepted" : "pending"}`}
-            >
-              {item.ok ? "✓" : "✕"}
-            </span>
+            {item.ok ? (
+              <Check size={14} strokeWidth={1.8} aria-hidden="true" />
+            ) : (
+              <X size={14} strokeWidth={1.8} aria-hidden="true" />
+            )}
             {readinessLabel(item, data.reportingTimezone, t)}
           </li>
         ))}
@@ -212,11 +211,12 @@ function Sources() {
                 <div className="settings-badges">
                   <Badge
                     size="xs"
-                    className={`settings-tone-${badges.implemented === "implemented" ? "accepted" : "neutral"}`}
+                    tone={badges.implemented === "implemented" ? "ok" : "neutral"}
+                    icon={badges.implemented === "implemented" ? Check : CircleHelp}
                   >
                     {t(`settingsUi.sourceState.${badges.implemented}`)}
                   </Badge>
-                  <Badge size="xs" className={`settings-tone-${live ? "accepted" : "neutral"}`}>
+                  <Badge size="xs" tone={live ? "ok" : "neutral"} icon={live ? Check : Circle}>
                     {t(`settingsUi.sourceState.${badges.runtime}`)}
                   </Badge>
                 </div>
@@ -595,7 +595,7 @@ function Leadership({ visible }: { visible: boolean }) {
       <div className="settings-leadership-head">
         <div className="settings-title-line">
           <h2 id="settings-leadership-title">{t("transfer")}</h2>
-          <Badge size="xs" className="settings-tone-pending">
+          <Badge size="xs" tone="warn" icon={Clock}>
             {t("settingsUi.directorOnly")}
           </Badge>
         </div>
@@ -790,7 +790,7 @@ export function SettingsPage() {
       {nickname && (
         <div className="card settings-transferred">
           <p ref={notice} role="status" tabIndex={-1}>
-            <span aria-hidden="true">✓ </span>
+            <Check size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
             {t("settingsUi.transferred", { nickname })}
           </p>
           <Button variant="outline" onClick={dismiss}>

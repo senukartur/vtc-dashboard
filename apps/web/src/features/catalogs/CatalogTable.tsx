@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import type { CatalogItem, CatalogList } from "../../shared/catalog-selectors/contracts.js";
 import { formatDecimal } from "../../shared/formatting.js";
-import { Button, Table } from "../../shared/ui/primitives.js";
+import { Badge, Button, Table } from "../../shared/ui/primitives.js";
 import { type CatalogRowFormat, CatalogUpdatedAt, MissingMetadata } from "./CatalogRowMetadata.js";
 import { CompanyLogo } from "./CompanyLogo.js";
 import { fallbackBadge, isTranslatable, tabLabels } from "./model.js";
@@ -14,8 +14,8 @@ export function RowBadges({ list, item }: { list: CatalogList; item: CatalogItem
   const { t } = useTranslation("catalogs");
   return (
     <>
-      {item.hidden && <span className="catalog-badge">{t("hidden")}</span>}
-      {fallbackBadge(list, item) && <span className="catalog-badge">{t("rowFallback")}</span>}
+      {item.hidden && <Badge className="catalog-badge">{t("hidden")}</Badge>}
+      {fallbackBadge(list, item) && <Badge className="catalog-badge">{t("rowFallback")}</Badge>}
     </>
   );
 }

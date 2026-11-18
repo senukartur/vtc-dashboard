@@ -1,4 +1,5 @@
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Check, Clock, X } from "lucide-react";
 import {
   type ReactNode,
   type RefObject,
@@ -45,6 +46,7 @@ import { EventGallery, EventPublicCover } from "./EventDetailGallery.js";
 import { useMemberDetailRead, usePublicDetailRead } from "./EventDetailReads.js";
 import { EventRoster } from "./EventDetailRoster.js";
 import { EventEditor, Stage2EventEditor } from "./EventEditor.js";
+import { ResponseIcon } from "./EventResponseSummary.js";
 import { eventEditorAccessLost } from "./editor/commands.js";
 import { type DTO, eventTime, responseInput } from "./model.js";
 import { useEventCommand, useEventQuery } from "./queries.js";
@@ -112,7 +114,7 @@ function BackLink({ to }: { to: string }) {
   const { t } = useTranslation("events");
   return (
     <Link className="events-back" to={to}>
-      <span aria-hidden="true">←</span> {t("back")}
+      <ArrowLeft size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" /> {t("back")}
     </Link>
   );
 }
@@ -160,8 +162,20 @@ function EventHeading({
       <div className="events-header-top">
         <div className="events-header-text">
           <p className="events-header-meta">
-            <span className="events-game">{event.game.toUpperCase()}</span>
-            <Badge className={`events-status events-status-${event.status}`}>
+            <Badge tone={event.game} className="events-game">
+              {event.game.toUpperCase()}
+            </Badge>
+            <Badge
+              tone={
+                event.status === "cancelled"
+                  ? "error"
+                  : event.status === "completed"
+                    ? "ok"
+                    : "neutral"
+              }
+              icon={event.status === "cancelled" ? X : event.status === "completed" ? Check : Clock}
+              className="events-status"
+            >
               {t(event.status)}
             </Badge>
             {visibility && (
@@ -645,7 +659,7 @@ function ResponseForm({
         {t("responseDeadline", { start: eventTime(event.startsAt, locale, timezone) })}
       </p>
       <p className={`events-state events-tone-${state.tone}`}>
-        <span aria-hidden="true">{state.symbol}</span>{" "}
+        <ResponseIcon response={current.response} />{" "}
         {t(
           current.response === "participating"
             ? "stateParticipating"
@@ -721,7 +735,7 @@ function ClosedResponse({ member, phase }: { member: DetailMember; phase: EventP
         <div>
           <dt>{t("responseBeforeStart")}</dt>
           <dd className={`events-tone-${tone.tone}`}>
-            <span aria-hidden="true">{tone.symbol}</span> {t(responseChoiceKey(own.response))}
+            <ResponseIcon response={own.response} /> {t(responseChoiceKey(own.response))}
           </dd>
           {own.response === "declined" && own.declineReason && (
             <dd className="events-reason">
@@ -777,11 +791,12 @@ function Participants({
       {view.state === "ready" ? (
         <p className="events-counts">
           <span className="events-tone-participating">
-            <span aria-hidden="true">✓</span>{" "}
+            <Check size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
             {t("countParticipating", { count: view.participating })}
           </span>
           <span className="events-tone-declined">
-            <span aria-hidden="true">✕</span> {t("countDeclined", { count: view.declined })}
+            <X size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
+            {t("countDeclined", { count: view.declined })}
           </span>
         </p>
       ) : (

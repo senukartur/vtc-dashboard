@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { Badge } from "../shared/ui/primitives.js";
 import type { WorkspaceSummary } from "./workspace-summary.js";
 
 export function navAttention(
@@ -23,9 +24,9 @@ export function navAttention(
         ? t(`nav.attention.${key}`, { label, total: new Intl.NumberFormat(locale).format(count) })
         : undefined,
     badge: count ? (
-      <span className="nav-attention-badge" aria-hidden="true">
+      <Badge className="nav-attention-badge" tone="info" aria-hidden="true">
         {count > 99 ? "99+" : count}
-      </span>
+      </Badge>
     ) : null,
   };
 }

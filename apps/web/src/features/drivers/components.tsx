@@ -1,4 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
+import { ArrowRight, Check } from "lucide-react";
 import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -31,8 +32,8 @@ import {
   initial,
   type Level,
   ladderFor,
-  membershipParts,
   type MemberQualification,
+  membershipParts,
   monthLabel,
   nextLevel,
   sourceKeys,
@@ -60,9 +61,9 @@ export function Skeleton({ className }: { className?: string }) {
 
 function GameChip({ game }: { game: Game }) {
   return (
-    <span className="driver-game" data-game={game}>
+    <Badge tone={game} className="driver-game" data-game={game}>
       {gameName[game]}
-    </span>
+    </Badge>
   );
 }
 
@@ -136,7 +137,11 @@ export function ProfileHeader({
           {member && (
             <>
               {member.roles.map((role) => (
-                <Badge key={role} size="xs">
+                <Badge
+                  key={role}
+                  size="xs"
+                  tone={role === "director" || role === "deputy_director" ? "info" : "neutral"}
+                >
                   {t(`roles.${role}`)}
                 </Badge>
               ))}
@@ -145,12 +150,12 @@ export function ProfileHeader({
                   {t("profile.former")}
                 </Badge>
               ) : (
-                <Badge size="xs" className="driver-active">
+                <Badge size="xs" tone="ok" icon={Check} className="driver-active">
                   {t("profile.active")}
                 </Badge>
               )}
               {isSelf && (
-                <Badge size="xs" className="driver-self">
+                <Badge size="xs" tone="info" className="driver-self">
                   {t("profile.you")}
                 </Badge>
               )}
@@ -181,9 +186,14 @@ export function ProfileHeader({
         {chips.length > 0 && (
           <p className="driver-chips">
             {chips.map((chip) => (
-              <span key={chip.game} className="driver-level-chip" data-game={chip.game}>
+              <Badge
+                key={chip.game}
+                tone={chip.game}
+                className="driver-level-chip"
+                data-game={chip.game}
+              >
                 {gameName[chip.game]} · {chip.name}
-              </span>
+              </Badge>
             ))}
           </p>
         )}
@@ -416,11 +426,17 @@ export function QualificationCard({
                 data-state={current ? "current" : passed ? "passed" : "upcoming"}
               >
                 {index > 0 && (
-                  <span className="driver-ladder-arrow" aria-hidden="true">
-                    →
-                  </span>
+                  <ArrowRight
+                    size={14}
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                    focusable="false"
+                    className="driver-ladder-arrow"
+                  />
                 )}
-                <span className="driver-ladder-name">{level.name}</span>
+                <Badge tone={current ? "info" : "neutral"} className="driver-ladder-name">
+                  {level.name}
+                </Badge>
               </li>
             );
           })}

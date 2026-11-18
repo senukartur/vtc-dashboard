@@ -48,26 +48,11 @@
   gap: 2px;
   min-width: 0;
 }
-
 /* Game chip and status badges: text always carries the meaning, colour only supports it. */
 .events-page .events-game {
   flex: none;
-  padding: 0 5px;
-  border-radius: var(--radius-badge);
-  background: var(--accent-soft);
-  color: var(--focus);
-  font-size: var(--font-badge);
-  font-weight: 700;
-  line-height: 1.6;
 }
-.events-page .events-status-cancelled {
-  background: var(--rejected-surface);
-  color: var(--destructive);
-}
-.events-page .events-status-completed {
-  background: var(--accepted-surface);
-  color: var(--accepted);
-}
+
 .events-page .events-tone-participating {
   color: var(--accepted);
 }

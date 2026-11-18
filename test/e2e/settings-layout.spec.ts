@@ -459,7 +459,7 @@ test(
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
     await expect(notice(page)).toHaveText(
-      `✓ Leadership transferred to ${names.volga}. You remain a driver and keep your qualifications and trips.`,
+      `Leadership transferred to ${names.volga}. You remain a driver and keep your qualifications and trips.`,
     );
     await expect(notice(page)).toBeFocused();
     expect(

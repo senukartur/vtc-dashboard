@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { Info } from "lucide-react";
+import { type PointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover.js";
 
 // Long enough to cross the gap between the icon and the explanation without it closing.
@@ -93,20 +94,7 @@ export function InfoTip({
           }
         }}
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 11v5M12 8h.01" />
-        </svg>
+        <Info size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
       </PopoverTrigger>
       <PopoverContent
         className="info-tip-content"

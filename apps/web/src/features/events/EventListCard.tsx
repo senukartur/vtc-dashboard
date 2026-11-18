@@ -1,3 +1,4 @@
+import { Check, Clock, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -109,13 +110,25 @@ export function EventListCard({
           </Link>
         </h2>
         <p className="events-row-meta">
-          <span className="events-game">{event.game.toUpperCase()}</span>
+          <Badge tone={event.game} className="events-game">
+            {event.game.toUpperCase()}
+          </Badge>
           {event.platform && (
             <span>{event.platform === "truckersmp" ? "TruckersMP" : "HaulMP"}</span>
           )}
           {event.server && <span>{event.server}</span>}
           {event.status !== "scheduled" && (
-            <Badge className={`events-status events-status-${event.status}`}>
+            <Badge
+              tone={
+                event.status === "cancelled"
+                  ? "error"
+                  : event.status === "completed"
+                    ? "ok"
+                    : "neutral"
+              }
+              icon={event.status === "cancelled" ? X : event.status === "completed" ? Check : Clock}
+              className="events-status"
+            >
               {t(event.status)}
             </Badge>
           )}
@@ -157,11 +170,11 @@ export function EventListCard({
       <div className="event-list-responses">
         <div className="events-row-meta">
           <span className="events-tone-participating">
-            <span aria-hidden="true">✓</span>{" "}
+            <Check size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
             {t("countParticipating", { count: responseCounts.participating })}
           </span>
           <span className="events-tone-declined">
-            <span aria-hidden="true">✕</span>{" "}
+            <X size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
             {t("countDeclined", { count: responseCounts.declined })}
           </span>
         </div>

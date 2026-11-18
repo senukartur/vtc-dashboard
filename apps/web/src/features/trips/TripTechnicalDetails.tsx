@@ -1,3 +1,4 @@
+import { TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatUtc } from "../../shared/formatting.js";
@@ -69,7 +70,9 @@ export function TripTechnicalDetails({ view }: { view: DTO["TripPrivate"] }) {
                   <p className="review-decision-by">
                     {d.reviewer?.nickname ?? t("system")}
                     {d.acceptedOverLimits && (
-                      <Badge className="review-marker">{t("overLimitsMarker")}</Badge>
+                      <Badge className="review-marker" tone="warn" icon={TriangleAlert}>
+                        {t("overLimitsMarker")}
+                      </Badge>
                     )}
                   </p>
                   <Fields

@@ -52,6 +52,11 @@
   color: inherit;
   cursor: pointer;
 }
+.qualification-selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .qualification-next {
   display: inline-flex;
   flex-wrap: wrap;

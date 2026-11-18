@@ -216,22 +216,6 @@
 .review-queue .review-filed {
   font-size: var(--font-small);
 }
-.review-queue .review-flag {
-  max-width: 100%;
-  white-space: nowrap;
-}
-.review-queue .review-flag[data-flag="exceeded"] {
-  background: var(--rejected-surface);
-  color: var(--destructive);
-}
-.review-queue .review-flag[data-flag="check"] {
-  background: var(--pending-surface);
-  color: var(--pending);
-}
-.review-queue .review-flag[data-flag="none"] {
-  background: var(--accepted-surface);
-  color: var(--accepted);
-}
 
 /* Phone cards: line 1 driver and rules flag, line 2 route, line 3 type, revision and time. The
    header row stays available to assistive technology only. */
@@ -485,10 +469,9 @@
 .review-decision .review-diff thead th:first-child {
   width: 32%;
 }
+
 .review-decision .review-changed {
   margin-left: 4px;
-  background: var(--surface-active);
-  color: var(--focus);
   vertical-align: baseline;
 }
 
@@ -533,11 +516,6 @@
 }
 .review-decision .review-history p {
   color: var(--secondary);
-}
-:is(.review-decision, .trip-page) .review-marker {
-  background: var(--pending-surface);
-  color: var(--pending);
-  white-space: normal;
 }
 
 /* Decision form. */
@@ -824,5 +802,33 @@
   }
   .dispatch-review .dispatch-pair {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Unbroken status and source badges keep their full labels beside the decision panel. */
+@media (min-width: 761px) {
+  .review-queue .review-table .data-table-scroll {
+    position: relative;
+  }
+  .review-queue .review-table .table {
+    min-width: 840px;
+  }
+  .review-queue .review-col-driver {
+    width: 110px;
+  }
+  .review-queue .review-col-route {
+    width: 220px;
+  }
+  .review-queue .review-col-type {
+    width: 210px;
+  }
+  .review-queue .review-col-revision {
+    width: 65px;
+  }
+  .review-queue .review-col-rules {
+    width: 105px;
+  }
+  .review-queue .review-col-filed {
+    width: 130px;
   }
 }

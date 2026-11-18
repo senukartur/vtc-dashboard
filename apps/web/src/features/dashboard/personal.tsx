@@ -1,6 +1,7 @@
 // My overview blocks (VTC-159): the own month with its place and comparison, the start steps for a
 // member without trips and the phone link to the company overview. Lists only, no tables.
 import type { TFunction } from "i18next";
+import { ChevronRight } from "lucide-react";
 import { useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -190,9 +191,13 @@ export function CompanyLinkCard() {
     <Link to="/account/company" className="card dashboard-company-link">
       <span className="dashboard-company-link-title">{t("personal.companyLink")}</span>
       <span className="dashboard-muted"> · {t("personal.companyLinkSub")}</span>
-      <span className="dashboard-company-link-arrow" aria-hidden="true">
-        ›
-      </span>
+      <ChevronRight
+        size={14}
+        strokeWidth={1.8}
+        aria-hidden="true"
+        focusable="false"
+        className="dashboard-company-link-arrow"
+      />
     </Link>
   );
 }

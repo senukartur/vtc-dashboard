@@ -1,3 +1,4 @@
+import { Search } from "lucide-react";
 import { type RefObject, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Label, Select } from "../../shared/ui/primitives.js";
@@ -42,16 +43,7 @@ export function TripListFilters({
     <fieldset className="trips-filter-group" aria-label={t("filters")}>
       <div className="trips-toolbar">
         <div className="trips-search">
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          >
-            <circle cx="10.5" cy="10.5" r="6.5" />
-            <path d="m16 16 4.5 4.5" />
-          </svg>
+          <Search size={16} strokeWidth={1.8} aria-hidden="true" focusable="false" />
           <Label htmlFor="trip-search" className="visually-hidden">
             {t("searchPlaceholder")}
           </Label>

@@ -1,3 +1,4 @@
+import { Circle, X } from "lucide-react";
 // Drivers directory access panel (VTC-160): a drawer on desktop and a bottom sheet on phones over
 // the list. It reads the member through the Members page query and sends the Members page
 // commands unchanged (membership, roles, deactivation, reinstatement), with their ETag, CSRF,
@@ -163,7 +164,7 @@ export function AccessPanel({
               aria-label={t("access.close")}
               disabled={command.pending}
             >
-              <span aria-hidden="true">×</span>
+              <X size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
             </Button>
           </DialogClose>
         </div>
@@ -399,7 +400,7 @@ function Unsaved({ onReset }: { onReset: () => void }) {
   return (
     <div className="drivers-access-unsaved">
       <span>
-        <span aria-hidden="true">● </span>
+        <Circle size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
         {t("access.unsaved")}
       </span>
       <Button type="button" variant="ghost" size="xs" onClick={onReset}>

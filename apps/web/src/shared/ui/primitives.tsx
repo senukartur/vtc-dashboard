@@ -1,5 +1,6 @@
 // Adapted from shadcn/ui d2fba50; see third_party/shadcn-ui/LICENSE.
 import type { VariantProps } from "class-variance-authority";
+import type { LucideIcon } from "lucide-react";
 import { Label as LabelPrimitive, Slot } from "radix-ui";
 import type { ComponentProps } from "react";
 import { cn } from "../cn.js";
@@ -61,9 +62,17 @@ export function Card({ className, ...props }: ComponentProps<"section">) {
 export function Badge({
   className,
   size,
+  tone,
+  icon: Icon,
+  children,
   ...props
-}: ComponentProps<"span"> & VariantProps<typeof badgeVariants>) {
-  return <span data-slot="badge" className={cn(badgeVariants({ size }), className)} {...props} />;
+}: ComponentProps<"span"> & VariantProps<typeof badgeVariants> & { icon?: LucideIcon }) {
+  return (
+    <span data-slot="badge" className={cn(badgeVariants({ size, tone }), className)} {...props}>
+      {Icon && <Icon size={13} strokeWidth={1.8} aria-hidden="true" focusable="false" />}
+      {children}
+    </span>
+  );
 }
 export function Table({
   className,

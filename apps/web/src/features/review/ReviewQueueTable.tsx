@@ -1,3 +1,12 @@
+import {
+  Activity,
+  Check,
+  CircleHelp,
+  FileText,
+  History,
+  PenLine,
+  TriangleAlert,
+} from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, type To } from "react-router-dom";
@@ -6,17 +15,7 @@ import { DataTable, type DataTableColumn, type DataTableProps } from "../../shar
 import { Badge } from "../../shared/ui/primitives.js";
 import { CatalogName, GameChip } from "../trips/TripTable.js";
 import type { DTO } from "../trips/transport.js";
-import {
-  isOwn,
-  queueType,
-  type RuleFlag,
-  ruleFlag,
-  shortDate,
-  submittedAt,
-} from "./review-model.js";
-
-// Decorative symbols beside the flag text, so the rules state never relies on colour alone.
-const flagSymbol: Record<RuleFlag, string> = { exceeded: "!", check: "?", none: "✓" };
+import { isOwn, queueType, ruleFlag, shortDate, submittedAt } from "./review-model.js";
 
 /** Short visible text for a constrained cell; assistive technology reads the full text. */
 function Short({ short, full }: { short: ReactNode; full: ReactNode }) {
@@ -103,7 +102,23 @@ export function ReviewQueueTable({
       header: t("queueType"),
       cardLabel: false,
       className: "review-col-type review-type review-muted",
-      cell: (trip) => <span id={`review-type-${trip.id}`}>{t(`type_${queueType(trip)}`)}</span>,
+      cell: (trip) => (
+        <Badge
+          id={`review-type-${trip.id}`}
+          tone={queueType(trip) === "resubmission" ? "info" : "neutral"}
+          icon={
+            queueType(trip) === "resubmission"
+              ? PenLine
+              : queueType(trip) === "late_telemetry"
+                ? History
+                : queueType(trip) === "manual"
+                  ? FileText
+                  : Activity
+          }
+        >
+          {t(`type_${queueType(trip)}`)}
+        </Badge>
+      ),
     },
     {
       id: "revision",
@@ -127,8 +142,12 @@ export function ReviewQueueTable({
       cell: (trip) => {
         const flag = ruleFlag(trip.review?.reasonCodes ?? []);
         return (
-          <Badge className="review-flag" data-flag={flag}>
-            <span aria-hidden="true">{flagSymbol[flag]}</span>
+          <Badge
+            className="review-flag"
+            data-flag={flag}
+            tone={flag === "exceeded" ? "warn" : flag === "check" ? "info" : "ok"}
+            icon={flag === "exceeded" ? TriangleAlert : flag === "check" ? CircleHelp : Check}
+          >
             <Short short={t(`flag_${flag}`)} full={t(`flag_${flag}_full`)} />
           </Badge>
         );

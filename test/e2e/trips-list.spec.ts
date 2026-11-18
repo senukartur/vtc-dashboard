@@ -242,13 +242,13 @@ test(
       await expect(rowLink(page, first)).toHaveAccessibleName(routeName(first));
       await expect(rowLink(page, first)).toHaveAttribute("href", `/account/trips/${first}`);
       await expect(current.locator(".trips-outcome").first()).toHaveText(
-        ru ? "✓Доставлен" : "✓Delivered",
+        ru ? "Доставлен" : "Delivered",
       );
       await expect(current.locator(".trips-recording").first()).toHaveText(
-        ru ? "✓Полная" : "✓Complete",
+        ru ? "Полная" : "Complete",
       );
       await expect(current.locator(".trips-decision").first()).toHaveText(
-        ru ? "✓Принят" : "✓Accepted",
+        ru ? "Принят" : "Accepted",
       );
       await expect(current.getByText("0 km", { exact: true })).toHaveCount(ru ? 0 : 1);
       await expect(
@@ -324,7 +324,9 @@ test(
         ru ? "9 007 199 254 740 993 EUR" : "9,007,199,254,740,993 EUR",
       );
       await expect(firstRow.locator(".trips-distance")).toHaveText(ru ? "755 км" : "755 km");
-      await expect(firstRow.getByRole("img", { name: /^Hard Mode:/ })).toBeVisible();
+      await expect(firstRow.locator(".trips-hard-mode")).toHaveText("HM");
+      await expect(firstRow.locator(".trips-hard-mode svg")).toHaveClass(/lucide-flame/);
+      await expect(current.locator("tbody tr").nth(1).locator(".trips-hard-mode")).toHaveCount(0);
       for (const row of [0, 2]) {
         const cells = current.locator("tbody tr").nth(row).locator("td");
         for (let cell = 0; cell < (await cells.count()); cell++)
@@ -990,15 +992,15 @@ test(
         "en",
         [
           ["Job type", "Cargo market"],
-          ["Game mode", "Unknown"],
+          ["Game mode", "Mode unknown"],
           ["Hard Mode", "Unknown"],
         ],
       ],
       [
         "ru",
         [
-          ["Тип заказа", "Рынок грузов для своего прицепа"],
-          ["Режим игры", "Неизвестно"],
+          ["Тип заказа", "Грузоперевозки"],
+          ["Режим игры", "Режим неизвестен"],
           // Hard Mode keeps its English name in both languages.
           ["Hard Mode", "Неизвестно"],
         ],

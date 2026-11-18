@@ -19,20 +19,8 @@
 .applications-page .applications-referral {
   white-space: pre-line;
 }
-
 /* List badges and their legend (VTC-161). Text and symbol carry the group; tone only repeats it. */
-.applications-page .applications-check-badge.applications-check-passed {
-  background: var(--accepted-surface);
-  color: var(--accepted);
-}
-.applications-page .applications-check-badge.applications-check-attention {
-  background: var(--pending-surface);
-  color: var(--pending);
-}
-.applications-page .applications-check-badge.applications-check-failed {
-  background: var(--rejected-surface);
-  color: var(--destructive);
-}
+
 .applications-page .applications-check-legend {
   display: flex;
   align-items: center;
@@ -47,19 +35,9 @@
 }
 /* The portaled legend repeats the badge symbols in their tones. */
 .info-tip-content .applications-check-symbol {
-  display: inline-block;
   min-width: 1ch;
-  font-weight: 600;
 }
-.info-tip-content .applications-check-symbol.applications-check-passed {
-  color: var(--accepted);
-}
-.info-tip-content .applications-check-symbol.applications-check-attention {
-  color: var(--pending);
-}
-.info-tip-content .applications-check-symbol.applications-check-failed {
-  color: var(--destructive);
-}
+
 /* Phones hide the table header, so the row card names the badge. */
 .applications-page .applications-check-prefix {
   display: none;

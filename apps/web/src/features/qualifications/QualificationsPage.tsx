@@ -1,3 +1,4 @@
+import { ArrowDown, ArrowRight, ArrowUp, Star } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
@@ -11,7 +12,7 @@ import {
   DialogTitle,
 } from "../../shared/ui/dialog.js";
 import { InfoTip } from "../../shared/ui/info-tip.js";
-import { Button, Card } from "../../shared/ui/primitives.js";
+import { Badge, Button, Card } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import {
   failureText,
@@ -127,9 +128,16 @@ function Ladder({ game }: { game: Game }) {
       header: t("colName"),
       rowHeader: true,
       cell: (level) => (
-        <Link to={levelPath(level.id)} className="qualification-level-link">
-          {level.name}
-        </Link>
+        <span className="qualification-chips">
+          <Link to={levelPath(level.id)} className="qualification-level-link">
+            {level.name}
+          </Link>
+          {list?.mine?.level?.id === level.id && (
+            <Badge tone="info" icon={Star}>
+              {t("mine")}
+            </Badge>
+          )}
+        </span>
       ),
     },
     { id: "limits", header: t("colLimits"), cell: (level) => <LimitChips limits={level.limits} /> },
@@ -139,7 +147,8 @@ function Ladder({ game }: { game: Game }) {
       cell: (level) =>
         level.nextLevel ? (
           <span className="qualification-next">
-            <span aria-hidden="true">→</span> <strong>{level.nextLevel.name}</strong>
+            <ArrowRight size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
+            <strong>{level.nextLevel.name}</strong>
             <span className="qualification-muted">{needText(t, level.conditions, locale)}</span>
           </span>
         ) : (
@@ -168,7 +177,7 @@ function Ladder({ game }: { game: Game }) {
                   disabled={command.pending || level.position === 1}
                   onClick={() => move(level, level.position - 1)}
                 >
-                  ↑
+                  <ArrowUp size={14} strokeWidth={1.8} aria-hidden="true" />
                 </Button>
                 <Button
                   type="button"
@@ -178,7 +187,7 @@ function Ladder({ game }: { game: Game }) {
                   disabled={command.pending || level.position === levels.length}
                   onClick={() => move(level, level.position + 1)}
                 >
-                  ↓
+                  <ArrowDown size={14} strokeWidth={1.8} aria-hidden="true" />
                 </Button>
                 <Button asChild size="xs" variant="outline">
                   <Link

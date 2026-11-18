@@ -1,8 +1,9 @@
+import { Ellipsis } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { Dialog, DialogContent, DialogTitle } from "../../shared/ui/dialog.js";
-import { Button, Table } from "../../shared/ui/primitives.js";
+import { Badge, Button, Table } from "../../shared/ui/primitives.js";
 import { type CatalogRowFormat, CatalogUpdatedAt } from "./CatalogRowMetadata.js";
 import { CompanyLogo } from "./CompanyLogo.js";
 import type { Depot } from "./DepotForm.js";
@@ -19,7 +20,7 @@ interface RowActions extends CatalogRowFormat {
 function DepotBadges({ depot }: { depot: Depot }) {
   const { t } = useTranslation("catalogs");
   const hidden = depot.hidden || depot.company.label.hidden || depot.city.label.hidden;
-  return <>{hidden && <span className="catalog-badge">{t("hidden")}</span>}</>;
+  return <>{hidden && <Badge className="catalog-badge">{t("hidden")}</Badge>}</>;
 }
 
 const rowHidden = (depot: Depot) =>
@@ -138,7 +139,7 @@ export function DepotCards({
               aria-label={t("actions", { name: name(depot) })}
               onClick={() => setSheet(depot)}
             >
-              …
+              <Ellipsis size={16} strokeWidth={1.8} aria-hidden="true" />
             </Button>
           )}
         </div>
