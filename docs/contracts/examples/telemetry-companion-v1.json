@@ -1,0 +1,882 @@
+[
+  {
+    "name": "fictional-Capabilities-0",
+    "schema": "Capabilities",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "capability": "companion.own.v1",
+      "games": [
+        "ets2",
+        "ats"
+      ],
+      "qualificationEnabled": true,
+      "previewEnabled": true,
+      "resultsEnabled": true,
+      "maxBatch": 25,
+      "maxBodyBytes": 16384,
+      "previewTtlSeconds": 5,
+      "pollMinimumSeconds": 5
+    }
+  },
+  {
+    "name": "fictional-Qualification-1",
+    "schema": "Qualification",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ownerId": "00000000-0000-4000-8000-000000000005",
+      "game": "ets2",
+      "state": "assigned",
+      "assignment": {
+        "id": "00000000-0000-4000-8000-000000000004",
+        "startedAt": "2026-11-01T00:00:00.000Z",
+        "level": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "name": "Fictional first level",
+          "editVersion": 2
+        },
+        "limits": {
+          "massMinKg": "0",
+          "massMaxKg": "24000",
+          "distanceMinM": "100000",
+          "distanceMaxM": "500000",
+          "trailers": {
+            "mode": "any",
+            "typeIds": []
+          },
+          "adr": {
+            "mode": "any",
+            "classes": []
+          },
+          "hardModeRequired": true
+        }
+      },
+      "progress": {
+        "creditedTrips": 2,
+        "creditedDistanceM": "200000.125",
+        "conditions": {
+          "requiredTrips": 3,
+          "requiredDistanceM": "300000"
+        },
+        "remainingTrips": 1,
+        "remainingDistanceM": "99999.875",
+        "conditionsMet": false,
+        "nextLevel": {
+          "id": "00000000-0000-4000-8000-000000000006",
+          "name": "Fictional next level"
+        },
+        "terminal": false
+      },
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "progressRevision": "12",
+      "refreshAfterSeconds": 5,
+      "offlineUsableUntil": "2026-11-18T12:05:00.000Z"
+    }
+  },
+  {
+    "name": "fictional-Qualification-2",
+    "schema": "Qualification",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ownerId": "00000000-0000-4000-8000-000000000005",
+      "game": "ats",
+      "state": "assigned",
+      "assignment": {
+        "id": "00000000-0000-4000-8000-000000000004",
+        "startedAt": "2026-11-01T00:00:00.000Z",
+        "level": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "name": "Fictional first level",
+          "editVersion": 2
+        },
+        "limits": {
+          "massMinKg": "0",
+          "massMaxKg": "24000",
+          "distanceMinM": "100000",
+          "distanceMaxM": "500000",
+          "trailers": {
+            "mode": "any",
+            "typeIds": []
+          },
+          "adr": {
+            "mode": "any",
+            "classes": []
+          },
+          "hardModeRequired": true
+        }
+      },
+      "progress": {
+        "creditedTrips": 2,
+        "creditedDistanceM": "200000.125",
+        "conditions": {
+          "requiredTrips": 3,
+          "requiredDistanceM": "300000"
+        },
+        "remainingTrips": 1,
+        "remainingDistanceM": "99999.875",
+        "conditionsMet": false,
+        "nextLevel": null,
+        "terminal": true
+      },
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "progressRevision": "12",
+      "refreshAfterSeconds": 5,
+      "offlineUsableUntil": "2026-11-18T12:05:00.000Z"
+    }
+  },
+  {
+    "name": "fictional-Qualification-3",
+    "schema": "Qualification",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ownerId": "00000000-0000-4000-8000-000000000005",
+      "game": "ets2",
+      "state": "assignment_missing",
+      "assignment": null,
+      "progress": null,
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "progressRevision": "12",
+      "refreshAfterSeconds": 5,
+      "offlineUsableUntil": "2026-11-18T12:05:00.000Z"
+    }
+  },
+  {
+    "name": "fictional-Qualification-4",
+    "schema": "Qualification",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ownerId": "00000000-0000-4000-8000-000000000005",
+      "game": "ets2",
+      "state": "unavailable",
+      "assignment": null,
+      "progress": null,
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "progressRevision": "12",
+      "refreshAfterSeconds": 5,
+      "offlineUsableUntil": "2026-11-18T12:05:00.000Z"
+    }
+  },
+  {
+    "name": "fictional-PreviewInput-5",
+    "schema": "PreviewInput",
+    "value": {
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "contextRevision": 1,
+      "evidenceRevision": 3,
+      "game": "ets2",
+      "cargo": {
+        "availability": "unknown",
+        "code": null
+      },
+      "cargoMassKg": {
+        "availability": "known",
+        "value": "0"
+      },
+      "trailers": {
+        "complete": false,
+        "items": []
+      },
+      "actualDistance": {
+        "availability": "known",
+        "metres": "99999",
+        "support": "whole-trip",
+        "final": false
+      },
+      "hardMode": {
+        "result": "qualified",
+        "final": false
+      },
+      "start": null,
+      "eventId": null
+    }
+  },
+  {
+    "name": "fictional-Preview-6",
+    "schema": "Preview",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "contextRevision": 1,
+      "evidenceRevision": 3,
+      "evaluatedAt": "2026-11-18T12:00:00.000Z",
+      "basis": "current_projection",
+      "assignment": {
+        "id": "00000000-0000-4000-8000-000000000004",
+        "startedAt": "2026-11-01T00:00:00.000Z",
+        "level": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "name": "Fictional first level",
+          "editVersion": 2
+        },
+        "limits": {
+          "massMinKg": "0",
+          "massMaxKg": "24000",
+          "distanceMinM": "100000",
+          "distanceMaxM": "500000",
+          "trailers": {
+            "mode": "any",
+            "typeIds": []
+          },
+          "adr": {
+            "mode": "any",
+            "classes": []
+          },
+          "hardModeRequired": true
+        }
+      },
+      "outcome": "unknown",
+      "rules": [
+        {
+          "rule": "cargo_mass",
+          "result": "pass",
+          "minKg": "0",
+          "maxKg": "24000",
+          "observedKg": "0"
+        },
+        {
+          "rule": "distance",
+          "result": "unknown",
+          "minM": "100000",
+          "maxM": "500000",
+          "observedM": "99999"
+        },
+        {
+          "rule": "trailer_types",
+          "result": "pass",
+          "mode": "any",
+          "allowedIds": [],
+          "observedIds": []
+        },
+        {
+          "rule": "adr",
+          "result": "pass",
+          "mode": "any",
+          "allowedClasses": [],
+          "observed": null
+        },
+        {
+          "rule": "hard_mode",
+          "result": "unknown",
+          "required": true,
+          "observed": "unknown"
+        }
+      ],
+      "reasons": [
+        "below_minimum_growing",
+        "hard_mode_not_final"
+      ],
+      "eventExempt": false,
+      "applicability": {
+        "expiresAt": "2026-11-18T12:00:05.000Z",
+        "contextRevision": 1,
+        "minimumDistanceM": "99999",
+        "maximumDistanceM": "500000",
+        "qualificationRevision": "12",
+        "requiresQualificationRefresh": true
+      },
+      "provisional": true
+    }
+  },
+  {
+    "name": "fictional-Preview-7",
+    "schema": "Preview",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "contextRevision": 1,
+      "evidenceRevision": 3,
+      "evaluatedAt": "2026-11-18T12:00:00.000Z",
+      "basis": "current_projection",
+      "assignment": {
+        "id": "00000000-0000-4000-8000-000000000004",
+        "startedAt": "2026-11-01T00:00:00.000Z",
+        "level": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "name": "Fictional first level",
+          "editVersion": 2
+        },
+        "limits": {
+          "massMinKg": "0",
+          "massMaxKg": "24000",
+          "distanceMinM": "100000",
+          "distanceMaxM": "500000",
+          "trailers": {
+            "mode": "any",
+            "typeIds": []
+          },
+          "adr": {
+            "mode": "any",
+            "classes": []
+          },
+          "hardModeRequired": true
+        }
+      },
+      "outcome": "pass",
+      "rules": [
+        {
+          "rule": "cargo_mass",
+          "result": "pass",
+          "minKg": "0",
+          "maxKg": "24000",
+          "observedKg": "0"
+        },
+        {
+          "rule": "distance",
+          "result": "pass",
+          "minM": "100000",
+          "maxM": "500000",
+          "observedM": "99999"
+        },
+        {
+          "rule": "trailer_types",
+          "result": "pass",
+          "mode": "any",
+          "allowedIds": [],
+          "observedIds": []
+        },
+        {
+          "rule": "adr",
+          "result": "pass",
+          "mode": "any",
+          "allowedClasses": [],
+          "observed": null
+        },
+        {
+          "rule": "hard_mode",
+          "result": "pass",
+          "required": true,
+          "observed": "unknown"
+        }
+      ],
+      "reasons": [],
+      "eventExempt": true,
+      "applicability": {
+        "expiresAt": "2026-11-18T12:00:05.000Z",
+        "contextRevision": 1,
+        "minimumDistanceM": "99999",
+        "maximumDistanceM": "500000",
+        "qualificationRevision": "12",
+        "requiresQualificationRefresh": true
+      },
+      "provisional": true
+    }
+  },
+  {
+    "name": "fictional-ResultBatchInput-8",
+    "schema": "ResultBatchInput",
+    "value": {
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "items": [
+        {
+          "source": {
+            "provider": "ets2telemetry",
+            "game": "ets2",
+            "pluginSessionId": "00000000-0000-4000-8000-000000000001",
+            "tripId": "00000000-0000-4000-8000-000000000002"
+          },
+          "revision": 2,
+          "eventId": "00000000-0000-4000-8000-000000000008"
+        }
+      ]
+    }
+  },
+  {
+    "name": "fictional-ResultBatch-9",
+    "schema": "ResultBatch",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "refreshAfterSeconds": 5,
+      "items": [
+        {
+          "source": {
+            "provider": "ets2telemetry",
+            "game": "ets2",
+            "pluginSessionId": "00000000-0000-4000-8000-000000000001",
+            "tripId": "00000000-0000-4000-8000-000000000002"
+          },
+          "requestedRevision": 2,
+          "requestedEventId": "00000000-0000-4000-8000-000000000008",
+          "version": "12.fictional",
+          "resultRevision": "12",
+          "unchanged": false,
+          "receipt": "not_received",
+          "state": "not_received",
+          "requestedSourceMessageId": null,
+          "latestSourceRevision": null,
+          "canonicalTripId": null,
+          "sourceOutcome": null,
+          "companyDecision": "unassessed",
+          "assessmentPending": false,
+          "correctionPending": false,
+          "assessmentBasis": "none",
+          "assessment": null,
+          "credit": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "fictional-ResultBatch-10",
+    "schema": "ResultBatch",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "refreshAfterSeconds": 5,
+      "items": [
+        {
+          "source": {
+            "provider": "ets2telemetry",
+            "game": "ets2",
+            "pluginSessionId": "00000000-0000-4000-8000-000000000001",
+            "tripId": "00000000-0000-4000-8000-000000000002"
+          },
+          "requestedRevision": 2,
+          "requestedEventId": "00000000-0000-4000-8000-000000000008",
+          "version": "12.fictional",
+          "resultRevision": "12",
+          "unchanged": false,
+          "receipt": "received",
+          "state": "processing",
+          "requestedSourceMessageId": "00000000-0000-4000-8000-000000000011",
+          "latestSourceRevision": 2,
+          "canonicalTripId": "00000000-0000-4000-8000-000000000012",
+          "sourceOutcome": null,
+          "companyDecision": "unassessed",
+          "assessmentPending": true,
+          "correctionPending": false,
+          "assessmentBasis": "none",
+          "assessment": null,
+          "credit": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "fictional-ResultBatch-11",
+    "schema": "ResultBatch",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "refreshAfterSeconds": 5,
+      "items": [
+        {
+          "source": {
+            "provider": "ets2telemetry",
+            "game": "ets2",
+            "pluginSessionId": "00000000-0000-4000-8000-000000000001",
+            "tripId": "00000000-0000-4000-8000-000000000002"
+          },
+          "requestedRevision": 2,
+          "requestedEventId": "00000000-0000-4000-8000-000000000008",
+          "version": "12.fictional",
+          "resultRevision": "12",
+          "unchanged": false,
+          "receipt": "received",
+          "state": "review",
+          "requestedSourceMessageId": null,
+          "latestSourceRevision": null,
+          "canonicalTripId": null,
+          "sourceOutcome": null,
+          "companyDecision": "pending_review",
+          "assessmentPending": false,
+          "correctionPending": false,
+          "assessmentBasis": "none",
+          "assessment": null,
+          "credit": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "fictional-ResultBatch-12",
+    "schema": "ResultBatch",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "refreshAfterSeconds": 5,
+      "items": [
+        {
+          "source": {
+            "provider": "ets2telemetry",
+            "game": "ets2",
+            "pluginSessionId": "00000000-0000-4000-8000-000000000001",
+            "tripId": "00000000-0000-4000-8000-000000000002"
+          },
+          "requestedRevision": 2,
+          "requestedEventId": "00000000-0000-4000-8000-000000000008",
+          "version": "12.fictional",
+          "resultRevision": "12",
+          "unchanged": false,
+          "receipt": "received",
+          "state": "decided",
+          "requestedSourceMessageId": "00000000-0000-4000-8000-000000000011",
+          "latestSourceRevision": 2,
+          "canonicalTripId": "00000000-0000-4000-8000-000000000012",
+          "sourceOutcome": "delivered",
+          "companyDecision": "accepted",
+          "assessmentPending": false,
+          "correctionPending": false,
+          "assessmentBasis": "current",
+          "assessment": {
+            "availability": "retained",
+            "decisionId": "00000000-0000-4000-8000-000000000009",
+            "decisionSequence": 1,
+            "decidedAt": "2026-11-18T12:00:00.000Z",
+            "factId": "00000000-0000-4000-8000-000000000010",
+            "sourceMessageId": "00000000-0000-4000-8000-000000000011",
+            "sourceRevision": 2,
+            "sourceEventId": "00000000-0000-4000-8000-000000000008",
+            "materialIdentity": "00000000-0000-4000-8000-000000000010",
+            "assignmentId": "00000000-0000-4000-8000-000000000004",
+            "level": {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "name": "Fictional first level",
+              "editVersion": 2
+            },
+            "limits": {
+              "massMinKg": "0",
+              "massMaxKg": "24000",
+              "distanceMinM": "100000",
+              "distanceMaxM": "500000",
+              "trailers": {
+                "mode": "any",
+                "typeIds": []
+              },
+              "adr": {
+                "mode": "any",
+                "classes": []
+              },
+              "hardModeRequired": true
+            },
+            "outcome": "pass",
+            "rules": [
+              {
+                "rule": "cargo_mass",
+                "result": "pass",
+                "minKg": "0",
+                "maxKg": "24000",
+                "observedKg": "0"
+              },
+              {
+                "rule": "distance",
+                "result": "pass",
+                "minM": "100000",
+                "maxM": "500000",
+                "observedM": "100000"
+              },
+              {
+                "rule": "trailer_types",
+                "result": "pass",
+                "mode": "any",
+                "allowedIds": [],
+                "observedIds": []
+              },
+              {
+                "rule": "adr",
+                "result": "pass",
+                "mode": "any",
+                "allowedClasses": [],
+                "observed": null
+              },
+              {
+                "rule": "hard_mode",
+                "result": "pass",
+                "required": true,
+                "observed": "qualified"
+              }
+            ],
+            "eventExempt": false,
+            "reasons": []
+          },
+          "credit": {
+            "credited": true,
+            "trips": 1,
+            "actualDistanceM": "100000",
+            "assignmentId": "00000000-0000-4000-8000-000000000004"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "fictional-ResultBatch-13",
+    "schema": "ResultBatch",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "refreshAfterSeconds": 5,
+      "items": [
+        {
+          "source": {
+            "provider": "ets2telemetry",
+            "game": "ets2",
+            "pluginSessionId": "00000000-0000-4000-8000-000000000001",
+            "tripId": "00000000-0000-4000-8000-000000000002"
+          },
+          "requestedRevision": 3,
+          "requestedEventId": "00000000-0000-4000-8000-000000000008",
+          "version": "12.fictional",
+          "resultRevision": "12",
+          "unchanged": false,
+          "receipt": "received",
+          "state": "review",
+          "requestedSourceMessageId": "00000000-0000-4000-8000-000000000011",
+          "latestSourceRevision": 2,
+          "canonicalTripId": "00000000-0000-4000-8000-000000000012",
+          "sourceOutcome": "delivered",
+          "companyDecision": "accepted",
+          "assessmentPending": true,
+          "correctionPending": true,
+          "assessmentBasis": "predecessor",
+          "assessment": {
+            "availability": "retained",
+            "decisionId": "00000000-0000-4000-8000-000000000009",
+            "decisionSequence": 1,
+            "decidedAt": "2026-11-18T12:00:00.000Z",
+            "factId": "00000000-0000-4000-8000-000000000010",
+            "sourceMessageId": "00000000-0000-4000-8000-000000000011",
+            "sourceRevision": 2,
+            "sourceEventId": "00000000-0000-4000-8000-000000000008",
+            "materialIdentity": "00000000-0000-4000-8000-000000000010",
+            "assignmentId": "00000000-0000-4000-8000-000000000004",
+            "level": {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "name": "Fictional first level",
+              "editVersion": 2
+            },
+            "limits": {
+              "massMinKg": "0",
+              "massMaxKg": "24000",
+              "distanceMinM": "100000",
+              "distanceMaxM": "500000",
+              "trailers": {
+                "mode": "any",
+                "typeIds": []
+              },
+              "adr": {
+                "mode": "any",
+                "classes": []
+              },
+              "hardModeRequired": true
+            },
+            "outcome": "pass",
+            "rules": [
+              {
+                "rule": "cargo_mass",
+                "result": "pass",
+                "minKg": "0",
+                "maxKg": "24000",
+                "observedKg": "0"
+              },
+              {
+                "rule": "distance",
+                "result": "pass",
+                "minM": "100000",
+                "maxM": "500000",
+                "observedM": "100000"
+              },
+              {
+                "rule": "trailer_types",
+                "result": "pass",
+                "mode": "any",
+                "allowedIds": [],
+                "observedIds": []
+              },
+              {
+                "rule": "adr",
+                "result": "pass",
+                "mode": "any",
+                "allowedClasses": [],
+                "observed": null
+              },
+              {
+                "rule": "hard_mode",
+                "result": "pass",
+                "required": true,
+                "observed": "qualified"
+              }
+            ],
+            "eventExempt": false,
+            "reasons": []
+          },
+          "credit": {
+            "credited": true,
+            "trips": 1,
+            "actualDistanceM": "100000",
+            "assignmentId": "00000000-0000-4000-8000-000000000004"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "fictional-ResultBatch-14",
+    "schema": "ResultBatch",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "refreshAfterSeconds": 5,
+      "items": [
+        {
+          "source": {
+            "provider": "ets2telemetry",
+            "game": "ets2",
+            "pluginSessionId": "00000000-0000-4000-8000-000000000001",
+            "tripId": "00000000-0000-4000-8000-000000000002"
+          },
+          "requestedRevision": 2,
+          "requestedEventId": "00000000-0000-4000-8000-000000000008",
+          "version": "12.fictional",
+          "resultRevision": "12",
+          "unchanged": false,
+          "receipt": "received",
+          "state": "decided",
+          "requestedSourceMessageId": "00000000-0000-4000-8000-000000000011",
+          "latestSourceRevision": 2,
+          "canonicalTripId": "00000000-0000-4000-8000-000000000012",
+          "sourceOutcome": "delivered",
+          "companyDecision": "accepted",
+          "assessmentPending": false,
+          "correctionPending": false,
+          "assessmentBasis": "current",
+          "assessment": {
+            "availability": "historical_unavailable",
+            "decisionId": "00000000-0000-4000-8000-000000000009",
+            "decisionSequence": 1,
+            "decidedAt": "2026-11-18T12:00:00.000Z",
+            "factId": "00000000-0000-4000-8000-000000000010",
+            "sourceMessageId": "00000000-0000-4000-8000-000000000011",
+            "sourceRevision": 2,
+            "sourceEventId": "00000000-0000-4000-8000-000000000008",
+            "materialIdentity": "00000000-0000-4000-8000-000000000010",
+            "assignmentId": "00000000-0000-4000-8000-000000000004",
+            "level": null,
+            "limits": null,
+            "outcome": null,
+            "rules": [],
+            "eventExempt": false,
+            "reasons": []
+          },
+          "credit": {
+            "credited": true,
+            "trips": 1,
+            "actualDistanceM": "100000",
+            "assignmentId": "00000000-0000-4000-8000-000000000004"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "fictional-ResultBatch-15",
+    "schema": "ResultBatch",
+    "value": {
+      "contract": "1.0",
+      "securityScope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "asOf": "2026-11-18T12:00:00.000Z",
+      "refreshAfterSeconds": 5,
+      "items": [
+        {
+          "source": {
+            "provider": "ets2telemetry",
+            "game": "ets2",
+            "pluginSessionId": "00000000-0000-4000-8000-000000000001",
+            "tripId": "00000000-0000-4000-8000-000000000002"
+          },
+          "requestedRevision": 2,
+          "requestedEventId": "00000000-0000-4000-8000-000000000008",
+          "version": "12.fictional",
+          "resultRevision": "12",
+          "unchanged": true,
+          "receipt": "received",
+          "state": "decided",
+          "requestedSourceMessageId": "00000000-0000-4000-8000-000000000011",
+          "latestSourceRevision": 2,
+          "canonicalTripId": "00000000-0000-4000-8000-000000000012",
+          "sourceOutcome": "delivered",
+          "companyDecision": "accepted",
+          "assessmentPending": false,
+          "correctionPending": false,
+          "assessmentBasis": "current",
+          "assessment": null,
+          "credit": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "fictional-Error-16",
+    "schema": "Error",
+    "value": {
+      "error": {
+        "code": "TOKEN_INVALID",
+        "retryable": false
+      },
+      "requestId": "00000000-0000-4000-8000-000000000007"
+    }
+  },
+  {
+    "name": "fictional-Error-17",
+    "schema": "Error",
+    "value": {
+      "error": {
+        "code": "CAPABILITY_REQUIRED",
+        "retryable": false
+      },
+      "requestId": "00000000-0000-4000-8000-000000000007"
+    }
+  },
+  {
+    "name": "fictional-Error-18",
+    "schema": "Error",
+    "value": {
+      "error": {
+        "code": "INVALID_PAYLOAD",
+        "retryable": false
+      },
+      "requestId": "00000000-0000-4000-8000-000000000007"
+    }
+  },
+  {
+    "name": "fictional-Error-19",
+    "schema": "Error",
+    "value": {
+      "error": {
+        "code": "RATE_LIMITED",
+        "retryable": true
+      },
+      "requestId": "00000000-0000-4000-8000-000000000007"
+    }
+  },
+  {
+    "name": "fictional-Error-20",
+    "schema": "Error",
+    "value": {
+      "error": {
+        "code": "TEMPORARILY_UNAVAILABLE",
+        "retryable": true
+      },
+      "requestId": "00000000-0000-4000-8000-000000000007"
+    }
+  }
+]

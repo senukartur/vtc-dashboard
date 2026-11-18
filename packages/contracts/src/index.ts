@@ -1,4 +1,8 @@
 export type { components, operations, paths } from "./generated/browser.js";
+export type {
+  components as companionComponents,
+  paths as companionPaths,
+} from "./generated/companion.js";
 
 export interface Readiness {
   status: "ready" | "not_ready";
