@@ -191,7 +191,8 @@ describe("Huninn subsets", () => {
         const code = character.codePointAt(0) ?? 0;
         if (code > 0x7e) used.add(code);
       }
-    expect(used.has(0x2192) && used.has(0x2190)).toBe(true);
+    // Route separators remain text; navigation arrows are now Lucide icons.
+    expect(used.has(0x2192)).toBe(true);
     const mapped = new Set(faces.flatMap((face) => [...(cmaps.get(face.file) ?? [])]));
     const uncovered = [...used]
       .filter((code) => !mapped.has(code) && !fallback.has(code))

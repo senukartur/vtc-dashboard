@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
+import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { tripTranslations } from "../../apps/web/src/features/trips/translations.ts";
 import { type DTO, schema } from "../../apps/web/src/features/trips/transport.ts";
-import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import {
   awaitingFix,
   canRevise,
@@ -492,7 +492,10 @@ test("every VTC-158 trip page key exists in both languages and is translated", (
   for (const key of keys) {
     expect(tripTranslations.en[key], key).toBeTruthy();
     expect(tripTranslations.ru[key], key).toBeTruthy();
-    expect(tripTranslations.ru[key], key).not.toBe(tripTranslations.en[key]);
+    if (key === "tripIdColumn") {
+      expect(tripTranslations.ru[key]).toBe("ID");
+      expect(tripTranslations.en[key]).toBe("ID");
+    } else expect(tripTranslations.ru[key], key).not.toBe(tripTranslations.en[key]);
   }
   expect(Object.keys(tripTranslations.ru).sort()).toEqual(Object.keys(tripTranslations.en).sort());
 });

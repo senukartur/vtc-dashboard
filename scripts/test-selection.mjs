@@ -236,7 +236,7 @@ const areas = [
       "apps/web/src/features/qualifications/",
       "test/fixtures/trip-evidence.ts",
     ],
-    tests: ["qualification"],
+    tests: ["qualification", "badge-labels"],
   },
   {
     paths: [
@@ -258,7 +258,7 @@ const areas = [
     paths: ["apps/api/src/modules/trip-decisions/", "apps/api/src/use-cases/trip-decisions.ts"],
     tests: ["trip-decisions", "trips-corrections"],
   },
-  { paths: ["apps/web/src/features/drivers/"], tests: ["drivers"] },
+  { paths: ["apps/web/src/features/drivers/"], tests: ["drivers", "badge-labels"] },
   { paths: ["apps/web/src/features/foundation/"], tests: ["foundation", "ui-variants"] },
   {
     paths: [
