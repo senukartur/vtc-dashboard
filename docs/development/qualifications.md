@@ -64,3 +64,7 @@ Edits, moves and removals take `expectedVersion` and return `409` on a stale ver
 - outbox, routing and notification rows of the retired types are removed.
 
 Ladder limits and conditions are not carried over, because the old rules have no equivalent. Staff configure them again after the upgrade. `test/integration/qualification-simplification-upgrade.test.ts` checks the mapping and that the upgraded schema equals a fresh one.
+
+## Companion reads and live checks
+
+The [companion contract](../contracts/telemetry-companion-v1.md) uses a caller-transaction read facade under the authenticated member/company fence. It returns exact current assignment, level edit, five limits, conditions and remaining credited amounts without invoking promotion. Missing assignment/disabled service are explicit states. A supported actual start may select a historical assignment; current mutable limits remain explicitly provisional. The pure final checkTrip is reused with only growing-distance/nonfinal-HardMode adaptations. Confirmed same-game attendance exempts all five limits without prescribed-load matching. RSVP and client references cannot authorize exemption. Lease applicability is supplied by the server; it is not a second client rule evaluator. Selected trailer labels are current_catalog presentation metadata, separate from retained identities/group membership. Qualification edits/assignments/promotions bump the Trips-owned owner revision through its contribution facade in the producer transaction.

@@ -81,6 +81,8 @@ export interface QualificationSnapshot {
   readonly editVersion: number | null;
   readonly limits: QualificationLimits | null;
   readonly eventExempt: boolean;
+  /** New exempt decisions retain observations without changing the existing browser exemption view. */
+  readonly exemptionRules?: CheckedRule[];
   readonly outcome: RuleResult | null;
   readonly reasonCode: string | null;
   readonly rules: CheckedRule[];

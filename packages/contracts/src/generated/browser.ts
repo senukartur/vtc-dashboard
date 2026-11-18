@@ -5876,6 +5876,8 @@ export interface components {
         /** Format: date-time */
         Timestamp: string;
         TokenInfo: {
+            /** @description Whether this token has the explicitly opted-in companion.own.v1 capability. */
+            companion?: boolean;
             /** Format: date-time */
             createdAt: string;
             /** Format: uuid */
@@ -5885,6 +5887,8 @@ export interface components {
             revokedAt: string | null;
         };
         TokenInput: {
+            /** @description Explicitly grant own qualification, provisional preview and own-upload result access. Reissue to enable. */
+            companion?: boolean;
             label: string;
         };
         TokenIssued: {

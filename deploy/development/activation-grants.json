@@ -30,6 +30,8 @@
     "qualification_levels": ["SELECT", "INSERT", "UPDATE"],
     "qualification_level_trailers": ["SELECT", "INSERT", "DELETE"],
     "qualification_assignments": ["SELECT", "INSERT", "UPDATE"],
+    "trip_event_associations": ["SELECT"],
+    "trip_owner_revisions": ["SELECT", "INSERT", "UPDATE"],
     "trip_contributions": ["SELECT", "INSERT", "UPDATE"],
     "trip_contribution_history": ["SELECT", "INSERT"],
     "events": ["SELECT", "INSERT", "UPDATE"],

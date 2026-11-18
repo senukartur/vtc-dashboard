@@ -30,6 +30,7 @@
     "qualification_levels": ["INSERT", "SELECT", "UPDATE"],
     "qualification_level_trailers": ["DELETE", "INSERT", "SELECT"],
     "qualification_assignments": ["INSERT", "SELECT", "UPDATE"],
+    "trip_owner_revisions": ["SELECT", "INSERT", "UPDATE"],
     "trip_contributions": ["INSERT", "SELECT", "UPDATE"],
     "trip_contribution_history": ["INSERT", "SELECT"],
     "events": ["INSERT", "SELECT", "UPDATE"],
@@ -113,6 +114,7 @@
     "trip_review_work": ["INSERT", "SELECT", "UPDATE"],
     "trip_event_associations": ["INSERT", "SELECT", "UPDATE"],
     "trip_decision_catchup": ["INSERT", "SELECT", "UPDATE"],
+    "trip_owner_revisions": ["SELECT", "INSERT", "UPDATE"],
     "trip_contributions": ["INSERT", "SELECT", "UPDATE"],
     "events": [
       "SELECT",

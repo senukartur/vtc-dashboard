@@ -45,6 +45,7 @@ import { inspectPng, logoCodeFromName, PngError } from "./png.js";
 
 type S = components["schemas"];
 type Locale = "en" | "ru";
+type CodeResolution = { game: Game; kind: CatalogKind; code: string };
 type ListFilters = {
   hidden?: "only";
   includeHidden?: boolean;
@@ -471,9 +472,10 @@ export function createCatalogs(
     }[list];
     if (Object.keys(input).some((key) => !allowed.includes(key))) throw identityError(422);
   }
-  async function resolveInTransaction(
+  async function resolveCode(
     tx: TxContext,
-    input: { game: Game; kind: CatalogKind; code: string },
+    input: CodeResolution,
+    current: boolean,
   ): Promise<
     | { status: "resolved"; id: string; adrClass: AdrClass | null }
     | { status: "unknown"; reasonCode: string }
@@ -481,10 +483,12 @@ export function createCatalogs(
     if (!validCode(input.code)) return { status: "unknown", reasonCode: "unknown_source_id" };
     const table = kindTables[input.kind];
     const adr = input.kind === "cargo" ? catalogCargoes.adrClass : sql<AdrClass | null>`NULL`;
-    const [row] = await c(tx)
+    const query = c(tx)
       .select({ id: table.id, adrClass: adr })
       .from(table)
-      .where(and(eq(table.game, input.game), eq(table.code, Buffer.from(input.code))));
+      .where(and(eq(table.game, input.game), eq(table.code, Buffer.from(input.code))))
+      .$dynamic();
+    const [row] = await (current ? query.for("share") : query);
     if (!row) return { status: "unknown", reasonCode: "unknown_source_id" };
     return { status: "resolved", id: row.id, adrClass: (row.adrClass as AdrClass | null) ?? null };
   }
@@ -1118,6 +1122,73 @@ export function createCatalogs(
 
   return {
     config,
+    async companionTrailerDisplayInTransaction(
+      tx: TxContext,
+      game: Game,
+      ids: readonly string[],
+      asOf: string,
+    ) {
+      if (ids.length > 110) throw new Error("COMPANION_TRAILER_BOUND");
+      const unique = [...new Set(ids)].sort();
+      if (!unique.length) return [];
+      const variants = await c(tx)
+        .select({
+          id: catalogTrailers.id,
+          code: catalogTrailers.code,
+          group: catalogTrailers.commonTrailer,
+          nameEn: catalogTrailers.nameEn,
+          nameRu: catalogTrailers.nameRu,
+          typeId: catalogTrailers.trailerTypeId,
+        })
+        .from(catalogTrailers)
+        .where(and(eq(catalogTrailers.game, game), inArray(catalogTrailers.id, unique)))
+        .orderBy(catalogTrailers.id)
+        .for("share");
+      const types = await c(tx)
+        .select({
+          id: catalogTrailerTypes.id,
+          code: catalogTrailerTypes.code,
+          nameEn: catalogTrailerTypes.nameEn,
+          nameRu: catalogTrailerTypes.nameRu,
+        })
+        .from(catalogTrailerTypes)
+        .where(and(eq(catalogTrailerTypes.game, game), inArray(catalogTrailerTypes.id, unique)))
+        .orderBy(catalogTrailerTypes.id)
+        .for("share");
+      const byVariant = new Map(variants.map((row) => [row.id, row])),
+        byType = new Map(types.map((row) => [row.id, row]));
+      return unique.map((id) => {
+        const variant = byVariant.get(id),
+          type = byType.get(id);
+        const row = variant && type ? undefined : (variant ?? type);
+        const identityKind = !row
+          ? ("unavailable" as const)
+          : type
+            ? ("type" as const)
+            : ("variant" as const);
+        return {
+          id,
+          identityKind,
+          code: row?.code.toString() ?? null,
+          groupCode: identityKind === "variant" ? (variant?.group?.toString() ?? null) : null,
+          nameEn: row?.nameEn ?? null,
+          nameRu: row?.nameRu ?? null,
+          classification:
+            identityKind === "variant"
+              ? variant?.typeId
+                ? { state: "classified" as const, typeId: variant.typeId }
+                : { state: "unclassified" as const }
+              : {
+                  state:
+                    identityKind === "type"
+                      ? ("not_applicable" as const)
+                      : ("unavailable" as const),
+                },
+          basis: "current_catalog" as const,
+          asOf,
+        };
+      });
+    },
     async trailerTypes(
       actor: Actor,
       query: { game: Game; locale?: Locale; search?: string; limit?: number; cursor?: string },
@@ -1975,7 +2046,11 @@ export function createCatalogs(
         return result as unknown as S["CatalogImportResult"];
       });
     },
-    resolveInTransaction,
+    /** Frozen ingestion keeps its existing consistent-read resolution. */
+    resolveInTransaction: (tx: TxContext, input: CodeResolution) => resolveCode(tx, input, false),
+    /** Current preview facts share the company fence and classification's locking-read view. */
+    resolveCurrentInTransaction: (tx: TxContext, input: CodeResolution) =>
+      resolveCode(tx, input, true),
     selectionsInTransaction,
     /** Published Events need safe canonical route facts without touching company logos. */
     async eventRouteCatalogInTransaction(

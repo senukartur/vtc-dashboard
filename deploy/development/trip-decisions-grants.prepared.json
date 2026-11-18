@@ -20,6 +20,7 @@
     "trip_review_work": ["SELECT", "INSERT", "UPDATE"],
     "trip_event_associations": ["SELECT", "INSERT", "UPDATE"],
     "trip_decision_catchup": ["SELECT", "INSERT", "UPDATE"],
+    "trip_owner_revisions": ["SELECT", "INSERT", "UPDATE"],
     "trip_contributions": ["SELECT", "INSERT", "UPDATE"],
     "manual_review_gates": ["SELECT", "INSERT", "UPDATE"],
     "trips": ["SELECT", "UPDATE"],

@@ -439,12 +439,14 @@ test("signed token pages bind current actor/session/limit and return bounded sec
   expect(next.items.length).toBe(2);
   expect(new Set([...page.items, ...next.items].map((x) => x.id)).size).toBe(4);
   expect(Object.keys(page.items[0] ?? {}).sort()).toEqual([
+    "companion",
     "createdAt",
     "id",
     "label",
     "lastUsedAt",
     "revokedAt",
   ]);
+  expect(page.items.every((item) => item.companion === false)).toBe(true);
   await expect(
     service.list(owner, { limit: 3, cursor: page.nextCursor as string }),
   ).rejects.toMatchObject({ statusCode: 409 });

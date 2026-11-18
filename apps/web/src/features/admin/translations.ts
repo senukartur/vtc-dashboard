@@ -161,6 +161,10 @@ export const administrationTranslations = {
     tokens: "Personal telemetry credentials",
     tokenHelp:
       "Create a credential for your telemetry client. The secret is displayed once. Never share it in reports or support messages.",
+    companionGrant: "Allow own qualifications, provisional checks and upload results",
+    companionEnabled: "Companion access enabled",
+    companionDisclosure:
+      "Optional: live checks send cargo code and mass, current and previous trailer types, supported actual distance, Hard Mode result and finality, actual start and event reference before upload. Existing credentials need reissuance to enable this access.",
     tokenLabel: "Credential label",
     createToken: "Create credential",
     revokeToken: "Revoke credential",
@@ -685,6 +689,11 @@ export const administrationTranslations = {
     tokens: "Личные ключи телеметрии",
     tokenHelp:
       "Создайте ключ для клиента телеметрии. Секрет показывается один раз. Не отправляйте его в отчётах или сообщениях поддержки.",
+    companionGrant:
+      "Разрешить чтение своих квалификаций, предварительных проверок и результатов загрузки",
+    companionEnabled: "Доступ к квалификациям и результатам включён",
+    companionDisclosure:
+      "Необязательно: для предварительных проверок до загрузки рейса передаются код и масса груза, текущие и предыдущие типы прицепов, доступная фактическая дистанция, результат и завершённость Hard Mode, фактическое начало и ссылка на событие. Для старого ключа нужен перевыпуск.",
     tokenLabel: "Название ключа",
     createToken: "Создать ключ",
     revokeToken: "Отозвать ключ",
