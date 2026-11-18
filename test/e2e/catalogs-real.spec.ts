@@ -480,3 +480,112 @@ test(
     }
   },
 );
+for (const game of ["ets2", "ats"] as const) {
+  test(
+    `${game} region source correction moves filter membership and preserves RU/EN selection IDs`,
+    browserCase(["@real"]),
+    async ({ page, context }) => {
+      test.setTimeout(90000);
+      const unique = randomUUID().slice(0, 8);
+      const staff = await staffContext();
+      try {
+        await resetAccountLimits();
+        const create = async (list: string, code: string, extra: Record<string, unknown> = {}) => {
+          const response = await write(staff, `/admin/catalogs/${list}`, {
+            game,
+            code: `${code}_${unique}`,
+            nameEn: `Fictional ${code} ${unique}`,
+            ...extra,
+          });
+          expect(response.status()).toBe(201);
+          return (await response.json()).data as CatalogSchemas["CatalogItem"];
+        };
+        const pack = await create("dlcs", "map");
+        const region = await create("regions", "corrected", {
+          nameRu: `Вымышленный регион ${unique}`,
+        });
+        const base = await create("regions", "base");
+        const city = await create("cities", "city", {
+          nameRu: `Вымышленный город ${unique}`,
+          regionId: region.id,
+        });
+        await context.addCookies((await staff.storageState()).cookies);
+        await page.goto(`/account/catalogs?game=${game}&tab=regions&q=${unique}`);
+        await catalogLanguage(page);
+        const c = catalogTranslations.en;
+        await page.getByRole("button", { name: c.importButton, exact: true }).first().click();
+        const dialog = page.getByRole("dialog");
+        await dialog.locator('input[type="file"]').setInputFiles({
+          name: "fictional-region-source.csv",
+          mimeType: "text/csv",
+          buffer: Buffer.from(
+            `game,code,name_en,name_ru,dlc_code\n${game},${region.code},${region.nameEn},${region.nameRu},${pack.code}\n`,
+          ),
+        });
+        await expect(dialog.getByRole("button", { name: c.apply, exact: true })).toBeEnabled();
+        await expect(dialog.locator(".catalog-counts strong").nth(0)).toHaveText("0");
+        await expect(dialog.locator(".catalog-counts strong").nth(1)).toHaveText("1");
+        await dialog.getByRole("button", { name: c.apply, exact: true }).click();
+        await expect(dialog.getByText(c.appliedTitle, { exact: true })).toBeVisible();
+        await dialog.getByRole("button", { name: c.done, exact: true }).click();
+
+        for (const locale of ["en", "ru"] as const) {
+          await page.goto(`/account/catalogs?game=${game}&tab=regions&q=${unique}`);
+          await catalogLanguage(page, locale);
+          const labels = catalogTranslations[locale];
+          const source = page.getByLabel(labels.dlcFilter, { exact: true });
+          await expect(source.locator(`option[value="${pack.id}"]`)).toHaveCount(1);
+          await source.selectOption(pack.id);
+          await expect(source).toHaveValue(pack.id);
+          await expect(page.getByText(region.code, { exact: true }).first()).toBeVisible();
+          await expect(page.getByText(base.code, { exact: true })).toHaveCount(0);
+          await source.selectOption("base");
+          await expect(page.getByText(base.code, { exact: true }).first()).toBeVisible();
+          await expect(page.getByText(region.code, { exact: true })).toHaveCount(0);
+
+          await page.goto(`/account/catalogs?game=${game}&tab=cities&q=${unique}`);
+          await expect(page.getByText(city.code, { exact: true }).first()).toBeVisible();
+          const name = locale === "en" ? city.nameEn : city.nameRu;
+          if ((page.viewportSize()?.width ?? 1280) < 760) {
+            await page
+              .getByRole("button", {
+                name: labels.actions.replace("{{name}}", name ?? ""),
+                exact: true,
+              })
+              .click();
+            await page
+              .getByRole("dialog")
+              .getByRole("button", { name: labels.edit, exact: true })
+              .click();
+          } else {
+            await page
+              .getByTestId("catalog-table")
+              .getByRole("row")
+              .filter({ hasText: city.code })
+              .getByRole("button", { name: labels.edit, exact: true })
+              .click();
+          }
+          const form = page.getByRole("dialog");
+          await expect(form.getByLabel(labels.fieldRegion, { exact: true })).toHaveValue(region.id);
+          await expect(
+            form
+              .getByLabel(labels.fieldRegion, { exact: true })
+              .locator(`option[value="${region.id}"]`),
+          ).toHaveText(locale === "en" ? region.nameEn : (region.nameRu ?? ""));
+          await form.getByRole("button", { name: labels.cancel, exact: true }).click();
+        }
+        const corrected = await staff.get(`/api/v1/catalogs/regions/${region.id}`);
+        expect((await corrected.json()).data).toMatchObject({
+          id: region.id,
+          dlcId: pack.id,
+          nameEn: region.nameEn,
+          nameRu: region.nameRu,
+        });
+        const linked = await staff.get(`/api/v1/catalogs/cities/${city.id}`);
+        expect((await linked.json()).data).toMatchObject({ id: city.id, regionId: region.id });
+      } finally {
+        await staff.dispose();
+      }
+    },
+  );
+}
