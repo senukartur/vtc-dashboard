@@ -79,6 +79,12 @@ Rows match by `(game, code)`. An empty cell keeps the current value, so an impor
 
 Catalog search and the city autocomplete match names and code case-insensitively, in either interface language, through the database collation (`utf8mb4_0900_ai_ci`), so a term finds a name regardless of case and accents. `name_native` is searched for cities only. `LIKE` compares character by character, so a ligature and its expansion (ß/ss, æ/ae) are not guaranteed to match.
 
+## Correcting region sources
+
+Country definitions in a shared game archive provide labels, not base-map availability. The private [parse-dlc survey and audit](../../.agents/skills/parse-dlc/SKILL.md#region-source-survey-and-private-correction) derives region sources from active city registrations and verified pack identities across a complete installed survey. Base presence, unique DLC ownership, multiple contributors and unresolved evidence remain distinct; the one-source schema does not encode every DLC contribution. For a split region without base presence, an explicit owner-reviewed primary DLC may be selected only from its completely surveyed contributors; the audit labels it `primary-dlc` and retains all candidates. Cities keep the DLC that adds each city.
+
+Prepare corrections only for inspected existing `(game, code)` rows, with exact current English/Russian names and visible same-game source codes. Preview must show no additions/errors and only `dlc_code` changes. CSV blanks preserve fields and cannot clear an incorrect source; use the form for that. A fresh preview/apply of identical correction bytes must be a no-op with stable IDs, names, visibility, timestamps and city links. Keep all source evidence, hosted inventories and correction files ignored under `.local/catalogs/`; hosted apply needs separate owner approval.
+
 ## Configuration
 
 `CATALOGS_ENABLED=true` and an independent 32-byte hex `CATALOGS_CURSOR_KEY` are the only settings. Old trust and limit settings are ignored by the app and retired by host activation. The public repository carries no game-derived values; real rows are loaded through the normal import on each host.
