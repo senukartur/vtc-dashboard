@@ -5,6 +5,8 @@ import {
   tripListTimestamp,
   tripPeriodBounds,
   tripSearch,
+  roundedTripDistanceM,
+  formatTripRevenue,
 } from "../../apps/web/src/features/trips/list-model.ts";
 import { tripTranslations } from "../../apps/web/src/features/trips/translations.ts";
 import {
@@ -25,6 +27,23 @@ import { queryString } from "../../apps/web/src/shared/paging.ts";
 const cases = JSON.parse(
   readFileSync(new URL("../../docs/contracts/dashboard/examples.json", import.meta.url), "utf8"),
 ).cases;
+
+test("journal distance rounds exact metres to whole kilometres without losing large values", () => {
+  for (const [metres, rounded] of [
+    ["0", "0"],
+    ["499.999", "0"],
+    ["500", "1000"],
+    ["1500", "2000"],
+    ["755400", "755000"],
+    ["755500", "756000"],
+    ["9007199254740993499", "9007199254740993000"],
+  ] as const)
+    expect(roundedTripDistanceM(metres)).toBe(rounded);
+  expect(roundedTripDistanceM(null)).toBeNull();
+  expect(formatTripRevenue("9007199254740993", "en")).toBe("9,007,199,254,740,993");
+  expect(formatTripRevenue("-1250", "en")).toBe("−1,250");
+  expect(formatTripRevenue("0", "ru")).toBe("0");
+});
 test("generated trip runtime envelopes accept reviewed fixtures and reject private summary additions", () => {
   const operations: Record<string, Parameters<typeof schema>[0]> = {
     getTrip: "EnvelopeTripView",

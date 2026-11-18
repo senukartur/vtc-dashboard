@@ -23,7 +23,37 @@ import {
   tripListCursor,
 } from "../../apps/api/src/modules/trips/list-query.ts";
 import { tripEvent } from "../../apps/api/src/platform/outbox/events.ts";
+import { observedRevenue } from "../../apps/api/src/modules/trips/facts.ts";
 import { telemetryFixture } from "../support/builders.ts";
+
+test("journal revenue preserves signed 64-bit integers, zero and documented currency without guessing", () => {
+  const evidence = (raw: string, currency: unknown = { status: "unknown" }) => ({
+    provider: "ets2telemetry" as const,
+    money: { revenue: { available: true, value: { raw, sdkType: "s64", currency } } },
+  });
+  expect(
+    observedRevenue(evidence("9007199254740993", { status: "sdk-documented", code: "EUR" })),
+  ).toEqual({ amount: "9007199254740993", currency: "EUR" });
+  expect(observedRevenue(evidence("0"))).toEqual({ amount: "0", currency: null });
+  expect(observedRevenue(evidence("-9223372036854775808"))).toEqual({
+    amount: "-9223372036854775808",
+    currency: null,
+  });
+  expect(observedRevenue(evidence("125", { status: "unknown", code: "EUR" }))).toEqual({
+    amount: "125",
+    currency: null,
+  });
+  for (const raw of ["9223372036854775808", "-9223372036854775809", "1.5", "-0", "01", "NaN"])
+    expect(observedRevenue(evidence(raw))).toBeNull();
+  expect(observedRevenue({ provider: "manual", money: evidence("5").money })).toBeNull();
+  expect(
+    observedRevenue({
+      provider: "ets2telemetry",
+      money: { expectedIncome: { available: true, value: { raw: "500" } } },
+    }),
+  ).toBeNull();
+  expect(observedRevenue(undefined)).toBeNull();
+});
 
 test("trip cursors reject legacy signatures and bind normalized filters to the effective locale", () => {
   const actor = {

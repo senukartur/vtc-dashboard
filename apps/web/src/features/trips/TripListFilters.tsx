@@ -42,6 +42,16 @@ export function TripListFilters({
     <fieldset className="trips-filter-group" aria-label={t("filters")}>
       <div className="trips-toolbar">
         <div className="trips-search">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+          >
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <path d="m16 16 4.5 4.5" />
+          </svg>
           <Label htmlFor="trip-search" className="visually-hidden">
             {t("searchPlaceholder")}
           </Label>
@@ -88,6 +98,7 @@ export function TripListFilters({
               </Label>
               <Select
                 id="trip-decision"
+                data-active={!!filters.decision}
                 value={filters.decision ?? ""}
                 onChange={(e) => onChange("decision", e.target.value)}
               >
@@ -107,6 +118,7 @@ export function TripListFilters({
             </Label>
             <Select
               id="trip-source"
+              data-active={!!filters.source}
               value={filters.source ?? ""}
               onChange={(e) => onChange("source", e.target.value)}
             >
@@ -124,6 +136,7 @@ export function TripListFilters({
             </Label>
             <Select
               id="trip-period"
+              data-active={!!effectivePeriod}
               value={effectivePeriod ?? ""}
               onChange={(e) => onChange("period", e.target.value)}
             >

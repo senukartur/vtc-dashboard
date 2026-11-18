@@ -39,7 +39,12 @@ import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
 import { createTripAdjudication } from "./adjudication.js";
 import { createContributionRegister } from "./contributions.js";
-import { createFactRepository, damagePercent, effectiveGameMode } from "./facts.js";
+import {
+  createFactRepository,
+  damagePercent,
+  effectiveGameMode,
+  observedRevenue,
+} from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
 import {
   type ListOptions,
@@ -794,6 +799,21 @@ export function createTrips(
     const factMembers = new Map(membership.map((row) => [row.id, row.aliasOf ?? row.id]));
     const associations = new Map<string, string>();
     const privateViewer = read?.privateViewer;
+    const depotIds = privateViewer
+      ? [
+          ...new Set(
+            [...facts.values()].flatMap(({ evidence }) =>
+              [evidence.companies?.origin.depotId, evidence.companies?.destination.depotId].filter(
+                (id): id is string => !!id,
+              ),
+            ),
+          ),
+        ]
+      : [];
+    const depots: ReadonlyMap<string, DepotRef> =
+      depotIds.length && ports.catalogs?.depotRefsInTransaction
+        ? await ports.catalogs.depotRefsInTransaction(tx, depotIds)
+        : new Map();
     let events: Awaited<ReturnType<Events["tripTitlesInTransaction"]>> | undefined;
     if (privateViewer && ports.eventTitles) {
       const saved = await ports.eventAssociations?.(tx, ids);
@@ -849,6 +869,19 @@ export function createTrips(
         ...(privateViewer && {
           event: event?.game === row.game ? { id: event.id, title: event.title } : null,
           gameMode: effectiveGameMode(f),
+          originCompany: f ? companyRef(f.companies?.origin, f.origin, depots) : null,
+          destinationCompany: f
+            ? companyRef(f.companies?.destination, f.destination, depots)
+            : null,
+          revenue: observedRevenue(f),
+          hardModeResult:
+            f?.provider === "ets2telemetry"
+              ? (f.recordedTelemetry?.hardModeResult ?? "unknown")
+              : "unknown",
+          jobType:
+            f?.provider === "ets2telemetry"
+              ? (f.recordedTelemetry?.jobType ?? "unknown")
+              : "unknown",
         }),
       };
     });

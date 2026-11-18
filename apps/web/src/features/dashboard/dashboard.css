@@ -185,7 +185,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
   gap: var(--space);
-  align-items: start;
+  align-items: stretch;
   min-width: 0;
 }
 .dashboard-page .dashboard-personal-split,
@@ -193,8 +193,15 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space);
-  align-items: flex-start;
+  align-items: stretch;
   min-width: 0;
+}
+/* Equal card heights within each row; keep their content at its natural spacing. */
+.dashboard-page .dashboard-personal-row > .card,
+.dashboard-page .dashboard-personal-split > .card,
+.dashboard-page .dashboard-company-split > .card,
+.dashboard-page .dashboard-breakdowns > .card {
+  align-content: start;
 }
 .dashboard-page .dashboard-personal-split > *,
 .dashboard-page .dashboard-company-split > * {
@@ -605,7 +612,7 @@
   grid-column: 1 / -1;
   grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
   gap: var(--space);
-  align-items: start;
+  align-items: stretch;
   min-width: 0;
 }
 .dashboard-page .dashboard-breakdown-list,

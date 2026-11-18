@@ -1,4 +1,9 @@
-/* Dense trip list: underline tabs, one-row filters, compact table, phone cards and side panel. */
+/* Dense trip list: underline tabs, one-row filters, telemetry-style journal and phone cards. */
+.trip-page.trips-journal {
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+}
 .trip-page .trips-header {
   align-items: center;
   gap: 8px 24px;
@@ -17,6 +22,7 @@
   min-width: 0;
 }
 .trip-page .trips-workspace > .tabs-content {
+  min-width: 0;
   padding-top: 0;
 }
 .trip-page .trips-scope {
@@ -176,90 +182,160 @@
     display: none;
   }
 }
-.trip-page .trips-layout {
+.trip-page .trips-layout,
+.trip-page .trips-list-area {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-/* The DataTable inside draws the frame, states and pager (shared/ui/data-table.css). */
-.trip-page .trips-list-area {
-  /* Containing block of last resort: a row-link overlay can never cover the app chrome. */
-  position: relative;
-  display: grid;
   min-width: 0;
+}
+.trip-page .trips-list-area {
+  position: relative;
+}
+.trip-page .trips-table .data-table-scroll {
+  position: relative;
+}
+.trip-page .trips-search {
+  position: relative;
+}
+.trip-page .trips-search > svg {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  width: 16px;
+  height: 16px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.trip-page .trips-search input {
+  padding-inline-start: 34px;
+}
+.trip-page .trips-filter:not(.trips-filter-game) select {
+  border-style: dashed;
+  background-color: transparent;
+}
+.trip-page .trips-filter select[data-active="true"] {
+  border-style: solid;
+  border-color: var(--focus);
+  background-color: var(--accent-soft);
 }
 .trip-page .trips-table th,
 .trip-page .trips-table td {
-  padding-inline: 6px;
-  /* Break inside a word only when it cannot fit, never mid-word by default. */
+  padding-inline: 10px;
   overflow-wrap: break-word;
 }
 .trip-page .trips-table th {
-  padding-block: 8px;
-  vertical-align: bottom;
+  padding-block: 10px;
+  vertical-align: middle;
+  background: var(--background);
 }
 .trip-page .trips-table td {
-  padding-block: 2px;
+  position: relative;
+  height: 60px;
+  padding-block: 10px;
   vertical-align: middle;
 }
-.trip-page .trips-col-route {
-  width: 25%;
+/* Keep all journal columns readable; only the table scrolls at intermediate widths. */
+@media (min-width: 801px) {
+  .trip-page .trips-table .table {
+    min-width: 1400px;
+  }
 }
-.trip-page .trips-col-cargo {
-  width: 15%;
-}
-.trip-page .trips-col-distance {
-  width: 12%;
-}
-.trip-page .trips-col-source {
-  width: 15%;
-}
-.trip-page .trips-col-decision {
-  width: 18%;
+.trip-page .trips-col-number {
+  width: 4%;
 }
 .trip-page .trips-col-time {
-  width: 15%;
+  width: 8%;
 }
-/* Beside the panel the table is narrower: sources move to the panel and the route gets the room. */
-.trip-page .trips-layout[data-panel] .trips-col-source,
-.trip-page .trips-layout[data-panel] .trips-source {
-  display: none;
+.trip-page .trips-col-game {
+  width: 8%;
 }
-.trip-page .trips-layout[data-panel] .trips-col-route {
-  width: 33%;
+.trip-page .trips-col-cargo {
+  width: 10%;
 }
-.trip-page .trips-layout[data-panel] .trips-col-cargo {
-  width: 18%;
-}
-.trip-page .trips-layout[data-panel] .trips-col-distance {
-  width: 13%;
-}
-.trip-page .trips-layout[data-panel] .trips-col-decision {
-  width: 19%;
-}
-.trip-page .trips-layout[data-panel] .trips-col-time {
+.trip-page .trips-col-route {
   width: 17%;
+}
+.trip-page .trips-col-distance {
+  width: 6%;
+}
+.trip-page .trips-col-revenue {
+  width: 8%;
+}
+.trip-page .trips-col-outcome {
+  width: 8%;
+}
+.trip-page .trips-col-recording {
+  width: 7%;
+}
+.trip-page .trips-col-source {
+  width: 7%;
+}
+.trip-page .trips-col-decision {
+  width: 7%;
+}
+.trip-page .trips-col-open {
+  width: 1%;
+}
+.trip-page .trips-bases,
+.trip-page .trips-revenue small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.trip-page .trips-revenue {
+  display: grid;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.trip-page .trips-game-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.trip-page .trips-hard-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--accepted), transparent 65%);
+  border-radius: var(--radius-badge);
+  color: var(--accepted);
+  background: var(--accepted-surface);
+  font-size: var(--font-badge);
+  font-weight: 600;
+}
+.trip-page .trips-hard-mode[data-result="not-qualified"] {
+  color: var(--destructive);
+  background: var(--rejected-surface);
+  border-color: color-mix(in srgb, var(--destructive), transparent 65%);
 }
 .trip-page td.trips-muted {
   color: var(--secondary);
+  font-variant-numeric: tabular-nums;
 }
-/* The route link is the row's only control. Its overlay fills the route cell in the table
-   (WebKit ignores position: relative on table rows) and the whole card on phones. */
-.trip-page .trips-table td.trips-route {
-  position: relative;
+.trip-page .trips-cell-stack {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
 }
-.trip-page .trips-row[data-selected] td {
-  background: var(--accent-soft);
+.trip-page .trips-cell-stack > .trips-row-meta {
+  padding: 0;
 }
-.trip-page .trips-row[data-selected] td:first-child {
-  box-shadow: inset 3px 0 0 var(--accent);
+.trip-page .trips-mode {
+  color: var(--muted);
+  font-size: var(--font-small);
 }
-.trip-page .trips-route-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+.trip-page .trips-mode[data-mode="haulmp"] {
+  color: var(--accepted);
+}
+.trip-page .trips-cargo-name,
+.trip-page .trips-distance {
+  font-weight: 600;
+}
+.trip-page .trips-distance {
+  font-variant-numeric: tabular-nums;
 }
 .trip-page .trips-link {
   display: inline-flex;
@@ -270,199 +346,166 @@
   font-weight: 500;
   text-decoration: none;
 }
+.trip-page .trips-link::after,
+.trip-page .trips-cell-link {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  content: "";
+}
+.trip-page .trips-row-meta a {
+  z-index: 2;
+}
 .trip-page .trips-link:focus-visible {
   outline-offset: 2px;
 }
-.trip-page .trips-link::after {
-  content: "";
-  position: absolute;
-  inset: 0;
+.trip-page .trips-row:has(.trips-link:focus-visible) > td {
+  background: var(--accent-soft);
 }
-.trip-page .trips-row[data-selected] .trips-link {
-  color: var(--focus);
+.trip-page .trips-row:has(.trips-link:focus-visible) > td:first-child {
+  box-shadow: inset 3px 0 0 var(--focus);
 }
-/* Touch screens keep hover after a tap, so hover feedback is limited to real hover devices. */
+.trip-page .trips-row:nth-child(odd) > td {
+  background: color-mix(in srgb, var(--surface), var(--surface-hover) 25%);
+}
 @media (hover: hover) {
-  .trip-page .trips-link:hover {
-    color: var(--focus);
-  }
-}
-/* In the table only the route cell is clickable, so only it reacts to the pointer. */
-@media (hover: hover) and (min-width: 801px) {
-  .trip-page .trips-row td.trips-route:hover {
+  .trip-page .trips-row:hover > td {
     background: var(--surface-hover);
-  }
-  .trip-page .trips-row[data-selected] td.trips-route:hover {
-    background: var(--accent-soft);
   }
 }
 .trip-page .trips-owner {
   display: block;
-  padding-bottom: 4px;
   color: var(--muted);
   font-size: var(--font-small);
 }
 .trip-page .trips-game {
+  display: inline-flex;
   flex-shrink: 0;
-  padding: 0 5px;
+  padding: 1px 5px;
+  border: 1px solid var(--selection-border);
   border-radius: var(--radius-badge);
-  font-size: var(--font-badge);
-  font-weight: 700;
-  line-height: 1.6;
-}
-.trip-page .trips-game[data-game="ets2"] {
   background: var(--accent-soft);
   color: var(--focus);
+  font-size: var(--font-badge);
+  font-weight: 600;
+  line-height: 1.5;
 }
-.trip-page .trips-game[data-game="ats"] {
-  background: var(--surface-active);
-  border: 1px solid var(--border-strong);
-  color: var(--secondary);
-}
-.trip-page .trips-decision {
+.trip-page .trips-decision,
+.trip-page .trips-outcome,
+.trip-page .trips-recording {
   max-width: 100%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-active);
+  color: var(--secondary);
+  font-weight: 500;
 }
-.trip-page .trips-decision[data-decision="accepted"] {
+.trip-page .trips-decision[data-decision="accepted"],
+.trip-page .trips-outcome[data-outcome="delivered"],
+.trip-page .trips-recording[data-recording="complete"] {
+  border-color: color-mix(in srgb, var(--accepted), transparent 65%);
   background: var(--accepted-surface);
   color: var(--accepted);
 }
-.trip-page .trips-decision[data-decision="pending_review"] {
+.trip-page .trips-decision[data-decision="pending_review"],
+.trip-page .trips-recording[data-recording="partial"] {
+  border-color: color-mix(in srgb, var(--pending), transparent 65%);
   background: var(--pending-surface);
   color: var(--pending);
 }
-.trip-page .trips-decision[data-decision="rejected"] {
+.trip-page .trips-decision[data-decision="rejected"],
+.trip-page .trips-outcome[data-outcome="cancelled"] {
+  border-color: color-mix(in srgb, var(--destructive), transparent 65%);
   background: var(--rejected-surface);
   color: var(--destructive);
 }
-.trip-page .trips-layout[data-panel] .trips-decision {
-  white-space: nowrap;
+.trip-page .trips-chevron {
+  color: var(--muted);
+  font-size: 22px;
 }
-/* Side panel: non-modal region; keep the 1200px breakpoint in sync with WIDE_QUERY in layout.ts. */
-@media (min-width: 1200px) {
-  .trip-page .trips-layout[data-panel] {
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+.trip-page .trips-secondary-status {
+  display: none;
+}
+/* Keep the status text readable between phone cards and the full desktop table. */
+@media (min-width: 801px) and (max-width: 1399px) {
+  .trip-page .trips-col-outcome,
+  .trip-page .trips-col-recording {
+    display: none;
+  }
+  .trip-page .trips-table .table {
+    min-width: 1200px;
+  }
+  .trip-page .trips-col-number {
+    width: 5%;
+  }
+  .trip-page .trips-col-time {
+    width: 11%;
+  }
+  .trip-page .trips-col-game {
+    width: 10%;
+  }
+  .trip-page .trips-col-cargo {
+    width: 12%;
+  }
+  .trip-page .trips-col-route {
+    width: 20%;
+  }
+  .trip-page .trips-col-distance {
+    width: 8%;
+  }
+  .trip-page .trips-col-revenue {
+    width: 11%;
+  }
+  .trip-page .trips-col-source {
+    width: 10%;
+  }
+  .trip-page .trips-col-decision {
+    width: 12%;
+  }
+  .trip-page .trips-secondary-status {
+    display: grid;
+    justify-items: start;
+    gap: 4px;
   }
 }
-.trip-page .trips-panel {
-  position: sticky;
-  top: 12px;
-  display: grid;
-  min-width: 0;
-  max-height: calc(100dvh - 24px);
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-.trip-page .trips-panel-header {
-  display: grid;
-  gap: 4px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-}
-.trip-page .trips-panel-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-.trip-page .trips-panel-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-}
-/* Icon-only close: square target, 40px under a coarse pointer via the shared tokens. */
-.trip-page .trips-panel-close {
-  min-width: var(--target-min);
-  padding-inline: 0;
-}
-.trip-page .trips-panel h2 {
-  margin: 0;
-  font-size: var(--font-body);
-  font-weight: 600;
-  line-height: 1.35;
-}
-.trip-page .trips-panel h2:focus {
-  outline: none;
-}
-.trip-page .trips-panel h2:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
-}
-.trip-page .trips-panel-meta {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--font-small);
-}
-.trip-page .trips-panel-body {
-  display: grid;
-  gap: 10px;
-  padding: 12px 14px 14px;
-}
-.trip-page .trips-panel-body > .button {
-  justify-self: start;
-}
-.trip-page .trips-facts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 12px;
-  margin: 0;
-}
-.trip-page .trips-facts dt {
-  color: var(--muted);
-  font-size: var(--font-badge);
-}
-.trip-page .trips-facts dd {
-  display: grid;
-  margin: 0;
-  font-weight: 600;
-}
-.trip-page .trips-facts dd small {
-  color: var(--muted);
-  font-size: var(--font-small);
-  font-weight: 400;
-}
-.trip-page .trips-panel h3 {
-  margin: 4px 0 0;
-  color: var(--secondary);
-  font-size: var(--font-small);
-  font-weight: 600;
-}
-.trip-page .trips-panel-note {
-  margin: 0;
-  color: var(--secondary);
-  font-size: var(--font-small);
-}
-.trip-page .trips-history {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0 0 0 12px;
-  border-left: 1px solid var(--border-strong);
-  list-style: none;
-}
-.trip-page .trips-history li {
-  display: grid;
-  gap: 2px;
-}
-.trip-page .trips-history p {
-  margin: 0;
-  color: var(--secondary);
-}
-/* Narrow cards (DataTable cardsBelow 800): the route spans the card and its link overlay covers
-   the whole card; labels, the hidden header and the pager come from the shared table. */
 @media (max-width: 800px) {
-  .trip-page .trips-table .table tbody tr.trips-row td,
-  .trip-page .trips-table .table tbody tr.trips-row[data-selected] td {
+  .trip-page .trips-table .table tbody tr.trips-row > td {
+    position: static;
+    height: auto;
     background: transparent;
     box-shadow: none;
   }
-  .trip-page .trips-table .table tbody td.trips-route {
-    position: static;
+  .trip-page .trips-table .table tbody tr.trips-row > .trips-route {
     grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .trip-page .trips-table .trips-col-open {
+    display: none;
+  }
+  .trip-page .trips-cell-link {
+    display: none;
+  }
+  .trip-page .trips-row:has(.trips-link:focus-visible) {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
   }
   .trip-page .trips-timezone {
     margin-left: 0;
   }
+}
+
+.trip-page .trips-col-job {
+  width: 9%;
+}
+.trip-page .trips-job {
+  display: inline-flex;
+  padding: 2px 6px;
+  border-radius: var(--radius-badge);
+  background: var(--surface-active);
+  color: var(--secondary);
+  font-size: var(--font-small);
+  line-height: 1.4;
+}
+.trip-page .trips-job[data-job="world-of-trucks"] {
+  color: var(--focus);
+  background: var(--accent-soft);
 }

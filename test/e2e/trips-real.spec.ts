@@ -1461,13 +1461,13 @@ test(
       expect(trip.reportingBasis).toBe("actual_completion");
       const rowLink = page.locator(`#trip-link-${completed.tripId}`);
       const row = page.getByRole("row").filter({ has: rowLink });
-      await expect(rowLink).toContainText(`#${trip.number}`);
+      await expect(row.locator(".trips-number")).toHaveText(`#${trip.number}`);
       await expect(page.getByText("Found 2", { exact: true })).toBeVisible();
       await expect(
         page.getByText("Lifetime accepted trips · 1 · 123.4 km", { exact: true }),
       ).toBeVisible();
       expect(trip.gameMode).toBe("unknown");
-      await expect(row.getByText("Unknown", { exact: true })).toBeVisible();
+      await expect(row.locator(".trips-mode")).toHaveText("Unknown");
 
       const search = page.getByRole("searchbox", { name: "City, cargo, trip number" });
       for (const term of [`#${trip.number}`, String(trip.number)]) {

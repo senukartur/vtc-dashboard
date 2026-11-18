@@ -1,6 +1,20 @@
 import type { operations } from "@vtc/contracts";
 import { computePeriodDates, periods } from "../dashboard/model.js";
 import { type DTO, tripFilters, validId } from "./transport.js";
+import { decimalShift, formatDecimal, type Locale } from "../../shared/formatting.js";
+
+/** Display-only rounding to whole kilometres; exact stored metres remain unchanged. */
+export function roundedTripDistanceM(value: string | null): string | null {
+  if (value === null) return null;
+  const [whole = "0", fraction = ""] = decimalShift(value, 3).split(".");
+  return ((BigInt(whole) + (fraction[0] && fraction[0] >= "5" ? 1n : 0n)) * 1000n).toString();
+}
+
+export function formatTripRevenue(amount: string, locale: Locale): string {
+  return amount.startsWith("-")
+    ? `−${formatDecimal(amount.slice(1), locale)}`
+    : formatDecimal(amount, locale);
+}
 
 type ListQuery = NonNullable<operations["listTrips"]["parameters"]["query"]>;
 export type TripOrder = Extract<ListQuery["order"], `completion_${string}`>;
