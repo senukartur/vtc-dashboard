@@ -61,6 +61,7 @@ import {
   reviewRoots,
   syncReviewReasons,
 } from "./review-queue.js";
+import { reviewQueueTrip, tripDepotRefs } from "./summary-projection.js";
 
 export { type ListOptions, type TripSource, tripListQuery, tripSources } from "./list-query.js";
 
@@ -77,6 +78,7 @@ type DepotRef =
 type SummaryRead = {
   manual: ReadonlyMap<string, ManualRevisionSummary>;
   privateViewer?: Actor;
+  journalMetadata?: boolean;
 };
 
 export interface TripsConfig {
@@ -799,7 +801,8 @@ export function createTrips(
     const factMembers = new Map(membership.map((row) => [row.id, row.aliasOf ?? row.id]));
     const associations = new Map<string, string>();
     const privateViewer = read?.privateViewer;
-    const depotIds = privateViewer
+    const journalMetadata = privateViewer && read?.journalMetadata !== false;
+    const depotIds = journalMetadata
       ? [
           ...new Set(
             [...facts.values()].flatMap(({ evidence }) =>
@@ -810,10 +813,7 @@ export function createTrips(
           ),
         ]
       : [];
-    const depots: ReadonlyMap<string, DepotRef> =
-      depotIds.length && ports.catalogs?.depotRefsInTransaction
-        ? await ports.catalogs.depotRefsInTransaction(tx, depotIds)
-        : new Map();
+    const depots = await tripDepotRefs(tx, depotIds, ports.catalogs?.depotRefsInTransaction);
     let events: Awaited<ReturnType<Events["tripTitlesInTransaction"]>> | undefined;
     if (privateViewer && ports.eventTitles) {
       const saved = await ports.eventAssociations?.(tx, ids);
@@ -869,19 +869,21 @@ export function createTrips(
         ...(privateViewer && {
           event: event?.game === row.game ? { id: event.id, title: event.title } : null,
           gameMode: effectiveGameMode(f),
-          originCompany: f ? companyRef(f.companies?.origin, f.origin, depots) : null,
-          destinationCompany: f
-            ? companyRef(f.companies?.destination, f.destination, depots)
-            : null,
-          revenue: observedRevenue(f),
-          hardModeResult:
-            f?.provider === "ets2telemetry"
-              ? (f.recordedTelemetry?.hardModeResult ?? "unknown")
-              : "unknown",
-          jobType:
-            f?.provider === "ets2telemetry"
-              ? (f.recordedTelemetry?.jobType ?? "unknown")
-              : "unknown",
+          ...(journalMetadata && {
+            originCompany: f ? companyRef(f.companies?.origin, f.origin, depots) : null,
+            destinationCompany: f
+              ? companyRef(f.companies?.destination, f.destination, depots)
+              : null,
+            revenue: observedRevenue(f),
+            hardModeResult:
+              f?.provider === "ets2telemetry"
+                ? (f.recordedTelemetry?.hardModeResult ?? "unknown")
+                : "unknown",
+            jobType:
+              f?.provider === "ets2telemetry"
+                ? (f.recordedTelemetry?.jobType ?? "unknown")
+                : "unknown",
+          }),
         }),
       };
     });
@@ -1145,13 +1147,14 @@ export function createTrips(
         const projected = await summaries(tx, roots, actor.locale, {
           manual,
           privateViewer: actor,
+          journalMetadata: false,
         });
         for (const [index, row] of roots.entries()) {
           const summary = projected[index];
           if (!summary) throw new Error("TRIP_SUMMARY_MISSING");
           const revision = manual.get(row.id);
           result.set(row.id, {
-            trip: { ...summary, createdAt: row.createdAt, number: row.number },
+            trip: reviewQueueTrip(summary, row.createdAt, row.number),
             manualRevision: revision
               ? { number: revision.number, submittedAt: revision.submittedAt }
               : null,
