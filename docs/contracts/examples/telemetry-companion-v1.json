@@ -1124,7 +1124,7 @@
           "result": "pass",
           "minM": "100000",
           "maxM": "500000",
-          "observedM": "99999",
+          "observedM": "499999",
           "reasons": [
             "within_limits"
           ]
@@ -1153,16 +1153,13 @@
           "rule": "hard_mode",
           "result": "pass",
           "required": true,
-          "observed": "unknown",
+          "observed": "qualified",
           "reasons": [
             "within_limits"
           ]
         }
       ],
-      "reasons": [
-        "below_minimum_growing",
-        "hard_mode_not_final"
-      ],
+      "reasons": [],
       "eventExempt": false,
       "applicability": {
         "expiresAt": "2026-11-18T12:00:05.000Z",
@@ -1669,9 +1666,13 @@
         {
           "rule": "trailer_types",
           "result": "pass",
-          "mode": "any",
-          "allowedIds": [],
-          "observedIds": [],
+          "mode": "selected",
+          "allowedIds": [
+            "00000000-0000-4000-8000-000000000013"
+          ],
+          "observedIds": [
+            "00000000-0000-4000-8000-000000000013"
+          ],
           "reasons": [
             "within_limits"
           ]
@@ -2230,6 +2231,40 @@
           }
         }
       ]
+    }
+  },
+  {
+    "name": "maximum-crossed-after-issued-lease",
+    "schema": "PreviewInput",
+    "value": {
+      "requestId": "00000000-0000-4000-8000-000000000007",
+      "contextRevision": 1,
+      "evidenceRevision": 4,
+      "game": "ets2",
+      "cargo": {
+        "availability": "unknown",
+        "code": null
+      },
+      "cargoMassKg": {
+        "availability": "known",
+        "value": "0"
+      },
+      "trailers": {
+        "complete": false,
+        "items": []
+      },
+      "actualDistance": {
+        "availability": "known",
+        "metres": "500001",
+        "support": "whole-trip",
+        "final": false
+      },
+      "hardMode": {
+        "result": "qualified",
+        "final": true
+      },
+      "start": null,
+      "eventId": null
     }
   }
 ]
