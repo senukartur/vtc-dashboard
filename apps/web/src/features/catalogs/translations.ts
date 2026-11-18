@@ -66,9 +66,12 @@ export const catalogTranslations = {
     formTitleNew: "New row: {{list}} · {{game}}",
     formTitleEdit: "Edit row: {{list}} · {{game}}",
     fieldCode: "Code",
-    fieldCommonTrailer: "Common trailer",
+    fieldType: "Type",
+    allTypes: "All types",
+    undefinedType: "Not determined",
+    fieldCommonTrailer: "Legacy common trailer",
     commonTrailerHint:
-      "Variants with the same game trailer key appear once and share qualification access. Their original body types remain recognized. Leave blank for a separate trailer.",
+      "Retained for existing variant-based qualifications. New selections use Type. Each catalog row is edited separately.",
     trailerVariants: "Variants: {{count}}",
     codeHint: "Must match the ID sent by telemetry exactly.",
     trailerCodeHint:
@@ -281,9 +284,12 @@ export const catalogTranslations = {
     formTitleNew: "Новая запись: {{list}} · {{game}}",
     formTitleEdit: "Изменение записи: {{list}} · {{game}}",
     fieldCode: "Код",
-    fieldCommonTrailer: "Общий прицеп",
+    fieldType: "Тип",
+    allTypes: "Все типы",
+    undefinedType: "Не определён",
+    fieldCommonTrailer: "Прежний общий прицеп",
     commonTrailerHint:
-      "Варианты с одним игровым ключом прицепа показываются одной строкой и имеют общий допуск. Исходные типы кузова продолжают распознаваться. Пустое поле — отдельный прицеп.",
+      "Сохранён для действующих допусков по вариантам. В новых выборах используется тип. Каждая строка каталога редактируется отдельно.",
     trailerVariants: "Вариантов: {{count}}",
     codeHint: "Должен точно совпадать с ID, который присылает телеметрия.",
     trailerCodeHint:

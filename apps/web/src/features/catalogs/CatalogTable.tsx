@@ -16,9 +16,6 @@ export function RowBadges({ list, item }: { list: CatalogList; item: CatalogItem
     <>
       {item.hidden && <span className="catalog-badge">{t("hidden")}</span>}
       {fallbackBadge(list, item) && <span className="catalog-badge">{t("rowFallback")}</span>}
-      {list === "trailers" && (item.variantCount ?? 1) > 1 && (
-        <span className="catalog-badge">{t("trailerVariants", { count: item.variantCount })}</span>
-      )}
     </>
   );
 }
@@ -52,6 +49,7 @@ export function CatalogTable({
             {translated && <th>{t("colNameRu")}</th>}
             {list === "cities" && <th>{t("colNameNative")}</th>}
             <th>{t("colCode")}</th>
+            {list === "trailers" && <th>{t("fieldType")}</th>}
             {list !== "dlcs" && <th>{t("colDlc")}</th>}
             {list === "cities" && <th>{t("colRegion")}</th>}
             {list === "cargoes" && <th>{t("colAdr")}</th>}
@@ -81,8 +79,9 @@ export function CatalogTable({
               {translated && <td className="catalog-name-ru">{item.nameRu ?? "—"}</td>}
               {list === "cities" && <td>{item.nameNative ?? "—"}</td>}
               <td className="catalog-code">
-                <code>{item.commonTrailer ?? item.code}</code>
+                <code>{item.code}</code>
               </td>
+              {list === "trailers" && <td>{item.trailerType?.label ?? t("undefinedType")}</td>}
               {list !== "dlcs" && (
                 <td className="catalog-source">{item.dlc?.label ?? t("baseGame")}</td>
               )}

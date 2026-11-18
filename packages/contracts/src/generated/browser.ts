@@ -1207,6 +1207,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalogs/trailer-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read semantic trailer types
+         * @description Apply visibility and filters before paging. The normalized filters are bound into the cursor.
+         */
+        get: operations["listTrailerTypes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalogs/trailer-types/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read semantic trailer types */
+        get: operations["getTrailerType"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/events": {
         parameters: {
             query?: never;
@@ -3525,7 +3562,7 @@ export interface components {
             adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
             code: string;
-            /** @description Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized. */
+            /** @description Legacy common-model identity retained for existing variant-based qualifications. Catalog lists show every original body type. */
             commonTrailer?: string | null;
             /** @description Companies list only. Count linked same-game depots. */
             depotCount?: number;
@@ -3546,6 +3583,8 @@ export interface components {
             region?: components["schemas"]["CatalogLabel"] | null;
             regionId?: string | null;
             steamAppId?: number | null;
+            trailerType?: components["schemas"]["CatalogLabel"] | null;
+            trailerTypeId?: string | null;
             /** @description Last update to this catalog row. */
             updatedAt?: components["schemas"]["Timestamp"];
             /** @description Number of stored body-type variants in this trailer group, including hidden variants. */
@@ -3561,7 +3600,7 @@ export interface components {
             adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
             code?: string;
-            /** @description Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized. */
+            /** @description Legacy common-model identity retained for existing variant-based qualifications. Catalog lists show every original body type. */
             commonTrailer?: string | null;
             dlcId?: string | null;
             hidden?: boolean;
@@ -3571,6 +3610,7 @@ export interface components {
             nameRu?: string | null;
             regionId?: string | null;
             steamAppId?: number | null;
+            trailerTypeId?: string | null;
         };
         CatalogLabel: {
             /** @description True when a requested Russian name is missing and English is shown. Always false on DLC and company labels, which use only their canonical name. */
@@ -3651,13 +3691,14 @@ export interface components {
         CatalogTrailerInput: {
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
             code: string;
-            /** @description Exact game trailer unit shared by body-type variants. Null leaves the row ungrouped. Trailer lists contain one representative per game and common trailer; original IDs and codes remain recognized. */
+            /** @description Legacy common-model identity retained for existing variant-based qualifications. Catalog lists show every original body type. */
             commonTrailer?: string | null;
             dlcId?: string | null;
             /** @enum {string} */
             game: "ets2" | "ats";
             nameEn: string;
             nameRu?: string | null;
+            trailerTypeId?: string | null;
         };
         Challenge: {
             /** Format: date-time */
@@ -5522,6 +5563,11 @@ export interface components {
             massMaxKg: components["schemas"]["Decimal"] | null;
             massMinKg: components["schemas"]["Decimal"] | null;
             trailers: {
+                /**
+                 * @description Omitted means legacy variant rules. New selections use semantic types; changing basis is an explicit qualification edit.
+                 * @enum {string}
+                 */
+                basis?: "variant" | "type";
                 /** @enum {string} */
                 mode: "any" | "selected";
                 types: components["schemas"]["CatalogLabel"][];
@@ -5540,6 +5586,11 @@ export interface components {
             massMaxKg: components["schemas"]["Decimal"] | null;
             massMinKg: components["schemas"]["Decimal"] | null;
             trailers: {
+                /**
+                 * @description Omitted means legacy variant rules. New selections use semantic types; changing basis is an explicit qualification edit.
+                 * @enum {string}
+                 */
+                basis?: "variant" | "type";
                 /** @enum {string} */
                 mode: "any" | "selected";
                 typeIds: components["schemas"]["Id"][];
@@ -8363,6 +8414,8 @@ export interface operations {
                 logo?: "missing";
                 regionId?: string;
                 search?: string;
+                /** @description Trailers only. undefined selects unclassified variants. */
+                trailerTypeId?: "undefined" | string;
                 /** @description Select rows missing a Russian name. English remains required. Not offered on the dlcs and companies lists, which use only their canonical name (422). */
                 untranslated?: true;
             };
@@ -8505,6 +8558,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeCatalogSummary"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrailerTypes: {
+        parameters: {
+            query: {
+                cursor?: components["parameters"]["Cursor"];
+                game: "ets2" | "ats";
+                limit?: components["parameters"]["Limit"];
+                locale?: "en" | "ru";
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCatalogItemList"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getTrailerType: {
+        parameters: {
+            query?: {
+                locale?: "en" | "ru";
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCatalogItem"];
                 };
             };
             default: components["responses"]["Error"];

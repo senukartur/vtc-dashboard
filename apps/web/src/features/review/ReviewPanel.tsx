@@ -157,7 +157,7 @@ function ResolutionForm({
                   ["originCityId", "origin", "city"],
                   ["destinationCityId", "destination", "city"],
                   ["cargoId", "cargo", "cargo"],
-                  ["trailerTypeId", "trailerType", "trailer"],
+                  ["trailerTypeId", "trailerType", "trailer-type"],
                 ] as const
               )
                 .filter(([key]) => key === catalogField)

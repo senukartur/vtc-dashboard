@@ -25,7 +25,11 @@ import {
 } from "./model.js";
 import { useEditorText } from "./text.js";
 
-export function useEditorCatalogItem(list: CatalogList, id: string | null, locale: "en" | "ru") {
+export function useEditorCatalogItem(
+  list: CatalogList | "trailer-types",
+  id: string | null,
+  locale: "en" | "ru",
+) {
   const query = useCatalogQuery(
     ["item", list, id, locale],
     `/catalogs/${list}/${id}?locale=${locale}`,
@@ -247,7 +251,7 @@ export function EditorCatalogSelector({
         caption={caption}
         required={required}
         game={game}
-        kind={kind}
+        kind={kind === "trailer" ? "trailer-type" : kind}
         value={value}
         onChange={onChange}
       />

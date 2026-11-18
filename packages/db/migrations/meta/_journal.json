@@ -260,6 +260,13 @@
       "when": 1794942823754,
       "tag": "0036_trailer_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "5",
+      "when": 1794960747659,
+      "tag": "0037_trailer_types",
+      "breakpoints": true
     }
   ]
 }

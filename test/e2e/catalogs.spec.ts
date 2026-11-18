@@ -29,7 +29,7 @@ const phone = (page: Page) => (page.viewportSize()?.width ?? 1280) < 760;
 
 for (const locale of ["ru", "en"] as const) {
   test(
-    `common trailer groups expose one editable row and variant count in ${locale}`,
+    `trailer variants retain separate rows, source codes and type filters in ${locale}`,
     browserCase(["@layout"]),
     async ({ page }, info) => {
       const c = catalogTranslations[locale];
@@ -37,17 +37,36 @@ for (const locale of ["ru", "en"] as const) {
         code: "_fiction_body_a",
         commonTrailer: "trailer.fiction_common",
         variantCount: 7,
+        trailerTypeId: cargoRowId,
+        trailerType: catalogItem(cargoRowId, locale === "ru" ? "Фургон" : "Box trailer", locale)
+          .display,
+      });
+      const other = catalogItem(entityId, "Fictional unclassified body", locale, {
+        code: "_fiction_body_b",
+        trailerTypeId: null,
+        trailerType: null,
+      });
+      const type = catalogItem(cargoRowId, locale === "ru" ? "Фургон" : "Box trailer", locale, {
+        code: "dryvan",
       });
       await mockCatalogs(page, true, {
-        rows: { ets2: { ...defaultRows(locale), trailers: [item] } },
+        rows: { ets2: { ...defaultRows(locale), trailers: [item, other] } },
+        trailerTypes: [type],
       });
       await open(page, locale, "?tab=trailers");
       const row = rowOf(page, item.nameEn);
       await expect(row).toHaveCount(1);
-      await expect(row.getByText("trailer.fiction_common", { exact: true })).toBeVisible();
-      await expect(
-        row.getByText(c.trailerVariants.replace("{{count}}", "7"), { exact: true }),
-      ).toBeVisible();
+      await expect(row.getByText("_fiction_body_a", { exact: true })).toBeVisible();
+      await expect(row.getByText(type.display.label, { exact: !phone(page) })).toBeVisible();
+      await expect(rowOf(page, other.nameEn)).toBeVisible();
+      await page
+        .getByRole("combobox", { name: c.fieldType, exact: true })
+        .selectOption("undefined");
+      await expect(row).toHaveCount(0);
+      await expect(rowOf(page, other.nameEn)).toBeVisible();
+      await page.getByRole("combobox", { name: c.fieldType, exact: true }).selectOption(cargoRowId);
+      await expect(row).toBeVisible();
+      await expect(rowOf(page, other.nameEn)).toHaveCount(0);
       await capture(page, info, `common-trailer-${locale}`);
       if (phone(page)) await row.getByRole("button").click();
       await (phone(page) ? page.getByRole("dialog") : row)
@@ -240,6 +259,7 @@ test(
         nameEn: "Fictional curtain",
         nameRu: null,
         dlcId: null,
+        trailerTypeId: null,
       },
       {
         game: "ets2",
@@ -247,6 +267,7 @@ test(
         nameEn: "Fictional curtain",
         nameRu: null,
         dlcId: null,
+        trailerTypeId: null,
       },
     ]);
   },

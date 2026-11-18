@@ -38,7 +38,8 @@
     "event_revisions": ["SELECT", "INSERT"],
     "event_response_revisions": ["SELECT", "INSERT"],
     "event_attendance_revisions": ["SELECT", "INSERT"],
-    "event_commands": ["SELECT", "INSERT"]
+    "event_commands": ["SELECT", "INSERT"],
+    "qualification_level_trailer_types": ["SELECT", "INSERT", "DELETE"]
   },
   "jobs": {
     "durable_jobs": ["SELECT", "INSERT", "UPDATE"],

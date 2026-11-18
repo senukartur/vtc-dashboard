@@ -15,7 +15,7 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { decimalColumn, idColumn, utcColumn } from "../../core/values.js";
-import { catalogTrailers } from "../catalogs/index.js";
+import { catalogTrailers, catalogTrailerTypes } from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
 
 export {
@@ -57,6 +57,7 @@ export const qualificationLevels = mysqlTable(
     distanceMinM: decimalColumn("distance_min_m"),
     distanceMaxM: decimalColumn("distance_max_m"),
     trailerMode: mysqlEnum("trailer_mode", ["any", "selected"]).notNull().default("any"),
+    trailerBasis: mysqlEnum("trailer_basis", ["variant", "type"]).notNull().default("variant"),
     adrMode: mysqlEnum("adr_mode", ["forbidden", "selected", "any"]).notNull().default("any"),
     adrClasses: json("adr_classes").$type<string[]>(),
     hardModeRequired: boolean("hard_mode_required").notNull().default(false),
@@ -111,6 +112,27 @@ export const qualificationLevelTrailers = mysqlTable(
       name: "qual_level_trailer_catalog_fk",
       columns: [t.trailerId, t.game],
       foreignColumns: [catalogTrailers.id, catalogTrailers.game],
+    }).onDelete("restrict"),
+  ],
+);
+export const qualificationLevelTrailerTypes = mysqlTable(
+  "qualification_level_trailer_types",
+  {
+    levelId: idColumn("level_id").notNull(),
+    game: game("game").notNull(),
+    trailerId: idColumn("trailer_id").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.levelId, t.trailerId] }),
+    foreignKey({
+      name: "qual_level_type_level_fk",
+      columns: [t.levelId, t.game],
+      foreignColumns: [qualificationLevels.id, qualificationLevels.game],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "qual_level_type_catalog_fk",
+      columns: [t.trailerId, t.game],
+      foreignColumns: [catalogTrailerTypes.id, catalogTrailerTypes.game],
     }).onDelete("restrict"),
   ],
 );

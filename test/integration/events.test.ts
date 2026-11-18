@@ -195,6 +195,60 @@ test("Director/Deputy manage, additive Driver/trainee respond, dispatcher denied
   expect((await service.nearest(trainee))?.id).toBe(id);
 });
 
+test("event draft and publication select semantic types while retaining legacy variant history", async () => {
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const routes = draftEvents();
+  const type = (await catalogs.trailerTypes(director, { game: "ets2", limit: 100 })).items.find(
+    (row) => row.code === "dryvan",
+  )!;
+  const draft = await routes.drafts!.create(
+    director,
+    newId(),
+    stagedInput({ prescribedTrailerTypeId: type.id }),
+  );
+  expect(
+    (await routes.drafts!.get(director, draft.data.id)).data.fields.prescribedTrailerTypeId,
+  ).toBe(type.id);
+  const published = await routes.drafts!.publish(director, draft.data.id, newId(), 1, "ru");
+  const id = published.data.event.id;
+  expect(published.data).toMatchObject({
+    prescribedTrailerTypeId: type.id,
+    prescribedTrailerType: { label: "Фургон" },
+  });
+  const [stored] = await control.query<RowDataPacket[]>(
+    "SELECT prescribed_trailer_id legacy, CAST(prescribed_trailer_kind_id AS CHAR) type FROM event_revisions WHERE event_id=?",
+    [id],
+  );
+  expect(stored).toMatchObject([{ legacy: null, type: type.id }]);
+  expect((await routes.listStage2(trainee, "ru")).items).toContainEqual(
+    expect.objectContaining({
+      prescribedTrailerTypeId: type.id,
+      prescribedTrailerType: expect.objectContaining({ label: "Фургон" }),
+    }),
+  );
+  const legacy = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "fictional_event_legacy",
+    nameEn: "Fictional retained body",
+  });
+  await routes.updatePublished(
+    director,
+    id,
+    newId(),
+    1,
+    stagedInput({ prescribedTrailerTypeId: legacy.id }),
+    "en",
+  );
+  expect((await routes.getPublished(trainee, id, "en")).data).toMatchObject({
+    prescribedTrailerTypeId: legacy.id,
+  });
+  const [history] = await control.query<RowDataPacket[]>(
+    "SELECT prescribed_trailer_id legacy,CAST(prescribed_trailer_kind_id AS CHAR) type FROM event_revisions WHERE event_id=? AND version=1",
+    [id],
+  );
+  expect(history).toMatchObject([{ legacy: null, type: type.id }]);
+});
+
 test("staged member list, detail and upcoming share safe organizer and current own response facts", async () => {
   await control.query("DELETE FROM identity_limits");
   const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);

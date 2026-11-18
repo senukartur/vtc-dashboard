@@ -5462,6 +5462,116 @@ test("HTTP author trip read serializes sources and the qualification check", asy
   }
 });
 
+test("typed allowances accept original body variants and typed manual facts, preserve history and fence reclassification", async () => {
+  const types = (await catalogs.trailerTypes(director, { game: "ets2", limit: 100 })).items;
+  const box = types.find((row) => row.code === "dryvan")!,
+    cold = types.find((row) => row.code === "refrigerated")!;
+  const variants = await Promise.all(
+    ["a", "b", "unclassified"].map((suffix) =>
+      catalogs.create(director, "trailers", newId(), {
+        game: "ets2",
+        code: `_typed_fiction_${suffix}`,
+        nameEn: "Fictional body",
+        ...(suffix === "unclassified" ? {} : { trailerTypeId: box.id }),
+      }),
+    ),
+  );
+  await configureFirstLevel({ trailers: { basis: "type", mode: "selected", typeIds: [box.id] } });
+  try {
+    const accepted = [];
+    for (const variant of variants.slice(0, 2)) {
+      const p = payload();
+      p.snapshot.trailers.items[0]!.bodyType = { available: true, value: variant.code };
+      const received = await receive(p);
+      accepted.push(received);
+      expect((await state(received.tripId))?.decision).toBe("accepted");
+      expect((await credit(received.tripId))?.credited).toBe(true);
+      expect((await receive(p)).duplicate).toBe(true);
+      const evidence = await unit.run((tx) =>
+        tripsService.sourceEvidenceInTransaction(tx, received.sourceRecordId),
+      );
+      expect(evidence?.trailers.items[0]).toMatchObject({
+        status: "known",
+        value: { entityId: variant.id },
+      });
+    }
+    const unknown = payload();
+    unknown.snapshot.trailers.items[0]!.bodyType = { available: true, value: variants[2]!.code };
+    expect((await state((await receive(unknown)).tripId))?.decision).toBe("pending_review");
+    ids.set("semantic_box", box.id);
+    const r = await report(owner, manual, { trailerType: "semantic_box" });
+    const review = await service.review(dispatcher, r.tripId);
+    expect(review.data.acceptance.mode).toBe("ordinary");
+    const [stored] = await control.query<RowDataPacket[]>(
+      "SELECT trailer_id, CAST(trailer_type_id AS CHAR) type FROM trip_fact_trailers WHERE trip_fact_id=(SELECT current_fact_id FROM trips WHERE id=?)",
+      [r.tripId],
+    );
+    expect(stored[0]).toMatchObject({ trailer_id: null, type: box.id });
+    await service.decide(dispatcher, r.tripId, newId(), review.version, {
+      decision: "accept",
+      reviewedRevisionId: review.data.trip.manualRevision!.id,
+      factRevisionId: review.data.factRevisionId,
+      proposalId: null,
+      reason: "Fictional typed report",
+    });
+    expect((await state(r.tripId))?.decision).toBe("accepted");
+    expect((await credit(r.tripId))?.credited).toBe(true);
+    const proposal = await service.propose(
+      dispatcher,
+      accepted[0]!.tripId,
+      newId(),
+      (await state(accepted[0]!.tripId))!.version,
+      { reason: "Fictional semantic correction", evidenceIds: [], trailerTypeId: box.id },
+    );
+    const proposalView = await service.getProposal(
+      dispatcher,
+      accepted[0]!.tripId,
+      proposal.data.id,
+    );
+    await decideProposal(
+      deputy,
+      accepted[0]!.tripId,
+      proposal.data.id,
+      newId(),
+      proposalView.version,
+      {
+        decision: "approve",
+        reviewedRevisionId: proposalView.data.revisionId,
+        reason: "Fictional typed correction approval",
+      },
+    );
+    ids.set("unclassified_semantic_body", variants[2]!.id);
+    const held = await report(owner, manual, { trailerType: "unclassified_semantic_body" });
+    const before = await service.review(dispatcher, held.tripId);
+    await catalogs.patch(director, "trailers", variants[2]!.id, newId(), { trailerTypeId: box.id });
+    const after = await service.review(dispatcher, held.tripId);
+    expect(after.data.acceptance.mode).toBe("ordinary");
+    expect(after.version).toBeGreaterThan(before.version);
+    await expect(
+      service.decide(dispatcher, held.tripId, newId(), before.version, {
+        decision: "accept",
+        reviewedRevisionId: before.data.trip.manualRevision!.id,
+        factRevisionId: before.data.factRevisionId,
+        proposalId: null,
+        reason: "Fictional stale type review",
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    // A correction changes future comparisons, while the accepted decision keeps its map.
+    await catalogs.patch(director, "trailers", variants[1]!.id, newId(), {
+      trailerTypeId: cold.id,
+    });
+    const wrong = payload();
+    wrong.snapshot.trailers.items[0]!.bodyType = { available: true, value: variants[1]!.code };
+    expect((await state((await receive(wrong)).tripId))?.decision).toBe("rejected");
+    expect((await state(accepted[1]!.tripId))?.decision).toBe("accepted");
+    expect(
+      (await service.review(dispatcher, accepted[1]!.tripId)).data.qualificationCheck,
+    ).toMatchObject({ basis: "decision", outcome: "pass" });
+  } finally {
+    await configureFirstLevel({ massMaxKg: "20000" });
+  }
+});
+
 test("grouped body variants pass actual ingestion and acceptance while unknown bodies and different groups stay distinct", async () => {
   const a = await catalogs.create(director, "trailers", newId(), {
     game: "ets2",

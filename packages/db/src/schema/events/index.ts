@@ -21,6 +21,7 @@ import {
   catalogCompanyCities,
   catalogDlcs,
   catalogTrailers,
+  catalogTrailerTypes,
 } from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
 
@@ -118,6 +119,7 @@ export const eventRevisions = mysqlTable(
     destinationCityId: idColumn("destination_city_id"),
     prescribedCargoId: idColumn("prescribed_cargo_id"),
     prescribedTrailerId: idColumn("prescribed_trailer_id"),
+    prescribedTrailerKindId: idColumn("prescribed_trailer_kind_id"),
     prescribedMassKg: decimalColumn("prescribed_mass_kg"),
     privateReason: varchar("private_reason", { length: 2048 }),
   },
@@ -150,6 +152,15 @@ export const eventRevisions = mysqlTable(
       columns: [t.prescribedTrailerId, t.game],
       foreignColumns: [catalogTrailers.id, catalogTrailers.game],
     }).onDelete("restrict"),
+    foreignKey({
+      name: "event_revision_type_fk",
+      columns: [t.prescribedTrailerKindId, t.game],
+      foreignColumns: [catalogTrailerTypes.id, catalogTrailerTypes.game],
+    }).onDelete("restrict"),
+    check(
+      "event_revision_trailer_identity",
+      sql`${t.prescribedTrailerId} IS NULL OR ${t.prescribedTrailerKindId} IS NULL`,
+    ),
     check("event_mass_nonnegative", sql`${t.prescribedMassKg} IS NULL OR ${t.prescribedMassKg}>=0`),
   ],
 );
@@ -303,6 +314,7 @@ export const eventDrafts = mysqlTable(
     destinationCityId: idColumn("destination_city_id"),
     prescribedCargoId: idColumn("prescribed_cargo_id"),
     prescribedTrailerTypeId: idColumn("prescribed_trailer_type_id"),
+    prescribedTrailerKindId: idColumn("prescribed_trailer_kind_id"),
     prescribedMassKg: decimalColumn("prescribed_mass_kg"),
     ...routeExtension(),
   },
@@ -332,6 +344,15 @@ export const eventDrafts = mysqlTable(
       columns: [t.prescribedTrailerTypeId, t.game],
       foreignColumns: [catalogTrailers.id, catalogTrailers.game],
     }).onDelete("restrict"),
+    foreignKey({
+      name: "event_draft_type_fk",
+      columns: [t.prescribedTrailerKindId, t.game],
+      foreignColumns: [catalogTrailerTypes.id, catalogTrailerTypes.game],
+    }).onDelete("restrict"),
+    check(
+      "event_draft_trailer_identity",
+      sql`${t.prescribedTrailerTypeId} IS NULL OR ${t.prescribedTrailerKindId} IS NULL`,
+    ),
     uniqueIndex("event_draft_id_game").on(t.eventId, t.game),
     index("event_draft_page").on(t.discardedAt, t.updatedAt, t.eventId),
     check("event_draft_version_positive", sql`${t.version}>0`),
@@ -345,7 +366,7 @@ export const eventDrafts = mysqlTable(
       sql`${t.game} IS NOT NULL OR (
       ${t.originCityId} IS NULL AND ${t.destinationCityId} IS NULL
       AND ${t.originDepotId} IS NULL AND ${t.destinationDepotId} IS NULL
-      AND ${t.prescribedCargoId} IS NULL AND ${t.prescribedTrailerTypeId} IS NULL)`,
+      AND ${t.prescribedCargoId} IS NULL AND ${t.prescribedTrailerTypeId} IS NULL AND ${t.prescribedTrailerKindId} IS NULL)`,
     ),
   ],
 );
