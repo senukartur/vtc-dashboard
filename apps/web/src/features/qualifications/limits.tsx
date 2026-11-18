@@ -8,6 +8,7 @@ import {
   formatUtc,
   type Locale,
 } from "../../shared/formatting.js";
+import { LabelBadge } from "../../shared/ui/label-badge.js";
 import { Badge } from "../../shared/ui/primitives.js";
 import { percent, setLimits } from "./model.js";
 
@@ -119,9 +120,7 @@ export function LimitChips({ limits }: { limits: Limits }) {
   return (
     <span className="qualification-chips">
       {chips.map((chip) => (
-        <Badge key={chip} className="badge-neutral">
-          {chip}
-        </Badge>
+        <LabelBadge key={chip}>{chip}</LabelBadge>
       ))}
       {set.hardMode && (
         <Badge tone="ok" icon={Flame}>
@@ -156,9 +155,7 @@ export function LimitList({ limits }: { limits: Limits }) {
           ) : (
             <span className="qualification-chips">
               {limits.trailers.types.map((type) => (
-                <Badge key={type.entityId} className="badge-neutral">
-                  {type.label}
-                </Badge>
+                <LabelBadge key={type.entityId}>{type.label}</LabelBadge>
               ))}
             </span>
           )}
@@ -170,9 +167,7 @@ export function LimitList({ limits }: { limits: Limits }) {
           {limits.adr.mode === "selected" && limits.adr.classes.length > 0 ? (
             <span className="qualification-chips">
               {limits.adr.classes.map((value) => (
-                <Badge key={value} className="badge-neutral">
-                  {t(`adr${value}`)}
-                </Badge>
+                <LabelBadge key={value}>{t(`adr${value}`)}</LabelBadge>
               ))}
             </span>
           ) : (

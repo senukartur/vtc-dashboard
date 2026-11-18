@@ -7,6 +7,7 @@ import { adrClasses, itemSchema } from "../../shared/catalog-selectors/contracts
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
 import { InfoTip } from "../../shared/ui/info-tip.js";
+import { LabelBadge } from "../../shared/ui/label-badge.js";
 import { Badge, Button, Card, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { failureText, LimitList, needText, useLocale } from "./limits.js";
@@ -665,7 +666,7 @@ function TrailerChip({
   }, [trailer.label, fetched, onLabel]);
   return (
     <li className="qualification-selected-chip">
-      <Badge>{name}</Badge>
+      <LabelBadge>{name}</LabelBadge>
       <button
         type="button"
         className="qualification-chip-remove"

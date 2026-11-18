@@ -14,6 +14,7 @@ import {
   type Locale,
 } from "../../shared/formatting.js";
 import { ChartContainer } from "../../shared/ui/chart.js";
+import { LabelBadge } from "../../shared/ui/label-badge.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { progressPercent } from "../dashboard/model.js";
@@ -186,14 +187,14 @@ export function ProfileHeader({
         {chips.length > 0 && (
           <p className="driver-chips">
             {chips.map((chip) => (
-              <Badge
+              <LabelBadge
                 key={chip.game}
                 tone={chip.game}
                 className="driver-level-chip"
                 data-game={chip.game}
               >
-                {gameName[chip.game]} · {chip.name}
-              </Badge>
+                {`${gameName[chip.game]} · ${chip.name}`}
+              </LabelBadge>
             ))}
           </p>
         )}
@@ -434,9 +435,9 @@ export function QualificationCard({
                     className="driver-ladder-arrow"
                   />
                 )}
-                <Badge tone={current ? "info" : "neutral"} className="driver-ladder-name">
+                <LabelBadge tone={current ? "info" : "neutral"} className="driver-ladder-name">
                   {level.name}
-                </Badge>
+                </LabelBadge>
               </li>
             );
           })}

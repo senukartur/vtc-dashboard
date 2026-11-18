@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigationType } from "react-router-dom";
 import { formatDecimal, formatQuantity, type Locale } from "../../shared/formatting.js";
 import type { DataTableColumn } from "../../shared/ui/DataTable.js";
+import { LabelBadge } from "../../shared/ui/label-badge.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../shared/ui/popover.js";
 import { Badge, Button, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { normalizeSearch, orderedRoles, searchMaxLength } from "../admin/members-model.js";
@@ -296,7 +297,7 @@ function LevelCell({ entry, game }: { entry: DirectoryEntry; game: "ets2" | "ats
         </span>
       </Badge>
     );
-  return <Badge className="drivers-level">{view.name}</Badge>;
+  return <LabelBadge className="drivers-level">{view.name}</LabelBadge>;
 }
 
 type SortColumn = {
