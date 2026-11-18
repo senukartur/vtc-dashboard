@@ -492,5 +492,460 @@ class ExportTests(unittest.TestCase):
             ops.restore_event_media(self.base, manifest, ops.PROJECT, self.revision, self.image)
 
 
+class ControlsReleaseTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = pathlib.Path(temporary.name)
+        for name in ['state/incoming', 'state/controls-candidate', 'state/controls-previous', 'private/maintenance']:
+            (self.base / name).mkdir(parents=True, mode=0o700, exist_ok=True)
+        self.base.chmod(0o700)
+        self.patch(ops, 'BASE', self.base)
+        self.old = {'revision': 'a' * 40, 'imageId': 'sha256:' + 'a' * 64, 'runId': 10, 'attempt': 1}
+        self.target = {'revision': 'b' * 40, 'imageId': 'sha256:' + 'b' * 64, 'runId': 11,
+                       'attempt': 1, 'mode': 'auto', 'bytes': 7, 'sha256': hashlib.sha256(b'archive').hexdigest()}
+        self.write('state/current.json', self.old)
+        for name in ops.HANDOFF_CONFIGURATION:
+            path = self.base / 'private' / name
+            path.write_text('fictional-private-value\n')
+            path.chmod(0o600)
+        (self.base / 'private/migrator.env').write_text('MYSQL_HOST=db\nMYSQL_PORT=3306\nMYSQL_DATABASE=vtc\nMYSQL_USER=vtc_migrator\nMYSQL_PASSWORD=fictional\n')
+        hashes = {}
+        for name in ops.activation.CONTROL_FILES:
+            for prefix in ['', 'state/controls-candidate/', 'state/controls-previous/']:
+                path = self.base / (prefix + name)
+                path.write_text('fictional-control\n')
+                path.chmod(0o600)
+            hashes[name] = ops.digest(self.base / name)
+        self.controls = dict(pending=True, complete=True, prepared=True, revision=self.old['revision'],
+                             imageId=self.old['imageId'], hashes=hashes, previous=hashes)
+        self.write('state/controls-update.json', self.controls)
+        self.write('state/recovery-required', {'owner': 'controls-update', 'state': self.controls})
+        self.binding = dict(version=1, previous=self.old, target=self.target,
+                            controlsHash=ops.digest(self.base / 'state/controls-update.json'),
+                            configuration=ops.handoff_configuration())
+        self.write('private/controls-release.json', self.binding)
+        path = self.base / 'state/incoming/controls-release.tar'
+        path.write_bytes(b'archive')
+        path.chmod(0o600)
+        self.original = [['1', 'c' * 64, 'applied']]
+        self.expected = self.original + [['2', 'd' * 64, 'applied']]
+        self.history = self.original
+        self.order = []
+        self.patch(ops, 'validate_image')
+        self.patch(ops, 'archive_safe')
+        self.patch(ops, 'run', side_effect=lambda *a, **k: json.dumps([{'Id': self.target['imageId']}]).encode())
+        self.patch(ops.activation, 'packaged_history', side_effect=lambda _o, image: self.original if image == self.old['imageId'] else self.expected)
+        self.patch(ops, 'handoff_history', side_effect=lambda *a: self.history)
+        self.patch(ops, 'handoff_migrator_absent', side_effect=lambda *a: self.order.append('migrator-absent'))
+        self.patch(ops, 'fenced', side_effect=lambda *a: (ops.maintenance(True), self.order.append('fenced')))
+        backup = self.base / 'state/exports' / ('e' * 32)
+        backup.mkdir(parents=True)
+        self.write(str(backup.relative_to(self.base) / 'manifest.json'),
+                   dict(revision=self.old['revision'], imageId=self.old['imageId']))
+        self.patch(ops, 'export_locked', side_effect=lambda *a: (self.order.append('export') or 'e' * 32))
+        self.patch(ops, 'validate_export', return_value=(backup, json.loads((backup / 'manifest.json').read_text())))
+        self.patch(ops, 'handoff_migrate', side_effect=self.migrate)
+        self.patch(ops.activation, 'validate', side_effect=lambda _o, rev, image, _p: self.order.append(('validate', rev, image)))
+        self.patch(ops.activation, 'module_flags', return_value={'TRIPS_ENABLED': 'true'})
+        self.patch(ops.activation, 'grants', side_effect=lambda *a: self.order.append('grants'))
+        self.patch(ops.activation, 'privileges', return_value=[])
+        self.patch(ops.activation, 'check_privileges', side_effect=lambda *a, **k: self.order.append('readback'))
+        self.patch(ops, 'compose', side_effect=lambda *a, **k: self.order.append(('start', a[0])))
+        self.patch(ops, 'ready', side_effect=lambda *a: self.order.append('ready'))
+        self.patch(ops, 'public_ready', side_effect=lambda *a: self.order.append('public-ready'))
+
+    def patch(self, target, name, *args, **kwargs):
+        replacement = patch.object(target, name, *args, **kwargs)
+        result = replacement.start()
+        self.addCleanup(replacement.stop)
+        return result
+
+    def write(self, name, value):
+        ops.atomic_json(self.base / name, value)
+
+    def intent(self):
+        return json.loads((self.base / 'state/release-handoff.json').read_text())
+
+    def migrate(self, intent, count):
+        self.assertEqual(self.history in [self.original, self.expected], True)
+        self.assertEqual(count, 1 if self.history == self.original else 0)
+        self.assertIn('export', self.order)
+        self.order.append(('migrate', count))
+        self.history = self.expected
+
+    def assert_fenced(self):
+        self.assertTrue((self.base / 'state/recovery-required').exists())
+        self.assertTrue((self.base / 'private/maintenance/enabled').exists())
+
+    def test_candidate_validation_and_complete_grants_precede_every_producer(self):
+        ops.controls_release_locked('start')
+        self.assertLess(self.order.index('export'), self.order.index(('migrate', 1)))
+        candidate = ('validate', self.target['revision'], self.target['imageId'])
+        self.assertLess(self.order.index(candidate), self.order.index('grants'))
+        first_start = next(i for i, value in enumerate(self.order) if isinstance(value, tuple) and value[0] == 'start')
+        self.assertLess(self.order.index('readback'), first_start)
+        self.assertEqual(ops.current()['imageId'], self.target['imageId'])
+        self.assertEqual(json.loads((self.base / 'state/previous.json').read_text()), self.old)
+        self.assertEqual(self.intent()['phase'], 'complete')
+        self.assertTrue(self.intent()['schemaAdvanced'])
+        self.assertEqual(ops.handoff_configuration(), self.binding['configuration'])
+        self.assertFalse((self.base / 'state/recovery-required').exists())
+        self.assertFalse(json.loads((self.base / 'state/controls-update.json').read_text())['pending'])
+
+    def test_unowned_or_incomplete_controls_and_foreign_fence_reject_before_mutation(self):
+        for field, value in [('pending', False), ('complete', False), ('prepared', False)]:
+            with self.subTest(field=field):
+                altered = dict(self.controls, **{field: value})
+                self.write('state/controls-update.json', altered)
+                with self.assertRaises(RuntimeError):
+                    ops.controls_release_locked('start')
+                self.assertEqual(self.order, [])
+        self.write('state/controls-update.json', self.controls)
+        self.write('state/recovery-required', {'owner': 'foreign'})
+        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_RECOVERY_UNOWNED'):
+            ops.controls_release_locked('start')
+        self.assertEqual(self.order, [])
+
+    def test_dirty_extra_and_checksum_drift_reject_before_export(self):
+        for history in [[['1', 'c' * 64, 'applying']], self.expected,
+                        [['1', 'f' * 64, 'applied']]]:
+            with self.subTest(history=history):
+                self.history = history
+                with self.assertRaisesRegex(RuntimeError, 'HANDOFF_PREVIOUS_HISTORY_INVALID'):
+                    ops.controls_release_locked('start')
+                self.assertNotIn('export', self.order)
+
+    def test_stale_automatic_target_and_altered_archive_are_rejected(self):
+        self.write('state/high-water.json', {'runId': 12, 'attempt': 1})
+        with self.assertRaisesRegex(RuntimeError, 'STALE_AUTOMATIC_RELEASE'):
+            ops.controls_release_locked('start')
+        self.assertEqual(self.order, [])
+        (self.base / 'state/incoming/controls-release.tar').write_bytes(b'changed')
+        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_ARTIFACT_CHANGED'):
+            ops.controls_release_locked('start')
+
+    def test_migration_lock_database_cannot_differ_from_bound_migrator(self):
+        path = self.base / 'private/migrator.env'
+        path.write_text(path.read_text().replace('MYSQL_DATABASE=vtc', 'MYSQL_DATABASE=foreign'))
+        self.binding['configuration']['migrator.env'] = ops.digest(path)
+        self.write('private/controls-release.json', self.binding)
+        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_MIGRATOR_CONFIGURATION_INVALID'):
+            ops.controls_release_locked('start')
+        self.assertEqual(self.order, [])
+
+    def test_backup_failure_leaves_old_metadata_and_owned_fence(self):
+        with patch.object(ops, 'export_locked', side_effect=RuntimeError('EXPORT_FAILED')):
+            with self.assertRaisesRegex(RuntimeError, 'EXPORT_FAILED'):
+                ops.controls_release_locked('start')
+        self.assert_fenced()
+        self.assertEqual(ops.current(), self.old)
+        self.assertEqual(self.intent()['phase'], 'prepared')
+        ops.controls_release_locked('resume')
+        self.assertEqual(self.intent()['phase'], 'complete')
+
+    def test_manual_older_target_preserves_previous_high_water_without_a_file(self):
+        self.binding['target'].update(mode='manual', runId=9)
+        self.write('private/controls-release.json', self.binding)
+        ops.controls_release_locked('start')
+        self.assertEqual(json.loads((self.base / 'state/high-water.json').read_text()), {'runId': 10, 'attempt': 1})
+
+    def test_maximum_bound_histories_resume_and_completed_metadata_cannot_regress(self):
+        self.original = [[str(9007199254739968 + i), 'c' * 64, 'applied'] for i in range(1023)]
+        self.expected = self.original + [['9007199254740991', 'd' * 64, 'applied']]
+        self.history = self.original
+        ops.controls_release_locked('start')
+        path = self.base / 'state/release-handoff.json'
+        self.assertGreater(path.stat().st_size, 65536)
+        self.assertLess(path.stat().st_size, ops.HANDOFF_MAX_RECORD)
+        ops.controls_release_locked('resume')
+        self.write('state/current.json', self.old)
+        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_METADATA_CHANGED'):
+            ops.controls_release_locked('resume')
+
+    def test_configuration_change_during_grants_never_starts_candidate(self):
+        def changed(*args):
+            (self.base / 'private/identity-mail.env').write_text('changed')
+        with patch.object(ops.activation, 'grants', side_effect=changed):
+            with self.assertRaisesRegex(RuntimeError, 'HANDOFF_CONFIGURATION_CHANGED'):
+                ops.controls_release_locked('start')
+        self.assert_fenced()
+        self.assertFalse(any(isinstance(x, tuple) and x[0] == 'start' for x in self.order))
+
+    def test_migration_lost_ack_replays_only_exact_candidate_with_zero_and_no_old_start(self):
+        def lost(intent, count):
+            self.migrate(intent, count)
+            raise RuntimeError('LOST_ACK')
+        with patch.object(ops, 'handoff_migrate', side_effect=lost):
+            with self.assertRaisesRegex(RuntimeError, 'LOST_ACK'):
+                ops.controls_release_locked('start')
+        self.assert_fenced()
+        ops.controls_release_locked('resume')
+        self.assertIn(('migrate', 0), self.order)
+        self.assertTrue(self.intent()['schemaAdvanced'])
+        self.assertEqual(self.intent()['phase'], 'complete')
+
+    def test_original_prefix_can_resume_before_advancement_but_not_after(self):
+        with patch.object(ops, 'handoff_migrate', side_effect=RuntimeError('BEFORE_DDL')):
+            with self.assertRaisesRegex(RuntimeError, 'BEFORE_DDL'):
+                ops.controls_release_locked('start')
+        ops.controls_release_locked('resume')
+        self.history = self.original
+        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_MIGRATION_RECOVERY_REQUIRED'):
+            ops.controls_release_locked('resume')
+        self.assert_fenced()
+
+    def test_candidate_history_before_migration_intent_is_unexplained(self):
+        with patch.object(ops, 'export_locked', side_effect=RuntimeError('EXPORT_FAILED')):
+            with self.assertRaises(RuntimeError):
+                ops.controls_release_locked('start')
+        self.history = self.expected
+        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_MIGRATION_RECOVERY_REQUIRED'):
+            ops.controls_release_locked('resume')
+        self.assert_fenced()
+
+    def test_grant_failure_or_missing_readback_never_starts_candidate(self):
+        with patch.object(ops.activation, 'grants', side_effect=RuntimeError('GRANT_FAILED')):
+            with self.assertRaisesRegex(RuntimeError, 'GRANT_FAILED'):
+                ops.controls_release_locked('start')
+        self.assert_fenced()
+        self.assertFalse(any(isinstance(x, tuple) and x[0] == 'start' for x in self.order))
+        with patch.object(ops.activation, 'check_privileges', side_effect=RuntimeError('INCOMPLETE_GRANTS')):
+            with self.assertRaisesRegex(RuntimeError, 'INCOMPLETE_GRANTS'):
+                ops.controls_release_locked('resume')
+        self.assertFalse(any(isinstance(x, tuple) and x[0] == 'start' for x in self.order))
+        ops.controls_release_locked('resume')
+
+    def test_readiness_failure_never_restores_old_image(self):
+        with patch.object(ops, 'ready', side_effect=RuntimeError('NOT_READY')):
+            with self.assertRaisesRegex(RuntimeError, 'NOT_READY'):
+                ops.controls_release_locked('start')
+        self.assert_fenced()
+        self.assertTrue(self.intent()['schemaAdvanced'])
+        self.assertEqual(ops.current(), self.old)
+        ops.controls_release_locked('resume')
+
+    def test_old_history_after_recorded_advancement_or_intermediate_history_is_blocked(self):
+        with patch.object(ops, 'ready', side_effect=RuntimeError('NOT_READY')):
+            with self.assertRaises(RuntimeError):
+                ops.controls_release_locked('start')
+        for history in [self.original, self.expected + [['3', 'e' * 64, 'applied']],
+                        self.original + [['2', 'd' * 64, 'applying']]]:
+            self.history = history
+            with self.assertRaisesRegex(RuntimeError, 'HANDOFF_MIGRATION_RECOVERY_REQUIRED'):
+                ops.controls_release_locked('resume')
+            self.assert_fenced()
+
+    def test_lost_ack_replays_only_exact_candidate_with_zero_and_latches_advancement(self):
+        def lost_ack(intent, count):
+            self.history = self.expected
+            raise RuntimeError('LOST_ACK')
+        with patch.object(ops, 'handoff_migrate', side_effect=lost_ack):
+            with self.assertRaisesRegex(RuntimeError, 'LOST_ACK'):
+                ops.controls_release_locked('start')
+        self.assertEqual(self.intent()['phase'], 'migrating')
+        with patch.object(ops, 'handoff_migrate', side_effect=RuntimeError('SECOND_LOST_ACK')):
+            with self.assertRaises(RuntimeError):
+                ops.controls_release_locked('resume')
+        self.assertTrue(self.intent()['schemaAdvanced'])
+        self.history = self.original
+        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_MIGRATION_RECOVERY_REQUIRED'):
+            ops.controls_release_locked('resume')
+        self.history = self.expected
+        ops.controls_release_locked('resume')
+        self.assertIn(('migrate', 0), self.order)
+
+    def test_resume_rejects_changed_binding_configuration_controls_backup_and_metadata(self):
+        with patch.object(ops, 'ready', side_effect=RuntimeError('NOT_READY')):
+            with self.assertRaises(RuntimeError):
+                ops.controls_release_locked('start')
+        for name in ['private/controls-release.json', 'private/identity-mail.env', 'operations.py',
+                     'state/exports/' + 'e' * 32 + '/manifest.json', 'state/current.json']:
+            path = self.base / name
+            original = path.read_bytes()
+            try:
+                path.write_text('{}' if path.suffix == '.json' else 'changed')
+                with self.assertRaises((RuntimeError, KeyError)):
+                    ops.controls_release_locked('resume')
+            finally:
+                path.write_bytes(original)
+        ops.controls_release_locked('resume')
+
+    def test_crashes_at_every_metadata_and_controls_write_resume_exactly(self):
+        actual_write = ops.atomic_json
+        for suffix in ['previous.json', 'current.json', 'high-water.json', 'controls-update.json']:
+            with self.subTest(suffix=suffix):
+                if self.intent_exists():
+                    # Independently model the original verified pre-publication state
+                    # for every boundary, rather than replaying already-published values.
+                    intent = self.intent()
+                    intent.update(phase='verified', pending=True)
+                    for name, value in intent['metadata'].items():
+                        if value is None:
+                            (self.base / 'state' / name).unlink(missing_ok=True)
+                        else:
+                            self.write('state/' + name, value)
+                    self.write('state/controls-update.json', intent['controls'])
+                    self.write('state/release-handoff.json', intent)
+                    self.write('state/recovery-required', dict(owner='controls-release', id=intent['id'], bindingHash=intent['bindingHash']))
+                def crash(path, value):
+                    actual_write(path, value)
+                    if path.name == suffix:
+                        raise RuntimeError('CRASH_AFTER_WRITE')
+                with patch.object(ops, 'atomic_json', side_effect=crash):
+                    with self.assertRaisesRegex(RuntimeError, 'CRASH_AFTER_WRITE'):
+                        ops.controls_release_locked('resume' if self.intent_exists() else 'start')
+                self.assert_fenced()
+                self.assertEqual(ops.current()['imageId'], self.old['imageId'] if suffix == 'previous.json' else self.target['imageId'])
+                ops.controls_release_locked('resume')
+                self.assertEqual(self.intent()['phase'], 'complete')
+
+    def test_settled_controls_and_lost_unfence_acknowledgment_resume(self):
+        actual_write = ops.atomic_json
+        def interrupted(path, value):
+            if path.name == 'release-handoff.json' and value.get('phase') == 'complete':
+                raise RuntimeError('SETTLEMENT_INTERRUPTED')
+            actual_write(path, value)
+        with patch.object(ops, 'atomic_json', side_effect=interrupted):
+            with self.assertRaisesRegex(RuntimeError, 'SETTLEMENT_INTERRUPTED'):
+                ops.controls_release_locked('start')
+        self.assertEqual(self.intent()['phase'], 'verified')
+        self.assertFalse(json.loads((self.base / 'state/controls-update.json').read_text())['pending'])
+        self.assert_fenced()
+        maintenance = ops.maintenance
+        def interrupted_unfence(enabled):
+            if not enabled:
+                raise RuntimeError('UNFENCE_INTERRUPTED')
+            maintenance(enabled)
+        with patch.object(ops, 'maintenance', side_effect=interrupted_unfence):
+            with self.assertRaisesRegex(RuntimeError, 'UNFENCE_INTERRUPTED'):
+                ops.controls_release_locked('resume')
+        self.assertEqual(self.intent()['phase'], 'complete')
+        ops.controls_release_locked('resume')
+        self.assertFalse((self.base / 'state/recovery-required').exists())
+
+    def intent_exists(self):
+        return (self.base / 'state/release-handoff.json').exists()
+
+    def test_changed_configuration_target_or_metadata_cannot_resume(self):
+        with patch.object(ops, 'ready', side_effect=RuntimeError('NOT_READY')):
+            with self.assertRaises(RuntimeError):
+                ops.controls_release_locked('start')
+        self.write('state/current.json', dict(self.old, runId=9))
+        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_METADATA_CHANGED'):
+            ops.controls_release_locked('resume')
+        self.write('state/current.json', self.old)
+        self.write('private/controls-release.json', dict(self.binding, target=dict(self.target, attempt=2)))
+        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_TARGET_CHANGED'):
+            ops.controls_release_locked('resume')
+        self.write('private/controls-release.json', self.binding)
+        (self.base / 'private/identity-mail.env').write_text('changed\n')
+        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_CONFIGURATION_CHANGED'):
+            ops.controls_release_locked('resume')
+
+    def test_activation_and_ordinary_release_cannot_steal_handoff(self):
+        self.write('state/release-handoff.json', {'pending': True})
+        with self.assertRaisesRegex(RuntimeError, 'CONTROLS_RELEASE_PENDING'):
+            ops.activation.config_operation(ops, self.old['revision'], self.old['imageId'], 'recover')
+        with self.assertRaisesRegex(RuntimeError, 'ACTIVATION_PENDING'):
+            ops.release_locked(self.base / 'state/incoming/controls-release.tar', self.target['revision'], 11, 1, 'auto', self.target['imageId'])
+
+
+class HandoffLockTests(unittest.TestCase):
+    def test_ledger_read_holds_same_named_lock_and_rejects_failed_acquisition(self):
+        with patch.object(ops, 'compose', return_value=b'1\n1\t' + b'a' * 64 + b'\tapplied\n1\n') as child:
+            self.assertEqual(len(ops.handoff_history('a' * 40, 'sha256:' + 'b' * 64)), 1)
+        sql = child.call_args.kwargs['data'].decode()
+        name = 'vtc:migrate:' + hashlib.sha256(b'vtc').hexdigest()[:48]
+        self.assertIn(f"GET_LOCK('{name}',5)", sql)
+        self.assertLess(sql.index('GET_LOCK'), sql.index('FROM vtc._vtc_migrations'))
+        self.assertLess(sql.index('FROM vtc._vtc_migrations'), sql.index('RELEASE_LOCK'))
+        self.assertIn('CONNECTION_ID()', sql)
+        with patch.object(ops, 'compose', return_value=b'0\nNULL\n'):
+            with self.assertRaisesRegex(RuntimeError, 'HANDOFF_MIGRATION_LOCK_REQUIRED'):
+                ops.handoff_history('a' * 40, 'sha256:' + 'b' * 64)
+
+    def test_owned_cid_image_project_service_and_uuid_required_before_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(ops, 'BASE', pathlib.Path(temporary)):
+            (ops.BASE / 'state').mkdir()
+            identity, attempt, owner = 'c' * 64, 'd' * 32, 'e' * 32
+            name = f'{ops.PROJECT}-handoff-{owner}'
+            image = 'sha256:' + 'a' * 64
+            intent = dict(id=owner, binding={'target': {'imageId': image}},
+                          migrator=dict(id=identity, attempt=attempt, phase='created'))
+            receipt = ops.BASE / f'state/handoff-{owner}-{attempt}.cid'
+            receipt.write_text(identity)
+            receipt.chmod(0o600)
+            info = dict(Id=identity, Name='/' + name, Image=image, State={'Running': True},
+                        Config={'Labels': {'vtc.release-handoff': owner,
+                                'com.docker.compose.project': ops.PROJECT, 'com.docker.compose.service': 'migrate'}})
+            present = True
+            calls = []
+            def child(args, **kwargs):
+                nonlocal present
+                calls.append(args)
+                if args[1] == 'ps':
+                    return identity.encode() if present else b''
+                if args[1] == 'inspect':
+                    return json.dumps([info]).encode()
+                if args[1] == 'rm':
+                    present = False
+                return b''
+            for field, value in [('Image', 'sha256:' + 'f' * 64), ('Name', '/foreign')]:
+                previous = info[field]
+                info[field] = value
+                with patch.object(ops, 'run', side_effect=child):
+                    with self.assertRaisesRegex(RuntimeError, 'HANDOFF_MIGRATOR_UNOWNED'):
+                        ops.handoff_migrator_absent(intent)
+                self.assertFalse(any(call[1] in ['stop', 'rm'] for call in calls))
+                info[field] = previous
+            for field in ['vtc.release-handoff', 'com.docker.compose.project', 'com.docker.compose.service']:
+                previous = info['Config']['Labels'][field]
+                info['Config']['Labels'][field] = 'foreign'
+                with patch.object(ops, 'run', side_effect=child):
+                    with self.assertRaisesRegex(RuntimeError, 'HANDOFF_MIGRATOR_UNOWNED'):
+                        ops.handoff_migrator_absent(intent)
+                self.assertFalse(any(call[1] in ['stop', 'rm'] for call in calls))
+                info['Config']['Labels'][field] = previous
+            with patch.object(ops, 'run', side_effect=child):
+                ops.handoff_migrator_absent(intent)
+            self.assertLess(next(i for i, call in enumerate(calls) if call[1] == 'stop'),
+                            next(i for i, call in enumerate(calls) if call[1] == 'rm'))
+            self.assertEqual(intent['migrator']['phase'], 'removed')
+            intent['migrator']['phase'] = 'creating'
+            with patch.object(ops, 'run', return_value=b'') as run:
+                with self.assertRaisesRegex(RuntimeError, 'HANDOFF_MIGRATOR_UNCERTAIN'):
+                    ops.handoff_migrator_absent(intent)
+            self.assertFalse(any(call.args[0][1] == 'rm' for call in run.call_args_list))
+
+    def test_cli_ack_requires_exit_zero_exact_integer_suffix_and_single_receipt(self):
+        for status, output, accepted in [('0', b'{"event":"database.migrated","applied":1}', True),
+                ('1', b'{"event":"database.migrated","applied":1}', False),
+                ('0', b'{"event":"database.migrated","applied":0}', False),
+                ('0', b'{"event":"database.migrated","applied":true}', False),
+                ('0', b'{}', False)]:
+            with self.subTest(status=status, output=output), tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(ops, 'BASE', pathlib.Path(temporary)):
+                (ops.BASE / 'state').mkdir()
+                intent = dict(id='e' * 32, binding={'target': {'imageId': 'sha256:' + 'a' * 64}})
+                def child(args, **kwargs):
+                    if args[1] == 'create':
+                        path = pathlib.Path(args[args.index('--cidfile') + 1])
+                        path.write_text('c' * 64)
+                        path.chmod(0o600)
+                        return ('c' * 64).encode()
+                    if args[1] == 'wait':
+                        return status.encode()
+                    if args[1] == 'logs':
+                        return output
+                    return b''
+                with patch.object(ops, 'run', side_effect=child), patch.object(ops, 'handoff_migrator_absent'):
+                    if accepted:
+                        ops.handoff_migrate(intent, 1)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'HANDOFF_MIGRATION_(?:FAILED|ACK_INVALID)'):
+                            ops.handoff_migrate(intent, 1)
+
+
 if __name__ == '__main__':
     unittest.main()

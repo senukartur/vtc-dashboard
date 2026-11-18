@@ -392,6 +392,14 @@ def retire_previous(o, shared, previous, intent_path, candidate):
         os.close(directory)
 
 
+def packaged_history(o, image_id):
+    return json.loads(o.run(['docker', 'run', '--rm', '--network', 'none', '--read-only',
+                            '--cap-drop', 'ALL', image_id, 'node', '--input-type=module', '-e',
+                            "import {createRequire} from 'node:module';import {migrationFolder} from '@vtc/db';"
+                            "const {readMigrationFiles}=createRequire(import.meta.resolve('@vtc/db'))('drizzle-orm/migrator');"
+                            "console.log(JSON.stringify(readMigrationFiles({migrationsFolder:migrationFolder}).map(m=>[String(m.folderMillis),m.hash,'applied'])));"], timeout=30))
+
+
 def validate(o, revision, image_id, path):
     values = private_values(o, path, SHARED_KEYS)
     module_settings(o, values)
@@ -402,11 +410,7 @@ def validate(o, revision, image_id, path):
     o.validate_image(image_id, revision)
     # Read the exact packaged migration hashes without applying missing DDL. Activation
     # is permitted only on the complete clean history already accepted by release.
-    expected = json.loads(o.run(['docker', 'run', '--rm', '--network', 'none', '--read-only',
-                                '--cap-drop', 'ALL', image_id, 'node', '--input-type=module', '-e',
-                                "import {createRequire} from 'node:module';import {migrationFolder} from '@vtc/db';"
-                                "const {readMigrationFiles}=createRequire(import.meta.resolve('@vtc/db'))('drizzle-orm/migrator');"
-                                "console.log(JSON.stringify(readMigrationFiles({migrationsFolder:migrationFolder}).map(m=>[String(m.folderMillis),m.hash,'applied'])));"], timeout=30))
+    expected = packaged_history(o, image_id)
     history = o.compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf',
                          '-N', '-B'], revision=revision, image_id=image_id,
                         data=b'SELECT version,CONVERT(hash USING ascii),state FROM vtc._vtc_migrations ORDER BY version;')
@@ -479,6 +483,9 @@ def retain_route_recovery_target(o, intent_path, targets):
 
 
 def config_operation(o, revision, image_id, mode):
+    handoff = o.BASE / 'state/release-handoff.json'
+    o.require(not handoff.exists() or json.loads(handoff.read_text()).get('pending') is not True,
+              'CONTROLS_RELEASE_PENDING')
     o.require(mode in ['prepare-stage', 'validate', 'apply', 'recover', 'rollback', 'inspect'], 'ACTIVATION_MODE_INVALID')
     if mode == 'prepare-stage':
         prepare_stage(o)

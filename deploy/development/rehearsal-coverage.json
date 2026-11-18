@@ -2,7 +2,9 @@
   "core": [
     "core-control-preflight",
     "initial-database-startup",
+    "core-controls-prefix-artifact",
     "initial-migration",
+    "core-controls-release-handoff",
     "core-production-codec-grants",
     "core-identity-ingress-acceptance",
     "core-restricted-domain-profiles",

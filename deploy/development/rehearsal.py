@@ -410,8 +410,109 @@ def core():
         assert not ops.run(['docker', 'network', 'ls', '-q', '--filter', f'name=^{project}_database$'], timeout=10).strip()
         compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
         ops.atomic_json(base / 'state/notification-proof-database.json', rehearsal_database_identity(ops, revision, image_id))
+    with rehearsal_phase('core-controls-prefix-artifact'):
+        # Synthetic previous artifact: current binaries are never started against the
+        # prefix. Only the packaged migration journal/SQL differs; no historical image
+        # behavior is inferred from this native DDL/grant-ordering proof.
+        packaged = ops.activation.packaged_history(ops, image_id)
+        assert len(packaged) == 39
+        prefix_revision = hashlib.sha256((revision + ':prefix').encode()).hexdigest()[:40]
+        prefix_context = base / 'state/prefix-build'
+        prefix_context.mkdir(mode=0o700)
+        trim = ("import {migrationFolder} from '@vtc/db';import fs from 'node:fs';"
+                "const p=migrationFolder+'/meta/_journal.json';const j=JSON.parse(fs.readFileSync(p));"
+                "const last=j.entries.pop();fs.unlinkSync(migrationFolder+'/'+last.tag+'.sql');"
+                "fs.rmSync(migrationFolder+'/meta/'+String(last.idx).padStart(4,'0')+'_snapshot.json',{force:true});"
+                "fs.writeFileSync(p,JSON.stringify(j));")
+        # BuildKit parses an image config ID as a registry reference. Bind its local
+        # tag before/after the build and prove the resulting filesystem's base layers.
+        base_image = ops.validate_image(image_id, revision)
+        assert json.loads(ops.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]['Id'] == image_id
+        dockerfile = (f'FROM vtc-dashboard:{revision}\nUSER root\nRUN node --input-type=module -e {json.dumps(trim)}\n'
+                      f'ENV VTC_REVISION={prefix_revision}\nLABEL org.opencontainers.image.revision={prefix_revision}\nUSER node\n')
+        ops.run(['docker', 'build', '--label', f'vtc011.rehearsal={project}', '-t',
+                 f'vtc-dashboard:{prefix_revision}', '-f', '-', str(prefix_context)], data=dockerfile.encode())
+        prefix_info = json.loads(ops.run(['docker', 'image', 'inspect', f'vtc-dashboard:{prefix_revision}']))[0]
+        prefix_image = prefix_info['Id']
+        assert json.loads(ops.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]['Id'] == image_id
+        assert prefix_info['RootFS']['Layers'][:len(base_image['RootFS']['Layers'])] == base_image['RootFS']['Layers']
+        assert ops.activation.packaged_history(ops, prefix_image) == packaged[:38]
     with rehearsal_phase('initial-migration'):
-        compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
+        compose(['run', '--rm', '--no-deps', 'migrate'], revision=prefix_revision, image_id=prefix_image)
+    with rehearsal_phase('core-controls-release-handoff'):
+        assert ops.handoff_history(prefix_revision, prefix_image) == packaged[:38]
+        import update_controls
+        update_controls.o = ops
+        os.umask(0o077)
+        old = dict(revision=prefix_revision, imageId=prefix_image, runId=1, attempt=1)
+        ops.atomic_json(base / 'state/current.json', old)
+        # Allocate the previous stopped services and their labeled persistent volumes;
+        # no current binary is executed against the prefix schema.
+        compose(['create', '--no-recreate', 'app', 'probe'], revision=prefix_revision, image_id=prefix_image)
+        candidate_grants = (base / 'activation-grants.json').read_bytes()
+        prefix_grants = json.loads(candidate_grants)
+        for tables in prefix_grants.values():
+            tables.pop('trip_owner_revisions', None)
+        (base / 'activation-grants.json').write_text(json.dumps(prefix_grants))
+        ops.activation.grants(ops, prefix_revision)
+        ops.activation.validate(ops, prefix_revision, prefix_image, base / 'private/identity-mail.env')
+        control_source = base / 'private/handoff-controls-fixture'
+        control_source.mkdir(mode=0o700)
+        for name in update_controls.FILES:
+            shutil.copyfile(base / name, control_source / name)
+        (control_source / 'activation-grants.json').write_bytes(candidate_grants)
+        # Fresh setup deliberately starts in maintenance. This fixture now represents
+        # an accepted predecessor (all its producers remain stopped), before the updater
+        # establishes its own durable fence. Never bypass the updater's fence guard.
+        assert not (base / 'state/recovery-required').exists()
+        ops.maintenance(False)
+        # The real updater leaves an owned, complete, retained controls fence.
+        update_controls.install(control_source)
+        assert ops.activation.controls_pending(ops, prefix_revision, prefix_image)
+        shared_hashes = ops.handoff_configuration()
+        archive = base / 'state/incoming/controls-release.tar'
+        archive.parent.mkdir(mode=0o700, exist_ok=True)
+        ops.run(['docker', 'save', '--output', str(archive), f'vtc-dashboard:{revision}'])
+        os.chmod(archive, 0o600)
+        ops.atomic_json(base / 'private/controls-release.json', dict(version=1, previous=old,
+                        controlsHash=ops.digest(base / 'state/controls-update.json'), configuration=shared_hashes,
+                        target=dict(revision=revision, imageId=image_id, runId=2, attempt=1, mode='auto',
+                                    sha256=ops.digest(archive), bytes=archive.stat().st_size)))
+        handoff_compose = ops.compose
+        handoff_public_ready = ops.public_ready
+        producer_checks = []
+        def ordered_compose(args, **kwargs):
+            if args[:3] == ['up', '-d', '--no-deps'] and any(name in args for name in ['app', 'probe']):
+                assert ops.handoff_history(revision, image_id) == packaged
+                ops.activation.check_privileges(ops, ops.activation.privileges(ops, prefix_revision), complete=True)
+                assert ops.current() == old
+                producer_checks.append(True)
+            return handoff_compose(args, **kwargs)
+        def trusted_public_ready(target):
+            # Bootstrap trust only in this owned synthetic allocation, after Caddy starts.
+            ops.run(['docker', 'network', 'connect', f'{project}_frontend', os.environ['HOSTNAME']])
+            proxy_id = handoff_compose(['ps', '-q', 'proxy'], revision=revision, image_id=image_id).decode().strip()
+            for _ in range(30):
+                result = subprocess.run(['docker', 'cp', f'{proxy_id}:/data/caddy/pki/authorities/local/root.crt',
+                                         str(base / 'test-ca.crt')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if result.returncode == 0:
+                    break
+                time.sleep(1)
+            os.environ['SSL_CERT_FILE'] = str(base / 'test-ca.crt')
+            handoff_public_ready(target)
+        ops.compose, ops.public_ready = ordered_compose, trusted_public_ready
+        try:
+            with ops.lock():
+                ops.controls_release_locked('start')
+        finally:
+            ops.compose, ops.public_ready = handoff_compose, handoff_public_ready
+        assert producer_checks == [True]
+        assert ops.handoff_configuration() == shared_hashes
+        assert ops.current()['imageId'] == image_id and ops.current()['backup']
+        assert json.loads((base / 'state/release-handoff.json').read_text())['schemaAdvanced'] is True
+        assert not (base / 'state/recovery-required').exists()
+        assert not ops.activation.controls_pending(ops, prefix_revision, prefix_image)
+        print('Owned controls handoff: exact native 38-to-39 history, verified export, unchanged configuration, complete grants before first producer and trusted readiness passed', flush=True)
     with rehearsal_phase('core-production-codec-grants'):
         notification_account_cleanup_proof(ops, revision, image_id)
         assert not ops.activation.has_published_route_history(ops, revision, image_id, fenced=True)
@@ -545,7 +646,7 @@ def core():
         print('Events route grants: restricted runtime shared reads and inserts, jobs shared detail reads, denied history mutation and jobs DLC reads', flush=True)
     with rehearsal_phase('core-identity-ingress-acceptance'):
         ops.maintenance(False)
-        ops.run(['docker', 'network', 'connect', f'{project}_frontend', os.environ['HOSTNAME']])
+        # The handoff already attached this owned operator to the trusted public lane.
         proxy_id = compose(['ps', '-q', 'proxy'], revision=revision).decode().strip()
         for _ in range(30):
             result = subprocess.run(['docker', 'cp', f'{proxy_id}:/data/caddy/pki/authorities/local/root.crt', str(base / 'test-ca.crt')],

@@ -10,6 +10,7 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -756,10 +757,347 @@ def restore_locked(identity):
     return project
 
 
+HANDOFF_CONFIGURATION = ('admin.cnf', 'db.env', 'export.cnf', 'heartbeat.env', 'identity-mail.env',
+                         'ingress.env', 'jobs.env', 'migrator.env', 'operator.env', 'probe.env',
+                         'proxy.env', 'runtime.env')
+HANDOFF_PHASES = ('prepared', 'exported', 'migrating', 'migrated', 'granted', 'verified', 'complete')
+HANDOFF_MAX_RECORD = 262144  # Includes both exact histories, each capped at 1024 migrations.
+
+
+def sealed_file(path, maximum, *, read=True):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, 'rb') as handle:
+        info = os.fstat(handle.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and
+                not info.st_mode & 0o077 and 0 < info.st_size <= maximum, 'HANDOFF_FILE_INVALID')
+        return handle.read() if read else None
+
+
+def handoff_configuration():
+    result = {}
+    for name in HANDOFF_CONFIGURATION:
+        path = BASE / 'private' / name
+        sealed_file(path, 16384)
+        result[name] = digest(path)
+    keys = {'MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD'}
+    migrator = activation.private_values(sys.modules[__name__], BASE / 'private/migrator.env', keys)
+    require(set(migrator) == keys and migrator['MYSQL_DATABASE'] == 'vtc' and
+            migrator['MYSQL_HOST'] == 'db' and migrator['MYSQL_PORT'] == '3306' and
+            migrator['MYSQL_USER'] == 'vtc_migrator', 'HANDOFF_MIGRATOR_CONFIGURATION_INVALID')
+    return result
+
+
+def handoff_controls(state, *, settled=False):
+    require(state.get('pending') is (not settled) and state.get('complete') is True and
+            state.get('prepared') is True and set(state.get('hashes', {})) == activation.CONTROL_FILES and
+            set(state.get('previous', {})).issubset(activation.CONTROL_FILES), 'HANDOFF_CONTROLS_INVALID')
+    for directory, hashes in [(BASE, state['hashes']),
+                              (BASE / 'state/controls-candidate', state['hashes']),
+                              (BASE / 'state/controls-previous', state['previous'])]:
+        require(directory.is_dir() and not directory.is_symlink() and directory.stat().st_uid == 0 and
+                not directory.stat().st_mode & (0o022 if directory == BASE else 0o077),
+                'HANDOFF_CONTROLS_INVALID')
+        for name, checksum in hashes.items():
+            path = directory / name
+            require(isinstance(checksum, str) and HASH.fullmatch(checksum) and path.is_file() and
+                    not path.is_symlink() and path.stat().st_uid == 0 and
+                    not path.stat().st_mode & 0o022 and digest(path) == checksum,
+                    'HANDOFF_CONTROLS_CHANGED')
+
+
+def handoff_history(revision, image_id):
+    # The same connection holds the runner's named lock throughout the ledger read.
+    # A dead Docker client/absent container alone does not prove DDL has stopped.
+    name = 'vtc:migrate:' + hashlib.sha256(b'vtc').hexdigest()[:48]
+    query = (f"SELECT GET_LOCK('{name}',5);\n"
+             "SELECT version,CONVERT(hash USING ascii),state FROM vtc._vtc_migrations "
+             f"WHERE IS_USED_LOCK('{name}')=CONNECTION_ID() ORDER BY version;\n"
+             f"SELECT RELEASE_LOCK('{name}');\n")
+    lines = compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf',
+                     '-N', '-B'], revision=revision, image_id=image_id, data=query.encode(), timeout=15).decode().splitlines()
+    require(len(lines) >= 2 and lines[0] == '1' and lines[-1] == '1', 'HANDOFF_MIGRATION_LOCK_REQUIRED')
+    return [line.split('\t') for line in lines[1:-1]]
+
+
+def handoff_migrator_absent(intent):
+    name = f'{PROJECT}-handoff-{intent["id"]}'
+    def inventory(selector):
+        ids = run(['docker', 'ps', '-aq', '--no-trunc', '--filter', selector], timeout=10).decode().split()
+        require(len(ids) <= 1 and all(re.fullmatch('[a-f0-9]{64}', value) for value in ids),
+                'HANDOFF_MIGRATOR_INVALID')
+        return ids
+    named = inventory(f'name=^/{name}$')
+    record = intent.get('migrator')
+    if record is None:
+        require(not named, 'HANDOFF_MIGRATOR_UNOWNED')
+        return
+    require(record.get('phase') in ['created', 'removed'] and
+            re.fullmatch('[a-f0-9]{64}', record.get('id', '')) and
+            re.fullmatch('[a-f0-9]{32}', record.get('attempt', '')), 'HANDOFF_MIGRATOR_UNCERTAIN')
+    identity = record['id']
+    path = BASE / f'state/handoff-{intent["id"]}-{record["attempt"]}.cid'
+    require(sealed_file(path, 128).decode().strip() == identity, 'HANDOFF_MIGRATOR_RECEIPT_INVALID')
+    by_id = inventory(f'id={identity}')
+    require(not named or named == [identity], 'HANDOFF_MIGRATOR_UNOWNED')
+    if by_id:
+        require(named == [identity] and record['phase'] == 'created', 'HANDOFF_MIGRATOR_UNOWNED')
+        info = json.loads(run(['docker', 'inspect', identity], timeout=10))[0]
+        labels = info['Config'].get('Labels') or {}
+        require(info['Id'] == identity and info['Name'] == '/' + name and
+                info['Image'] == intent['binding']['target']['imageId'] and
+                labels.get('vtc.release-handoff') == intent['id'] and
+                labels.get('com.docker.compose.project') == PROJECT and
+                labels.get('com.docker.compose.service') == 'migrate', 'HANDOFF_MIGRATOR_UNOWNED')
+        if info['State']['Running']:
+            run(['docker', 'stop', '--time', '30', identity], timeout=40)
+        run(['docker', 'rm', identity], timeout=10)
+    require(not inventory(f'id={identity}') and not inventory(f'name=^/{name}$'), 'HANDOFF_MIGRATOR_REMAINS')
+    record['phase'] = 'removed'
+    atomic_json(BASE / 'state/release-handoff.json', intent)
+
+
+def handoff_migrate(intent, expected_count):
+    target = intent['binding']['target']
+    attempt = uuid.uuid4().hex
+    path = BASE / f'state/handoff-{intent["id"]}-{attempt}.cid'
+    intent['migrator'] = {'phase': 'creating', 'attempt': attempt}
+    atomic_json(BASE / 'state/release-handoff.json', intent)
+    # Create is separate from start: the committed CID receipt grants execution authority.
+    identity = run(['docker', 'create', '--name', f'{PROJECT}-handoff-{intent["id"]}',
+                    '--cidfile', str(path), '--label', f'vtc.release-handoff={intent["id"]}',
+                    '--label', f'com.docker.compose.project={PROJECT}',
+                    '--label', 'com.docker.compose.service=migrate',
+                    '--label', f'vtc011.rehearsal={PROJECT}',
+                    '--network', f'{PROJECT}_database', '--init', '--read-only', '--cap-drop', 'ALL',
+                    '--security-opt', 'no-new-privileges:true', '--memory', '192m', '--pids-limit', '32',
+                    '--env-file', str(BASE / 'private/migrator.env'), target['imageId'],
+                    'node', 'node_modules/@vtc/db/dist/migrate-cli.js'], timeout=30).decode().strip()
+    require(re.fullmatch('[a-f0-9]{64}', identity) and sealed_file(path, 128).decode().strip() == identity,
+            'HANDOFF_MIGRATOR_RECEIPT_INVALID')
+    # Docker writes the receipt; flush both it and its parent before recording authority.
+    with open(path, 'rb') as handle:
+        os.fsync(handle.fileno())
+    sync_directory(path.parent)
+    intent['migrator'].update(phase='created', id=identity)
+    atomic_json(BASE / 'state/release-handoff.json', intent)
+    run(['docker', 'start', identity], timeout=10)
+    status = run(['docker', 'wait', identity], timeout=180).decode().strip()
+    output = run(['docker', 'logs', identity], timeout=10)
+    require(status == '0' and len(output) <= 32768, 'HANDOFF_MIGRATION_FAILED')
+    receipts = []
+    for line in output.splitlines():
+        try:
+            value = json.loads(line)
+        except (ValueError, UnicodeError):
+            continue
+        if isinstance(value, dict) and value.get('event') == 'database.migrated':
+            require(type(value.get('applied')) is int, 'HANDOFF_MIGRATION_ACK_INVALID')
+            receipts.append(value)
+    require(receipts == [{'event': 'database.migrated', 'applied': expected_count}],
+            'HANDOFF_MIGRATION_ACK_INVALID')
+    handoff_migrator_absent(intent)
+
+
+def sync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def handoff_metadata(intent):
+    before, target = intent['binding']['previous'], intent['binding']['target']
+    accepted = {key: target[key] for key in ['revision', 'imageId', 'runId', 'attempt']}
+    accepted['backup'] = intent.get('backup')
+    old = intent['metadata']
+    high_water = old['high-water.json'] or before
+    high_water = {'runId': high_water['runId'], 'attempt': high_water['attempt']}
+    promoted = {'current.json': accepted,
+                'previous.json': before if before['imageId'] != target['imageId'] else old['previous.json'],
+                'high-water.json': {'runId': target['runId'], 'attempt': target['attempt']}
+                if (target['runId'], target['attempt']) >
+                (high_water['runId'], high_water['attempt']) else high_water}
+    actual = {name: json.loads((BASE / 'state' / name).read_text()) if (BASE / 'state' / name).exists()
+              else None for name in old}
+    # Only prefixes of the fixed publication order can be the result of an interrupted settlement.
+    order = ['previous.json', 'current.json', 'high-water.json']
+    permitted = [dict(old, **{name: promoted[name] for name in order[:count]}) for count in range(4)]
+    allowed = [promoted] if intent['phase'] == 'complete' else permitted if intent['phase'] == 'verified' else [old]
+    require(actual in allowed,
+            'HANDOFF_METADATA_CHANGED')
+    return promoted
+
+
+def controls_release_locked(mode):
+    require(mode in ['start', 'resume'], 'HANDOFF_MODE_INVALID')
+    require(not any((BASE / f'state/{name}').exists() for name in
+                    ['jobs-acceptance', 'identity-acceptance', 'notifications-acceptance', 'ingress-check.json']),
+            'ACCEPTANCE_WINDOW')
+    activation_intent = BASE / 'state/activation-intent.json'
+    require(not activation_intent.exists() or json.loads(activation_intent.read_text()).get('pending') is not True,
+            'ACTIVATION_PENDING')
+    binding_path, archive = BASE / 'private/controls-release.json', BASE / 'state/incoming/controls-release.tar'
+    binding = json.loads(sealed_file(binding_path, 16384))
+    require(set(binding) == {'version', 'previous', 'target', 'controlsHash', 'configuration'} and
+            type(binding['version']) is int and binding['version'] == 1, 'HANDOFF_BINDING_INVALID')
+    target = binding['target']
+    require(isinstance(target, dict) and set(target) == {'revision', 'imageId', 'sha256', 'bytes', 'runId', 'attempt', 'mode'} and
+            isinstance(target['revision'], str) and SHA.fullmatch(target['revision']) and
+            isinstance(target['imageId'], str) and re.fullmatch('sha256:[a-f0-9]{64}', target['imageId']) and
+            isinstance(target['sha256'], str) and HASH.fullmatch(target['sha256']) and
+            type(target['bytes']) is int and 0 < target['bytes'] <= MAX_IMAGE and
+            type(target['runId']) is int and 0 < target['runId'] < 10**15 and
+            type(target['attempt']) is int and 0 < target['attempt'] < 10**6 and
+            target['mode'] in ['auto', 'manual'], 'HANDOFF_BINDING_INVALID')
+    require(binding['configuration'] == handoff_configuration(), 'HANDOFF_CONFIGURATION_CHANGED')
+    sealed_file(archive, MAX_IMAGE, read=False)
+    require(archive.stat().st_size == target['bytes'] and digest(archive) == target['sha256'],
+            'HANDOFF_ARTIFACT_CHANGED')
+    marker = BASE / 'state/controls-update.json'
+    controls = json.loads(sealed_file(marker, 65536))
+    intent_path, recovery = BASE / 'state/release-handoff.json', BASE / 'state/recovery-required'
+    if mode == 'start':
+        retained = json.loads(sealed_file(intent_path, HANDOFF_MAX_RECORD)) if intent_path.exists() else None
+        require(retained is None or (retained.get('phase') == 'complete' and
+                retained.get('pending') is False), 'HANDOFF_ALREADY_RECORDED')
+        require(digest(marker) == binding['controlsHash'] and current() == binding['previous'] and
+                controls.get('revision') == binding['previous']['revision'] and
+                controls.get('imageId') == binding['previous']['imageId'], 'HANDOFF_PREVIOUS_CHANGED')
+        handoff_controls(controls)
+        require(json.loads(sealed_file(recovery, 65536)) == {'owner': 'controls-update', 'state': controls},
+                'HANDOFF_RECOVERY_UNOWNED')
+        previous = binding['previous']
+        validate_image(previous['imageId'], previous['revision'])
+        original = activation.packaged_history(sys.modules[__name__], previous['imageId'])
+        require(original and handoff_history(previous['revision'], previous['imageId']) == original,
+                'HANDOFF_PREVIOUS_HISTORY_INVALID')
+        high = BASE / 'state/high-water.json'
+        high_water = json.loads(high.read_text()) if high.exists() else previous
+        require(target['mode'] == 'manual' or (target['runId'], target['attempt']) >=
+                (high_water['runId'], high_water['attempt']), 'STALE_AUTOMATIC_RELEASE')
+        require(shutil.disk_usage(BASE).free > target['bytes'] * 3 + 1024**3, 'DISK_CAPACITY_REQUIRED')
+        archive_safe(archive, docker=True)
+        run(['docker', 'load', '--input', str(archive)], timeout=240)
+        loaded = json.loads(run(['docker', 'image', 'inspect', f'vtc-dashboard:{target["revision"]}']))[0]
+        require(loaded['Id'] == target['imageId'], 'LOADED_IMAGE_ID_MISMATCH')
+        validate_image(target['imageId'], target['revision'])
+        expected = activation.packaged_history(sys.modules[__name__], target['imageId'])
+        require(len(original) <= len(expected) <= 1024 and expected[:len(original)] == original,
+                'HANDOFF_TARGET_HISTORY_INVALID')
+        intent = {'version': 1, 'id': uuid.uuid4().hex, 'pending': True, 'phase': 'prepared',
+                  'schemaAdvanced': False, 'binding': binding, 'bindingHash': digest(binding_path),
+                  'controls': controls, 'original': original, 'expected': expected,
+                  'metadata': {name: json.loads((BASE / 'state' / name).read_text())
+                               if (BASE / 'state' / name).exists() else None
+                               for name in ['current.json', 'previous.json', 'high-water.json']}}
+        if retained is not None:
+            archived = BASE / f'state/release-handoff-{retained["id"]}.json'
+            require(not archived.exists(), 'HANDOFF_ARCHIVE_COLLISION')
+            os.replace(intent_path, archived)
+            sync_directory(intent_path.parent)
+        atomic_json(intent_path, intent)
+    else:
+        intent = json.loads(sealed_file(intent_path, HANDOFF_MAX_RECORD))
+        require(intent.get('version') == 1 and re.fullmatch('[a-f0-9]{32}', intent.get('id', '')) and
+                intent.get('phase') in HANDOFF_PHASES and intent.get('binding') == binding and
+                intent.get('bindingHash') == digest(binding_path), 'HANDOFF_TARGET_CHANGED')
+        require(controls in [intent['controls'], dict(intent['controls'], pending=False)] and
+                (controls['pending'] is True or intent['phase'] in ['verified', 'complete']) and
+                (intent['phase'] != 'complete' or controls['pending'] is False),
+                'HANDOFF_CONTROLS_CHANGED')
+        handoff_controls(controls, settled=controls['pending'] is False)
+        validate_image(target['imageId'], target['revision'])
+        require(activation.packaged_history(sys.modules[__name__], target['imageId']) == intent['expected'],
+                'HANDOFF_TARGET_HISTORY_INVALID')
+    owner = {'owner': 'controls-release', 'id': intent['id'], 'bindingHash': intent['bindingHash']}
+    observed = json.loads(sealed_file(recovery, 65536)) if recovery.exists() else None
+    require(observed == owner or (intent['phase'] == 'prepared' and observed ==
+            {'owner': 'controls-update', 'state': intent['controls']}) or
+            (intent['phase'] == 'complete' and observed is None), 'HANDOFF_RECOVERY_UNOWNED')
+    handoff_metadata(intent)
+    atomic_json(recovery, owner)
+    revision, image_id = target['revision'], target['imageId']
+    try:
+        fenced(revision, image_id)
+        handoff_migrator_absent(intent)
+        history = handoff_history(revision, image_id)
+        original, expected = intent['original'], intent['expected']
+        old = history == original
+        full = history == expected
+        require((old and not intent['schemaAdvanced'] and intent['phase'] in ['prepared', 'exported', 'migrating']) or
+                (full and intent['phase'] in ['migrating', 'migrated', 'granted', 'verified', 'complete']),
+                'HANDOFF_MIGRATION_RECOVERY_REQUIRED')
+        if full and original != expected and not intent['schemaAdvanced']:
+            intent['schemaAdvanced'] = True
+            atomic_json(intent_path, intent)
+        if intent['phase'] == 'prepared':
+            backup = export_locked(binding['previous']['revision'])
+            directory, _ = validate_export(backup)
+            intent.update(backup=backup, backupHash=digest(directory / 'manifest.json'), phase='exported')
+            atomic_json(intent_path, intent)
+        directory, manifest = validate_export(intent['backup'])
+        require(digest(directory / 'manifest.json') == intent['backupHash'] and
+                manifest['revision'] == binding['previous']['revision'] and
+                manifest['imageId'] == binding['previous']['imageId'], 'HANDOFF_BACKUP_CHANGED')
+        if intent['phase'] in ['exported', 'migrating']:
+            intent['phase'] = 'migrating'
+            atomic_json(intent_path, intent)
+            handoff_migrate(intent, len(expected) - len(original) if old else 0)
+            require(handoff_history(revision, image_id) == expected, 'HANDOFF_MIGRATION_RECOVERY_REQUIRED')
+            intent.update(phase='migrated', schemaAdvanced=original != expected)
+            atomic_json(intent_path, intent)
+        require(handoff_configuration() == binding['configuration'], 'HANDOFF_CONFIGURATION_CHANGED')
+        activation.validate(sys.modules[__name__], revision, image_id, BASE / 'private/identity-mail.env')
+        # Admin SQL uses the existing database container; accepted metadata remains old.
+        # Compose configuration and both grant profiles are already hash-bound to this handoff.
+        values = activation.module_flags(BASE / 'private/identity-mail.env')
+        activation.grants(sys.modules[__name__], binding['previous']['revision'], values)
+        activation.check_privileges(sys.modules[__name__], activation.privileges(sys.modules[__name__],
+                                    binding['previous']['revision']), complete=True, values=values)
+        require(handoff_configuration() == binding['configuration'] and digest(binding_path) == intent['bindingHash'],
+                'HANDOFF_CONFIGURATION_CHANGED')
+        handoff_controls(controls, settled=controls['pending'] is False)
+        if intent['phase'] not in ['verified', 'complete']:
+            intent['phase'] = 'granted'
+            atomic_json(intent_path, intent)
+        compose(['up', '-d', '--no-deps', 'app', 'probe'], revision=revision, image_id=image_id)
+        ready(revision, image_id)
+        compose(['up', '-d', '--no-deps', 'proxy'], revision=revision, image_id=image_id)
+        public_ready(revision)
+        require(json.loads(sealed_file(marker, 65536)) == controls and
+                digest(binding_path) == intent['bindingHash'], 'HANDOFF_CONTROLS_CHANGED')
+        handoff_controls(controls, settled=controls['pending'] is False)
+        if intent['phase'] != 'complete':
+            intent['phase'] = 'verified'
+            atomic_json(intent_path, intent)
+        promoted = handoff_metadata(intent)
+        for name in ['previous.json', 'current.json', 'high-water.json']:
+            if promoted[name] is not None:
+                atomic_json(BASE / 'state' / name, promoted[name])
+        require(handoff_configuration() == binding['configuration'], 'HANDOFF_CONFIGURATION_CHANGED')
+        atomic_json(marker, dict(intent['controls'], pending=False))
+        intent.update(phase='complete', pending=False)
+        atomic_json(intent_path, intent)
+        recovery.unlink(missing_ok=True)
+        sync_directory(recovery.parent)
+        maintenance(False)
+        sync_directory(BASE / 'private/maintenance')
+    except BaseException:
+        # Never roll back to the old image, even if a resumed migrator returned applied:0.
+        with contextlib.suppress(Exception):
+            fenced(revision, image_id)
+        # Worker cleanup deliberately sets a generic safety marker on failure. Retain
+        # this already-established owner under the operations lock, rather than losing it.
+        if not recovery.exists() or recovery.read_text().strip() == 'RECOVERY_REQUIRED':
+            atomic_json(recovery, owner)
+        raise
+
+
 def release_locked(path, revision, run_id, attempt, mode, expected_image_id):
     require(not any((BASE / f'state/{name}').exists() for name in
                     ['jobs-acceptance', 'identity-acceptance', 'notifications-acceptance', 'ingress-check.json']), 'ACCEPTANCE_WINDOW')
-    for name in ['activation-intent.json', 'controls-update.json']:
+    for name in ['activation-intent.json', 'controls-update.json', 'release-handoff.json']:
         control = BASE / 'state' / name
         require(not control.exists() or json.loads(control.read_text()).get('pending') is not True,
                 'ACTIVATION_PENDING')
@@ -908,6 +1246,11 @@ def main():
         signal.signal(number, interrupted)
     if operation == ['receive']:
         receive()
+        return
+    if len(operation) == 2 and operation[0] == 'controls-release':
+        with lock():
+            controls_release_locked(operation[1])
+        print('Controls release: success')
         return
     require(operation and operation[0] in ['tick', 'heartbeat', 'jobs', 'jobs-config', 'jobs-grants', 'jobs-acceptance', 'activation', 'identity-acceptance', 'notifications-acceptance', 'export', 'restore', 'seed-synthetic', 'stage-seed', 'stage-smoke'], 'OPERATION_REJECTED')
     with lock(wait_seconds=0 if operation[0] in ['tick', 'heartbeat', 'jobs'] else 600):

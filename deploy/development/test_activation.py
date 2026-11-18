@@ -169,6 +169,8 @@ class ActivationTests(unittest.TestCase):
             update_controls.install(source)
         self.assertEqual((self.base / 'state/controls-previous/operations.py').read_bytes(), original)
         self.assertTrue(activation.controls_pending(ops, self.revision, self.image))
+        self.assertEqual(json.loads((self.base / 'state/recovery-required').read_text()),
+                         {'owner': 'controls-update', 'state': json.loads((self.base / 'state/controls-update.json').read_text())})
         self.assertEqual((self.base / 'operations.py').read_bytes(), (source / 'operations.py').read_bytes())
 
     def settled_update(self):
