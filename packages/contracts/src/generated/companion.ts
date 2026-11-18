@@ -73,7 +73,10 @@ export interface components {
             assignmentId: string | null;
             /** @enum {string} */
             availability: "retained" | "historical_unavailable";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Canonical UTC serialization with milliseconds: YYYY-MM-DDTHH:mm:ss.SSSZ (24 characters).
+             */
             decidedAt: string;
             /** Format: uuid */
             decisionId: string;
@@ -97,7 +100,10 @@ export interface components {
             id: string;
             level: components["schemas"]["LevelIdentity"];
             limits: components["schemas"]["Limits"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Canonical UTC serialization with milliseconds: YYYY-MM-DDTHH:mm:ss.SSSZ (24 characters).
+             */
             startedAt: string;
             trailerDisplay: components["schemas"]["TrailerDisplay"][];
         };
@@ -138,7 +144,7 @@ export interface components {
         Error: {
             error: {
                 /** @enum {string} */
-                code: "TOKEN_INVALID" | "INGESTION_FORBIDDEN" | "CAPABILITY_REQUIRED" | "INVALID_PAYLOAD" | "PAYLOAD_TOO_LARGE" | "UNSUPPORTED_MEDIA_TYPE" | "NOT_FOUND" | "RATE_LIMITED" | "TEMPORARILY_UNAVAILABLE";
+                code: "TOKEN_INVALID" | "INGESTION_FORBIDDEN" | "CAPABILITY_REQUIRED" | "INVALID_PAYLOAD" | "PAYLOAD_TOO_LARGE" | "UNSUPPORTED_MEDIA_TYPE" | "NOT_FOUND" | "RATE_LIMITED" | "TEMPORARILY_UNAVAILABLE" | "RESULT_BATCH_TOO_LARGE";
                 retryable: boolean;
             };
             requestId: string;
@@ -171,7 +177,10 @@ export interface components {
         Preview: {
             applicability: {
                 contextRevision: number;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description Canonical UTC serialization with milliseconds: YYYY-MM-DDTHH:mm:ss.SSSZ (24 characters).
+                 */
                 expiresAt: string;
                 maximumDistanceM: string | null;
                 minimumDistanceM: string | null;
@@ -184,7 +193,10 @@ export interface components {
             contextRevision: number;
             /** @constant */
             contract: "1.0";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Canonical UTC serialization with milliseconds: YYYY-MM-DDTHH:mm:ss.SSSZ (24 characters).
+             */
             evaluatedAt: string;
             eventExempt: boolean;
             evidenceRevision: number;
@@ -252,13 +264,19 @@ export interface components {
             terminal: boolean;
         };
         Qualification: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Canonical UTC serialization with milliseconds: YYYY-MM-DDTHH:mm:ss.SSSZ (24 characters).
+             */
             asOf: string;
             assignment: components["schemas"]["Assignment"] | null;
             /** @constant */
             contract: "1.0";
             game: components["schemas"]["Game"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Canonical UTC serialization with milliseconds: YYYY-MM-DDTHH:mm:ss.SSSZ (24 characters).
+             */
             offlineUsableUntil: string;
             /** Format: uuid */
             ownerId: string;
@@ -300,7 +318,10 @@ export interface components {
             version: components["schemas"]["ResultVersion"];
         };
         ResultBatch: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Canonical UTC serialization with milliseconds: YYYY-MM-DDTHH:mm:ss.SSSZ (24 characters).
+             */
             asOf: string;
             /** @constant */
             contract: "1.0";
@@ -381,7 +402,10 @@ export interface components {
             source: components["schemas"]["SourceIdentity"];
         };
         TrailerDisplay: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Canonical UTC serialization with milliseconds: YYYY-MM-DDTHH:mm:ss.SSSZ (24 characters).
+             */
             asOf: string;
             /** @constant */
             basis: "current_catalog";
@@ -752,6 +776,15 @@ export interface operations {
             };
             /** @description Safe failure */
             415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The complete successful result batch exceeds 1048576 UTF-8 bytes. RESULT_BATCH_TOO_LARGE is permanent for this batch: split down to one item under ordinary polling/admission budgets; never truncate or infer a verdict. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

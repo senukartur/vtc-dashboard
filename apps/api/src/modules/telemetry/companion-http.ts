@@ -70,10 +70,17 @@ export async function registerCompanionRoutes(
         requestId: r.id,
       });
     });
-    child.addHook("onSend", async (_r, reply, payload) => {
+    child.addHook("onSend", async (r, reply, payload) => {
       reply.header("Cache-Control", "no-store");
-      if (typeof payload === "string" && Buffer.byteLength(payload) > 1048576)
+      if (typeof payload === "string" && Buffer.byteLength(payload) > 1048576) {
+        if (
+          reply.statusCode === 200 &&
+          r.method === "POST" &&
+          r.routeOptions.url === "/api/telemetry/companion/v1/results"
+        )
+          throw new TelemetryError(422, "RESULT_BATCH_TOO_LARGE");
         throw new TelemetryError(503, "TEMPORARILY_UNAVAILABLE");
+      }
     });
     const prefix = "/api/telemetry/companion/v1";
     child.get(
@@ -114,7 +121,7 @@ export async function registerCompanionRoutes(
         schema: {
           querystring: noQuery,
           body: ref("ResultBatchInput"),
-          response: { 200: ref("ResultBatch") },
+          response: { 200: ref("ResultBatch"), 422: ref("Error") },
         },
       },
       (r) => companion.results(auth(r), r.ip, r.body, tickets.get(r)),

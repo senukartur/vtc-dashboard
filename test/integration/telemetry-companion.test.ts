@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { request as httpRequest } from "node:http";
+import { type IncomingHttpHeaders, request as httpRequest } from "node:http";
 import type { companionComponents, components } from "@vtc/contracts";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { steamAccounts, steamLinks } from "@vtc/db/external-identities-schema";
@@ -132,6 +132,42 @@ const batch = (items: C["SourceRequest"][]): C["ResultBatchInput"] => ({
 });
 async function results(items: C["SourceRequest"][], auth = authorization) {
   return modules.telemetryCompanion!.results(auth, ip, batch(items));
+}
+async function httpResults(items: C["SourceRequest"][]) {
+  if (!app.server.listening) await app.listen({ host: "127.0.0.1", port: 0 });
+  const address = app.server.address();
+  if (!address || typeof address === "string") throw new Error("SYNTHETIC_HTTP_ADDRESS_REQUIRED");
+  const payload = JSON.stringify(batch(items));
+  return new Promise<{ status: number | undefined; headers: IncomingHttpHeaders; body: string }>(
+    (resolve, reject) => {
+      const request = httpRequest(
+        {
+          host: "127.0.0.1",
+          port: address.port,
+          path: prefix + "/results",
+          method: "POST",
+          headers: {
+            authorization,
+            "content-type": "application/json",
+            "content-length": Buffer.byteLength(payload),
+          },
+        },
+        (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => {
+            body += chunk;
+          });
+          response.on("end", () =>
+            resolve({ status: response.statusCode, headers: response.headers, body }),
+          );
+        },
+      );
+      request.setTimeout(10000, () => request.destroy(new Error("SYNTHETIC_HTTP_TIMEOUT")));
+      request.on("error", reject);
+      request.end(payload);
+    },
+  );
 }
 async function clearAdmission() {
   await control.query("DELETE FROM telemetry_limits");
@@ -1031,7 +1067,7 @@ test("event edits invalidate a decided associated owner without an attendance ro
   expect(await domainState()).toEqual(domain);
 });
 
-test("maximum legal batch and trailer labels cannot bypass the success response byte budget or mutate domain state", async () => {
+test("real HTTP oversized results give a permanent split hint and one full immutable assessment remains retrievable", async () => {
   const seeded = await seedCatalog(unit, "ets2", {
     trailers: Array.from({ length: 99 }, (_, i) => ({
       code: `fixture_budget_${i}`,
@@ -1051,17 +1087,40 @@ test("maximum legal batch and trailer labels cannot bypass the success response 
   const p = await upload();
   await modules.telemetry!.receive(authorization, ip, p);
   await clearAdmission();
-  const before = await domainState(),
-    response = await app.inject({
-      method: "POST",
-      url: `${prefix}/results`,
-      headers: { authorization },
-      payload: batch(Array(25).fill(sourceRequest(p))),
-    });
-  expect(response.statusCode).toBe(503);
-  expect(Buffer.byteLength(response.body)).toBeLessThan(1048576);
-  expect(response.headers["cache-control"]).toBe("no-store");
-  expect(response.json().error.code).toBe("TEMPORARILY_UNAVAILABLE");
+  const expected = (await results([sourceRequest(p)])).items[0]!;
+  const before = await domainState();
+  const oversized = await httpResults(Array(25).fill(sourceRequest(p)));
+  expect(oversized.status).toBe(422);
+  expect(Buffer.byteLength(oversized.body)).toBeLessThan(1048576);
+  expect(oversized.headers["cache-control"]).toBe("no-store");
+  expect(oversized.headers["retry-after"]).toBeUndefined();
+  expect(JSON.parse(oversized.body)).toEqual({
+    error: { code: "RESULT_BATCH_TOO_LARGE", retryable: false },
+    requestId: expect.stringMatching(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/),
+  });
+  expect(await domainState()).toEqual(before);
+  const single = await httpResults([sourceRequest(p)]);
+  expect(single.status).toBe(200);
+  expect(single.headers["cache-control"]).toBe("no-store");
+  expect(single.headers["retry-after"]).toBeUndefined();
+  expect(Buffer.byteLength(single.body)).toBeLessThan(1048576);
+  const reply = JSON.parse(single.body) as C["ResultBatch"];
+  expect(reply.items).toHaveLength(1);
+  const actual = reply.items[0]!;
+  expect(actual).toMatchObject({
+    unchanged: false,
+    receipt: "received",
+    state: "decided",
+    assessmentBasis: "current",
+  });
+  expect(immutableAssessment(actual.assessment)).toEqual(immutableAssessment(expected.assessment));
+  expect(actual.credit).toEqual(expected.credit);
+  expect(actual.assessment!.trailerDisplay).toHaveLength(100);
+  const labels = (assessment: C["Assessment"]) =>
+    assessment.trailerDisplay.map(({ asOf: _asOf, ...label }) => label);
+  expect(labels(actual.assessment!)).toEqual(labels(expected.assessment!));
+  expect(actual.assessment!.limits!.trailers.typeIds).toHaveLength(100);
+  expect(actual.assessment!.rules).toHaveLength(5);
   expect(await domainState()).toEqual(before);
 });
 
