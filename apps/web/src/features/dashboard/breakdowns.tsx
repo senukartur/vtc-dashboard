@@ -5,7 +5,9 @@ import { Fragment, type ReactNode, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { formatDecimal, type Locale } from "../../shared/formatting.js";
+import { isRateLimited, rateLimitSeconds } from "../../shared/rate-limit.js";
 import { Badge, Card } from "../../shared/ui/primitives.js";
+import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import { KeepFocusButton } from "../events/components.js";
 import { useBlockRetry } from "./blocks.js";
 import { Skeleton } from "./components.js";
@@ -65,7 +67,7 @@ function BreakdownCard<D extends BreakdownDimension>({
   const { t } = useTranslation("dashboard");
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
-  const { retrying, retry } = useBlockRetry(query);
+  const { retrying, error, retry } = useBlockRetry(query);
   const view = retrying && !query.data ? "error" : blockView(query, breakdownEmpty);
 
   let body: ReactNode;
@@ -76,7 +78,11 @@ function BreakdownCard<D extends BreakdownDimension>({
   else if (view === "error")
     body = (
       <div className="dashboard-block-error">
-        <p>{t(copy[dimension].error)}</p>
+        {isRateLimited(error) ? (
+          <RateLimitNotice seconds={rateLimitSeconds(error)} />
+        ) : (
+          <p>{t(copy[dimension].error)}</p>
+        )}
         <KeepFocusButton
           variant="outline"
           focusTarget={() => heading.current?.focus()}

@@ -874,6 +874,11 @@
 .dashboard-page .dashboard-error {
   justify-items: start;
 }
+/* The rate-limit notice replaces the error text; the gap spaces it from Retry. */
+.dashboard-page .dashboard-error > .notice,
+.dashboard-page .dashboard-block-error > .notice {
+  margin: 0;
+}
 .dashboard-page .dashboard-forbidden p {
   color: var(--secondary);
 }

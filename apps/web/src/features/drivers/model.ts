@@ -1,6 +1,7 @@
 // Pure driver profile helpers: analytics window, level ladder, trip request paths and failures.
 import type { TFunction } from "i18next";
 import type { Locale } from "../../shared/formatting.js";
+import { isRateLimited } from "../../shared/rate-limit.js";
 import { formatDay } from "../admin/members-model.js";
 import { calendarToday, isoDate } from "../dashboard/model.js";
 import { DriversFailure, type DTO } from "./transport.js";
@@ -92,10 +93,14 @@ export function sourceKeys(
   return kinds.length ? [...new Set(kinds)] : ["unknown"];
 }
 
-export type FailureView = "notFound" | "forbidden" | "setup" | "error";
+export type FailureView = "notFound" | "forbidden" | "setup" | "limited" | "error";
 
-/** Page/block outcome for a failed drivers read; everything unexpected is a retryable error. */
+/**
+ * Page/block outcome for a failed drivers read; everything unexpected is a retryable error. A
+ * read still rate limited after its automatic retry is "limited" and shows the wait notice.
+ */
 export function failureView(error: unknown): FailureView {
+  if (isRateLimited(error)) return "limited";
   if (!(error instanceof DriversFailure)) return "error";
   if (error.status === 404 || error.status === 400 || error.status === 422) return "notFound";
   if (error.status === 403) return "forbidden";

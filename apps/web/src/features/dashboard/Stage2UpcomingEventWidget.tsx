@@ -2,7 +2,9 @@ import { type ReactNode, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatUtc, type Locale } from "../../shared/formatting.js";
+import { isRateLimited, rateLimitSeconds } from "../../shared/rate-limit.js";
 import { Card } from "../../shared/ui/primitives.js";
+import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import { KeepFocusButton } from "../events/components.js";
 import { EventQuickResponse } from "../events/EventQuickResponse.js";
 import { EventResponseSummary } from "../events/EventResponseSummary.js";
@@ -41,7 +43,7 @@ export function Stage2UpcomingEventWidget({
   const event = query.data?.event;
   const now = useCountdownNow(event?.startsAt ?? null);
   const left = event ? countdown(event.startsAt, now) : null;
-  const { retrying, retry } = useBlockRetry(query);
+  const { retrying, error, retry } = useBlockRetry(query);
   const view = retrying && query.data === undefined ? "error" : blockView(query, (d) => d === null);
 
   let body: ReactNode;
@@ -91,7 +93,11 @@ export function Stage2UpcomingEventWidget({
   } else if (view === "error") {
     body = (
       <div className="dashboard-block-error">
-        <p>{t("upcomingEvent.error")}</p>
+        {isRateLimited(error) ? (
+          <RateLimitNotice seconds={rateLimitSeconds(error)} />
+        ) : (
+          <p>{t("upcomingEvent.error")}</p>
+        )}
         <KeepFocusButton
           variant="outline"
           focusTarget={() => heading.current?.focus()}

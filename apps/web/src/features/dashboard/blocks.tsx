@@ -13,7 +13,9 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { formatUtc, type Locale } from "../../shared/formatting.js";
+import { isRateLimited, rateLimitSeconds } from "../../shared/rate-limit.js";
 import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
+import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import { EventFailureView, KeepFocusButton } from "../events/components.js";
 import { ResponseIcon } from "../events/EventResponseSummary.js";
 import { responseInput } from "../events/model.js";
@@ -63,21 +65,26 @@ export function useCountdownNow(startsAt: string | null) {
  * A block's Retry. Without data TanStack resets a refetch to pending, which would replace the
  * error and its focused Retry with the loading state. Until the query (as passed down by the
  * page) shows a newer outcome, the block keeps its error, so a failed retry keeps focus on Retry
- * and success removes it, handing focus to the heading.
+ * and success removes it, handing focus to the heading. `error` is the one to show: while
+ * retrying it is the held error (the refetch cleared the query's), so a rate-limit notice stays.
  */
 export function useBlockRetry(query: {
   data: unknown;
+  error: unknown;
   errorUpdateCount: number;
   refetch: () => Promise<unknown>;
 }) {
-  const [since, setSince] = useState<number | null>(null);
-  const retrying = retainsError(since, query);
+  const [held, setHeld] = useState<{ since: number; error: unknown } | null>(null);
+  const retrying = retainsError(held?.since ?? null, query);
   // Data or a later error ends the retry, so a later query (another game) shows its own state.
-  if (since !== null && !retrying) setSince(null);
+  if (held !== null && !retrying) setHeld(null);
+  const error = retrying && held ? held.error : query.error;
   return {
     retrying,
+    error,
     retry() {
-      setSince(query.errorUpdateCount);
+      // Another press while retrying keeps the held error: the query's own is already cleared.
+      setHeld({ since: query.errorUpdateCount, error });
       void query.refetch();
     },
   };
@@ -96,7 +103,7 @@ export function RecentTripsWidget({
   const { t } = useTranslation("dashboard");
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
-  const { retrying, retry } = useBlockRetry(query);
+  const { retrying, error, retry } = useBlockRetry(query);
   const view = retrying && !query.data ? "error" : blockView(query, (d) => d.items.length === 0);
 
   let body: ReactNode;
@@ -151,7 +158,11 @@ export function RecentTripsWidget({
   } else if (view === "error") {
     body = (
       <div className="dashboard-block-error">
-        <p>{t("recentTrips.error")}</p>
+        {isRateLimited(error) ? (
+          <RateLimitNotice seconds={rateLimitSeconds(error)} />
+        ) : (
+          <p>{t("recentTrips.error")}</p>
+        )}
         {/* Removed on success, which hands focus to the heading; a failed retry keeps it here. */}
         <KeepFocusButton
           variant="outline"
@@ -213,7 +224,7 @@ export function UpcomingEventWidget({
   const now = useCountdownNow(event?.startsAt ?? null);
   const phase: EventPhase = event ? eventPhase(event, now) : "open";
   const left = event ? countdown(event.startsAt, now) : null;
-  const { retrying, retry } = useBlockRetry(query);
+  const { retrying, error, retry } = useBlockRetry(query);
   const view = retrying && query.data === undefined ? "error" : blockView(query, (d) => d === null);
 
   // At the start the endpoint moves on to the next event; refetch once per event and identity.
@@ -289,7 +300,11 @@ export function UpcomingEventWidget({
   } else if (view === "error") {
     body = (
       <div className="dashboard-block-error">
-        <p>{t("upcomingEvent.error")}</p>
+        {isRateLimited(error) ? (
+          <RateLimitNotice seconds={rateLimitSeconds(error)} />
+        ) : (
+          <p>{t("upcomingEvent.error")}</p>
+        )}
         <KeepFocusButton
           variant="outline"
           focusTarget={() => heading.current?.focus()}
