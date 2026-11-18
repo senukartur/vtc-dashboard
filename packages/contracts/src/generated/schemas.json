@@ -1538,6 +1538,10 @@
               "type": "null"
             }
           ]
+        },
+        "companion": {
+          "type": "boolean",
+          "description": "Whether this token has the explicitly opted-in companion.own.v1 capability."
         }
       },
       "required": [
@@ -1556,6 +1560,10 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 128
+        },
+        "companion": {
+          "type": "boolean",
+          "description": "Explicitly grant own qualification, provisional preview and own-upload result access. Reissue to enable."
         }
       },
       "required": [

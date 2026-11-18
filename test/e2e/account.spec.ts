@@ -2331,6 +2331,41 @@ test(
 );
 
 test(
+  "companion opt-in renders RU/EN without overflow and preserves keyboard access, default state and identity reset",
+  browserCase(["@layout"]),
+  async ({ page }, info) => {
+    const state = await settingsWorkspace(page);
+    state.self.data.steamVerified = true;
+    state.self.data.missingSetup = [];
+    await page.goto("/account/connections");
+    await language(page, "en");
+    const grant = page.getByRole("checkbox", {
+      name: "Allow own qualifications, provisional checks and upload results",
+      exact: true,
+    });
+    await expect(grant).not.toBeChecked();
+    await expect(page.getByText(/Optional: live checks send cargo code and mass/)).toBeVisible();
+    await grant.focus();
+    await page.keyboard.press("Space");
+    await expect(grant).toBeChecked();
+    await capture(page, info, "en-companion-opt-in");
+    await language(page, "ru");
+    const translated = page.getByRole("checkbox", {
+      name: "Разрешить чтение своих квалификаций, предварительных проверок и результатов загрузки",
+      exact: true,
+    });
+    await expect(translated).toBeChecked();
+    await expect(
+      page.getByText(/Необязательно: для предварительных проверок до загрузки рейса/),
+    ).toBeVisible();
+    await capture(page, info, "ru-companion-opt-in");
+    state.self.data.identityEpoch++;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(translated).not.toBeChecked();
+  },
+);
+
+test(
   "profile rows show nickname, roles and the driver profile link",
   browserCase(["@functional"]),
   async ({ page }, info) => {

@@ -38,6 +38,7 @@ import type {
 import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
 import { createTripAdjudication } from "./adjudication.js";
+import { createCompanionTrips } from "./companion.js";
 import { createContributionRegister } from "./contributions.js";
 import { createFactRepository, damagePercent, effectiveGameMode } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
@@ -48,6 +49,7 @@ import {
   tripListQuery,
   tripSearchCondition,
 } from "./list-query.js";
+import { createOwnerRevision } from "./owner-revision.js";
 import { createTripReconciliation } from "./reconciliation.js";
 import {
   createReviewQueueRepair,
@@ -669,6 +671,7 @@ export function createTrips(
         receivedAt: firstReceivedAt,
         deliveryMode: key.deliveryMode,
       });
+    await createOwnerRevision(unit).bump(tx, context.ownerUserId);
     await c(tx).insert(sourcePayloads).values({ messageId, content });
     await factsRepository.insert(tx, originalTripId, fact, adapter.version);
     await emit(tx, "source.snapshot_stored", tripId, trip.version, fact);
@@ -1040,6 +1043,7 @@ export function createTrips(
   }
   return {
     config,
+    companion: createCompanionTrips(unit),
     trailerTypesInTransaction,
     groups,
     reviewQueueRepair: createReviewQueueRepair(unit),
@@ -1255,6 +1259,7 @@ export function createTrips(
         (!correction && row.decision === "accepted")
       )
         throw identityError(409);
+      await createOwnerRevision(unit).bump(tx, row.ownerId);
       await c(tx)
         .update(trips)
         .set({

@@ -33,6 +33,7 @@ import { registerQualificationRoutes } from "./modules/qualifications/http.js";
 import type { Qualifications } from "./modules/qualifications/service.js";
 import { registerReconciliationRoutes } from "./modules/reconciliation/http.js";
 import type { Reconciliation } from "./modules/reconciliation/service.js";
+import { registerCompanionRoutes } from "./modules/telemetry/companion-http.js";
 import { registerTelemetryRoutes } from "./modules/telemetry/http.js";
 import type { TelemetryService } from "./modules/telemetry/service.js";
 import { registerTripDecisionRoutes } from "./modules/trip-decisions/http.js";
@@ -45,6 +46,7 @@ import { ingressTrust } from "./platform/http/ingress.js";
 import { logRequestFailure } from "./platform/http/request-failure.js";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
 import type { Administration } from "./use-cases/administration.js";
+import type { TelemetryCompanion } from "./use-cases/telemetry-companion.js";
 import type { createWorkspaceSummary } from "./use-cases/workspace-summary.js";
 
 const errorCodes: Readonly<Record<number, string>> = {
@@ -76,6 +78,7 @@ export interface AppOptions {
   catalogs?: Catalogs;
   trips?: Trips;
   telemetry?: TelemetryService;
+  telemetryCompanion?: TelemetryCompanion;
   manualReports?: ManualReports;
   qualifications?: Qualifications;
   events?: Events;
@@ -261,6 +264,8 @@ export async function createApp(options: AppOptions) {
     );
   if (options.identity && options.telemetry)
     await registerTelemetryRoutes(app, options.identity, options.telemetry);
+  if (options.telemetry && options.telemetryCompanion)
+    await registerCompanionRoutes(app, options.telemetry, options.telemetryCompanion);
   if (options.identity && options.qualifications)
     await registerQualificationRoutes(app, options.identity, options.qualifications);
   if (options.identity && options.events)
@@ -323,6 +328,10 @@ export async function createApp(options: AppOptions) {
     const reserved = ["/api", "/health", "/evidence", "/uploads"].some(
       (prefix) => path === prefix || path.startsWith(`${prefix}/`),
     );
+    if (path.startsWith("/api/telemetry/companion/"))
+      return reply
+        .code(404)
+        .send({ error: { code: "NOT_FOUND", retryable: false }, requestId: request.id });
     if (
       options.webRoot &&
       request.method === "GET" &&

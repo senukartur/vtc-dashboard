@@ -39,6 +39,8 @@ The per-game summary keeps its existing `visible` and `hidden` buckets based on 
 
 The API has no game-build, map or source gate. `resolveInTransaction(game, kind, code)` looks up the exact row, hidden rows included, and uses only `(game, code)`: a city's names, canonical name included, never identify it. The telemetry adapter records resolved cargo ADR as a known class, `cargo_not_adr` for listed non-hazardous cargo (a complete rule context) and `cargo_adr_unknown` otherwise. A later change to a cargo's ADR class does not rewrite an earlier trip; each trip keeps the class it was evaluated with, and staff reading it see the current row name.
 
+Companion preview uses `resolveCurrentInTransaction` under its current company/member fence. Exact cargo/trailer code and cargo ADR are read with `FOR SHARE`, matching current trailer classification reads even when authentication established an older repeatable-read snapshot before waiting for a catalog writer. An atomically renamed trailer cannot combine its old code with its new classification. Frozen ingestion retains the existing consistent-read resolver and immutable normalization semantics.
+
 A row's source or region must be a visible same-game row; an unchanged link to a hidden parent stays valid, in the admin form and in import (`hidden_reference`). Manual selections and rule allowlists must name same-game rows. A hidden row can stay selected when it is unchanged but cannot be newly chosen (`CATALOG_SELECTION_HIDDEN`).
 
 ## Companies, depots and logos

@@ -173,3 +173,5 @@ VTC-003 can close only after that final independent review and merge. Client rec
 - [HTTP semantics (RFC 9110)](https://www.rfc-editor.org/rfc/rfc9110.html): status/retry behavior; durable receipt semantics above are our application contract.
 - [JSON Canonicalization Scheme (RFC 8785)](https://www.rfc-editor.org/rfc/rfc8785.html): canonical content hashing, distinct from the local reducer's own job-key serialization.
 - [JSON Schema 2020-12](https://json-schema.org/draft/2020-12): structural schema dialect; cross-record authorization, ordering, source truth and durability require implementation tests.
+
+The additive [companion contract](telemetry-companion-v1.md) has separate bearer capability discovery, qualification, preview and own-upload result operations. Existing ingest-only tokens and all frozen connection/event/ACK bodies remain unchanged; enabling companion reads requires explicit token reissuance.

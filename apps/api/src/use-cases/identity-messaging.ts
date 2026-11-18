@@ -15,13 +15,13 @@ import type { CatalogConfig } from "../modules/catalogs/config.js";
 import { createCatalogs } from "../modules/catalogs/service.js";
 import { createEventMedia, type EventMediaConfig } from "../modules/events/media.js";
 import { mediaJobKinds } from "../modules/events/media-jobs.js";
-import { createEvents, type EventsConfig } from "../modules/events/service.js";
+import { createEvents, type Events, type EventsConfig } from "../modules/events/service.js";
 import { createEventWorkspace } from "../modules/events/workspace.js";
+import { truckersApplicantProvider } from "../modules/external-identities/providers.js";
 import {
   createExternalIdentities,
   steamProjection,
 } from "../modules/external-identities/service.js";
-import { truckersApplicantProvider } from "../modules/external-identities/providers.js";
 import type { IdentityConfig } from "../modules/identity/engine.js";
 import { createIdentity, type Identity } from "../modules/identity/service.js";
 import {
@@ -58,17 +58,22 @@ import {
   type TelemetryConfig,
 } from "../modules/telemetry/service.js";
 import {
+  companionEventTripRelation,
+  createCompanionAssessments,
+} from "../modules/trip-decisions/companion.js";
+import {
   createTripDecisions,
   type TripDecisions,
   type TripDecisionsConfig,
 } from "../modules/trip-decisions/service.js";
 import { createTripDecisionWorkspace } from "../modules/trip-decisions/workspace.js";
 import { createTripActivity } from "../modules/trips/activity.js";
-import { createTrips, type TripsConfig } from "../modules/trips/service.js";
+import { createTrips, type Trips, type TripsConfig } from "../modules/trips/service.js";
 import { createTripWorkspace } from "../modules/trips/workspace.js";
 import { createQueue } from "../platform/jobs/queue.js";
 import { admissionsEvents, createOutbox, identityAccessEvents } from "../platform/outbox/events.js";
 import { createAdministration } from "./administration.js";
+import { createTelemetryCompanion } from "./telemetry-companion.js";
 import { createWorkspaceSummary } from "./workspace-summary.js";
 
 export function composeIdentity(
@@ -181,7 +186,7 @@ export function composeIdentity(
     : undefined;
   const catalogs = catalogConfig ? createCatalogs(unit, catalogConfig, { identity }) : undefined;
   let manualReports: ManualReports | undefined;
-  const trips = tripsConfig
+  const trips: Trips | undefined = tripsConfig
     ? createTrips(
         unit,
         { ...tripsConfig, dispatchReviewStage3Enabled },
@@ -302,10 +307,25 @@ export function composeIdentity(
           identity,
         )
       : undefined;
-  const events = eventsConfig
+  const events: Events | undefined = eventsConfig
     ? createEvents(unit, eventsConfig, {
         identity,
         outbox,
+        ...(trips
+          ? {
+              companionChanged: async (
+                tx: import("@vtc/db").TxContext,
+                ids: readonly string[],
+                eventId: string,
+              ) => {
+                await trips.companion.eventChanged(
+                  tx,
+                  ids,
+                  companionEventTripRelation(unit, tx, eventId),
+                );
+              },
+            }
+          : {}),
         ...(eventMedia ? { media: eventMedia } : {}),
         ...(notificationsConfig
           ? {
@@ -415,9 +435,27 @@ export function composeIdentity(
     ...(events ? { events: createEventWorkspace(unit) } : {}),
     ...(admissions ? { admissions } : {}),
   });
+  const telemetry =
+    telemetryConfig && trips && externalIdentities
+      ? createTelemetry(unit, telemetryConfig, { identity, external: externalIdentities, trips })
+      : undefined;
+  const telemetryCompanion =
+    telemetry && trips
+      ? createTelemetryCompanion({
+          telemetry,
+          trips,
+          ...(qualifications ? { qualifications } : {}),
+          ...(catalogs ? { catalogs } : {}),
+          ...(events ? { events } : {}),
+          ...(tripDecisions && events
+            ? { assessments: createCompanionAssessments(unit, events) }
+            : {}),
+        })
+      : undefined;
   return {
     identity,
     workspaceSummary,
+    ...(telemetryCompanion ? { telemetryCompanion } : {}),
     ...(notifications ? { notifications } : {}),
     administration: createAdministration(
       unit,
@@ -443,15 +481,7 @@ export function composeIdentity(
     ...(tripDecisions ? { tripDecisions } : {}),
     ...(qualifications ? { qualifications } : {}),
     ...(reconciliation ? { reconciliation } : {}),
-    ...(telemetryConfig && trips && externalIdentities
-      ? {
-          telemetry: createTelemetry(unit, telemetryConfig, {
-            identity,
-            external: externalIdentities,
-            trips,
-          }),
-        }
-      : {}),
+    ...(telemetry ? { telemetry } : {}),
     ...(trips ? { trips } : {}),
     ...(externalIdentities ? { externalIdentities } : {}),
     jobsQueue: jobsQueueFor(),
