@@ -1,3 +1,4 @@
+import { Ellipsis } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CatalogItem, CatalogList } from "../../shared/catalog-selectors/contracts.js";
@@ -74,7 +75,7 @@ export function CatalogCards({
               aria-label={t("actions", { name: item.display.label })}
               onClick={() => setSheet(item)}
             >
-              …
+              <Ellipsis size={16} strokeWidth={1.8} aria-hidden="true" />
             </Button>
           )}
         </div>

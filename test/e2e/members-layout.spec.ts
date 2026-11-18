@@ -547,7 +547,7 @@ test(
     await expect(
       detail(page).getByRole("button", { name: text.en.restore, exact: true }),
     ).toBeVisible();
-    await expect(detail(page).locator(".members-status")).toHaveText("◇Former member");
+    await expect(detail(page).locator(".members-status")).toHaveText("Former member");
   },
 );
 

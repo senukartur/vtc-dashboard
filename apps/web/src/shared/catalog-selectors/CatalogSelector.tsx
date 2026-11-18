@@ -1,6 +1,7 @@
+import { ChevronDown, X } from "lucide-react";
 import { type KeyboardEvent, type MouseEvent, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Input, Label } from "../ui/primitives.js";
+import { Badge, Input, Label } from "../ui/primitives.js";
 import {
   type ComboboxRow,
   clampActive,
@@ -260,7 +261,7 @@ export function CatalogSelector({
         <span className="catalog-adornments">
           {fallback && (
             <>
-              <span
+              <Badge
                 className="catalog-chip"
                 aria-hidden="true"
                 title={t("fallback")}
@@ -272,16 +273,16 @@ export function CatalogSelector({
                 }}
               >
                 EN
-              </span>
+              </Badge>
               <span id={`${id}-fallback`} className="visually-hidden">
                 {t("fallback")}
               </span>
             </>
           )}
           {hiddenMark && (
-            <span id={`${id}-hidden`} className="catalog-chip">
+            <Badge id={`${id}-hidden`} className="catalog-chip">
               {t("hidden")}
-            </span>
+            </Badge>
           )}
           {canClear && (
             <button
@@ -293,34 +294,16 @@ export function CatalogSelector({
               onMouseDown={keepFocus}
               onClick={clear}
             >
-              <svg
-                aria-hidden="true"
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-              >
-                <path d="M6 6l12 12M18 6L6 18" />
-              </svg>
+              <X size={13} strokeWidth={1.8} aria-hidden="true" focusable="false" />
             </button>
           )}
-          <svg
-            className="catalog-chevron"
+          <ChevronDown
+            size={13}
+            strokeWidth={1.8}
             aria-hidden="true"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
+            focusable="false"
+            className="catalog-chevron"
+          />
         </span>
         {open && (
           // biome-ignore lint/a11y/noStaticElementInteractions: mouse down only keeps input focus.
@@ -364,13 +347,13 @@ export function CatalogSelector({
                           {selectorDisplay(row.item).englishFallback && (
                             <>
                               {" "}
-                              <span
+                              <Badge
                                 className="catalog-chip"
                                 aria-hidden="true"
                                 title={t("fallback")}
                               >
                                 EN
-                              </span>
+                              </Badge>
                               <span className="visually-hidden">{t("fallback")}</span>
                             </>
                           )}

@@ -5944,6 +5944,12 @@ export interface components {
             /** Format: uuid */
             tripId: string;
         } & unknown;
+        /** @description Observed telemetry revenue only. Null currency means the source did not document its currency; it is never inferred from the game. */
+        TripRevenue: {
+            /** @description Exact signed 64-bit telemetry revenue integer; never a JavaScript number or expected income. */
+            amount: string;
+            currency: string | null;
+        };
         /** @description Present only in listTrips responses for scope=review. Review-queue state of the canonical trip: hold flag, stored review reasons, queue time and the current manual revision number (null without a manual report). */
         TripReviewQueueEntry: {
             /** Format: date-time */
@@ -6224,6 +6230,8 @@ export interface components {
             /** @enum {string} */
             decision: "unassessed" | "pending_review" | "accepted" | "rejected";
             destination: components["schemas"]["CatalogLabel"] | null;
+            /** @description Effective depot reference, only in authorized author/reviewer summaries; omitted in company scope. */
+            destinationCompany?: components["schemas"]["TripStage4CompanyRef"] | null;
             /** @description Associated visible event, or null if none is visible. Only in authorized author/reviewer projections. Omit entirely in company scope. */
             event?: {
                 id: components["schemas"]["Id"];
@@ -6236,11 +6244,23 @@ export interface components {
              * @enum {string}
              */
             gameMode?: "single-player" | "truckersmp" | "haulmp" | "unknown";
+            /**
+             * @description Recorded effective telemetry Hard Mode result. Author/reviewer summaries only; omitted in company scope. Unknown is never inferred as qualified.
+             * @enum {string}
+             */
+            hardModeResult?: "qualified" | "not-qualified" | "unknown";
             /** Format: uuid */
             id: string;
+            /**
+             * @description Recorded effective telemetry job type. Author/reviewer summaries only; omitted in company scope. Unknown is not classified from other trip fields.
+             * @enum {string}
+             */
+            jobType?: "quick-job" | "freight-market" | "cargo-market" | "world-of-trucks" | "unknown";
             /** @description Stable canonical trip number when assigned. */
             number?: number;
             origin: components["schemas"]["CatalogLabel"] | null;
+            /** @description Effective depot reference, only in authorized author/reviewer summaries; omitted in company scope. */
+            originCompany?: components["schemas"]["TripStage4CompanyRef"] | null;
             /** @enum {string} */
             outcome: "open" | "delivered" | "cancelled" | "none";
             owner: components["schemas"]["MemberSummary"];
@@ -6252,6 +6272,8 @@ export interface components {
              * @enum {string}
              */
             reportingBasis?: "actual_completion" | "manual_confirmation" | "unknown";
+            /** @description Observed effective telemetry revenue, only in authorized author/reviewer summaries. Null when unavailable; omitted in company scope. */
+            revenue?: components["schemas"]["TripRevenue"] | null;
             review?: components["schemas"]["TripReviewQueueEntry"];
             sourceKinds: ("ets2telemetry" | "manual")[];
             /** @description UTC submission instant of the current manual revision, or null when there is no current manual revision. */

@@ -1,17 +1,18 @@
+import { Check, PenLine, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CatalogDTO } from "../../shared/catalog-selectors/contracts.js";
 import { Dialog, DialogContent, DialogTitle } from "../../shared/ui/dialog.js";
-import { Button } from "../../shared/ui/primitives.js";
+import { Badge, Button } from "../../shared/ui/primitives.js";
 import { Failure } from "./Feedback.js";
 import {
+  type CatalogTab,
   digest,
   downloadText,
   importChangedText,
   importColumns,
   importIssueText,
   importLinesFromDetails,
-  type CatalogTab,
   templateCsv,
   templateJson,
 } from "./model.js";
@@ -54,9 +55,20 @@ export function ImportLines({
                 <code>{line.code ?? "—"}</code>
               </td>
               <td>
-                <span className="catalog-badge" data-status={line.status}>
+                <Badge
+                  className="catalog-badge"
+                  tone={
+                    line.status === "error"
+                      ? "error"
+                      : line.status === "changed"
+                        ? "info"
+                        : "neutral"
+                  }
+                  icon={line.status === "error" ? X : line.status === "changed" ? PenLine : Check}
+                  data-status={line.status}
+                >
                   {t(line.status === "error" ? "statusError" : "willChange")}
-                </span>{" "}
+                </Badge>{" "}
                 {line.status === "error"
                   ? line.issues.map((issue) => importIssueText(t, issue)).join("; ")
                   : importChangedText(t, line.changedFields)}

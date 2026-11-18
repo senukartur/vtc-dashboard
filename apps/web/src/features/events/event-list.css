@@ -70,9 +70,7 @@
   padding: 0;
   list-style: none;
 }
-.event-list-dlcs :is(li, .badge) {
-  max-width: 100%;
-}
+
 .event-list-responses {
   grid-area: responses;
   display: flex;

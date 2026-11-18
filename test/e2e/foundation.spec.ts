@@ -2,6 +2,60 @@ import { createHash } from "node:crypto";
 import type { Locator, Page, Response, TestInfo } from "@playwright/test";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
+for (const locale of ["ru", "en"] as const)
+  test(
+    `badge system ${locale}: palette, metrics, icons and contrast`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await page.goto("/foundation");
+      await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption(locale);
+      const gallery = page.locator(".foundation-badges");
+      await expect(gallery).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      const expected = {
+        neutral: ["rgb(163, 177, 198)", "rgb(25, 35, 53)"],
+        ok: ["rgb(52, 211, 153)", "rgb(20, 46, 43)"],
+        warn: ["rgb(251, 191, 36)", "rgb(48, 42, 28)"],
+        error: ["rgb(252, 165, 165)", "rgb(51, 34, 45)"],
+        info: ["rgb(125, 182, 255)", "rgb(26, 43, 70)"],
+        ets2: ["rgb(125, 211, 252)", "rgb(21, 46, 64)"],
+        ats: ["rgb(196, 181, 253)", "rgb(40, 37, 62)"],
+      } as const;
+      for (const [tone, [color, backgroundColor]] of Object.entries(expected)) {
+        const badges = gallery.locator(`.badge-${tone}`);
+        expect(await badges.count()).toBeGreaterThan(0);
+        for (const badge of await badges.all()) {
+          await expect(badge).toHaveCSS("color", color);
+          await expect(badge).toHaveCSS("background-color", backgroundColor);
+          await expect(badge).toHaveCSS("height", "20px");
+          await expect(badge).toHaveCSS("font-size", "12px");
+          await expect(badge).toHaveCSS("line-height", "16px");
+          await expect(badge).toHaveCSS("font-weight", "500");
+          await expect(badge).toHaveCSS("border-radius", "4px");
+          await expect(badge).toHaveCSS("padding", "0px 7px");
+          await expect(badge).toHaveCSS("border-top-width", "1px");
+          await expect(badge).toHaveCSS("white-space", "nowrap");
+          expect(await contrast(badge)).toBeGreaterThanOrEqual(4.5);
+          for (const icon of await badge.locator("svg").all()) {
+            await expect(icon).toHaveClass(/lucide/);
+            await expect(icon).toHaveCSS("width", "13px");
+            await expect(icon).toHaveCSS("height", "13px");
+            await expect(icon).toHaveAttribute("stroke-width", "1.8");
+            await expect(icon).toHaveAttribute("aria-hidden", "true");
+          }
+        }
+      }
+      await expect(gallery.locator('[data-status="pending_review"] svg')).toHaveClass(
+        /lucide-clock/,
+      );
+      await expect(gallery.getByText("Hard Mode", { exact: true }).locator("svg")).toHaveClass(
+        /lucide-flame/,
+      );
+      await noOverflow(page);
+      await gallery.screenshot({ path: info.outputPath(`badges-${locale}.png`) });
+    },
+  );
+
 async function capture(page: Page, info: TestInfo, name: string) {
   const path = info.outputPath(`${name}.png`);
   await page.screenshot({ path, fullPage: true, animations: "disabled" });
@@ -1060,7 +1114,7 @@ test(
       h1: "18px",
       h1Weight: "600",
       th: "12px",
-      badge: "11px",
+      badge: "12px",
     });
     await noOverflow(page);
     await capture(page, info, `compact-controls-${coarse ? "coarse" : "fine"}`);

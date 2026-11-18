@@ -511,10 +511,10 @@ for (const locale of ["en", "ru"] as const)
 // VTC-161: the queue's TruckersMP column. The group decides symbol and tone; the label names why.
 const badgeText = {
   en: {
-    passed: "✓No bans",
-    attention: "!Has bans",
-    failed: "✕Check failed",
-    pending: "–Checking",
+    passed: "No bans",
+    attention: "Has bans",
+    failed: "Check failed",
+    pending: "Checking",
     legend: "What the TruckersMP badges mean",
     title: "TruckersMP check",
     meanings: [
@@ -525,10 +525,10 @@ const badgeText = {
     ],
   },
   ru: {
-    passed: "✓Банов нет",
-    attention: "!Есть баны",
-    failed: "✕Ошибка проверки",
-    pending: "–Проверяется",
+    passed: "Банов нет",
+    attention: "Есть баны",
+    failed: "Ошибка проверки",
+    pending: "Проверяется",
     legend: "Что означают отметки TruckersMP",
     title: "Проверка TruckersMP",
     meanings: [
@@ -574,7 +574,11 @@ for (const locale of ["en", "ru"] as const)
       for (const [index, group] of groups.entries()) {
         const row = rows(page).nth(index);
         await expect(badge(row)).toHaveText(s[group]);
-        await expect(badge(row)).toHaveClass(new RegExp(`applications-check-${group}`));
+        await expect(badge(row)).toHaveClass(
+          new RegExp(
+            `badge-${{ passed: "ok", attention: "warn", failed: "error", pending: "neutral" }[group]}`,
+          ),
+        );
         // Text, not colour, carries the state; the symbol is decorative.
         await expect(badge(row).locator("[aria-hidden=true]")).toHaveCount(1);
         const prefix = row.locator(".applications-check-prefix");
@@ -631,21 +635,21 @@ for (const locale of ["en", "ru"] as const)
 test("C8 variants map per the owner rule", browserCase(["@functional"]), async ({ page }) => {
   const clean = badgeChecks.passed;
   for (const [check, locale, text] of [
-    [clean, "en", "✓No bans"],
-    [checks.notFound(), "en", "!Not found"],
-    [checks.found({ bans: { any: true, count: 0 } }), "en", "!Has bans"],
-    [checks.found({ bans: null }), "en", "!Bans hidden"],
-    [checks.found(), "en", "!In a VTC"],
-    [checks.failed("rate_limited", clean), "en", "✕Check failed"],
-    [checks.checking(clean), "en", "–Checking"],
-    [checks.checking(checks.found({ bans: { any: true, count: 3 } })), "en", "–Checking"],
-    [checks.notRequested(), "en", "–Not checked"],
-    [null, "en", "–Not checked"],
-    [clean, "ru", "✓Банов нет"],
-    [checks.notFound(), "ru", "!Не найден"],
-    [checks.found(), "ru", "!В ВТК"],
-    [checks.failed("timeout"), "ru", "✕Ошибка проверки"],
-    [checks.vanity(), "ru", "–Не проверено"],
+    [clean, "en", "No bans"],
+    [checks.notFound(), "en", "Not found"],
+    [checks.found({ bans: { any: true, count: 0 } }), "en", "Has bans"],
+    [checks.found({ bans: null }), "en", "Bans hidden"],
+    [checks.found(), "en", "In a VTC"],
+    [checks.failed("rate_limited", clean), "en", "Check failed"],
+    [checks.checking(clean), "en", "Checking"],
+    [checks.checking(checks.found({ bans: { any: true, count: 3 } })), "en", "Checking"],
+    [checks.notRequested(), "en", "Not checked"],
+    [null, "en", "Not checked"],
+    [clean, "ru", "Банов нет"],
+    [checks.notFound(), "ru", "Не найден"],
+    [checks.found(), "ru", "В ВТК"],
+    [checks.failed("timeout"), "ru", "Ошибка проверки"],
+    [checks.vanity(), "ru", "Не проверено"],
   ] as const) {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     await queue(page, locale, (state) => canonicalApplicant(state, ids.submitted, check));

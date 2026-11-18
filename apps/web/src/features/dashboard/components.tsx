@@ -371,7 +371,7 @@ export function ActualDistanceChart({
                   <th scope="row">
                     <time dateTime={p.date}>{p.full}</time>
                     {isPeak(p.value) && (
-                      <Badge size="xs" className="dashboard-peak-badge">
+                      <Badge size="xs" tone="info" className="dashboard-peak-badge">
                         {t("chart.highestPeriod")}
                       </Badge>
                     )}
@@ -442,7 +442,7 @@ function RankCell({ rank }: { rank: number }) {
   return (
     <td>
       {rank <= 3 ? (
-        <Badge size="xs" className="dashboard-rank">
+        <Badge size="xs" tone="info" className="dashboard-rank">
           {rank}
         </Badge>
       ) : (
@@ -600,7 +600,7 @@ function QualificationGame({
   } else {
     const conditions = progress.nextLevel ? progress.conditions : null;
     badges = (
-      <Badge size="xs">
+      <Badge size="xs" tone="info">
         <Link to={`/account/qualifications/${encodeURIComponent(progress.level.id)}`}>
           {progress.level.name}
         </Link>

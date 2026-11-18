@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { ArrowRight } from "lucide-react";
 import { useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
@@ -175,7 +176,8 @@ function History() {
           <h2>{t("preferences")}</h2>
           <p className="notifications-help">{t("preferenceHelp")}</p>
           <Link className="notifications-preferences-link" to={paths.accountPreferences}>
-            {t("preferencesLink")} <span aria-hidden="true">→</span>
+            {t("preferencesLink")}{" "}
+            <ArrowRight size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
           </Link>
         </Card>
       </aside>

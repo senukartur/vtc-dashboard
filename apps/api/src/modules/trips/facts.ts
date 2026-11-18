@@ -45,6 +45,46 @@ export function effectiveGameMode(
     : "unknown";
 }
 
+/** Exact observed revenue only; no expected-income fallback or inferred game currency. */
+export function observedRevenue(
+  evidence: Pick<NormalizedTripEvidence, "provider" | "money"> | undefined,
+): components["schemas"]["TripRevenue"] | null {
+  if (evidence?.provider !== "ets2telemetry") return null;
+  const money = evidence.money as {
+    revenue?: {
+      available?: unknown;
+      value?: { raw?: unknown; sdkType?: unknown; currency?: { status?: unknown; code?: unknown } };
+    };
+  } | null;
+  const revenue = money?.revenue;
+  const value = revenue?.value;
+  const amount = value?.raw;
+  if (
+    revenue?.available !== true ||
+    value?.sdkType !== "s64" ||
+    typeof amount !== "string" ||
+    !/^(0|[1-9][0-9]{0,18}|-[1-9][0-9]{0,18})$/.test(amount)
+  )
+    return null;
+  const exact = BigInt(amount);
+  if (exact < -9223372036854775808n || exact > 9223372036854775807n) return null;
+  const currency = value.currency;
+  const code = currency?.code;
+  return {
+    amount,
+    currency:
+      currency?.status === "sdk-documented" &&
+      typeof code === "string" &&
+      code.trim().length > 0 &&
+      code.length <= 16 &&
+      Array.from(code).every(
+        (character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127,
+      )
+        ? code
+        : null,
+  };
+}
+
 export function createFactRepository(unit: UnitOfWork) {
   const c = (tx: TxContext) => unit.client(tx),
     groups = createTripGroups(unit),

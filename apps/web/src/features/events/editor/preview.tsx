@@ -124,15 +124,19 @@ export function EditorPreview({
           <div className="event-editor-preview-details">
             <div className="event-editor-inline">
               <h3>{form.title.trim() || text.untitled}</h3>
-              {form.game && <span className="event-editor-tag">{form.game.toUpperCase()}</span>}
+              {form.game && (
+                <Badge tone={form.game} className="event-editor-tag">
+                  {form.game.toUpperCase()}
+                </Badge>
+              )}
             </div>
             <p className="muted">{meta || text.noDate}</p>
             {route && <p>{route}</p>}
             {dlcs.length > 0 && (
               <ul className="event-editor-preview-dlcs">
                 {dlcs.map(({ id, label }) => (
-                  <li key={id} className="event-editor-tag">
-                    {label ?? text.retainedCatalog}
+                  <li key={id}>
+                    <Badge>{label ?? text.retainedCatalog}</Badge>
                   </li>
                 ))}
               </ul>
@@ -148,3 +152,5 @@ export function EditorPreview({
     </aside>
   );
 }
+
+import { Badge } from "../../../shared/ui/primitives.js";

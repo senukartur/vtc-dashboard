@@ -1,3 +1,4 @@
+import { ChevronLeft, ChevronRight } from "lucide-react";
 // The one pager for cursor lists: DataTable footers and paged lists that are not tables.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -72,7 +73,7 @@ export function Pager({
           if (canPrevious) pages.previous();
         }}
       >
-        <span aria-hidden="true">‹</span>
+        <ChevronLeft size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
         <span className="pager-text">{t("dataTable.previousShort")}</span>
       </Button>
       <Button
@@ -86,7 +87,7 @@ export function Pager({
         }}
       >
         <span className="pager-text">{t("dataTable.nextShort")}</span>
-        <span aria-hidden="true">›</span>
+        <ChevronRight size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
       </Button>
     </nav>
   );

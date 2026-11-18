@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../../shared/ui/dialog.js";
-import { Button } from "../../shared/ui/primitives.js";
+import { Badge, Button } from "../../shared/ui/primitives.js";
 import { AccountFailure } from "../account/transport.js";
 import { EventFailureView } from "./components.js";
 import { eventListCopy } from "./event-list-copy.js";
@@ -47,7 +47,9 @@ export function EventDraftList({
                     <h2 className="events-row-title">{title}</h2>
                     <p className="events-row-meta">
                       {draft.fields.game && (
-                        <span className="events-game">{draft.fields.game.toUpperCase()}</span>
+                        <Badge tone={draft.fields.game} className="events-game">
+                          {draft.fields.game.toUpperCase()}
+                        </Badge>
                       )}
                       <span>
                         {copy.updated}{" "}

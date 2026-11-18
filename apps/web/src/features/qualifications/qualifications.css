@@ -45,12 +45,20 @@
   list-style: none;
 }
 .qualification-chip-remove {
+  flex: none;
   margin-inline-start: 2px;
   padding: 0 2px;
   border: 0;
   background: none;
   color: inherit;
   cursor: pointer;
+}
+.qualification-selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
 }
 .qualification-next {
   display: inline-flex;

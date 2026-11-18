@@ -1,17 +1,18 @@
+import { TriangleAlert } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { InfoTip } from "../../shared/ui/info-tip.js";
 import { Badge, Card } from "../../shared/ui/primitives.js";
 import { shortDate } from "../review/review-model.js";
-import { CatalogName, GameChip } from "./TripTable.js";
+import { HardModeBadge, SourceBadge, StatusBadge } from "./badges.js";
 import { UnknownValue, useTripDisplay } from "./TripPageSections.js";
-import { type DTO, tripSourceLabels } from "./transport.js";
+import { CatalogName, GameChip } from "./TripTable.js";
+import type { DTO } from "./transport.js";
 import {
   creditState,
   distanceNote,
   type NextStep,
-  statusSymbol,
   type TripStatus,
   tripHistory,
 } from "./trip-page-model.js";
@@ -24,14 +25,7 @@ function useWhen() {
 }
 
 export function TripStatusBadge({ status }: { status: TripStatus }) {
-  const { t } = useTranslation("trips"),
-    symbol = statusSymbol[status];
-  return (
-    <Badge className="trip-detail-status" data-status={status}>
-      {symbol && <span aria-hidden="true">{symbol}</span>}
-      {t(`status_${status}`)}
-    </Badge>
-  );
+  return <StatusBadge status={status} className="trip-detail-status" />;
 }
 
 /** "Trip #N" when the server assigned a number, otherwise "Trip". */
@@ -70,7 +64,13 @@ export function TripHeader({
     if (summary.sourceKinds.length)
       meta.push({
         key: "sources",
-        value: summary.sourceKinds.map((kind) => t(tripSourceLabels[kind])).join(" + "),
+        value: (
+          <span className="trip-source-badges">
+            {summary.sourceKinds.map((kind) => (
+              <SourceBadge key={kind} source={kind} />
+            ))}
+          </span>
+        ),
       });
     if (completed)
       meta.push({ key: "completed", value: t("completedOn", { date: when(completed) }) });
@@ -93,6 +93,7 @@ export function TripHeader({
               )}
             </h1>
             {status && <TripStatusBadge status={status} />}
+            <HardModeBadge result={view?.effectiveFacts?.recordedTelemetry?.hardModeResult} />
           </div>
           {meta.length > 0 && (
             <p className="trip-detail-meta">
@@ -227,7 +228,9 @@ export function TripHistory({ view }: { view: DTO["TripPrivate"] }) {
                   <span className="trip-detail-history-title">
                     {t(entry.titleKey, { number: entry.number })}
                     {entry.overLimits && (
-                      <Badge className="review-marker">{t("overLimitsMarker")}</Badge>
+                      <Badge tone="warn" icon={TriangleAlert} className="review-marker">
+                        {t("overLimitsMarker")}
+                      </Badge>
                     )}
                   </span>
                   <span className="trip-muted">

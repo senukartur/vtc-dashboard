@@ -1,3 +1,4 @@
+import { Check, CircleHelp, Clock, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
@@ -172,7 +173,7 @@ function Tokens() {
             }
             action={
               token.revokedAt ? (
-                <Badge>{t("revoked")}</Badge>
+                <Badge icon={X}>{t("revoked")}</Badge>
               ) : (
                 <Confirmation
                   label={`${t("revokeToken")} · ${token.label}`}
@@ -208,10 +209,10 @@ function Tokens() {
 
 function statusBadge(status: string) {
   return status === "verified" || status === "available"
-    ? "badge-accepted"
+    ? ({ tone: "ok", icon: Check } as const)
     : status === "pending" || status === "review_required" || status === "stale"
-      ? "badge-pending"
-      : undefined;
+      ? ({ tone: "warn", icon: Clock } as const)
+      : ({ tone: "neutral", icon: CircleHelp } as const);
 }
 
 function ExternalIdentity() {
@@ -254,9 +255,7 @@ function ExternalIdentity() {
             id="connections-steam"
             level={3}
             title="Steam"
-            value={
-              <Badge className={statusBadge(identity.steamStatus)}>{t(identity.steamStatus)}</Badge>
-            }
+            value={<Badge {...statusBadge(identity.steamStatus)}>{t(identity.steamStatus)}</Badge>}
             hint={
               <>
                 {identity.steamProfileUrl && (
@@ -331,7 +330,7 @@ function ExternalIdentity() {
             id="connections-truckersmp"
             level={3}
             title="TruckersMP"
-            value={<Badge className={statusBadge(truckers.status)}>{t(truckers.status)}</Badge>}
+            value={<Badge {...statusBadge(truckers.status)}>{t(truckers.status)}</Badge>}
             hint={[
               truckers.found !== null ? t(truckers.found ? "found" : "notFound") : null,
               truckers.displayName,

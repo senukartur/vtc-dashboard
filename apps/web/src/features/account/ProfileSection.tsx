@@ -22,7 +22,14 @@ export function ProfileSection({ self }: { self: DTO["SelfStage4"] }) {
         title={t("roles")}
         value={
           roles.length ? (
-            roles.map((role) => <Badge key={role}>{t(`administration:${role}`)}</Badge>)
+            roles.map((role) => (
+              <Badge
+                key={role}
+                tone={role === "director" || role === "deputy_director" ? "info" : "neutral"}
+              >
+                {t(`administration:${role}`)}
+              </Badge>
+            ))
           ) : (
             <span className="muted">{t("noRoles")}</span>
           )

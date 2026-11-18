@@ -46,6 +46,21 @@
 }
 
 /* Queue table: fixed column shares keep the layout independent of long names. */
+.applications-page .applications-table-scroll {
+  min-width: 0;
+  max-width: 100%;
+}
+@media (min-width: 701px) {
+  .applications-page .applications-table-scroll {
+    overflow-x: auto;
+  }
+  .applications-page .applications-table {
+    min-width: 900px;
+  }
+  .applications-page .applications-table:has(thead th:nth-child(6)) {
+    min-width: 1050px;
+  }
+}
 .applications-page .applications-table {
   table-layout: fixed;
 }
@@ -108,24 +123,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-}
-.applications-page .applications-status.applications-tone-pending {
-  background: var(--pending-surface);
-}
-.applications-page .applications-status.applications-tone-accepted {
-  background: var(--accepted-surface);
-}
-.applications-page .applications-status.applications-tone-rejected {
-  background: var(--rejected-surface);
-}
-.applications-page .applications-tone-pending {
-  color: var(--pending);
-}
-.applications-page .applications-tone-accepted {
-  color: var(--accepted);
-}
-.applications-page .applications-tone-rejected {
-  color: var(--destructive);
 }
 
 /* Detail card. */

@@ -1,8 +1,8 @@
 import type { Page } from "@playwright/test";
+import { catalogItem, catalogList, envelope } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { switchLanguage } from "./support/locale.ts";
 import { driverId, mockQualifications, qid } from "./support/qualifications-ui.ts";
-import { catalogItem, catalogList, envelope } from "./support/catalogs.ts";
 
 // Desktop rows and phone cards both carry one entry per level inside the ladder card.
 const ladder = (page: Page) => page.locator(".qualification-ladder-card");
@@ -39,7 +39,11 @@ test(
     );
     await page.goto(`/account/qualifications/${level.id}/edit`);
     await switchLanguage(page, "en");
-    await expect(page.getByText("Fictional original body", { exact: true })).toBeVisible();
+    await expect(
+      page
+        .locator(".qualification-selected-chip")
+        .getByText("Fictional original body", { exact: true }),
+    ).toBeVisible();
     const picker = page.getByRole("combobox", { name: "Trailer type", exact: true });
     await expect(picker).toBeDisabled();
     await page.getByRole("button", { name: "Switch to trailer types", exact: true }).click();

@@ -1,8 +1,10 @@
 import type { components } from "@vtc/contracts";
+import { ArrowDown, Check, CircleHelp, X } from "lucide-react";
 import { lazy, Suspense, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatQuantity, type Locale } from "../../shared/formatting.js";
+import { DataTable, type DataTableColumn } from "../../shared/ui/DataTable.js";
 import {
   Dialog,
   DialogClose,
@@ -11,8 +13,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../../shared/ui/dialog.js";
-import { DataTable, type DataTableColumn } from "../../shared/ui/DataTable.js";
 import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
+import { BadgeExamples } from "./BadgeExamples.js";
 import { ControlsExample } from "./ControlsExample.js";
 import { LocalForm } from "./LocalForm.js";
 import { createFoundationMocks, type FoundationMocks, fixtureId } from "./mocks.js";
@@ -80,9 +82,7 @@ function TripList({
       cell: (trip) => (
         <div className="route">
           <CatalogName label={trip.origin} />
-          <span className="route-arrow" aria-hidden="true">
-            ↓
-          </span>
+          <ArrowDown size={14} strokeWidth={1.8} aria-hidden="true" className="route-arrow" />
           <CatalogName label={trip.destination} />
         </div>
       ),
@@ -97,8 +97,10 @@ function TripList({
       id: "status",
       header: t("status"),
       cell: (trip) => (
-        <Badge className={trip.decision === "accepted" ? "badge-accepted" : "badge-neutral"}>
-          <span aria-hidden="true">{trip.decision === "accepted" ? "✓" : "—"}</span>
+        <Badge
+          tone={trip.decision === "accepted" ? "ok" : "neutral"}
+          icon={trip.decision === "accepted" ? Check : CircleHelp}
+        >
           {t(trip.decision === "accepted" ? "accepted" : "unassessed")}
         </Badge>
       ),
@@ -167,7 +169,7 @@ export function FoundationPage({
         <h1>{t(member ? "memberTitle" : "title")}</h1>
         <p className="lead">{t(member ? "memberIntro" : "intro")}</p>
         <div className="heading-actions">
-          <Badge className="badge-preview">{t("synthetic")}</Badge>
+          <Badge tone="info">{t("synthetic")}</Badge>
           <Dialog>
             <DialogTrigger asChild>
               <Button variant="outline">{t("dialog")}</Button>
@@ -192,6 +194,7 @@ export function FoundationPage({
       </header>
       <div className={member ? "foundation-grid member-grid" : "foundation-grid"}>
         <div className="stack main-column">
+          <BadgeExamples />
           <Card aria-labelledby="trips-title">
             <div className="section-heading">
               <div>
@@ -221,9 +224,13 @@ export function FoundationPage({
             <div className="content-state" aria-live="polite">
               {state === "forbidden" ? (
                 <div className="state-message">
-                  <span className="status-symbol" aria-hidden="true">
-                    ×
-                  </span>
+                  <X
+                    size={14}
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                    focusable="false"
+                    className="status-symbol"
+                  />
                   <h3>{t("forbiddenTitle")}</h3>
                   <p>{t("forbiddenText")}</p>
                   <Button asChild variant="outline">

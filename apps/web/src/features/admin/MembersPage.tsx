@@ -1,3 +1,4 @@
+import { Check, Circle } from "lucide-react";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
@@ -83,8 +84,12 @@ function LevelLabel({
 function StatusBadge({ status }: { status: "active" | "inactive" }) {
   const { t } = useTranslation("administration");
   return (
-    <Badge size="xs" className={`members-status members-status-${status}`}>
-      <span aria-hidden="true">{status === "active" ? "●" : "◇"}</span>
+    <Badge
+      size="xs"
+      tone={status === "active" ? "ok" : "neutral"}
+      icon={status === "active" ? Check : Circle}
+      className="members-status"
+    >
       {t(`membersUi.status.${status}`)}
     </Badge>
   );
@@ -95,7 +100,12 @@ function RoleBadges({ roles }: { roles: Role[] }) {
   return ordered.length ? (
     <span className="members-role-badges">
       {ordered.map((role) => (
-        <Badge key={role} size="xs" className={`members-role members-role-${role}`}>
+        <Badge
+          key={role}
+          size="xs"
+          tone={role === "director" || role === "deputy_director" ? "info" : "neutral"}
+          className="members-role"
+        >
           {t(`membersUi.roleShort.${role}`)}
         </Badge>
       ))}
@@ -714,7 +724,7 @@ function MemberPanel({
         {change && (
           <div className="members-unsaved">
             <p>
-              <span aria-hidden="true">● </span>
+              <Circle size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
               {t("membersUi.unsaved")}
             </p>
             <Button
@@ -781,7 +791,7 @@ function MemberPanel({
         {rolesChanged && (
           <div className="members-unsaved">
             <p>
-              <span aria-hidden="true">● </span>
+              <Circle size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
               {t("membersUi.unsaved")}
             </p>
             <Button
@@ -1178,88 +1188,90 @@ function Members() {
             <QueryState pending={false} error={options.isError} retry={options.refetch} />
           )}
           {items && items.length > 0 && (
-            <Table size="xs" className="members-table" role="table">
-              <caption className="visually-hidden">{t("membersUi.listCaption")}</caption>
-              {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-              <thead role="rowgroup">
+            <div className="members-table-scroll">
+              <Table size="xs" className="members-table" role="table">
+                <caption className="visually-hidden">{t("membersUi.listCaption")}</caption>
                 {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-                <tr role="row">
-                  {columns.map((column) => (
-                    // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
-                    <th key={column} scope="col" role="columnheader">
-                      {t(`membersUi.${column}`)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-              <tbody role="rowgroup">
-                {items.map((row) => {
-                  const member = row.profile.member,
-                    on = selected === member.id,
-                    trip = lastTrip(row.lastAcceptedTripAt);
-                  return (
-                    // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
-                    <tr key={member.id} role="row" data-selected={on ? "" : undefined}>
-                      {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-                      <th scope="row" role="rowheader">
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          className="members-row-button"
-                          aria-pressed={on}
-                          data-member-id={member.id}
-                          onClick={() => {
-                            setSelected(member.id);
-                            setFocusOnLoad(matchMedia("(max-width: 700px)").matches);
-                          }}
-                        >
-                          {member.nickname}
-                        </Button>
+                <thead role="rowgroup">
+                  {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
+                  <tr role="row">
+                    {columns.map((column) => (
+                      // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
+                      <th key={column} scope="col" role="columnheader">
+                        {t(`membersUi.${column}`)}
                       </th>
-                      {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-                      <td role="cell">
-                        <RoleBadges roles={member.roles} />
-                      </td>
-                      {games.map((game) => (
-                        // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
-                        <td key={game} role="cell">
-                          <span className="members-cell-label" aria-hidden="true">
-                            {t(`membersUi.gameShort.${game}`)}
-                          </span>
-                          <LevelText
-                            cell={levelCell(
-                              row.profile.qualifications,
-                              game,
-                              levelOptions,
-                              options.isPending,
-                              options.isError,
-                            )}
-                          />
+                    ))}
+                  </tr>
+                </thead>
+                {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
+                <tbody role="rowgroup">
+                  {items.map((row) => {
+                    const member = row.profile.member,
+                      on = selected === member.id,
+                      trip = lastTrip(row.lastAcceptedTripAt);
+                    return (
+                      // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
+                      <tr key={member.id} role="row" data-selected={on ? "" : undefined}>
+                        {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
+                        <th scope="row" role="rowheader">
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            className="members-row-button"
+                            aria-pressed={on}
+                            data-member-id={member.id}
+                            onClick={() => {
+                              setSelected(member.id);
+                              setFocusOnLoad(matchMedia("(max-width: 700px)").matches);
+                            }}
+                          >
+                            {member.nickname}
+                          </Button>
+                        </th>
+                        {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
+                        <td role="cell">
+                          <RoleBadges roles={member.roles} />
                         </td>
-                      ))}
-                      {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-                      <td role="cell">
-                        <span className="members-cell-label" aria-hidden="true">
-                          {t("membersUi.colLast")}
-                        </span>
-                        {trip.kind === "none" ? (
-                          t("membersUi.noTrips")
-                        ) : (
-                          <time dateTime={trip.iso}>
-                            {dates.day(trip.iso) ?? t("membersUi.levelUnavailable")}
-                          </time>
-                        )}
-                      </td>
-                      {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-                      <td role="cell">
-                        <StatusBadge status={row.status} />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </Table>
+                        {games.map((game) => (
+                          // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
+                          <td key={game} role="cell">
+                            <span className="members-cell-label" aria-hidden="true">
+                              {t(`membersUi.gameShort.${game}`)}
+                            </span>
+                            <LevelText
+                              cell={levelCell(
+                                row.profile.qualifications,
+                                game,
+                                levelOptions,
+                                options.isPending,
+                                options.isError,
+                              )}
+                            />
+                          </td>
+                        ))}
+                        {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
+                        <td role="cell">
+                          <span className="members-cell-label" aria-hidden="true">
+                            {t("membersUi.colLast")}
+                          </span>
+                          {trip.kind === "none" ? (
+                            t("membersUi.noTrips")
+                          ) : (
+                            <time dateTime={trip.iso}>
+                              {dates.day(trip.iso) ?? t("membersUi.levelUnavailable")}
+                            </time>
+                          )}
+                        </td>
+                        {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
+                        <td role="cell">
+                          <StatusBadge status={row.status} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            </div>
           )}
           <p className="muted">{t("membersUi.footnote", { timezone: dates.timezone })}</p>
           <Pager

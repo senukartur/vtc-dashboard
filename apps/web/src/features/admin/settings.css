@@ -71,27 +71,7 @@
 .settings-page .settings-audit-foot {
   justify-content: space-between;
 }
-
 /* Status tones always pair a symbol or word with the colour. */
-.settings-page .badge {
-  gap: 4px;
-}
-.settings-page .badge.settings-tone-accepted {
-  background: var(--accepted-surface);
-}
-.settings-page .badge.settings-tone-pending {
-  background: var(--pending-surface);
-}
-.settings-page .badge.settings-tone-neutral {
-  background: var(--surface-active);
-  color: var(--secondary);
-}
-.settings-page .settings-tone-accepted {
-  color: var(--accepted);
-}
-.settings-page .settings-tone-pending {
-  color: var(--pending);
-}
 
 /* Readiness banner. */
 .settings-page .settings-readiness {

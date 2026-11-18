@@ -17,17 +17,15 @@
   font-size: var(--font-small);
   line-height: 1.5;
 }
+
 .members-page .admin-detail,
 .members-page .members-table :is(th, td),
-.members-page .members-row-button,
-.members-page .badge {
+.members-page .members-row-button {
   overflow-wrap: break-word;
 }
+
 .members-page .members-break {
   overflow-wrap: anywhere;
-}
-.members-page .badge {
-  white-space: normal;
 }
 
 /* Filters: nickname search and the role segmented control. */
@@ -81,28 +79,34 @@
   justify-items: start;
 }
 
-/* Members table: fixed column shares keep the layout independent of long names. At the narrowest
-   side-by-side width (a list of about 570px) each column keeps several pixels beyond its longest
-   expected word, date or badge (a badge does not wrap below its longest word plus its symbol), so
-   font rendering differences between platforms neither break words nor push badges out. */
+/* Keep status and role labels intact when the detail panel narrows the list. */
+.members-page .members-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
 .members-page .members-table {
   table-layout: fixed;
 }
 .members-page .members-table thead th:nth-child(1) {
-  width: 23%;
+  width: 20%;
 }
 .members-page .members-table thead th:nth-child(2) {
   width: 18%;
 }
 .members-page .members-table thead th:nth-child(3),
 .members-page .members-table thead th:nth-child(4) {
-  width: 11.5%;
+  width: 10%;
 }
 .members-page .members-table thead th:nth-child(5) {
   width: 20%;
 }
 .members-page .members-table thead th:nth-child(6) {
-  width: 16%;
+  width: 22%;
+}
+@media (min-width: 701px) {
+  .members-page .members-table {
+    min-width: 760px;
+  }
 }
 /* A short date stays on one line (RU appends a separate year abbreviation). */
 .members-page .members-table time {
@@ -137,19 +141,7 @@
   flex-wrap: wrap;
   gap: 4px;
 }
-.members-page .members-role-director {
-  background: var(--accent);
-  color: white;
-}
-.members-page .members-role-deputy_director {
-  background: var(--accent-soft);
-  color: var(--focus);
-  box-shadow: inset 0 0 0 1px var(--selection-border);
-}
-.members-page .members-status-active {
-  background: var(--accepted-surface);
-  color: var(--accepted);
-}
+
 .members-page .members-cell-label {
   display: none;
 }

@@ -1,7 +1,25 @@
+import {
+  ArrowRight,
+  ArrowUp,
+  Award,
+  Bell,
+  Calendar,
+  Check,
+  Circle,
+  ClipboardCheck,
+  Clock,
+  FileText,
+  type LucideIcon,
+  Pencil,
+  Route,
+  Truck,
+  UserRound,
+  X,
+} from "lucide-react";
 import { Popover } from "radix-ui";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { useSession } from "../../app/Session.js";
 import { accountTimeZone } from "../../shared/formatting.js";
 import { Badge, Button } from "../../shared/ui/primitives.js";
@@ -11,10 +29,10 @@ import { useNotificationCommand, useNotifications, useReadThrough } from "./cont
 import {
   badgeText,
   messageName,
-  notificationTarget,
-  notificationVisual,
   type Notification,
   type NotificationIconName,
+  notificationTarget,
+  notificationVisual,
 } from "./model.js";
 
 export function NotificationFailure({
@@ -144,41 +162,30 @@ function shortRelative(value: string, now: number, locale: string) {
 function absoluteTime(value: string, locale: string, timezone: string) {
   return Number.isFinite(Date.parse(value)) ? eventTime(value, locale, timezone) : "";
 }
-const iconPaths: Record<NotificationIconName, string> = {
-  truck:
-    "M3 7h11v9H3zM14 10h4l3 3v3h-7M5 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0M15 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0",
-  check: "M5 12l5 5L20 7",
-  cross: "M6 6l12 12M18 6L6 18",
-  review: "M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9",
-  edit: "M4 20h4L19 9l-4-4L4 16zM13 7l4 4",
-  calendar: "M3 5h18v16H3zM3 10h18M8 3v4M16 3v4",
-  route:
-    "M6 19a2 2 0 1 0 0-4a2 2 0 1 0 0 4M18 9a2 2 0 1 0 0-4a2 2 0 1 0 0 4M6 15V9a3 3 0 0 1 3-3h7M18 9v6a3 3 0 0 1-3 3H8",
-  clock: "M12 7v5l3 2M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18",
-  award: "M12 3a6 6 0 1 0 0 12a6 6 0 1 0 0-12M8.5 14 7 21l5-3 5 3-1.5-7",
-  up: "M12 19V5M5 12l7-7 7 7",
-  document: "M4 4h16v16H4zM8 9h8M8 13h8M8 17h5",
-  user: "M8 8a4 4 0 1 0 8 0a4 4 0 1 0-8 0M4 21c1-4 4-6 8-6s7 2 8 6",
-  dot: "M12 10a2 2 0 1 0 0 4a2 2 0 1 0 0-4",
+const notificationIcons: Record<NotificationIconName, LucideIcon> = {
+  truck: Truck,
+  check: Check,
+  cross: X,
+  review: ClipboardCheck,
+  edit: Pencil,
+  calendar: Calendar,
+  route: Route,
+  clock: Clock,
+  award: Award,
+  up: ArrowUp,
+  document: FileText,
+  user: UserRound,
+  dot: Circle,
 };
 function NotificationIcon({ item, size }: { item: Notification; size: "sm" | "md" }) {
-  const visual = notificationVisual(item);
+  const visual = notificationVisual(item),
+    Icon = notificationIcons[visual.icon];
   return (
     <span
       className={`notification-icon notification-icon-${size} notification-tone-${visual.tone}`}
       aria-hidden="true"
     >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        aria-hidden="true"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d={iconPaths[visual.icon]} />
-      </svg>
+      <Icon size={16} strokeWidth={1.8} aria-hidden="true" focusable="false" />
     </span>
   );
 }
@@ -200,7 +207,11 @@ export function NotificationRow({ item, now }: { item: Notification; now: number
         </p>
         <div className="notification-meta">
           <span>{t(`category${visual.kind}`)}</span>
-          {!item.readAt && <Badge size="xs">{t("new")}</Badge>}
+          {!item.readAt && (
+            <Badge size="xs" tone="info">
+              {t("new")}
+            </Badge>
+          )}
           <time className="notification-absolute" dateTime={item.occurredAt}>
             {absolute}
           </time>
@@ -344,24 +355,11 @@ export function NotificationBell() {
           className="notification-bell"
           aria-label={`${t("bell")} · ${count === undefined ? t("unknownCount") : t("unreadCount", { count })}`}
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0" />
-          </svg>
+          <Bell size={18} strokeWidth={1.8} aria-hidden="true" focusable="false" />
           {badge && (
-            <span
-              className={`notification-badge${badge === "?" ? " notification-badge-unknown" : ""}`}
-              aria-hidden="true"
-            >
+            <Badge className="notification-badge" tone="info" aria-hidden="true">
               {badge}
-            </span>
+            </Badge>
           )}
         </Button>
       </Popover.Trigger>
@@ -447,7 +445,8 @@ export function NotificationBell() {
               {t("readAll")}
             </Button>
             <Link to="/account/notifications" onClick={navigate}>
-              {t("viewAll")} <span aria-hidden="true">→</span>
+              {t("viewAll")}{" "}
+              <ArrowRight size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
             </Link>
           </div>
         </Popover.Content>

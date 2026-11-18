@@ -734,20 +734,24 @@ test.describe("Compact driver profile", () => {
         order.push(
           await page.evaluate(() => {
             const active = document.activeElement as HTMLElement | null;
-            return active?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+            return (
+              active?.getAttribute("aria-label") ??
+              active?.textContent?.replace(/\s+/g, " ").trim() ??
+              ""
+            );
           }),
         );
         await page.keyboard.press("Tab");
       }
       expect(order).toEqual([
-        "← All drivers",
+        "All drivers",
         // The relative last trip shows its absolute date on focus.
         "2 days ago",
         "All games",
         "ETS2",
         "ATS",
         // How the 30 days are counted.
-        "i",
+        "How the 30 days are counted",
         "Гамбург → Берлин",
         "Прага → Вена",
         "All my trips",

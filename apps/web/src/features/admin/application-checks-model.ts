@@ -116,15 +116,18 @@ export interface CheckBadge {
   group: CheckGroup;
   label: CheckBadgeLabel;
 }
-/** Symbols are decorative (aria-hidden); the label carries the state. */
+/** Icons are decorative (aria-hidden); the label carries the state. */
 export const checkBadgeLook: Record<
   CheckGroup,
-  { tone: "accepted" | "pending" | "rejected" | "neutral"; symbol: "✓" | "!" | "✕" | "–" }
+  {
+    tone: "ok" | "warn" | "error" | "neutral";
+    icon: "shield-check" | "triangle-alert" | "x" | "circle-help";
+  }
 > = {
-  passed: { tone: "accepted", symbol: "✓" },
-  attention: { tone: "pending", symbol: "!" },
-  failed: { tone: "rejected", symbol: "✕" },
-  pending: { tone: "neutral", symbol: "–" },
+  passed: { tone: "ok", icon: "shield-check" },
+  attention: { tone: "warn", icon: "triangle-alert" },
+  failed: { tone: "error", icon: "x" },
+  pending: { tone: "neutral", icon: "circle-help" },
 };
 /**
  * Owner rule (VTC-161): passed = found, no bans, not in a VTC; attention = not found, bans present

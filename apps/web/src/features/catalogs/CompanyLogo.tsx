@@ -1,3 +1,4 @@
+import { Building2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { CatalogLogo } from "../../shared/catalog-selectors/contracts.js";
 import { logoLoader } from "./logo-loader.js";
@@ -6,22 +7,13 @@ import { logoSrc } from "./model.js";
 /** A neutral drawn mark for a company without a logo; it is not a game asset. */
 function Placeholder() {
   return (
-    <svg
+    <Building2
+      size={22}
+      strokeWidth={1.8}
       aria-hidden="true"
+      focusable="false"
       className="company-logo-placeholder"
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M4 20V8l8-4 8 4v12" />
-      <path d="M9 20v-6h6v6" />
-      <path d="M3 20h18" />
-    </svg>
+    />
   );
 }
 
