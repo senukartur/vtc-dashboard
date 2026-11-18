@@ -1407,6 +1407,15 @@ for (const refreshOutcome of ["success", "failure"] as const) {
       const tokens = page
         .getByRole("heading", { name: "Personal telemetry credentials", exact: true })
         .locator("..");
+      const companion = tokens.getByRole("checkbox", {
+        name: "Allow own qualifications, provisional checks and upload results",
+        exact: true,
+      });
+      await expect(companion).not.toBeChecked();
+      await expect(
+        tokens.getByText(/Optional: live checks send cargo code and mass/),
+      ).toBeVisible();
+      if (refreshOutcome === "success") await companion.check();
       await expect(
         tokens.getByText("There are no records in this view.", { exact: true }),
       ).toBeVisible();
@@ -1435,9 +1444,13 @@ for (const refreshOutcome of ["success", "failure"] as const) {
           return route.continue();
         if (route.request().method() === "POST") {
           posts++;
+          expect(route.request().postDataJSON().companion).toBe(
+            refreshOutcome === "success" ? true : undefined,
+          );
           const response = await route.fetch();
           expect(response.status()).toBe(201);
           const data = (await response.json()).data;
+          expect(data.info.companion).toBe(refreshOutcome === "success");
           issuedId = data.info.id;
           issuedSecret = data.token;
           postEntered();
@@ -1469,6 +1482,7 @@ for (const refreshOutcome of ["success", "failure"] as const) {
         await page.getByLabel("Credential label", { exact: true }).fill(label);
         await page.getByRole("button", { name: "Create credential", exact: true }).click();
         await postReady;
+        await expect(companion).toBeDisabled();
         // The server has committed POST201, but the browser response is gated. Keep
         // this request below its own 15-second deadline before starting the list read.
         await page.clock.fastForward(8000);

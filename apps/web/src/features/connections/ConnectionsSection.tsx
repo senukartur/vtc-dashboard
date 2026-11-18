@@ -31,6 +31,7 @@ function Tokens() {
     issue = useWorkspaceCommand(),
     revoke = useWorkspaceCommand(),
     [label, setLabel] = useState(""),
+    [companion, setCompanion] = useState(false),
     [secret, setSecret] = useState<string | null>(null);
   const issueTrigger = useRef<HTMLButtonElement | null>(null),
     returnFocus = useRef<HTMLElement | null>(null);
@@ -66,12 +67,29 @@ function Tokens() {
                 submitter instanceof HTMLElement ? submitter : issueTrigger.current;
               const result = await issue.run("/me/telemetry-tokens", "EnvelopeTokenIssued", {
                 label: label.trim(),
+                ...(companion ? { companion: true } : {}),
               });
               if (result) {
                 setSecret(result.data.token);
               }
             }}
           >
+            <div className="stack">
+              <label className="checkbox-label" htmlFor="telemetry-companion">
+                <input
+                  id="telemetry-companion"
+                  type="checkbox"
+                  checked={companion}
+                  disabled={issue.held || issue.pending || !!recoveryId}
+                  onChange={(e) => setCompanion(e.target.checked)}
+                  aria-describedby="telemetry-companion-disclosure"
+                />{" "}
+                {t("companionGrant")}
+              </label>
+              <p id="telemetry-companion-disclosure" className="muted">
+                {t("companionDisclosure")}
+              </p>
+            </div>
             <Label htmlFor="telemetry-label">{t("tokenLabel")}</Label>
             <div className="settings-inline-form">
               <Input
@@ -147,6 +165,7 @@ function Tokens() {
             title={token.label}
             hint={
               <>
+                {token.companion && <>{t("companionEnabled")} · </>}
                 {t("created")}: {timestamp(token.createdAt)} · {t("lastUsed")}:{" "}
                 {token.lastUsedAt ? timestamp(token.lastUsedAt) : t("neverUsed")}
               </>
