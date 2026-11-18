@@ -124,9 +124,7 @@ test(
       expect(workspaceData.reviewQueue?.waitingCount).toBeGreaterThan(0);
       expect(workspaceData.legacyReviewQueue).toBeUndefined();
       await expect(reviewer.getByRole("button", { name: "Queue", exact: true })).toBeVisible();
-      await expect(reviewer.locator(".review-queue-totals")).toContainText(
-        "Awaiting decision overall",
-      );
+      await expect(reviewer.locator(".review-queue-totals")).toContainText("Waiting");
       const waitingResponse = await reviewer.request.get(
         `/api/v1/trips?scope=review&view=stage3&status=waiting&ownerId=${fixture.userId}&limit=25`,
       );
