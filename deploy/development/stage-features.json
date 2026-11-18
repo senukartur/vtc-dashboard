@@ -42,7 +42,7 @@
     "event_drafts": [
       "SELECT",
       "INSERT",
-      "UPDATE(version,updated_by,updated_at,discarded_at,title,description,game,server,meeting_location,route,meeting_at,starts_at,ends_at,visibility,origin_city_id,destination_city_id,prescribed_cargo_id,prescribed_trailer_type_id,prescribed_mass_kg,platform,organizer_member_id,origin_depot_id,destination_depot_id,distance_km)"
+      "UPDATE(version,updated_by,updated_at,discarded_at,title,description,game,server,meeting_location,route,meeting_at,starts_at,ends_at,visibility,origin_city_id,destination_city_id,prescribed_cargo_id,prescribed_trailer_type_id,prescribed_trailer_kind_id,prescribed_mass_kg,platform,organizer_member_id,origin_depot_id,destination_depot_id,distance_km)"
     ],
     "event_metadata": ["SELECT", "INSERT", "UPDATE(published_event_id)"],
     "event_workflow_commands": ["SELECT", "INSERT"]
