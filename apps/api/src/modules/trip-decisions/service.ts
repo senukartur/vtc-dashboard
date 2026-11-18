@@ -857,7 +857,7 @@ export function createTripDecisions(
           telemetry && (await ports.trips.projectReviewSourceInTransaction(tx, telemetry));
         const data: S["TripStage3Review"] = {
           ...shared,
-          summary: { ...trip.summary, number: row.number, createdAt: row.createdAt },
+          summary: ports.trips.reviewQueueTrip(trip.summary, row.createdAt, row.number),
           effectiveFacts: trip.effectiveFacts ?? null,
           decisions: trip.decisions,
           pendingProposalId: trip.pendingProposalId,

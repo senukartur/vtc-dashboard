@@ -1163,6 +1163,7 @@ export function createTrips(
       }
       return result;
     },
+    reviewQueueTrip,
     projectReviewSourceInTransaction: factsRepository.projectEffective,
     prepareSourceInTransaction: async (tx: TxContext, owner: string, game: "ets2" | "ats") => {
       await ports.prepare?.(tx, owner, game);
