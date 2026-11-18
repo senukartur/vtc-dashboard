@@ -449,11 +449,15 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
       const folder = await companionPriorFolder();
       try {
         assert.equal(await runMigrations(settings, { folder }), 38);
-        const identity = createIdentity(unit, {
-          secret: randomBytes(32).toString("hex"),
-          origin: "http://127.0.0.1:4173",
-          production: false,
-        });
+        const identity = createIdentity(
+          unit,
+          {
+            secret: randomBytes(32).toString("hex"),
+            origin: "http://127.0.0.1:4173",
+            production: false,
+          },
+          { accessEvents: identityAccessEvents(unit) },
+        );
         await identity.bootstrap({
           email: "companion-upgrade@example.invalid",
           name: "Fictional Upgrade Director",

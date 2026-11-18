@@ -5,6 +5,7 @@ import { createUnitOfWork, migrationFolder, newId, runMigrations } from "@vtc/db
 import type { RowDataPacket } from "mysql2/promise";
 import { expect, test } from "vitest";
 import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
+import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import {
   companionPriorFolder,
   guardedSettings,
@@ -114,11 +115,15 @@ test("exact 38-migration base upgrades once to companion without changing taxono
   try {
     await reset(control);
     expect(await runMigrations(settings, { folder })).toBe(38);
-    const identity = createIdentity(unit, {
-      secret: randomBytes(32).toString("hex"),
-      origin: "http://127.0.0.1:4173",
-      production: false,
-    });
+    const identity = createIdentity(
+      unit,
+      {
+        secret: randomBytes(32).toString("hex"),
+        origin: "http://127.0.0.1:4173",
+        production: false,
+      },
+      { accessEvents: identityAccessEvents(unit) },
+    );
     await identity.bootstrap({
       email: "companion-prefix@example.invalid",
       name: "Fictional Prefix Director",

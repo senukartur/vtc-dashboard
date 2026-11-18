@@ -89,10 +89,10 @@ export function createTelemetryCompanion(
       sourceEventId: material?.eventId ?? null,
       assessedSource: material?.source ?? null,
       trailerDisplay:
-        snapshot?.limits && material?.source && ports.catalogs
+        snapshot?.limits && material?.game && ports.catalogs
           ? await ports.catalogs.companionTrailerDisplayInTransaction(
               tx,
-              material.source.game,
+              material.game,
               [
                 ...snapshot.limits.trailers.typeIds,
                 ...(snapshot.exemptionRules ?? snapshot.rules).flatMap((rule) =>

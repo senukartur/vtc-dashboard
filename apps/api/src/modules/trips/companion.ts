@@ -116,6 +116,7 @@ export function createCompanionTrips(unit: UnitOfWork) {
         .for("share");
       return {
         id: message.id,
+        game: source?.game ?? null,
         revision: Number(message.revision),
         eventId: message.eventKey.toString(),
         source:

@@ -15,6 +15,7 @@ import { createEvents } from "../../apps/api/src/modules/events/service.ts";
 import { createExternalIdentities } from "../../apps/api/src/modules/external-identities/service.ts";
 import { createTelemetry } from "../../apps/api/src/modules/telemetry/service.ts";
 import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
+import type { AssignableRole } from "../../apps/api/src/modules/identity/permissions.ts";
 import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
 import {
   createQualificationInitialization,
@@ -84,7 +85,7 @@ async function configure(
 }
 async function member(
   games: ("ets2" | "ats")[] = ["ets2", "ats"],
-  roles: Actor["roles"] = ["driver"],
+  roles: AssignableRole[] = ["driver"],
 ) {
   const id = newId(),
     email = `${id}@example.invalid`,
@@ -1174,7 +1175,7 @@ for (const game of ["ets2", "ats"] as const) {
     const types = (await catalog.trailerTypes(director, { game, limit: 100 })).items;
     const allowed = types.find((row) => row.code === "dryvan")!,
       wrong = types.find((row) => row.id !== allowed.id)!;
-    const variants = [];
+    const variants: S["CatalogItem"][] = [];
     for (const classification of [allowed.id, wrong.id, null])
       variants.push(
         await catalog.create(director, "trailers", newId(), {
@@ -1465,12 +1466,10 @@ test("legacy common-model allowances remain literal after semantic classificatio
   const saved = (await results([sourceRequest(p)])).items[0]!;
   expect(saved.assessment!.trailerComparison).toEqual({
     basis: "variant",
-    entries: [allowed.id, peer.id]
-      .sort()
-      .map((id) => ({
-        id,
-        comparisonIdentity: `common:ets2:${Buffer.from("fictional.legacy").toString("hex")}`,
-      })),
+    entries: [allowed.id, peer.id].sort().map((id) => ({
+      id,
+      comparisonIdentity: `common:ets2:${Buffer.from("fictional.legacy").toString("hex")}`,
+    })),
   });
   await catalog.patch(director, "trailers", peer.id, newId(), {
     commonTrailer: "fictional.changed",
@@ -1626,8 +1625,68 @@ test("typed manual and derived facts retain identity kind, labels and saved comp
     expect.objectContaining({ id: type.id, identityKind: "type", nameEn: type.nameEn }),
   ]);
   const retained = immutableAssessment(merged.assessment);
+  const wire = await httpResults([sourceRequest(p)]);
+  expect(wire.status).toBe(200);
+  const wireItem = (JSON.parse(wire.body) as C["ResultBatch"]).items[0]!;
+  expect(wireItem.requestedSourceMessageId).toBe(original.requestedSourceMessageId);
+  expect(wireItem.assessmentBasis).toBe("predecessor");
+  expect(wireItem.assessment!.assessedSource).toBeNull();
+  expect(wireItem.assessment!.sourceMessageId).not.toBe(wireItem.requestedSourceMessageId);
+  expect(immutableAssessment(wireItem.assessment)).toEqual(retained);
   await catalog.patch(director, "trailers", variant.id, newId(), { trailerTypeId: null });
   expect(immutableAssessment((await results([sourceRequest(p)])).items[0]!.assessment)).toEqual(
     retained,
   );
+});
+
+test("real owning UInt32 promotion conditions and a widened exact distance SUM serialize without losing precision", async () => {
+  await configure({}, { requiredTrips: 4294967295, requiredDistanceM: null });
+  const dispatcher = await member([], ["dispatcher"]),
+    maximum = "99999999999999999999.999999999999999999";
+  for (let i = 0; i < 2; i++) {
+    const p = await upload();
+    await modules.telemetry!.receive(authorization, ip, p);
+    const result = (await results([sourceRequest(p)])).items[0]!,
+      row = await modules.trips!.detail(driver, result.canonicalTripId!);
+    if (row.view !== "private") throw new Error("SYNTHETIC_PRIVATE_TRIP_REQUIRED");
+    const proposed = await modules.tripDecisions!.propose(
+      dispatcher,
+      result.canonicalTripId!,
+      newId(),
+      row.summary.version,
+      { reason: "Fictional exact-distance correction", evidenceIds: [], actualDistanceM: maximum },
+    );
+    const proposal = await modules.tripDecisions!.getProposal(
+      director,
+      result.canonicalTripId!,
+      proposed.data.id,
+    );
+    await modules.tripDecisions!.proposalDecision(
+      director,
+      result.canonicalTripId!,
+      proposal.data.id,
+      newId(),
+      proposal.version,
+      {
+        decision: "approve",
+        reviewedRevisionId: proposal.data.revisionId,
+        reason: "Fictional exact-distance approval",
+      },
+    );
+  }
+  const before = await domainState();
+  const response = await app.inject({
+    url: `${prefix}/qualification/ets2`,
+    headers: { authorization },
+  });
+  expect(response.statusCode).toBe(200);
+  expect(response.json().progress).toMatchObject({
+    creditedTrips: 2,
+    creditedDistanceM: "199999999999999999999.999999999999999998",
+    conditions: { requiredTrips: 4294967295, requiredDistanceM: null },
+    remainingTrips: 4294967293,
+    remainingDistanceM: null,
+    conditionsMet: false,
+  });
+  expect(await domainState()).toEqual(before);
 });

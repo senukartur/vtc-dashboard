@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { AnySchema } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { expect, test } from "vitest";
@@ -335,7 +336,7 @@ test("equal domain revisions revalidate presentation and legitimate A/B/A hashes
 });
 
 test("owning unsigned versions/conditions and aggregate progress preserve their full legal ranges", () => {
-  const scalar = (schema: unknown) => ajv.compile(schema);
+  const scalar = (schema: AnySchema) => ajv.compile(schema);
   for (const definition of [
     schemas.$defs.LevelIdentity.properties.editVersion,
     schemas.$defs.Assessment.properties.decisionSequence,
