@@ -37,7 +37,8 @@ function required<T>(value: T | undefined | null): T {
   if (value == null) throw new Error("Missing fictional fixture value");
   return value;
 }
-function fixture() {
+const unrelatedBase = { survey_base_city: "survey_base_region" };
+function fixture(game: "ets2" | "ats" = "ets2") {
   const dir = mkdtempSync(join(tmpdir(), "vtc-fictional-regions-"));
   temporary.push(dir);
   const put = (path: string, bytes: string) => {
@@ -73,7 +74,7 @@ function fixture() {
     return entry;
   };
   const hosted = {
-    game: "ets2",
+    game,
     regions: ["base_region", "addon_region", "split_region", "unknown_region"].map((code) => ({
       code,
       name_en: `Hosted ${code}`,
@@ -92,7 +93,7 @@ function fixture() {
       file,
       JSON.stringify({
         schemaVersion: 1,
-        game: "ets2",
+        game,
         coverage: { complete, expectedPacks },
         packs,
         primarySources,
@@ -110,7 +111,7 @@ function fixture() {
         cli,
         "audit-regions",
         "--game",
-        "ets2",
+        game,
         "--region-evidence",
         evidence(complete, expected),
         "--hosted",
@@ -213,11 +214,52 @@ test.each([
   );
 });
 
+for (const game of ["ets2", "ats"] as const) {
+  test.each(["missing-def", "empty-registration-array", "empty-active-registration"])(
+    `${game} %s base evidence cannot establish unique ownership of a DLC extension`,
+    (kind) => {
+      const f = fixture(game);
+      const base = f.pack("base", { old_city: "base_region" });
+      f.pack("dlc_one", { extension: "base_region" });
+      if (kind === "missing-def") {
+        base.root = join(f.dir, "wrong-base-root");
+        base.registrations = [];
+        mkdirSync(base.root);
+      } else if (kind === "empty-registration-array") {
+        base.root = join(f.dir, "empty-base-root");
+        base.registrations = [];
+        mkdirSync(join(base.root, "def"), { recursive: true });
+      } else {
+        // The old city definition remains on disk, but is no longer registered.
+        f.put(join(base.root, "def/city.sii"), "");
+      }
+      const output = f.run();
+      expect(output.result.status, output.result.stderr).toBe(0);
+      expect(output.report).toMatchObject({ complete: false, corrections: 0 });
+      expect(output.report?.gaps).toContain("base: no validated active city registrations");
+      if (kind !== "empty-active-registration")
+        expect(output.report?.gaps).toContain("base: no active city registration inventory");
+      expect(output.report?.regionSources.find((row) => row.code === "base_region")).toMatchObject({
+        status: "unresolved",
+        basePresent: false,
+        contributors: ["dlc.900001"],
+        dlcCode: null,
+      });
+      expect(readFileSync(join(output.out, "regions.csv"), "utf8")).toBe(
+        "game,code,name_en,name_ru,dlc_code\n",
+      );
+    },
+  );
+}
+
 test.each(["country", "identity", "shared-file", "country-field"])(
   "conflicting %s evidence is ambiguous regardless of pack order",
   (kind) => {
     const f = fixture();
-    const basePack = f.pack("base", kind === "country-field" ? { old_city: "base_region" } : {});
+    const basePack = f.pack(
+      "base",
+      kind === "country-field" ? { old_city: "base_region" } : unrelatedBase,
+    );
     if (kind === "country-field")
       f.put(
         join(basePack.root, "def/city/old_city.sii"),
@@ -259,7 +301,7 @@ test.each(["country", "identity", "shared-file", "country-field"])(
 
 test("a reviewed primary source retains all split contributors and is independent of input order", () => {
   const f = fixture();
-  f.pack("base", {});
+  f.pack("base", unrelatedBase);
   f.pack("dlc_one", { first: "split_region" });
   f.pack("dlc_two", { second: "split_region" }, "900002");
   f.primarySources.push({
@@ -294,7 +336,7 @@ test.each([
   "country-conflict",
 ])("invalid %s primary mapping is rejected", (kind) => {
   const f = fixture();
-  f.pack("base", kind === "base-present" ? { original: "split_region" } : {});
+  f.pack("base", kind === "base-present" ? { original: "split_region" } : unrelatedBase);
   f.pack("dlc_one", { first: "split_region" });
   f.pack(
     "dlc_two",
@@ -343,7 +385,7 @@ test("correction excludes unavailable/hidden parents, byte-distinct rows and bas
 
 test("audit rejects root escapes and refuses to overwrite output", () => {
   const f = fixture();
-  f.pack("base", {});
+  f.pack("base", unrelatedBase);
   const one = f.pack("dlc_one", { city: "addon_region" });
   const first = f.run();
   expect(first.result.status).toBe(0);

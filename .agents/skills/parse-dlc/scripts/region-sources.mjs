@@ -152,6 +152,8 @@ export function readRegionEvidence(file, game) {
     );
     if (JSON.stringify(discovered) !== JSON.stringify(item.registrations))
       gaps.push(`${pack.id}: explicit registrations do not match extracted inventory`);
+    if (pack.id === "base" && !discovered.length)
+      gaps.push("base: no active city registration inventory");
     packs.push(item);
   }
   for (const id of expected)
@@ -223,6 +225,8 @@ export function readRegionEvidence(file, game) {
     };
     for (const path of pack.registrations) visit(path);
   }
+  if (!cities.some((city) => city.pack === "base" && city.verified))
+    gaps.push("base: no validated active city registrations");
   const countryConflicts = new Set();
   for (const code of sorted(cities.map((city) => city.code))) {
     const regions = sorted(cities.filter((city) => city.code === code).map((city) => city.country));
