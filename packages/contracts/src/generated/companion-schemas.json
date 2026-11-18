@@ -179,6 +179,14 @@
                 "maxLength": 36
               },
               "maxItems": 100
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "variant",
+                "type"
+              ],
+              "description": "Absent means legacy variant/common-model comparison. Type selects the semantic type dictionary; a saved basis is never replaced by current classification."
             }
           },
           "required": [
@@ -253,7 +261,7 @@
         "editVersion": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 2147483647
+          "maximum": 4294967295
         }
       },
       "required": [
@@ -311,8 +319,8 @@
           "oneOf": [
             {
               "type": "integer",
-              "minimum": 0,
-              "maximum": 2147483647
+              "minimum": 1,
+              "maximum": 4294967295
             },
             {
               "type": "null"
@@ -344,12 +352,10 @@
         "creditedTrips": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 2147483647
+          "maximum": 9007199254740991
         },
         "creditedDistanceM": {
-          "type": "string",
-          "maxLength": 39,
-          "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$"
+          "$ref": "#/$defs/AggregateDecimal"
         },
         "conditions": {
           "$ref": "#/$defs/Conditions"
@@ -359,7 +365,7 @@
             {
               "type": "integer",
               "minimum": 0,
-              "maximum": 2147483647
+              "maximum": 4294967295
             },
             {
               "type": "null"
@@ -1351,7 +1357,7 @@
         "decisionSequence": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 2147483647
+          "maximum": 4294967295
         },
         "decidedAt": {
           "type": "string",
@@ -1506,6 +1512,16 @@
               "type": "null"
             }
           ]
+        },
+        "trailerComparison": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/TrailerComparison"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1526,7 +1542,8 @@
         "eventExempt",
         "reasons",
         "trailerDisplay",
-        "assessedSource"
+        "assessedSource",
+        "trailerComparison"
       ],
       "additionalProperties": false
     },
@@ -1549,12 +1566,14 @@
           "maxLength": 36
         },
         "version": {
-          "$ref": "#/$defs/ResultVersion"
+          "$ref": "#/$defs/ResultVersion",
+          "description": "Opaque validator including all current presentation content except asOf. Equal domain revisions may have different versions; never sort this value."
         },
         "resultRevision": {
           "type": "string",
           "maxLength": 20,
-          "pattern": "^(0|[1-9][0-9]{0,19})$"
+          "pattern": "^(0|[1-9][0-9]{0,19})$",
+          "description": "Durable monotonic domain owner counter. Presentation-only changes leave it equal."
         },
         "unchanged": {
           "type": "boolean"
@@ -1925,7 +1944,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Current legacy common-model presentation only; always null for a semantic type identity."
         },
         "nameEn": {
           "oneOf": [
@@ -1962,6 +1982,57 @@
           "minLength": 24,
           "maxLength": 24,
           "description": "Canonical UTC serialization with milliseconds: YYYY-MM-DDTHH:mm:ss.SSSZ (24 characters)."
+        },
+        "identityKind": {
+          "type": "string",
+          "enum": [
+            "variant",
+            "type",
+            "unavailable"
+          ]
+        },
+        "classification": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "classified"
+                },
+                "typeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+                  "minLength": 36,
+                  "maxLength": 36
+                }
+              },
+              "required": [
+                "state",
+                "typeId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unclassified",
+                    "not_applicable",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "description": "Current variant classification only, never the retained comparison mapping. Semantic identities are not_applicable; missing metadata is unavailable."
         }
       },
       "required": [
@@ -1971,9 +2042,66 @@
         "nameEn",
         "nameRu",
         "basis",
-        "asOf"
+        "asOf",
+        "identityKind",
+        "classification"
       ],
       "additionalProperties": false
+    },
+    "TrailerComparisonIdentity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 268,
+      "pattern": "^(?:type:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|common:(?:ets2|ats):[0-9a-f]{2,256}|undefined)$",
+      "description": "Exact saved ASCII comparison token. undefined means unclassified at assessment; common contains the original model bytes in hexadecimal."
+    },
+    "TrailerComparison": {
+      "type": "object",
+      "properties": {
+        "basis": {
+          "type": "string",
+          "enum": [
+            "variant",
+            "type"
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 1010,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "comparisonIdentity": {
+                "$ref": "#/$defs/TrailerComparisonIdentity"
+              }
+            },
+            "required": [
+              "id",
+              "comparisonIdentity"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "basis",
+        "entries"
+      ],
+      "additionalProperties": false,
+      "description": "Complete deterministically ordered saved QualificationSnapshot.trailerGroups. No current lookup or truncation; omitted mapping keys retain literal-ID fallback. Null on Assessment means old mapping unavailable."
+    },
+    "AggregateDecimal": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+      "description": "Exact canonical aggregate distance, matching the owning progress Decimal output. Unlike individual DECIMAL(38,18) values, SUM may exceed20 integer digits. Output only."
     }
   }
 }

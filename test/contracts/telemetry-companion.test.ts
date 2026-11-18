@@ -130,6 +130,7 @@ test("exact decimal and batch bounds reject rounding, invented targets and overs
 type BoundedSchema = {
   $ref?: string;
   type?: string;
+  pattern?: string;
   const?: string | number | boolean | null;
   enum?: (string | number | boolean | null)[];
   oneOf?: BoundedSchema[];
@@ -142,6 +143,13 @@ type BoundedSchema = {
   minimum?: number;
   maximum?: number;
 };
+// Only these complete anchored patterns admit ASCII without JSON escape characters.
+// Unknown patterns/format-only strings retain the six-byte bound.
+const unescapedAsciiPatterns = new Set([
+  "^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+  "^[A-Za-z0-9_-]{43}$",
+  "^(?:type:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|common:(?:ets2|ats):[0-9a-f]{2,256}|undefined)$",
+]);
 /** Includes keys, delimiters, every optional property and the largest union alternative. */
 function encodedCeiling(schema: BoundedSchema, seen = new Set<string>()): number {
   if (schema.$ref) {
@@ -169,7 +177,7 @@ function encodedCeiling(schema: BoundedSchema, seen = new Set<string>()): number
         throw new Error("UNBOUNDED_STRING");
       // JSON.stringify uses at most six bytes per codepoint: escaped C0/lone surrogate;
       // valid supplementary characters remain UTF-8 (at most four bytes), not escaped pairs.
-      return 2 + 6 * schema.maxLength!;
+      return 2 + (unescapedAsciiPatterns.has(schema.pattern ?? "") ? 1 : 6) * schema.maxLength!;
     }
     case "array": {
       if (!Number.isSafeInteger(schema.maxItems) || schema.maxItems! < 0 || !schema.items)
@@ -219,6 +227,7 @@ test("every output has a finite encoded ceiling and one complete result always f
   const trailers = assessment.rules.find((rule) => rule.rule === "trailer_types");
   expect(trailers?.observedIds).toHaveLength(10);
   expect(assessment.rules).toHaveLength(5);
+  expect(assessment.trailerComparison!.entries).toHaveLength(1010);
   expect(
     assessment.trailerDisplay.every(
       (row) => row.nameEn?.length === 256 && row.nameRu?.length === 256,
@@ -233,7 +242,11 @@ test("every output has a finite encoded ceiling and one complete result always f
       fixtureBytes: bytes,
     }),
   );
-  expect(bytes).toBeGreaterThan(500000);
+  expect(bytes).toBeGreaterThan(800000);
+  expect(encodedCeiling({ type: "string", format: "uuid", maxLength: 36 } as BoundedSchema)).toBe(
+    218,
+  );
+  expect(encodedCeiling({ type: "string", pattern: "^.*$", maxLength: 36 })).toBe(218);
   expect(bytes).toBeLessThanOrEqual(ceiling);
   for (const value of ["\u0001", "\ud800", "😀", "\\", '"'])
     expect(Buffer.byteLength(JSON.stringify(value))).toBeLessThanOrEqual(2 + 6 * [...value].length);
@@ -255,6 +268,8 @@ test("output timestamps use bounded canonical UTC milliseconds while input compa
     nameEn: null,
     nameRu: null,
     basis: "current_catalog",
+    identityKind: "unavailable",
+    classification: { state: "unavailable" },
     asOf: "2026-11-18T12:00:00.000Z",
   };
   expect(output(row)).toBe(true);
@@ -288,4 +303,55 @@ test("the permanent split hint is closed and never a transient retry signal", ()
       error: { ...(fixture.value.error as object), message: "private" },
     }),
   ).toBe(false);
+});
+
+test("equal domain revisions revalidate presentation and legitimate A/B/A hashes remain request fenced", () => {
+  const get = (name: string) => {
+    const fixture = fixtures.find((value) => value.name === name);
+    if (!fixture) throw new Error("PRESENTATION_FIXTURE_REQUIRED");
+    return fixture.value as unknown as companionComponents["schemas"]["ResultBatch"];
+  };
+  const a = get("presentation-A-equal-domain-revision"),
+    b = get("presentation-B-equal-domain-revision-current-request"),
+    again = get("presentation-return-A-old-hash-legitimate-later-request"),
+    stale = get("presentation-stale-request-A-ignore-even-at-equal-domain-revision");
+  expect([a, b, again].map((value) => value.items[0]!.resultRevision)).toEqual(["12", "12", "12"]);
+  expect(a.items[0]!.version).not.toBe(b.items[0]!.version);
+  expect(again.items[0]!.version).toBe(a.items[0]!.version);
+  const domain = (value: companionComponents["schemas"]["ResultBatch"]) => {
+    const { version: _version, assessment, ...rest } = value.items[0]!;
+    if (!assessment) throw new Error("RETAINED_FIXTURE_REQUIRED");
+    const { trailerDisplay: _display, ...saved } = assessment;
+    return { ...rest, assessment: saved };
+  };
+  expect(domain(b)).toEqual(domain(a));
+  expect(domain(again)).toEqual(domain(a));
+  const display = (value: companionComponents["schemas"]["ResultBatch"]) =>
+    value.items[0]!.assessment!.trailerDisplay.map(({ asOf: _asOf, ...row }) => row);
+  expect(display(again)).toEqual(display(a));
+  expect(display(b)).not.toEqual(display(a));
+  expect(again.requestId).not.toBe(stale.requestId);
+  expect(stale.requestId).toBe(a.requestId);
+});
+
+test("owning unsigned versions/conditions and aggregate progress preserve their full legal ranges", () => {
+  const scalar = (schema: unknown) => ajv.compile(schema);
+  for (const definition of [
+    schemas.$defs.LevelIdentity.properties.editVersion,
+    schemas.$defs.Assessment.properties.decisionSequence,
+    schemas.$defs.Conditions.properties.requiredTrips,
+    schemas.$defs.Progress.properties.remainingTrips,
+  ]) {
+    const validate = scalar(definition);
+    expect(validate(4294967295)).toBe(true);
+    expect(validate(4294967296)).toBe(false);
+  }
+  const count = scalar(schemas.$defs.Progress.properties.creditedTrips);
+  expect(count(Number.MAX_SAFE_INTEGER)).toBe(true);
+  expect(count(Number.MAX_SAFE_INTEGER + 1)).toBe(false);
+  const aggregate = ajv.compile({ $ref: "urn:vtc:companion:v1#/$defs/AggregateDecimal" });
+  expect(aggregate("199999999999999999999.999999999999999998")).toBe(true);
+  expect(aggregate("1.0")).toBe(false);
+  const individual = ajv.compile({ $ref: "urn:vtc:companion:v1#/$defs/Decimal" });
+  expect(individual("199999999999999999999.999999999999999998")).toBe(false);
 });

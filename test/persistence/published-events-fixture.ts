@@ -260,6 +260,7 @@ export async function seedPublishedEventsHistory(
         destinationCityId: null,
         prescribedCargoId: null,
         prescribedTrailerId: null,
+        prescribedTrailerKindId: null,
       })),
       responses: await unit.client(tx).select().from(eventResponseRevisions),
       attendance: await unit.client(tx).select().from(eventAttendanceRevisions),

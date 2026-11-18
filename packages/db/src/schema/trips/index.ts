@@ -22,6 +22,7 @@ import {
   catalogCities,
   catalogCompanyCities,
   catalogTrailers,
+  catalogTrailerTypes,
 } from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
 import { qualificationAssignments } from "../qualifications/index.js";
@@ -289,6 +290,7 @@ export const tripFactTrailers = mysqlTable(
       .references(() => tripFacts.id, { onDelete: "restrict" }),
     position: int("position", { unsigned: true }).notNull(),
     trailerId: idColumn("trailer_id"),
+    trailerTypeId: idColumn("trailer_type_id"),
     sourceField: varchar("source_field", { length: 128 }),
     unknownReason: varchar("unknown_reason", { length: 128 }),
   },
@@ -300,9 +302,14 @@ export const tripFactTrailers = mysqlTable(
       foreignColumns: [catalogTrailers.id],
     }).onDelete("restrict"),
     check("trip_trailer_position", sql`${t.position} < 10`),
+    foreignKey({
+      name: "trip_trailer_type_fk",
+      columns: [t.trailerTypeId],
+      foreignColumns: [catalogTrailerTypes.id],
+    }).onDelete("restrict"),
     check(
       "trip_trailer_shape",
-      sql`(${t.trailerId} IS NULL AND ${t.sourceField} IS NULL AND ${t.unknownReason} IS NOT NULL) OR (${t.trailerId} IS NOT NULL AND ${t.sourceField} IS NOT NULL AND ${t.unknownReason} IS NULL)`,
+      sql`(${t.trailerId} IS NULL AND ${t.trailerTypeId} IS NULL AND ${t.sourceField} IS NULL AND ${t.unknownReason} IS NOT NULL) OR (((${t.trailerId} IS NOT NULL AND ${t.trailerTypeId} IS NULL) OR (${t.trailerId} IS NULL AND ${t.trailerTypeId} IS NOT NULL)) AND ${t.sourceField} IS NOT NULL AND ${t.unknownReason} IS NULL)`,
     ),
   ],
 );

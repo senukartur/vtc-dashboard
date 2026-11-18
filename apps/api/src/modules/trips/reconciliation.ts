@@ -82,7 +82,15 @@ function withoutHeld(all: readonly NormalizedTripEvidence[], current: readonly (
     held: [...new Set(all.flatMap((f) => heldCodes(f, current)))],
   };
 }
-export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stage3Enabled = false) {
+export function createTripReconciliation(
+  unit: UnitOfWork,
+  now: () => Date,
+  stage3Enabled = false,
+  trailerTypes: (
+    tx: TxContext,
+    evidence: readonly NormalizedTripEvidence[],
+  ) => Promise<Readonly<Record<string, string>>> = async () => ({}),
+) {
   const c = (tx: TxContext) => unit.client(tx),
     groups = createTripGroups(unit),
     facts = createFactRepository(unit);
@@ -207,7 +215,12 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stag
           primary.currentFactId,
           secondary.currentFactId,
         ]),
-        selected = selectQuality(selectable, primary.currentFactId);
+        selected = selectQuality(
+          selectable,
+          primary.currentFactId,
+          undefined,
+          await trailerTypes(tx, selectable),
+        );
       if (!selected.selected || !primary.currentFactId || !secondary.currentFactId)
         throw identityError(409);
       const credits = await c(tx)
@@ -342,7 +355,12 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stag
           );
         if (all.some((f) => !snapshot.facts.includes(f.factRevisionId))) {
           const { selectable, held } = withoutHeld(all, [root.currentFactId]),
-            choice = selectQuality(selectable, root.currentFactId);
+            choice = selectQuality(
+              selectable,
+              root.currentFactId,
+              undefined,
+              await trailerTypes(tx, selectable),
+            );
           const patch =
             root.decision === "accepted"
               ? {

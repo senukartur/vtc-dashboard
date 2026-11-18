@@ -1,4 +1,7 @@
 const en = {
+  legacyTrailers:
+    "This level still uses its original variant allowances. Switching to types replaces the selected list and may broaden access.",
+  useTrailerTypes: "Switch to trailer types",
   title: "Qualifications",
   game: "Game",
   howLabel: "How qualifications work",
@@ -236,6 +239,9 @@ const en = {
 };
 type Messages = { [K in keyof typeof en]: string } & Record<string, string>;
 const ru: Messages = {
+  legacyTrailers:
+    "Уровень сохраняет прежние допуски по вариантам. Переход на типы заменит выбранный список и может расширить допуск.",
+  useTrailerTypes: "Перейти на типы прицепов",
   title: "Квалификации",
   game: "Игра",
   howLabel: "Как работают квалификации",

@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 103 tables including the ledger and 38 migrations.
+// Fresh full-schema preparation now covers 105 tables including the ledger and 39 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -144,6 +144,7 @@ export async function reset(connection: Connection) {
     "trip_contribution_history",
     "trip_contributions",
     "qualification_level_trailers",
+    "qualification_level_trailer_types",
     "qualification_promotion_reviews",
     "qualification_promotions",
     "qualification_states",
@@ -171,6 +172,7 @@ export async function reset(connection: Connection) {
     "catalog_cities",
     "catalog_cargoes",
     "catalog_trailers",
+    "catalog_trailer_types",
     "catalog_regions",
     "catalog_dlcs",
     "catalog_mapping_reviews",
@@ -292,7 +294,8 @@ async function publishedPrefixFolder(
     | 34
     | 35
     | 36
-    | 37,
+    | 37
+    | 38,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -360,6 +363,10 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_SIMPLE_QUALIFICATIONS_PREFIX_REQUIRED");
   if (count === 36 && entries[35]?.tag !== "0035_simple_qualifications")
     throw new Error("PUBLISHED_TRAILER_GROUPING_PREFIX_REQUIRED");
+  if (count === 37 && entries[36]?.tag !== "0036_trailer_groups")
+    throw new Error("PUBLISHED_TRAILER_TYPES_PREFIX_REQUIRED");
+  if (count === 38 && entries[37]?.tag !== "0037_trailer_types")
+    throw new Error("PUBLISHED_COMPANION_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -520,7 +527,7 @@ export async function simpleQualificationsPriorFolder(): Promise<string> {
 }
 
 export async function companionPriorFolder(): Promise<string> {
-  return publishedPrefixFolder(37);
+  return publishedPrefixFolder(38);
 }
 
 export async function trailerGroupingPriorFolder(): Promise<string> {
@@ -544,4 +551,8 @@ export async function withPrefixMembershipJoinedAt<T>(
   } finally {
     await connection.query("ALTER TABLE identity_memberships DROP COLUMN joined_at");
   }
+}
+
+export async function trailerTypesPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(37);
 }

@@ -4,15 +4,16 @@ import { z } from "zod";
 export type CatalogDTO = components["schemas"];
 export type CatalogItem = CatalogDTO["CatalogItem"];
 export type Game = CatalogItem["game"];
-export type Kind = "city" | "cargo" | "trailer" | "company";
+export type Kind = "city" | "cargo" | "trailer" | "trailer-type" | "company";
 export type CatalogList = "dlcs" | "regions" | "cities" | "companies" | "cargoes" | "trailers";
 export type CatalogLogo = NonNullable<CatalogItem["logo"]>;
 export const adrClasses = ["1", "2", "3", "4", "6", "8"] as const;
 export type AdrClass = (typeof adrClasses)[number];
-export const listOfKind: Record<Kind, CatalogList> = {
+export const listOfKind: Record<Kind, CatalogList | "trailer-types"> = {
   city: "cities",
   cargo: "cargoes",
   trailer: "trailers",
+  "trailer-type": "trailer-types",
   company: "companies",
 };
 export const uuid = z.uuidv4();
@@ -38,6 +39,8 @@ export const itemSchema = z.strictObject({
   game,
   code: text.max(128),
   commonTrailer: text.max(128).nullable().optional(),
+  trailerTypeId: uuid.nullable().optional(),
+  trailerType: labelSchema.nullable().optional(),
   variantCount: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
   nameEn: text.max(256),
   nameRu: z.string().max(256).nullable(),

@@ -80,7 +80,7 @@ import {
   withPrefixMembershipJoinedAt,
 } from "./support.ts";
 
-const currentMigrationCount = 38;
+const currentMigrationCount = 39;
 
 const values = mysqlTable("synthetic_values", {
   id: idColumn("id").primaryKey(),
@@ -208,10 +208,10 @@ async function serializedFreshMigrations(
     })),
   );
   const expectedTables = Object.keys(
-    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0037_snapshot.json"), "utf8"))
+    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0038_snapshot.json"), "utf8"))
       .tables,
   ).sort();
-  assert.equal(expectedTables.length, 102);
+  assert.equal(expectedTables.length, 104);
   const gate = await journalAckGate("finalize", currentMigrationCount);
   const lock = migrationLockName(settings.database);
   const history = async () => {
@@ -448,7 +448,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
       await reset(connection);
       const folder = await companionPriorFolder();
       try {
-        assert.equal(await runMigrations(settings, { folder }), 37);
+        assert.equal(await runMigrations(settings, { folder }), 38);
         const identity = createIdentity(unit, {
           secret: randomBytes(32).toString("hex"),
           origin: "http://127.0.0.1:4173",
@@ -482,7 +482,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         assert.equal(await runMigrations(settings), 1);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
-          "SELECT version,hash,state FROM _vtc_migrations ORDER BY version LIMIT 37",
+          "SELECT version,hash,state FROM _vtc_migrations ORDER BY version LIMIT 38",
         );
         assert.deepEqual(after, prefix);
         const [tokens] = await connection.execute<RowDataPacket[]>(
@@ -522,7 +522,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 2);
+        assert.equal(await runMigrations(settings), currentMigrationCount - 36);
         assert.equal(await runMigrations(settings), 0);
         const [rows] = await connection.query<RowDataPacket[]>(
           "SELECT CAST(id AS CHAR) id,HEX(code) code,common_trailer,hidden FROM catalog_trailers",

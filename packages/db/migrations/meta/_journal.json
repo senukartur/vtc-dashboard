@@ -264,8 +264,15 @@
     {
       "idx": 37,
       "version": "5",
-      "when": 1794962920197,
-      "tag": "0037_supreme_professor_monster",
+      "when": 1794960747659,
+      "tag": "0037_trailer_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "5",
+      "when": 1794971336849,
+      "tag": "0038_telemetry_companion",
       "breakpoints": true
     }
   ]

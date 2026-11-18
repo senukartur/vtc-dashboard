@@ -65,7 +65,7 @@ export function createCompanionQualifications(
       level: { id: level.id, name: level.name, editVersion: level.version },
       limits: {
         ...limits,
-        trailers: { mode: limits.trailers.mode, typeIds: [...limits.trailers.typeIds] },
+        trailers: { ...limits.trailers, typeIds: [...limits.trailers.typeIds] },
         adr: { mode: limits.adr.mode, classes: [...limits.adr.classes] },
       },
       trailerDisplay:

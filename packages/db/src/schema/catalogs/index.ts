@@ -24,6 +24,22 @@ const updatedAt = () => utcColumn("updated_at").notNull().default(sql`(UTC_TIMES
 const logoBlob = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "blob" });
 const digest = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "binary(32)" });
 
+/** Product taxonomy; source body types remain separate catalog rows. */
+export const catalogTrailerTypes = mysqlTable(
+  "catalog_trailer_types",
+  {
+    id: idColumn("id").primaryKey(),
+    game: game("game").notNull(),
+    code: code("code").notNull(),
+    nameEn: name("name_en").notNull(),
+    nameRu: name("name_ru").notNull(),
+  },
+  (t) => [
+    uniqueIndex("catalog_trailer_type_game_code").on(t.game, t.code),
+    uniqueIndex("catalog_trailer_type_id_game").on(t.id, t.game),
+  ],
+);
+
 export const catalogDlcs = mysqlTable(
   "catalog_dlcs",
   {
@@ -149,6 +165,7 @@ export const catalogTrailers = mysqlTable(
     game: game("game").notNull(),
     code: code("code").notNull(),
     commonTrailer: code("common_trailer"),
+    trailerTypeId: idColumn("trailer_type_id"),
     nameEn: name("name_en").notNull(),
     nameRu: name("name_ru"),
     dlcId: idColumn("dlc_id"),
@@ -159,6 +176,11 @@ export const catalogTrailers = mysqlTable(
     uniqueIndex("catalog_trailer_game_code").on(t.game, t.code),
     uniqueIndex("catalog_trailer_id_game").on(t.id, t.game),
     index("catalog_trailer_common").on(t.game, t.commonTrailer, t.hidden, t.id),
+    foreignKey({
+      name: "catalog_trailer_type_fk",
+      columns: [t.trailerTypeId, t.game],
+      foreignColumns: [catalogTrailerTypes.id, catalogTrailerTypes.game],
+    }).onDelete("restrict"),
     check(
       "catalog_trailer_common_nonempty",
       sql`${t.commonTrailer} IS NULL OR octet_length(${t.commonTrailer}) > 0`,

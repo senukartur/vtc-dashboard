@@ -3,12 +3,14 @@ import { type IncomingHttpHeaders, request as httpRequest } from "node:http";
 import type { companionComponents, components } from "@vtc/contracts";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { steamAccounts, steamLinks } from "@vtc/db/external-identities-schema";
+import { manualEvidence } from "@vtc/db/manual-reports-schema";
 import { eq, membership } from "@vtc/db/identity-schema";
 import { tripOwnerRevisions } from "@vtc/db/trips-schema";
 import { tripDecisions } from "@vtc/db/trip-decisions-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { beforeEach, expect, test, afterAll as vAfter, beforeAll as vBefore } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
+import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import { createEvents } from "../../apps/api/src/modules/events/service.ts";
 import { createExternalIdentities } from "../../apps/api/src/modules/external-identities/service.ts";
 import { createTelemetry } from "../../apps/api/src/modules/telemetry/service.ts";
@@ -69,9 +71,10 @@ async function configure(
     requiredTrips: 1000,
     requiredDistanceM: "1000000000",
   },
+  game: "ets2" | "ats" = "ets2",
 ) {
   const q = modules.qualifications!;
-  const level = await q.detail(director, structuralLevels.ets2[0]);
+  const level = await q.detail(director, structuralLevels[game][0]);
   return q.update(director, level.id, {
     expectedVersion: level.version,
     name: level.name,
@@ -79,7 +82,10 @@ async function configure(
     conditions,
   });
 }
-async function member(games: ("ets2" | "ats")[] = ["ets2", "ats"]) {
+async function member(
+  games: ("ets2" | "ats")[] = ["ets2", "ats"],
+  roles: Actor["roles"] = ["driver"],
+) {
   const id = newId(),
     email = `${id}@example.invalid`,
     credential = await modules.identity.prepareCredential(password);
@@ -88,7 +94,7 @@ async function member(games: ("ets2" | "ats")[] = ["ets2", "ats"]) {
       userId: id,
       email,
       name: "Fictional companion driver",
-      roles: ["driver"],
+      roles,
       ...credential,
     });
     if (games.length)
@@ -1160,4 +1166,468 @@ test("both games keep exact source identities and independent credit while shari
     provisional: true,
     outcome: "pass",
   });
+});
+
+for (const game of ["ets2", "ats"] as const) {
+  test(`${game} semantic preview uses exact body classification, explicit unknowns and immutable saved mappings`, async () => {
+    const catalog = modules.catalogs!;
+    const types = (await catalog.trailerTypes(director, { game, limit: 100 })).items;
+    const allowed = types.find((row) => row.code === "dryvan")!,
+      wrong = types.find((row) => row.id !== allowed.id)!;
+    const variants = [];
+    for (const classification of [allowed.id, wrong.id, null])
+      variants.push(
+        await catalog.create(director, "trailers", newId(), {
+          game,
+          code: `fixture_semantic_${newId()}`,
+          nameEn: "Fictional semantic body",
+          nameRu: "Вымышленный кузов",
+          trailerTypeId: classification,
+        }),
+      );
+    await configure(
+      { trailers: { basis: "type", mode: "selected", typeIds: [allowed.id] } },
+      undefined,
+      game,
+    );
+    const body = preview();
+    body.game = game;
+    body.actualDistance.metres = "123400";
+    body.actualDistance.final = true;
+    body.hardMode.final = true;
+    const assess = async (index: number) => {
+      body.requestId = newId();
+      body.trailers = {
+        complete: true,
+        items: [{ code: variants[index]!.code, provenance: "attached" }],
+      };
+      return modules.telemetryCompanion!.preview(authorization, ip, body);
+    };
+    const pass = await assess(0);
+    expect(pass.assignment!.limits.trailers).toMatchObject({
+      basis: "type",
+      mode: "selected",
+      typeIds: [allowed.id],
+    });
+    expect(pass.outcome).toBe("pass");
+    expect(pass.trailerDisplay).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: allowed.id,
+          identityKind: "type",
+          code: allowed.code,
+          nameEn: allowed.nameEn,
+          groupCode: null,
+          classification: { state: "not_applicable" },
+        }),
+        expect.objectContaining({
+          id: variants[0]!.id,
+          identityKind: "variant",
+          classification: { state: "classified", typeId: allowed.id },
+        }),
+      ]),
+    );
+    expect((await assess(1)).outcome).toBe("fail");
+    expect((await assess(2)).outcome).toBe("unknown");
+    body.requestId = newId();
+    body.trailers = {
+      complete: false,
+      items: [
+        { code: variants[1]!.code, provenance: "previous" },
+        { code: variants[2]!.code, provenance: "attached" },
+      ],
+    };
+    expect((await modules.telemetryCompanion!.preview(authorization, ip, body)).outcome).toBe(
+      "fail",
+    );
+    const p = await upload();
+    p.source.game = game;
+    p.snapshot.trailers.items[0]!.bodyType = { available: true, value: variants[0]!.code };
+    await modules.telemetry!.receive(authorization, ip, p);
+    await clearAdmission();
+    const saved = (await results([sourceRequest(p)])).items[0]!;
+    expect(saved).toMatchObject({
+      state: "decided",
+      assessmentBasis: "current",
+      assessment: {
+        outcome: "pass",
+        limits: { trailers: { basis: "type" } },
+        trailerComparison: {
+          basis: "type",
+          entries: expect.arrayContaining([
+            { id: allowed.id, comparisonIdentity: `type:${allowed.id}` },
+            { id: variants[0]!.id, comparisonIdentity: `type:${allowed.id}` },
+          ]),
+        },
+      },
+    });
+    const immutable = immutableAssessment(saved.assessment),
+      domain = await domainState();
+    await catalog.patch(director, "trailers", variants[0]!.id, newId(), {
+      trailerTypeId: wrong.id,
+    });
+    const changed = (await results([{ ...sourceRequest(p), ifVersion: saved.version }])).items[0]!;
+    expect(changed.resultRevision).toBe(saved.resultRevision);
+    expect(changed.version).not.toBe(saved.version);
+    expect(changed.unchanged).toBe(false);
+    expect(immutableAssessment(changed.assessment)).toEqual(immutable);
+    expect(changed.credit).toEqual(saved.credit);
+    expect(changed.assessmentPending).toBe(false);
+    body.requestId = newId();
+    body.trailers = {
+      complete: true,
+      items: [{ code: variants[0]!.code, provenance: "attached" }],
+    };
+    expect((await modules.telemetryCompanion!.preview(authorization, ip, body)).outcome).toBe(
+      "fail",
+    );
+    expect(
+      Date.parse(pass.applicability.expiresAt) - Date.parse(pass.evaluatedAt),
+    ).toBeLessThanOrEqual(5000);
+    expect(await domainState()).toEqual(domain);
+    await configure({}, undefined, game);
+  });
+}
+
+test("presentation A/B/A revalidates historical owner zero without domain writes, replay/unchanged-import/rollback churn or foreign disclosure", async () => {
+  const catalog = modules.catalogs!,
+    box = await unit.run((tx) =>
+      catalog.resolveInTransaction(tx, { game: "ets2", kind: "trailer", code: "fixture_box" }),
+    );
+  if (box.status !== "resolved") throw new Error("SYNTHETIC_BODY_REQUIRED");
+  const type = (await catalog.trailerTypes(director, { game: "ets2", limit: 100 })).items.find(
+    (row) => row.code === "dryvan",
+  )!;
+  const p = await upload();
+  await modules.telemetry!.receive(authorization, ip, p);
+  await catalog.patch(director, "trailers", box.id, newId(), {
+    nameEn: "Fictional label A",
+    commonTrailer: "fictional.model.a",
+    trailerTypeId: null,
+  });
+  // Model an upgraded historical owner whose published decisions predate the new ordering table.
+  await control.execute("DELETE FROM trip_owner_revisions WHERE owner_id=?", [driver.userId]);
+  let observed = Date.parse("2026-11-18T12:00:00.000Z");
+  const companion = createTelemetryCompanion(
+    {
+      telemetry: modules.telemetry!,
+      trips: modules.trips!,
+      qualifications: modules.qualifications!,
+      catalogs: catalog,
+      events: modules.events!,
+      assessments: createCompanionAssessments(unit, modules.events!),
+    },
+    () => new Date(observed),
+  );
+  const read = async (ifVersion?: string) => {
+    const input = batch([{ ...sourceRequest(p), ...(ifVersion ? { ifVersion } : {}) }]);
+    const reply = await companion.results(authorization, ip, input);
+    expect(reply.requestId).toBe(input.requestId);
+    return reply.items[0]!;
+  };
+  const a = await read(),
+    domain = await domainState();
+  expect(a.resultRevision).toBe("0");
+  const decision = async () =>
+    (
+      await control.execute<RowDataPacket[]>(
+        "SELECT CAST(qualification_snapshot AS CHAR) snapshot FROM trip_decisions WHERE id=?",
+        [a.assessment!.decisionId],
+      )
+    )[0][0]!.snapshot;
+  const saved = await decision(),
+    keyB = newId(),
+    change = {
+      nameEn: "Fictional label B",
+      commonTrailer: "fictional.model.b",
+      trailerTypeId: type.id,
+    };
+  await catalog.patch(director, "trailers", box.id, keyB, change);
+  observed += 1000;
+  const b = await read(a.version);
+  expect(b.unchanged).toBe(false);
+  expect(b.resultRevision).toBe(a.resultRevision);
+  expect(b.version).not.toBe(a.version);
+  expect(b.assessment!.trailerDisplay).toEqual([
+    expect.objectContaining({
+      nameEn: "Fictional label B",
+      groupCode: "fictional.model.b",
+      classification: { state: "classified", typeId: type.id },
+    }),
+  ]);
+  expect(immutableAssessment(b.assessment)).toEqual(immutableAssessment(a.assessment));
+  expect(b.credit).toEqual(a.credit);
+  expect(b.assessmentPending).toBe(a.assessmentPending);
+  observed += 1000;
+  const matched = await read(b.version);
+  expect(matched).toMatchObject({
+    unchanged: true,
+    assessment: null,
+    credit: null,
+    version: b.version,
+  });
+  await catalog.patch(director, "trailers", box.id, keyB, change);
+  observed += 1000;
+  expect((await read(b.version)).unchanged).toBe(true);
+  const bytes = Buffer.from("game,code,trailer_type_code\nets2,fixture_box,dryvan\n");
+  const plan = await catalog.previewImport(director, "trailers", bytes);
+  expect(plan).toMatchObject({ errors: 0, changed: 0, unchanged: 1 });
+  await catalog.applyImport(director, "trailers", bytes, newId(), plan.token!);
+  observed += 1000;
+  expect((await read(b.version)).unchanged).toBe(true);
+  const marker = new Error("SYNTHETIC_CATALOG_ROLLBACK");
+  await expect(
+    unit.run(async (tx) => {
+      const scoped = {
+        run: <T>(command: (tx: import("@vtc/db").TxContext) => Promise<T>) => command(tx),
+        client: unit.client,
+        close: async () => {},
+      };
+      await createCatalogs(scoped, catalog.config, { identity: modules.identity }).patch(
+        director,
+        "trailers",
+        box.id,
+        newId(),
+        { nameEn: "Fictional rollback label" },
+      );
+      throw marker;
+    }),
+  ).rejects.toBe(marker);
+  observed += 1000;
+  expect((await read(b.version)).unchanged).toBe(true);
+  await catalog.patch(director, "trailers", box.id, newId(), {
+    nameEn: "Fictional label A",
+    commonTrailer: "fictional.model.a",
+    trailerTypeId: null,
+  });
+  observed += 1000;
+  const again = await read(b.version);
+  expect(again.unchanged).toBe(false);
+  expect(again.version).toBe(a.version);
+  expect(again.resultRevision).toBe("0");
+  expect(immutableAssessment(again.assessment)).toEqual(immutableAssessment(a.assessment));
+  observed += 1000;
+  expect((await read(again.version)).unchanged).toBe(true);
+  expect(await decision()).toBe(saved);
+  expect(await domainState()).toEqual(domain);
+  await clearAdmission();
+  const foreign = await member(),
+    foreignToken = await issue(foreign);
+  const foreignReply = (await results([sourceRequest(p)], bearer(foreignToken.token))).items[0]!;
+  const missing = (
+    await results([
+      { ...sourceRequest(p), source: { ...sourceRequest(p).source, tripId: newId() } },
+    ])
+  ).items[0]!;
+  const neutral = ({ source: _source, version: _version, ...rest }: C["Result"]) => rest;
+  expect(neutral(foreignReply)).toEqual(neutral(missing));
+});
+
+test("legacy common-model allowances remain literal after semantic classification and retain their saved map", async () => {
+  const catalog = modules.catalogs!,
+    types = (await catalog.trailerTypes(director, { game: "ets2", limit: 100 })).items;
+  const allowed = await catalog.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: `fixture_legacy_a_${newId()}`,
+    nameEn: "Fictional legacy A",
+    commonTrailer: "fictional.legacy",
+    trailerTypeId: types[0]!.id,
+  });
+  const peer = await catalog.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: `fixture_legacy_b_${newId()}`,
+    nameEn: "Fictional legacy B",
+    commonTrailer: "fictional.legacy",
+    trailerTypeId: types[1]!.id,
+  });
+  const other = await catalog.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: `fixture_legacy_c_${newId()}`,
+    nameEn: "Fictional legacy C",
+    commonTrailer: "fictional.other",
+    trailerTypeId: types[0]!.id,
+  });
+  await configure({ trailers: { basis: "variant", mode: "selected", typeIds: [allowed.id] } });
+  const body = preview();
+  body.actualDistance.metres = "123400";
+  body.actualDistance.final = true;
+  body.hardMode.final = true;
+  const check = async (code: string) => {
+    body.requestId = newId();
+    body.trailers = { complete: true, items: [{ code, provenance: "attached" }] };
+    return modules.telemetryCompanion!.preview(authorization, ip, body);
+  };
+  expect((await check(peer.code)).outcome).toBe("pass");
+  expect((await check(other.code)).outcome).toBe("fail");
+  const p = await upload();
+  p.snapshot.trailers.items[0]!.bodyType = { available: true, value: peer.code };
+  await modules.telemetry!.receive(authorization, ip, p);
+  const saved = (await results([sourceRequest(p)])).items[0]!;
+  expect(saved.assessment!.trailerComparison).toEqual({
+    basis: "variant",
+    entries: [allowed.id, peer.id]
+      .sort()
+      .map((id) => ({
+        id,
+        comparisonIdentity: `common:ets2:${Buffer.from("fictional.legacy").toString("hex")}`,
+      })),
+  });
+  await catalog.patch(director, "trailers", peer.id, newId(), {
+    commonTrailer: "fictional.changed",
+    trailerTypeId: types[0]!.id,
+  });
+  expect((await check(peer.code)).outcome).toBe("fail");
+  const changed = (await results([{ ...sourceRequest(p), ifVersion: saved.version }])).items[0]!;
+  expect(immutableAssessment(changed.assessment)).toEqual(immutableAssessment(saved.assessment));
+  expect(changed.credit).toEqual(saved.credit);
+  expect(changed.assessmentPending).toBe(false);
+  expect(changed.resultRevision).toBe(saved.resultRevision);
+});
+
+test("typed manual and derived facts retain identity kind, labels and saved comparisons through reconciliation", async () => {
+  const catalog = modules.catalogs!,
+    type = (await catalog.trailerTypes(director, { game: "ets2", limit: 100 })).items.find(
+      (row) => row.code === "dryvan",
+    )!;
+  const variant = await catalog.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: `fixture_typed_material_${newId()}`,
+    nameEn: "Fictional typed material",
+    trailerTypeId: type.id,
+  });
+  await configure({ trailers: { basis: "type", mode: "selected", typeIds: [type.id] } });
+  const p = await upload();
+  p.snapshot.trailers.items[0]!.bodyType = { available: true, value: variant.code };
+  await modules.telemetry!.receive(authorization, ip, p);
+  const original = (await results([sourceRequest(p)])).items[0]!;
+  const dispatcher = await member([], ["dispatcher"]),
+    row = await modules.trips!.detail(driver, original.canonicalTripId!);
+  if (row.view !== "private") throw new Error("SYNTHETIC_PRIVATE_TRIP_REQUIRED");
+  const proposed = await modules.tripDecisions!.propose(
+    dispatcher,
+    original.canonicalTripId!,
+    newId(),
+    row.summary.version,
+    { reason: "Fictional semantic correction", evidenceIds: [], trailerTypeId: type.id },
+  );
+  const proposal = await modules.tripDecisions!.getProposal(
+    director,
+    original.canonicalTripId!,
+    proposed.data.id,
+  );
+  await modules.tripDecisions!.proposalDecision(
+    director,
+    original.canonicalTripId!,
+    proposal.data.id,
+    newId(),
+    proposal.version,
+    {
+      decision: "approve",
+      reviewedRevisionId: proposal.data.revisionId,
+      reason: "Fictional typed correction approval",
+    },
+  );
+  const derived = (await results([sourceRequest(p)])).items[0]!;
+  expect(derived.assessment!.materialIdentity).not.toBe(original.assessment!.materialIdentity);
+  expect(derived.assessment!.trailerDisplay).toEqual([
+    expect.objectContaining({
+      id: type.id,
+      identityKind: "type",
+      code: type.code,
+      groupCode: null,
+      classification: { state: "not_applicable" },
+    }),
+  ]);
+  const [derivedRows] = await control.execute<RowDataPacket[]>(
+    "SELECT trailer_id,CAST(trailer_type_id AS CHAR) type FROM trip_fact_trailers WHERE trip_fact_id=?",
+    [derived.assessment!.factId],
+  );
+  expect(derivedRows).toEqual([expect.objectContaining({ trailer_id: null, type: type.id })]);
+  const evidenceId = newId(),
+    instant = new Date().toISOString();
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .insert(manualEvidence)
+      .values({
+        id: evidenceId,
+        ownerId: driver.userId,
+        state: "ready",
+        generation: newId(),
+        originalName: "fictional.png",
+        contentType: "image/png",
+        byteLength: 1,
+        sha256: randomBytes(32),
+        fingerprint: randomBytes(32),
+        createdAt: instant,
+        updatedAt: instant,
+        nextCheckAt: instant,
+      }),
+  );
+  const pin = async (kind: "city" | "cargo", code: string) => {
+    const found = await unit.run((tx) =>
+      catalog.resolveInTransaction(tx, { game: "ets2", kind, code }),
+    );
+    if (found.status !== "resolved") throw new Error("SYNTHETIC_CATALOG_REQUIRED");
+    return { status: "resolved" as const, entityId: found.id };
+  };
+  const manual = await modules.manualReports!.submitReport(driver, newId(), {
+    fields: {
+      game: "ets2",
+      origin: await pin("city", "fixture_north"),
+      destination: await pin("city", "fixture_south"),
+      cargo: await pin("cargo", "fixture_crates"),
+      trailerType: { status: "resolved", entityId: type.id },
+      cargoMassKg: "18000",
+      actualDistanceM: "123400",
+      evidenceIds: [evidenceId],
+      startedAt: new Date(p.snapshot.start.utcMs!).toISOString(),
+      completedAt: new Date(p.snapshot.end!.utcMs!).toISOString(),
+    },
+  });
+  const review = await modules.tripDecisions!.review(director, manual.tripId);
+  await modules.tripDecisions!.decide(director, manual.tripId, newId(), review.version, {
+    decision: "accept",
+    reviewedRevisionId: review.data.trip.manualRevision!.id,
+    factRevisionId: review.data.factRevisionId,
+    proposalId: null,
+    reason: "Fictional typed manual report",
+  });
+  const [messages] = await control.execute<RowDataPacket[]>(
+    "SELECT CAST(message_id AS CHAR) id FROM trip_facts WHERE id=(SELECT current_fact_id FROM trips WHERE id=?)",
+    [manual.tripId],
+  );
+  const readback = await unit.run((tx) =>
+    modules.trips!.sourceEvidenceInTransaction(tx, messages[0]!.id),
+  );
+  expect(readback?.trailers.items[0]).toMatchObject({
+    status: "known",
+    value: { entityId: type.id, identityKind: "type" },
+  });
+  const states = await unit.run((tx) =>
+    modules.trips!.statesInTransaction(tx, [manual.tripId, original.canonicalTripId!]),
+  );
+  await modules.reconciliation!.merge(director, newId(), {
+    primaryTripId: manual.tripId,
+    secondaryTripId: original.canonicalTripId!,
+    primaryVersion: states.find((value) => value.id === manual.tripId)!.version,
+    secondaryVersion: states.find((value) => value.id === original.canonicalTripId)!.version,
+    reason: "Fictional same typed journey",
+  });
+  await clearAdmission();
+  const merged = (await results([sourceRequest(p)])).items[0]!;
+  expect(merged.canonicalTripId).toBe(manual.tripId);
+  expect(merged.assessmentBasis).toBe("predecessor");
+  expect(merged.assessment!.limits!.trailers.basis).toBe("type");
+  expect(merged.assessment!.rules.find((value) => value.rule === "trailer_types")).toMatchObject({
+    observedIds: [type.id],
+  });
+  expect(merged.assessment!.trailerDisplay).toEqual([
+    expect.objectContaining({ id: type.id, identityKind: "type", nameEn: type.nameEn }),
+  ]);
+  const retained = immutableAssessment(merged.assessment);
+  await catalog.patch(director, "trailers", variant.id, newId(), { trailerTypeId: null });
+  expect(immutableAssessment((await results([sourceRequest(p)])).items[0]!.assessment)).toEqual(
+    retained,
+  );
 });

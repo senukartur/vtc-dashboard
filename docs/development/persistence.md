@@ -210,4 +210,4 @@ Apply through the locked migration runner. A partial DDL failure uses the existi
 
 ### Telemetry companion ordering
 
-VTC-164 adds 0037 after the unchanged 0000–0036 prefix: an explicitly false token grant and a restrictive per-owner ordering row. [Migration rollout/recovery](../../packages/db/migrations/README.md) requires prepared runtime/worker grants before new producers run, independently of companion opt-in. Domain readers never create ordering rows or repair history. Synthetic upgrade/recovery tests retain the published prefix, old token hashes/ingest scope, immutable decisions and sticky partial-DDL refusal.
+VTC-164 adds 0038 after the unchanged 0000–0037 prefix: an explicitly false token grant and a restrictive per-owner ordering row. [Migration rollout/recovery](../../packages/db/migrations/README.md) requires prepared runtime/worker grants before new producers run, independently of companion opt-in. Domain readers never create ordering rows or repair history. Synthetic upgrade/recovery tests retain the published prefix, old token hashes/ingest scope, immutable decisions and sticky partial-DDL refusal.

@@ -47,6 +47,8 @@
     "event_attendances": ["SELECT"],
     "event_attendance_revisions": ["SELECT"],
     "manual_correction_requests": ["SELECT"],
-    "reconciliation_candidates": ["SELECT", "INSERT", "UPDATE(active)"]
+    "reconciliation_candidates": ["SELECT", "INSERT", "UPDATE(active)"],
+    "catalog_trailer_types": ["SELECT"],
+    "qualification_level_trailer_types": ["SELECT"]
   }
 }

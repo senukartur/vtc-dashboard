@@ -68,6 +68,8 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Exact canonical aggregate distance, matching the owning progress Decimal output. Unlike individual DECIMAL(38,18) values, SUM may exceed20 integer digits. Output only. */
+        AggregateDecimal: string;
         Assessment: {
             assessedSource: components["schemas"]["SourceIdentity"] | null;
             assignmentId: string | null;
@@ -93,6 +95,7 @@ export interface components {
             sourceEventId: string | null;
             sourceMessageId: string | null;
             sourceRevision: number | null;
+            trailerComparison: components["schemas"]["TrailerComparison"] | null;
             trailerDisplay: components["schemas"]["TrailerDisplay"][];
         };
         Assignment: {
@@ -169,6 +172,11 @@ export interface components {
             massMaxKg: string | null;
             massMinKg: string | null;
             trailers: {
+                /**
+                 * @description Absent means legacy variant/common-model comparison. Type selects the semantic type dictionary; a saved basis is never replaced by current classification.
+                 * @enum {string}
+                 */
+                basis?: "variant" | "type";
                 /** @enum {string} */
                 mode: "any" | "selected";
                 typeIds: string[];
@@ -252,7 +260,7 @@ export interface components {
         Progress: {
             conditions: components["schemas"]["Conditions"];
             conditionsMet: boolean;
-            creditedDistanceM: string;
+            creditedDistanceM: components["schemas"]["AggregateDecimal"];
             creditedTrips: number;
             nextLevel: {
                 /** Format: uuid */
@@ -309,12 +317,14 @@ export interface components {
             requestedEventId: string;
             requestedRevision: number;
             requestedSourceMessageId: string | null;
+            /** @description Durable monotonic domain owner counter. Presentation-only changes leave it equal. */
             resultRevision: string;
             source: components["schemas"]["SourceIdentity"];
             sourceOutcome: ("open" | "delivered" | "cancelled" | "none") | null;
             /** @enum {string} */
             state: "not_received" | "processing" | "review" | "decided";
             unchanged: boolean;
+            /** @description Opaque validator including all current presentation content except asOf. Equal domain revisions may have different versions; never sort this value. */
             version: components["schemas"]["ResultVersion"];
         };
         ResultBatch: {
@@ -401,6 +411,18 @@ export interface components {
             revision: number;
             source: components["schemas"]["SourceIdentity"];
         };
+        /** @description Complete deterministically ordered saved QualificationSnapshot.trailerGroups. No current lookup or truncation; omitted mapping keys retain literal-ID fallback. Null on Assessment means old mapping unavailable. */
+        TrailerComparison: {
+            /** @enum {string} */
+            basis: "variant" | "type";
+            entries: {
+                comparisonIdentity: components["schemas"]["TrailerComparisonIdentity"];
+                /** Format: uuid */
+                id: string;
+            }[];
+        };
+        /** @description Exact saved ASCII comparison token. undefined means unclassified at assessment; common contains the original model bytes in hexadecimal. */
+        TrailerComparisonIdentity: string;
         TrailerDisplay: {
             /**
              * Format: date-time
@@ -409,10 +431,23 @@ export interface components {
             asOf: string;
             /** @constant */
             basis: "current_catalog";
+            /** @description Current variant classification only, never the retained comparison mapping. Semantic identities are not_applicable; missing metadata is unavailable. */
+            classification: {
+                /** @constant */
+                state: "classified";
+                /** Format: uuid */
+                typeId: string;
+            } | {
+                /** @enum {string} */
+                state: "unclassified" | "not_applicable" | "unavailable";
+            };
             code: string | null;
+            /** @description Current legacy common-model presentation only; always null for a semantic type identity. */
             groupCode: string | null;
             /** Format: uuid */
             id: string;
+            /** @enum {string} */
+            identityKind: "variant" | "type" | "unavailable";
             nameEn: string | null;
             nameRu: string | null;
         };

@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "03b2ed3f-301f-4357-8239-1dca3cc558ff",
+  "id": "53cdd1b9-3084-4cc6-b0c3-cb62d25b64ae",
   "prevId": "23b48e4b-9f4b-4efe-a6d0-72b6c726044e",
   "tables": {
     "audit_entries": {
@@ -2387,6 +2387,61 @@
         }
       }
     },
+    "qualification_level_trailer_types": {
+      "name": "qualification_level_trailer_types",
+      "columns": {
+        "level_id": {
+          "name": "level_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "game": {
+          "name": "game",
+          "type": "enum('ets2','ats')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "trailer_id": {
+          "name": "trailer_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "qual_level_type_level_fk": {
+          "name": "qual_level_type_level_fk",
+          "tableFrom": "qualification_level_trailer_types",
+          "tableTo": "qualification_levels",
+          "columnsFrom": ["level_id", "game"],
+          "columnsTo": ["id", "game"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "qual_level_type_catalog_fk": {
+          "name": "qual_level_type_catalog_fk",
+          "tableFrom": "qualification_level_trailer_types",
+          "tableTo": "catalog_trailer_types",
+          "columnsFrom": ["trailer_id", "game"],
+          "columnsTo": ["id", "game"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "qualification_level_trailer_types_level_id_trailer_id_pk": {
+          "name": "qualification_level_trailer_types_level_id_trailer_id_pk",
+          "columns": ["level_id", "trailer_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
     "qualification_level_trailers": {
       "name": "qualification_level_trailers",
       "columns": {
@@ -2515,6 +2570,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'any'"
+        },
+        "trailer_basis": {
+          "name": "trailer_basis",
+          "type": "enum('variant','type')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'variant'"
         },
         "adr_mode": {
           "name": "adr_mode",
@@ -3866,6 +3929,67 @@
         }
       }
     },
+    "catalog_trailer_types": {
+      "name": "catalog_trailer_types",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "game": {
+          "name": "game",
+          "type": "enum('ets2','ats')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "code": {
+          "name": "code",
+          "type": "varbinary(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name_en": {
+          "name": "name_en",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name_ru": {
+          "name": "name_ru",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "catalog_trailer_type_game_code": {
+          "name": "catalog_trailer_type_game_code",
+          "columns": ["game", "code"],
+          "isUnique": true
+        },
+        "catalog_trailer_type_id_game": {
+          "name": "catalog_trailer_type_id_game",
+          "columns": ["id", "game"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "catalog_trailer_types_id": {
+          "name": "catalog_trailer_types_id",
+          "columns": ["id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
     "catalog_trailers": {
       "name": "catalog_trailers",
       "columns": {
@@ -3893,6 +4017,13 @@
         "common_trailer": {
           "name": "common_trailer",
           "type": "varbinary(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "trailer_type_id": {
+          "name": "trailer_type_id",
+          "type": "binary(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -3953,6 +4084,15 @@
         }
       },
       "foreignKeys": {
+        "catalog_trailer_type_fk": {
+          "name": "catalog_trailer_type_fk",
+          "tableFrom": "catalog_trailers",
+          "tableTo": "catalog_trailer_types",
+          "columnsFrom": ["trailer_type_id", "game"],
+          "columnsTo": ["id", "game"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "catalog_trailer_dlc_fk": {
           "name": "catalog_trailer_dlc_fk",
           "tableFrom": "catalog_trailers",
@@ -4521,6 +4661,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "trailer_type_id": {
+          "name": "trailer_type_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "source_field": {
           "name": "source_field",
           "type": "varchar(128)",
@@ -4555,6 +4702,15 @@
           "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
+        },
+        "trip_trailer_type_fk": {
+          "name": "trip_trailer_type_fk",
+          "tableFrom": "trip_fact_trailers",
+          "tableTo": "catalog_trailer_types",
+          "columnsFrom": ["trailer_type_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -4571,7 +4727,7 @@
         },
         "trip_trailer_shape": {
           "name": "trip_trailer_shape",
-          "value": "(`trip_fact_trailers`.`trailer_id` IS NULL AND `trip_fact_trailers`.`source_field` IS NULL AND `trip_fact_trailers`.`unknown_reason` IS NOT NULL) OR (`trip_fact_trailers`.`trailer_id` IS NOT NULL AND `trip_fact_trailers`.`source_field` IS NOT NULL AND `trip_fact_trailers`.`unknown_reason` IS NULL)"
+          "value": "(`trip_fact_trailers`.`trailer_id` IS NULL AND `trip_fact_trailers`.`trailer_type_id` IS NULL AND `trip_fact_trailers`.`source_field` IS NULL AND `trip_fact_trailers`.`unknown_reason` IS NOT NULL) OR (((`trip_fact_trailers`.`trailer_id` IS NOT NULL AND `trip_fact_trailers`.`trailer_type_id` IS NULL) OR (`trip_fact_trailers`.`trailer_id` IS NULL AND `trip_fact_trailers`.`trailer_type_id` IS NOT NULL)) AND `trip_fact_trailers`.`source_field` IS NOT NULL AND `trip_fact_trailers`.`unknown_reason` IS NULL)"
         }
       }
     },
@@ -5066,45 +5222,6 @@
         "trip_history_id": {
           "name": "trip_history_id",
           "columns": ["id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "trip_owner_revisions": {
-      "name": "trip_owner_revisions",
-      "columns": {
-        "owner_id": {
-          "name": "owner_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "bigint unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "trip_owner_revisions_owner_id_identity_memberships_user_id_fk": {
-          "name": "trip_owner_revisions_owner_id_identity_memberships_user_id_fk",
-          "tableFrom": "trip_owner_revisions",
-          "tableTo": "identity_memberships",
-          "columnsFrom": ["owner_id"],
-          "columnsTo": ["user_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "trip_owner_revisions_owner_id": {
-          "name": "trip_owner_revisions_owner_id",
-          "columns": ["owner_id"]
         }
       },
       "uniqueConstraints": {},
@@ -5766,14 +5883,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "companion": {
-          "name": "companion",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
         },
         "label": {
           "name": "label",
@@ -7455,6 +7564,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "prescribed_trailer_kind_id": {
+          "name": "prescribed_trailer_kind_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "prescribed_mass_kg": {
           "name": "prescribed_mass_kg",
           "type": "decimal(38,18)",
@@ -7591,6 +7707,15 @@
           "columnsTo": ["id", "game"],
           "onDelete": "restrict",
           "onUpdate": "no action"
+        },
+        "event_draft_type_fk": {
+          "name": "event_draft_type_fk",
+          "tableFrom": "event_drafts",
+          "tableTo": "catalog_trailer_types",
+          "columnsFrom": ["prescribed_trailer_kind_id", "game"],
+          "columnsTo": ["id", "game"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -7601,6 +7726,10 @@
       },
       "uniqueConstraints": {},
       "checkConstraint": {
+        "event_draft_trailer_identity": {
+          "name": "event_draft_trailer_identity",
+          "value": "`event_drafts`.`prescribed_trailer_type_id` IS NULL OR `event_drafts`.`prescribed_trailer_kind_id` IS NULL"
+        },
         "event_draft_version_positive": {
           "name": "event_draft_version_positive",
           "value": "`event_drafts`.`version`>0"
@@ -7615,7 +7744,7 @@
         },
         "event_draft_catalog_game": {
           "name": "event_draft_catalog_game",
-          "value": "`event_drafts`.`game` IS NOT NULL OR (\n      `event_drafts`.`origin_city_id` IS NULL AND `event_drafts`.`destination_city_id` IS NULL\n      AND `event_drafts`.`origin_depot_id` IS NULL AND `event_drafts`.`destination_depot_id` IS NULL\n      AND `event_drafts`.`prescribed_cargo_id` IS NULL AND `event_drafts`.`prescribed_trailer_type_id` IS NULL)"
+          "value": "`event_drafts`.`game` IS NOT NULL OR (\n      `event_drafts`.`origin_city_id` IS NULL AND `event_drafts`.`destination_city_id` IS NULL\n      AND `event_drafts`.`origin_depot_id` IS NULL AND `event_drafts`.`destination_depot_id` IS NULL\n      AND `event_drafts`.`prescribed_cargo_id` IS NULL AND `event_drafts`.`prescribed_trailer_type_id` IS NULL AND `event_drafts`.`prescribed_trailer_kind_id` IS NULL)"
         }
       }
     },
@@ -8547,6 +8676,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "prescribed_trailer_kind_id": {
+          "name": "prescribed_trailer_kind_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "prescribed_mass_kg": {
           "name": "prescribed_mass_kg",
           "type": "decimal(38,18)",
@@ -8628,6 +8764,15 @@
           "columnsTo": ["id", "game"],
           "onDelete": "restrict",
           "onUpdate": "no action"
+        },
+        "event_revision_type_fk": {
+          "name": "event_revision_type_fk",
+          "tableFrom": "event_revisions",
+          "tableTo": "catalog_trailer_types",
+          "columnsFrom": ["prescribed_trailer_kind_id", "game"],
+          "columnsTo": ["id", "game"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -8641,6 +8786,10 @@
         "event_time_order": {
           "name": "event_time_order",
           "value": "`event_revisions`.`meeting_at`<=`event_revisions`.`starts_at` AND (`event_revisions`.`ends_at` IS NULL OR `event_revisions`.`ends_at`>=`event_revisions`.`starts_at`)"
+        },
+        "event_revision_trailer_identity": {
+          "name": "event_revision_trailer_identity",
+          "value": "`event_revisions`.`prescribed_trailer_id` IS NULL OR `event_revisions`.`prescribed_trailer_kind_id` IS NULL"
         },
         "event_mass_nonnegative": {
           "name": "event_mass_nonnegative",

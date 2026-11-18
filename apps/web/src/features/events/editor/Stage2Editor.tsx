@@ -191,7 +191,7 @@ function EventEditorForm({
   const originDepot = useRetainedDepot(form.game, form.origin, locale);
   const destinationDepot = useRetainedDepot(form.game, form.destination, locale);
   const cargo = useEditorCatalogItem("cargoes", form.prescribedCargoId, locale);
-  const trailer = useEditorCatalogItem("trailers", form.prescribedTrailerTypeId, locale);
+  const trailer = useEditorCatalogItem("trailer-types", form.prescribedTrailerTypeId, locale);
   const originHint = event?.origin?.entityId === form.origin.cityId ? event?.origin : null;
   const destinationHint =
     event?.destination?.entityId === form.destination.cityId ? event?.destination : null;
@@ -234,7 +234,7 @@ function EventEditorForm({
     locale,
   );
   const savedTrailer = useEditorCatalogItem(
-    "trailers",
+    "trailer-types",
     overlapping("prescribedTrailerTypeId")?.saved ?? null,
     locale,
   );

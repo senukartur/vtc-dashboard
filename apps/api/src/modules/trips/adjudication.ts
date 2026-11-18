@@ -185,16 +185,21 @@ export function createTripAdjudication(
               }
             : known(cargo.adrClass, "adrClass");
       }
-      if (changes.trailerTypeId)
+      if (changes.trailerTypeId) {
+        const trailer = await select(changes.trailerTypeId, "trailer", base.trailers.items[0]);
         evidence.trailers = {
           complete: true,
           items: [
-            reference(
-              (await select(changes.trailerTypeId, "trailer", base.trailers.items[0])).id,
+            known(
+              {
+                entityId: trailer.id,
+                ...(trailer.identityKind ? { identityKind: trailer.identityKind } : {}),
+              },
               "trailer",
             ),
           ],
         };
+      }
       if (changes.cargoMassKg)
         evidence.cargoMassKg = known(decimal(changes.cargoMassKg), "cargoMassKg");
       if (changes.actualDistanceM) {

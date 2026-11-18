@@ -102,6 +102,15 @@ export function createTelemetryCompanion(
               now().toISOString(),
             )
           : [],
+      trailerComparison:
+        snapshot?.trailerGroups && snapshot.limits
+          ? {
+              basis: snapshot.limits.trailers.basis ?? "variant",
+              entries: Object.entries(snapshot.trailerGroups)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([id, comparisonIdentity]) => ({ id, comparisonIdentity })),
+            }
+          : null,
       materialIdentity: row.factId,
       assignmentId: row.assignmentId,
       level:
@@ -112,7 +121,7 @@ export function createTelemetryCompanion(
         ? {
             ...snapshot.limits,
             trailers: {
-              mode: snapshot.limits.trailers.mode,
+              ...snapshot.limits.trailers,
               typeIds: [...snapshot.limits.trailers.typeIds],
             },
             adr: { mode: snapshot.limits.adr.mode, classes: [...snapshot.limits.adr.classes] },
@@ -213,12 +222,17 @@ export function createTelemetryCompanion(
           const facts = await previewFacts(tx, token.ownerId, input, ports.catalogs),
             groups =
               assignment && ports.catalogs
-                ? await ports.catalogs.trailerGroupsInTransaction(tx, input.game, [
-                    ...assignment.limits.trailers.typeIds,
-                    ...facts.trailers.items.flatMap((f) =>
-                      f.status === "known" ? [f.value.entityId] : [],
-                    ),
-                  ])
+                ? await ports.catalogs.trailerGroupsInTransaction(
+                    tx,
+                    input.game,
+                    [
+                      ...assignment.limits.trailers.typeIds,
+                      ...facts.trailers.items.flatMap((f) =>
+                        f.status === "known" ? [f.value.entityId] : [],
+                      ),
+                    ],
+                    assignment.limits.trailers.basis,
+                  )
                 : {};
           let eventExempt = false,
             eventUnresolved = false;
@@ -303,7 +317,6 @@ export function createTelemetryCompanion(
           const revision = await ports.trips.companion.revision.read(tx, token.ownerId),
             items: S["Result"][] = [];
           for (const request of input.items) {
-            const version = `${revision}.${sign([scope, revision, enabled(), request.source, request.revision, request.eventId])}`;
             const found = await ports.trips.companion.source(tx, token.ownerId, request);
             const retained =
               found && ports.assessments ? await ports.assessments.read(tx, found.root) : null;
@@ -318,6 +331,10 @@ export function createTelemetryCompanion(
                 value.sourceMessageId !== found?.requested?.id ||
                 pending ||
                 !!found?.root.correctionPending);
+            const presentation = (value?.trailerDisplay ?? [])
+              .map(({ asOf: _asOf, ...display }) => display)
+              .sort((a, b) => a.id.localeCompare(b.id));
+            const version = `${revision}.${sign([scope, revision, enabled(), request.source, request.revision, request.eventId, presentation])}`;
             const unchanged = request.ifVersion === version;
             items.push({
               source: request.source,
