@@ -83,7 +83,7 @@ export function ManualCatalogField({
       <CatalogSelector
         label={t(name)}
         game={game}
-        kind={name === "cargo" ? "cargo" : name === "trailerType" ? "trailer" : "city"}
+        kind={name === "cargo" ? "cargo" : name === "trailerType" ? "trailer-type" : "city"}
         value={value?.status === "resolved" ? value.entityId : null}
         onChange={(v) => onChange(v ? { status: "resolved", entityId: v } : undefined)}
         extraRow={{

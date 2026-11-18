@@ -26,6 +26,7 @@ interface Draft {
   distanceMin: string;
   distanceMax: string;
   trailerMode: "any" | "selected";
+  trailerBasis: "variant" | "type";
   trailers: Trailer[];
   adrMode: "forbidden" | "selected" | "any";
   adrClasses: AdrClass[];
@@ -137,6 +138,7 @@ function initial(detail: LevelDetail | null, ladder: Level[], locale: "ru" | "en
     distanceMin: displayUnits(limits?.distanceMinM ?? null, locale),
     distanceMax: displayUnits(limits?.distanceMaxM ?? null, locale),
     trailerMode: limits?.trailers.mode ?? "any",
+    trailerBasis: detail ? (limits?.trailers.basis ?? "variant") : "type",
     trailers:
       limits?.trailers.types.map((type) => ({ id: type.entityId, label: type.label })) ?? [],
     adrMode: limits?.adr.mode ?? "any",
@@ -237,6 +239,7 @@ function Editor({
     distanceMinM: amounts.distanceMin ?? null,
     distanceMaxM: amounts.distanceMax ?? null,
     trailers: {
+      basis: draft.trailerBasis,
       mode: draft.trailerMode,
       types:
         draft.trailerMode === "selected"
@@ -260,6 +263,7 @@ function Editor({
       distanceMinM: amounts.distanceMin ?? null,
       distanceMaxM: amounts.distanceMax ?? null,
       trailers: {
+        basis: draft.trailerBasis,
         mode: draft.trailerMode,
         typeIds:
           draft.trailerMode === "selected" ? draft.trailers.map((trailer) => trailer.id) : [],
@@ -392,13 +396,29 @@ function Editor({
               <p className="qualification-muted">
                 {t(draft.trailerMode === "any" ? "trailersHintAny" : "trailersHintSelected")}
               </p>
+              {draft.trailerBasis === "variant" && (
+                <div className="stack">
+                  <p>{t("legacyTrailers")}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setDraft((previous) => ({ ...previous, trailerBasis: "type", trailers: [] }));
+                      setPicking(null);
+                    }}
+                  >
+                    {t("useTrailerTypes")}
+                  </Button>
+                </div>
+              )}
               {draft.trailerMode === "selected" && (
                 <div className="stack">
                   <div className="qualification-picker">
                     <CatalogSelector
                       label={t("trailerPick")}
                       game={game}
-                      kind="trailer"
+                      kind="trailer-type"
+                      disabled={draft.trailerBasis === "variant"}
                       value={picking}
                       onChange={setPicking}
                     />
@@ -634,7 +654,7 @@ function TrailerChip({
     locale = useLocale(),
     query = useCatalogQuery(
       ["qualification-trailer", trailer.id, locale],
-      `/catalogs/trailers/${trailer.id}?locale=${locale}`,
+      `/catalogs/trailer-types/${trailer.id}?locale=${locale}`,
       itemSchema,
       trailer.label === null,
     ),

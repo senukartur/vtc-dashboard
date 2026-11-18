@@ -89,6 +89,11 @@ beforeAll(async () => {
   const identity = { config, authenticate: async () => actor } as unknown as Identity;
   const catalogs = {
     config: { cursorKey: "1".repeat(64) },
+    trailerTypes: async (_actor: Actor, query: unknown) => {
+      calls.push({ op: "trailerTypes", args: [query] });
+      return { items: [], total: 0, nextCursor: null };
+    },
+    trailerType: async () => companyItem,
     authorize: async () => {
       if (authorizeError) throw authorizeError;
     },
@@ -171,6 +176,37 @@ beforeEach(() => {
   calls.length = 0;
   authorizeError = null;
   logoMatcher = null;
+});
+
+test("semantic type reads use closed paginated routes and the normal read authority", async () => {
+  const headers = { cookie: "fixture=placeholder" };
+  expect(
+    (
+      await app.inject({
+        url: "/api/v1/catalogs/trailer-types?game=ets2&locale=ru&limit=1",
+        headers,
+      })
+    ).statusCode,
+  ).toBe(200);
+  expect(calls).toContainEqual({
+    op: "trailerTypes",
+    args: [{ game: "ets2", locale: "ru", limit: 1 }],
+  });
+  expect(
+    (
+      await app.inject({
+        url: "/api/v1/catalogs/trailer-types?game=ets2&includeHidden=true",
+        headers,
+      })
+    ).statusCode,
+  ).toBe(422);
+  expect(
+    (await app.inject({ url: `/api/v1/catalogs/trailer-types/${id}`, headers })).statusCode,
+  ).toBe(200);
+  authorizeError = identityError(403);
+  expect(
+    (await app.inject({ url: "/api/v1/catalogs/trailer-types?game=ets2", headers })).statusCode,
+  ).toBe(403);
 });
 
 test("a preview admits one bounded file and passes its bytes through unchanged", async () => {

@@ -167,6 +167,7 @@ export type CatalogMockOptions = {
   displayTimezone?: string;
   /** Rows per list and game; other lists keep the defaults for that game. */
   rows?: Partial<Record<CatalogGame, Partial<Record<CatalogListName, S["CatalogItem"][]>>>>;
+  trailerTypes?: S["CatalogItem"][];
   /** Depots per game. */
   depots?: Partial<Record<CatalogGame, CatalogDepotRow[]>>;
   /** Company ids whose logo image answers with an error, so the placeholder shows. */
@@ -323,6 +324,20 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
       );
       return json(mockPage(visible, url.searchParams, options.paginate));
     }
+    if (path.startsWith("/api/v1/catalogs/trailer-types")) {
+      const rows = options.trailerTypes ?? [],
+        id = path.split("/")[5];
+      const game = url.searchParams.get("game") === "ats" ? "ats" : "ets2";
+      const legacy = [
+        ...(options.rows?.ets2?.trailers ?? defaultRows(locale).trailers),
+        ...(options.rows?.ats?.trailers ?? []),
+      ];
+      return json(
+        id
+          ? envelope([...rows, ...legacy].find((row) => row.id === id))
+          : catalogList(rows.filter((row) => row.game === game)),
+      );
+    }
     const match =
       /^\/api\/v1\/catalogs\/(dlcs|regions|cities|companies|cargoes|trailers)(?:\/([^/]+))?$/.exec(
         path,
@@ -362,6 +377,10 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
         return route.fulfill({ status: 422, json: { error: { code: "PRIVATE_SENTINEL" } } });
       const visible = rows.filter(
         (r) =>
+          (!url.searchParams.get("trailerTypeId") ||
+            (url.searchParams.get("trailerTypeId") === "undefined"
+              ? !r.trailerTypeId
+              : r.trailerTypeId === url.searchParams.get("trailerTypeId"))) &&
           (hiddenOnly ? r.hidden : includeHidden || !r.hidden) &&
           (!untranslated || !r.nameRu) &&
           (!missingLogo || !r.logo) &&

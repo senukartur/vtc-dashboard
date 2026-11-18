@@ -33,6 +33,42 @@ const open: QualificationLimits = {
   adr: { mode: "any", classes: [] },
   hardModeRequired: false,
 };
+test("semantic types accept classified variants, hold unclassified bodies, and never expand legacy rules", () => {
+  const limits: QualificationLimits = {
+    ...open,
+    trailers: { basis: "type", mode: "selected", typeIds: [source] },
+  };
+  const mapping = {
+    [source]: `type:${source}`,
+    [trailerA]: `type:${source}`,
+    [trailerB]: "type:other",
+  };
+  expect(checkTrip(limits, facts(), mapping).outcome).toBe("pass");
+  expect(checkTrip(limits, facts(), { ...mapping, [trailerA]: "undefined" }).outcome).toBe(
+    "unknown",
+  );
+  expect(
+    checkTrip(
+      limits,
+      facts({ trailers: { complete: true, items: [known({ entityId: trailerB })] } }),
+      mapping,
+    ).outcome,
+  ).toBe("fail");
+  const legacy: QualificationLimits = {
+    ...open,
+    trailers: { mode: "selected", typeIds: [trailerA] },
+  };
+  const typed = known({ entityId: source, identityKind: "type" as const });
+  expect(checkTrip(legacy, facts({ trailers: { complete: true, items: [typed] } })).outcome).toBe(
+    "unknown",
+  );
+  expect(
+    checkTrip(
+      legacy,
+      facts({ trailers: { complete: true, items: [typed, known({ entityId: trailerB })] } }),
+    ).outcome,
+  ).toBe("fail");
+});
 function facts(overrides: Partial<NormalizedTripEvidence> = {}): NormalizedTripEvidence {
   return {
     sourceRecordId: source,

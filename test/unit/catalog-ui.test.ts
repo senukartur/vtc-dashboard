@@ -90,6 +90,7 @@ test("a selector offers visible same-game rows only, and a hidden row stays read
     city: "cities",
     cargo: "cargoes",
     trailer: "trailers",
+    "trailer-type": "trailer-types",
     company: "companies",
   });
 });

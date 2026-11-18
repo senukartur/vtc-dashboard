@@ -38,7 +38,10 @@ export function CatalogCards({
               <span>{item.display.label}</span> <RowBadges list={list} item={item} />
             </div>
             <span className="catalog-card-meta">
-              <code>{item.commonTrailer ?? item.code}</code>
+              <code>{item.code}</code>
+              {list === "trailers"
+                ? ` · ${t("fieldType")}: ${item.trailerType?.label ?? t("undefinedType")}`
+                : ""}
               {list === "cities" && item.nameNative ? ` · ${item.nameNative}` : ""}
               {list !== "dlcs" ? ` · ${item.dlc?.label ?? t("baseGame")}` : ""}
               {list === "cities" && item.region ? ` · ${item.region.label}` : ""}

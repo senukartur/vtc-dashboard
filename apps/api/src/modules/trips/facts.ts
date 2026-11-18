@@ -151,7 +151,12 @@ export function createFactRepository(unit: UnitOfWork) {
             f.trailers.items.map((item, position) => ({
               tripFactId: f.factRevisionId,
               position,
-              trailerId: entity(item),
+              trailerId:
+                item.status === "known" && item.value.identityKind === "type" ? null : entity(item),
+              trailerTypeId:
+                item.status === "known" && item.value.identityKind === "type"
+                  ? item.value.entityId
+                  : null,
               sourceField: item.status === "known" ? item.sourceField : null,
               unknownReason: item.status === "unknown" ? item.reasonCode : null,
             })),
@@ -282,10 +287,11 @@ export function createFactRepository(unit: UnitOfWork) {
             changes.trailerTypeId
               ? actualTrailers.length !== 1 ||
                 !stored.trailersComplete ||
-                actualTrailers[0]?.trailerId !== changes.trailerTypeId
+                (actualTrailers[0]?.trailerId ?? actualTrailers[0]?.trailerTypeId) !==
+                  changes.trailerTypeId
               : stored.trailersComplete !== base.trailersComplete ||
-                JSON.stringify(actualTrailers.map((t) => t.trailerId)) !==
-                  JSON.stringify(baseTrailers.map((t) => t.trailerId))
+                JSON.stringify(actualTrailers.map((t) => [t.trailerId, t.trailerTypeId])) !==
+                  JSON.stringify(baseTrailers.map((t) => [t.trailerId, t.trailerTypeId]))
           )
             throw new Error("DERIVED_TRAILER_PROVENANCE_INVALID");
         }
@@ -318,7 +324,8 @@ export function createFactRepository(unit: UnitOfWork) {
         )
           throw new Error("SOURCE_TRAILER_HISTORY_INCOMPLETE");
         const items: Fact<TripEntity>[] = orderedTrailers.map((t) => {
-          if (t.trailerId === null)
+          const entityId = t.trailerId ?? t.trailerTypeId;
+          if (entityId === null)
             return {
               status: "unknown",
               reasonCode: t.unknownReason ?? "normalized_unknown",
@@ -327,7 +334,10 @@ export function createFactRepository(unit: UnitOfWork) {
           if (!t.sourceField) throw new Error("SOURCE_TRAILER_REF_INCONSISTENT");
           return {
             status: "known",
-            value: { entityId: t.trailerId },
+            value: {
+              entityId,
+              ...(t.trailerTypeId ? { identityKind: "type" as const } : {}),
+            },
             sourceRecordId: messageId,
             sourceField: t.sourceField,
           };

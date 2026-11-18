@@ -17,7 +17,7 @@ function ParentFilter({
   emptyLabel,
   extra,
 }: {
-  list: "dlcs" | "regions";
+  list: "dlcs" | "regions" | "trailer-types";
   game: Game;
   value: string;
   onChange: (value: string) => void;
@@ -30,7 +30,7 @@ function ParentFilter({
   const query = useCatalogPages(
     ["filter", list, game, locale],
     `/catalogs/${list}`,
-    { game, locale, includeHidden: "true" },
+    { game, locale, ...(list === "trailer-types" ? {} : { includeHidden: "true" }) },
     listSchema,
   );
   const items = query.data?.pages.flatMap((p) => p.data.data.items) ?? [];
@@ -115,6 +115,17 @@ export function CatalogToolbar({
             label={t("dlcFilter")}
             emptyLabel={t("allDlcs")}
             extra={{ value: "base", label: t("baseGame") }}
+          />
+        )}
+        {tab === "trailers" && (
+          <ParentFilter
+            list="trailer-types"
+            game={filters.game}
+            value={filters.trailerType ?? ""}
+            onChange={(trailerType) => onChange({ trailerType })}
+            label={t("fieldType")}
+            emptyLabel={t("allTypes")}
+            extra={{ value: "undefined", label: t("undefinedType") }}
           />
         )}
         {tab === "cities" && (

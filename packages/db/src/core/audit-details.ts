@@ -208,7 +208,7 @@ export type QualificationLevelValues = {
     massMaxKg: string | null;
     distanceMinM: string | null;
     distanceMaxM: string | null;
-    trailers: { mode: "any" | "selected"; typeIds: string[] };
+    trailers: { basis?: "variant" | "type"; mode: "any" | "selected"; typeIds: string[] };
     adr: { mode: "forbidden" | "selected" | "any"; classes: ReturnType<typeof adrClass>[] };
     hardModeRequired: boolean;
   };
@@ -322,7 +322,7 @@ function levelValues(value: unknown): QualificationLevelValues {
     ],
     invalidDetails,
   );
-  const trailers = auditObject(limits.trailers, ["mode", "typeIds"], invalidDetails);
+  const trailers = auditObject(limits.trailers, ["basis", "mode", "typeIds"], invalidDetails);
   const adr = auditObject(limits.adr, ["mode", "classes"], invalidDetails);
   const conditions = auditObject(
     input.conditions,
@@ -338,6 +338,7 @@ function levelValues(value: unknown): QualificationLevelValues {
       distanceMinM: nullable(amount)(limits.distanceMinM),
       distanceMaxM: nullable(amount)(limits.distanceMaxM),
       trailers: {
+        ...("basis" in trailers ? { basis: oneOf("variant", "type")(trailers.basis) } : {}),
         mode: oneOf("any", "selected")(trailers.mode),
         typeIds: distinctList(trailers.typeIds, 100, id),
       },

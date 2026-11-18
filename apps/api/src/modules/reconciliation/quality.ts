@@ -36,10 +36,38 @@ function value(f: Evidence, key: string): unknown {
   const v = f[key as (typeof fields)[number]];
   return v?.status === "known" ? (typeof v.value === "object" ? v.value.entityId : v.value) : true;
 }
+/** Compare a manual semantic selection with a verified source variant, never two raw chains. */
+export function sameTrailerContext(
+  left: Evidence,
+  right: Evidence,
+  types: Readonly<Record<string, string>> = {},
+) {
+  const semantic =
+    left.provider !== right.provider &&
+    [left, right].some((f) =>
+      f.trailers.items.some(
+        (item) => item.status === "known" && item.value.identityKind === "type",
+      ),
+    );
+  const chain = (f: Evidence) =>
+    f.trailers.items.map((item) =>
+      item.status !== "known"
+        ? null
+        : !semantic
+          ? item.value.entityId
+          : item.value.identityKind === "type"
+            ? `type:${item.value.entityId}`
+            : types[item.value.entityId]?.startsWith("type:")
+              ? types[item.value.entityId]
+              : `variant:${item.value.entityId}`,
+    );
+  return canonicalJson(chain(left)) === canonicalJson(chain(right));
+}
 export function selectQuality(
   facts: readonly Evidence[],
   preferredId?: string | null,
   progression?: { fromFactId: string; toFactId: string },
+  trailerTypes: Readonly<Record<string, string>> = {},
 ) {
   const ordered = [...facts].sort((a, b) => a.factRevisionId.localeCompare(b.factRevisionId));
   let selected = ordered.find((f) => f.factRevisionId === preferredId) ?? ordered[0];
@@ -64,7 +92,9 @@ export function selectQuality(
             key,
           )
         ) &&
-        canonicalJson(value(selected as Evidence, key)) !== canonicalJson(value(next, key)),
+        (key === "trailers"
+          ? !sameTrailerContext(selected as Evidence, next, trailerTypes)
+          : canonicalJson(value(selected as Evidence, key)) !== canonicalJson(value(next, key))),
     );
     if (conflicts.length) {
       reasons.add("quality_supported_conflict");

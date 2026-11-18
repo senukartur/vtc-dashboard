@@ -47,6 +47,7 @@ export function CatalogSelector({
   extraRow,
   labelHidden = false,
   required = false,
+  disabled = false,
 }: {
   label: string;
   caption?: string | undefined;
@@ -59,6 +60,7 @@ export function CatalogSelector({
   /** Compact filters: the label stays the accessible name but shows only as the placeholder. */
   labelHidden?: boolean | undefined;
   required?: boolean;
+  disabled?: boolean;
 }) {
   const { t, i18n } = useTranslation("catalogs"),
     id = useId();
@@ -221,6 +223,7 @@ export function CatalogSelector({
       </Label>
       <div className="catalog-combobox">
         <Input
+          disabled={disabled}
           ref={inputRef}
           id={id}
           role="combobox"

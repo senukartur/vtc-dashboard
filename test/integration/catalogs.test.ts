@@ -130,7 +130,64 @@ const auditCount = async (operation: string) => {
   return Number(rows[0]?.n);
 };
 
-test("common trailers page once, search every body code and retain exact hidden telemetry recognition", async () => {
+test("semantic type assignment is game-scoped, row-scoped, filterable and importable without altering body codes", async () => {
+  const types = await catalogs.trailerTypes(driver, { game: "ets2", locale: "ru", limit: 100 });
+  const type = types.items.find((row) => row.code === "dryvan")!;
+  expect(type.display.label).toBe("Фургон");
+  const page = await catalogs.trailerTypes(driver, { game: "ets2", limit: 1 });
+  expect(page.total).toBe(21);
+  expect(page.nextCursor).not.toBeNull();
+  await expect(
+    catalogs.trailerTypes(driver, { game: "ats", limit: 1, cursor: page.nextCursor! }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  expect(await catalogs.get(driver, "trailers", type.id, "ru")).toMatchObject({
+    id: type.id,
+    display: { label: "Фургон", hidden: false },
+  });
+  const a = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_typed_a",
+    nameEn: "Fictional body",
+    commonTrailer: "fictional.shared",
+  });
+  const b = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_typed_b",
+    nameEn: "Fictional body",
+    commonTrailer: "fictional.shared",
+  });
+  expect((await catalogs.trailerType(driver, a.id)).id).toBe(a.id);
+  const file = csv("game,code,trailer_type_code", "ets2,_typed_a,dryvan");
+  const preview = await catalogs.previewImport(director, "trailers", file);
+  expect(preview).toMatchObject({ errors: 0, changed: 1 });
+  await catalogs.applyImport(director, "trailers", file, newId(), preview.token!);
+  expect(await catalogs.get(driver, "trailers", a.id, "ru")).toMatchObject({
+    code: a.code,
+    trailerTypeId: type.id,
+    trailerType: { label: "Фургон" },
+  });
+  expect((await catalogs.get(driver, "trailers", b.id)).trailerTypeId).toBeNull();
+  expect(
+    (await catalogs.list(driver, "trailers", { game: "ets2", trailerTypeId: type.id })).items.map(
+      (row) => row.id,
+    ),
+  ).toEqual([a.id]);
+  expect(
+    (
+      await catalogs.list(driver, "trailers", { game: "ets2", trailerTypeId: "undefined" })
+    ).items.map((row) => row.id),
+  ).toEqual([b.id]);
+  const ats = (await catalogs.trailerTypes(driver, { game: "ats", limit: 100 })).items[0]!;
+  await expect(
+    catalogs.patch(director, "trailers", a.id, newId(), { trailerTypeId: ats.id }),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  await catalogs.patch(director, "trailers", a.id, newId(), { trailerTypeId: null });
+  expect(
+    (await catalogs.list(driver, "trailers", { game: "ets2", trailerTypeId: "undefined" })).total,
+  ).toBe(2);
+});
+
+test("catalog lists retain every original body while legacy grouping remains recognizable", async () => {
   const a = await catalogs.create(director, "trailers", newId(), {
     game: "ets2",
     code: "_fiction_a",
@@ -155,18 +212,18 @@ test("common trailers page once, search every body code and retain exact hidden 
   expect(preview).toMatchObject({ errors: 0, changed: 2 });
   await catalogs.applyImport(director, "trailers", file, newId(), preview.token as string);
   const first = await catalogs.list(driver, "trailers", { game: "ets2", limit: 1 });
-  expect(first.total).toBe(2);
+  expect(first.total).toBe(3);
   const second = await catalogs.list(driver, "trailers", {
     game: "ets2",
     limit: 1,
     cursor: first.nextCursor as string,
   });
   expect(new Set([...first.items, ...second.items].map((item) => item.id)).size).toBe(2);
-  expect(second.nextCursor).toBeNull();
+  expect(second.nextCursor).not.toBeNull();
   const group = (await catalogs.list(driver, "trailers", { game: "ets2", search: "_fiction_b" }))
     .items[0];
   expect(group).toMatchObject({ commonTrailer: "trailer.fiction_car", variantCount: 2 });
-  expect((await catalogs.summary(driver, "ets2")).lists.trailers.visible).toBe(2);
+  expect((await catalogs.summary(driver, "ets2")).lists.trailers.visible).toBe(3);
   const original = await catalogs.get(driver, "trailers", b.id);
   expect(original).toMatchObject({ id: b.id, code: "_fiction_b", nameEn: b.nameEn });
   const names = csv("game,code,name_en", "ets2,_fiction_b,Fictional imported variant");
@@ -200,14 +257,14 @@ test("common trailers page once, search every body code and retain exact hidden 
   });
   expect(
     (await catalogs.list(driver, "trailers", { game: "ets2" })).items.map((item) => item.id),
-  ).toEqual([separate.id]);
+  ).toEqual(expect.arrayContaining([a.id, separate.id]));
   expect((await catalogs.list(driver, "trailers", { game: "ets2", hidden: "only" })).total).toBe(1);
   await unit.run(async (tx) => {
     const selections = await catalogs.selectionsInTransaction(
       tx,
       [a, b].map((row) => ({ kind: "trailer" as const, id: row.id })),
     );
-    expect(selections.get(a.id)?.hidden).toBe(true);
+    expect(selections.get(a.id)?.hidden).toBe(false);
     expect(selections.get(b.id)?.hidden).toBe(true);
     for (const row of [a, b])
       expect(
@@ -284,7 +341,7 @@ test("moving or detaching one grouped member preserves the other variants and ex
   expect((await catalogs.get(driver, "trailers", c.id)).commonTrailer).toBe(
     "trailer.fiction_second",
   );
-  expect((await catalogs.list(driver, "trailers", { game: "ets2" })).total).toBe(2);
+  expect((await catalogs.list(driver, "trailers", { game: "ets2" })).total).toBe(3);
   await unit.run(async (tx) => {
     for (const item of [a, b, c])
       expect(

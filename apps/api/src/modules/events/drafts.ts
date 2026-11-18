@@ -139,6 +139,7 @@ function definition(row: DraftRow, requiredDlcIds: string[]): DraftDefinition {
   return {
     row: fields({
       ...row,
+      prescribedTrailerTypeId: row.prescribedTrailerKindId ?? row.prescribedTrailerTypeId,
       prescribedMassKg: row.prescribedMassKg === null ? null : decimal(row.prescribedMassKg),
       distanceKm: row.distanceKm === null ? null : decimal(row.distanceKm),
     }),
@@ -165,6 +166,7 @@ function dto(
 }
 
 interface Ports {
+  semanticTrailer(tx: TxContext, id: string | null): Promise<boolean>;
   run<T>(command: (tx: TxContext) => Promise<T>): Promise<T>;
   authorize(
     tx: TxContext,
@@ -242,6 +244,14 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
   const at = () => now().toISOString();
   const receiptKey = Buffer.from(key, "hex");
 
+  async function trailerColumns(tx: TxContext, value: DraftDefinition) {
+    const id = value.row.prescribedTrailerTypeId;
+    const semantic = await ports.semanticTrailer(tx, id);
+    return {
+      prescribedTrailerTypeId: semantic ? null : id,
+      prescribedTrailerKindId: semantic ? id : null,
+    };
+  }
   function responseTag(requestTag: Buffer, result: DraftResult) {
     try {
       return createHmac("sha256", receiptKey)
@@ -442,6 +452,7 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
             .insert(eventDrafts)
             .values({
               ...value.row,
+              ...(await trailerColumns(tx, value)),
               eventId: id,
               version,
               updatedAt: time,
@@ -492,7 +503,13 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
             await c(tx).delete(eventDraftDlcs).where(eq(eventDraftDlcs.eventId, id));
             await c(tx)
               .update(eventDrafts)
-              .set({ ...value.row, version, updatedAt: time, updatedBy: actor.userId })
+              .set({
+                ...value.row,
+                ...(await trailerColumns(tx, value)),
+                version,
+                updatedAt: time,
+                updatedBy: actor.userId,
+              })
               .where(eq(eventDrafts.eventId, id));
             await storeDlcs(tx, id, value);
             await auditChange(tx, actor, id, time, value.row.title);

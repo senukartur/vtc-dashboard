@@ -42,7 +42,7 @@ const retired = [
   "qualification_rule_versions",
   "qualification_states",
 ];
-/** The three-table model: the old tables and every rule version reference are gone. */
+/** Simplified levels with separate legacy and semantic trailer joins; retired references are gone. */
 const expectThreeTableModel = async () => {
   expect(
     (
@@ -50,7 +50,12 @@ const expectThreeTableModel = async () => {
         "SELECT TABLE_NAME t FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'qualification%' ORDER BY 1",
       )
     ).map((r) => r.t),
-  ).toEqual(["qualification_assignments", "qualification_level_trailers", "qualification_levels"]);
+  ).toEqual([
+    "qualification_assignments",
+    "qualification_level_trailer_types",
+    "qualification_level_trailers",
+    "qualification_levels",
+  ]);
   expect(
     await rows(
       `SELECT TABLE_NAME t FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (${retired.map((name) => `'${name}'`).join(",")})`,
@@ -121,7 +126,7 @@ test(
         ('${id(52)}','${id(1)}',3,'fictional-e3','promotion.review_required','company','qualification','${id(30)}',1,UTC_TIMESTAMP(3),1)`,
     ];
     for (const statement of seed) await control.query(statement);
-    expect(await runMigrations(settings)).toBe(2);
+    expect(await runMigrations(settings)).toBe(3);
     expect(await runMigrations(settings)).toBe(0);
 
     await expectThreeTableModel();
@@ -184,7 +189,7 @@ test(
     // A fresh migration reaches the same model: the three tables, no old tables, the same shape
     // and the structural levels in order.
     await reset(control);
-    expect(await runMigrations(settings)).toBe(37);
+    expect(await runMigrations(settings)).toBe(38);
     await expectThreeTableModel();
     expect(await schema()).toEqual(upgraded);
     expect(
