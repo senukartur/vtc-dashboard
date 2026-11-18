@@ -1223,6 +1223,7 @@ await recoveryTest(
           "catalog_company_logos",
           "catalog_dlcs",
           "catalog_regions",
+          "catalog_trailer_types",
           "catalog_trailers",
         ],
       );
