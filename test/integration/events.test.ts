@@ -220,10 +220,15 @@ test("event draft and publication select semantic types while retaining legacy v
     [id],
   );
   expect(stored).toMatchObject([{ legacy: null, type: type.id }]);
-  expect((await routes.listStage2(trainee, "ru")).items).toContainEqual(
+  expect((await routes.listStage2(trainee, "ru")).items[0]).not.toHaveProperty(
+    "prescribedTrailerTypeId",
+  );
+  expect((await routes.listAdmin(director, { locale: "ru" })).items).toContainEqual(
     expect.objectContaining({
-      prescribedTrailerTypeId: type.id,
-      prescribedTrailerType: expect.objectContaining({ label: "Фургон" }),
+      definition: expect.objectContaining({
+        prescribedTrailerTypeId: type.id,
+        prescribedTrailerType: expect.objectContaining({ label: "Фургон" }),
+      }),
     }),
   );
   const legacy = await catalogs.create(director, "trailers", newId(), {
