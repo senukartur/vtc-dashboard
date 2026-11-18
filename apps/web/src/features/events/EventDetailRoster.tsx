@@ -4,12 +4,13 @@ import { Link } from "react-router-dom";
 import { Button, Card, Input, Label } from "../../shared/ui/primitives.js";
 import { EventFailureView, EventState, KeepFocusButton, useEventStarted } from "./components.js";
 import type { DetailEvent } from "./EventDetailContent.js";
+import { ResponseIcon } from "./EventResponseSummary.js";
 import type { DTO } from "./model.js";
 import { useEventCommand, useEventQuery } from "./queries.js";
 import { useEventStage2Query } from "./stage-2-queries.js";
 import { eventStage2Reads } from "./stage-2-transport.js";
 import { EventFailure } from "./transport.js";
-import { responseChoiceKey, responseTone } from "./view-model.js";
+import { responseChoiceKey } from "./view-model.js";
 
 type RefreshDetail = () => Promise<unknown>;
 
@@ -287,7 +288,7 @@ function Attendance({
               <span>
                 {t("memberResponse")}:{" "}
                 <span className={`events-tone-${row.response.response}`}>
-                  <span aria-hidden="true">{responseTone(row.response.response).symbol}</span>{" "}
+                  <ResponseIcon response={row.response.response} />{" "}
                   {t(responseChoiceKey(row.response.response))}
                 </span>
               </span>

@@ -174,7 +174,9 @@ function CatalogWorkspace() {
           className="catalog-game"
           value={filters.game}
           options={games}
-          onValueChange={(game) => update({ game, dlc: "", region: "", company: "", city: "" })}
+          onValueChange={(game) =>
+            update({ game, dlc: "", region: "", company: "", city: "", trailerType: "" })
+          }
         />
         {staff && (
           <div className="catalog-actions">

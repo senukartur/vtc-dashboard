@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Check, Clock, TriangleAlert } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -92,19 +93,7 @@ function Verification({ onVerified }: { onVerified: () => void }) {
   return (
     <div className="settings-notice">
       <div className="settings-notice-text">
-        <svg
-          aria-hidden="true"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12 3l10 18H2zM12 10v4M12 17v.5" />
-        </svg>
+        <TriangleAlert size={16} strokeWidth={1.8} aria-hidden="true" focusable="false" />
         <p id={explanationId}>{t("verifyFirst")}</p>
       </div>
       <Form
@@ -222,7 +211,7 @@ function EmailValue({ address, verified }: { address: string; verified: boolean 
   return (
     <>
       <span className="account-address">{address}</span>
-      <Badge className={verified ? "badge-accepted" : "badge-pending"}>
+      <Badge tone={verified ? "ok" : "warn"} icon={verified ? Check : Clock}>
         {t(verified ? "emailVerifiedBadge" : "emailUnverifiedBadge")}
       </Badge>
     </>
@@ -323,7 +312,9 @@ function EmailRow({
       value={<EmailValue address={address} verified />}
       action={
         current != null ? (
-          <Badge className="badge-pending">{t("emailPendingBadge")}</Badge>
+          <Badge tone="warn" icon={Clock}>
+            {t("emailPendingBadge")}
+          </Badge>
         ) : pending.isError ? undefined : (
           <ChangeToggle
             ref={toggleRef}

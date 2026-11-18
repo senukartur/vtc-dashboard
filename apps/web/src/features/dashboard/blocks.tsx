@@ -17,9 +17,11 @@ import { isRateLimited, rateLimitSeconds } from "../../shared/rate-limit.js";
 import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
 import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import { EventFailureView, KeepFocusButton } from "../events/components.js";
+import { ResponseIcon } from "../events/EventResponseSummary.js";
 import { responseInput } from "../events/model.js";
 import { useEventCommand, useEventQuery } from "../events/queries.js";
 import { countsView, type EventPhase, eventPhase, responseTone } from "../events/view-model.js";
+import { DecisionBadge } from "../trips/TripTable.js";
 import { Skeleton } from "./components.js";
 import type { DTO } from "./transport.js";
 import {
@@ -88,27 +90,6 @@ export function useBlockRetry(query: {
   };
 }
 
-type Decision = DTO["TripSummary"]["decision"];
-// Decorative symbols beside the decision text (as in the trip list), so status never relies on
-// colour alone.
-const decisionSymbol: Record<Decision, string | null> = {
-  unassessed: null,
-  pending_review: "●",
-  accepted: "✓",
-  rejected: "✕",
-};
-
-function DecisionBadge({ decision }: { decision: Decision }) {
-  const { t } = useTranslation("trips");
-  const symbol = decisionSymbol[decision];
-  return (
-    <Badge size="xs" className="dashboard-decision" data-decision={decision}>
-      {symbol && <span aria-hidden="true">{symbol} </span>}
-      {t(decision)}
-    </Badge>
-  );
-}
-
 /** The viewer's own latest trips with their game and company decision (My overview). */
 export function RecentTripsWidget({
   query,
@@ -158,7 +139,9 @@ export function RecentTripsWidget({
                   </span>
                 </div>
                 <span className="dashboard-trip-tags">
-                  <span className="dashboard-game">{row.game.toUpperCase()}</span>
+                  <Badge tone={row.game} className="dashboard-game">
+                    {row.game.toUpperCase()}
+                  </Badge>
                   <DecisionBadge decision={row.decision} />
                 </span>
               </li>
@@ -357,7 +340,11 @@ export function UpcomingEventWidget({
         <h2 id={headingId} ref={heading} tabIndex={-1}>
           {t("upcomingEvent.title")}
         </h2>
-        {chip && <span className="dashboard-countdown">{chip}</span>}
+        {chip && (
+          <Badge tone="info" className="dashboard-countdown">
+            {chip}
+          </Badge>
+        )}
       </div>
       {body}
     </Card>
@@ -505,7 +492,7 @@ function ConvoyResponse({
           t("events:savingResponse")
         ) : (
           <>
-            <span aria-hidden="true">{tone.symbol}</span>{" "}
+            <ResponseIcon response={current.response} />{" "}
             {t(
               current.response === "participating"
                 ? "events:stateParticipating"

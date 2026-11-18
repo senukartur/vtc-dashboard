@@ -45,6 +45,46 @@ export function effectiveGameMode(
     : "unknown";
 }
 
+/** Exact observed revenue only; no expected-income fallback or inferred game currency. */
+export function observedRevenue(
+  evidence: Pick<NormalizedTripEvidence, "provider" | "money"> | undefined,
+): components["schemas"]["TripRevenue"] | null {
+  if (evidence?.provider !== "ets2telemetry") return null;
+  const money = evidence.money as {
+    revenue?: {
+      available?: unknown;
+      value?: { raw?: unknown; sdkType?: unknown; currency?: { status?: unknown; code?: unknown } };
+    };
+  } | null;
+  const revenue = money?.revenue;
+  const value = revenue?.value;
+  const amount = value?.raw;
+  if (
+    revenue?.available !== true ||
+    value?.sdkType !== "s64" ||
+    typeof amount !== "string" ||
+    !/^(0|[1-9][0-9]{0,18}|-[1-9][0-9]{0,18})$/.test(amount)
+  )
+    return null;
+  const exact = BigInt(amount);
+  if (exact < -9223372036854775808n || exact > 9223372036854775807n) return null;
+  const currency = value.currency;
+  const code = currency?.code;
+  return {
+    amount,
+    currency:
+      currency?.status === "sdk-documented" &&
+      typeof code === "string" &&
+      code.trim().length > 0 &&
+      code.length <= 16 &&
+      Array.from(code).every(
+        (character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127,
+      )
+        ? code
+        : null,
+  };
+}
+
 export function createFactRepository(unit: UnitOfWork) {
   const c = (tx: TxContext) => unit.client(tx),
     groups = createTripGroups(unit),
@@ -151,7 +191,12 @@ export function createFactRepository(unit: UnitOfWork) {
             f.trailers.items.map((item, position) => ({
               tripFactId: f.factRevisionId,
               position,
-              trailerId: entity(item),
+              trailerId:
+                item.status === "known" && item.value.identityKind === "type" ? null : entity(item),
+              trailerTypeId:
+                item.status === "known" && item.value.identityKind === "type"
+                  ? item.value.entityId
+                  : null,
               sourceField: item.status === "known" ? item.sourceField : null,
               unknownReason: item.status === "unknown" ? item.reasonCode : null,
             })),
@@ -282,10 +327,11 @@ export function createFactRepository(unit: UnitOfWork) {
             changes.trailerTypeId
               ? actualTrailers.length !== 1 ||
                 !stored.trailersComplete ||
-                actualTrailers[0]?.trailerId !== changes.trailerTypeId
+                (actualTrailers[0]?.trailerId ?? actualTrailers[0]?.trailerTypeId) !==
+                  changes.trailerTypeId
               : stored.trailersComplete !== base.trailersComplete ||
-                JSON.stringify(actualTrailers.map((t) => t.trailerId)) !==
-                  JSON.stringify(baseTrailers.map((t) => t.trailerId))
+                JSON.stringify(actualTrailers.map((t) => [t.trailerId, t.trailerTypeId])) !==
+                  JSON.stringify(baseTrailers.map((t) => [t.trailerId, t.trailerTypeId]))
           )
             throw new Error("DERIVED_TRAILER_PROVENANCE_INVALID");
         }
@@ -318,7 +364,8 @@ export function createFactRepository(unit: UnitOfWork) {
         )
           throw new Error("SOURCE_TRAILER_HISTORY_INCOMPLETE");
         const items: Fact<TripEntity>[] = orderedTrailers.map((t) => {
-          if (t.trailerId === null)
+          const entityId = t.trailerId ?? t.trailerTypeId;
+          if (entityId === null)
             return {
               status: "unknown",
               reasonCode: t.unknownReason ?? "normalized_unknown",
@@ -327,7 +374,10 @@ export function createFactRepository(unit: UnitOfWork) {
           if (!t.sourceField) throw new Error("SOURCE_TRAILER_REF_INCONSISTENT");
           return {
             status: "known",
-            value: { entityId: t.trailerId },
+            value: {
+              entityId,
+              ...(t.trailerTypeId ? { identityKind: "type" as const } : {}),
+            },
             sourceRecordId: messageId,
             sourceField: t.sourceField,
           };

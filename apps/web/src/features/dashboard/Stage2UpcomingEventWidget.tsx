@@ -133,7 +133,11 @@ export function Stage2UpcomingEventWidget({
         <h2 id={headingId} ref={heading} tabIndex={-1}>
           {t("upcomingEvent.title")}
         </h2>
-        {chip && <span className="dashboard-countdown">{chip}</span>}
+        {chip && (
+          <Badge tone="info" className="dashboard-countdown">
+            {chip}
+          </Badge>
+        )}
       </div>
       {body}
     </Card>
@@ -198,3 +202,5 @@ function GoingCount({ id, optimistic }: { id: string; optimistic: number | undef
     </p>
   );
 }
+
+import { Badge } from "../../shared/ui/primitives.js";

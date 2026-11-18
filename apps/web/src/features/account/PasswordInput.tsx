@@ -1,3 +1,4 @@
+import { Eye, EyeOff } from "lucide-react";
 import type { ComponentProps } from "react";
 import { Input } from "../../shared/ui/primitives.js";
 import "./auth.css";
@@ -35,24 +36,11 @@ export function PasswordInput({
         aria-controls={id}
         onClick={onToggle}
       >
-        <svg
-          aria-hidden="true"
-          focusable="false"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          {visible ? (
-            <path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7c1.8 0 3.4-.5 4.8-1.3M9.9 9.9a3 3 0 0 0 4.2 4.2" />
-          ) : (
-            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6" />
-          )}
-        </svg>
+        {visible ? (
+          <EyeOff size={16} strokeWidth={1.8} aria-hidden="true" focusable="false" />
+        ) : (
+          <Eye size={16} strokeWidth={1.8} aria-hidden="true" focusable="false" />
+        )}
       </button>
     </div>
   );

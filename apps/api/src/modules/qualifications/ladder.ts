@@ -7,6 +7,7 @@ import {
   maxQualificationLevels,
   qualificationLevels,
   qualificationLevelTrailers,
+  qualificationLevelTrailerTypes,
 } from "@vtc/db/qualifications-schema";
 import { decimal } from "../sources/contracts/canonical.js";
 import type { AdrClass } from "../sources/contracts/evidence.js";
@@ -53,17 +54,19 @@ export async function activeLevels(
 export async function levelTrailers(unit: UnitOfWork, tx: TxContext, levelIds: string[]) {
   const result = new Map<string, string[]>(levelIds.map((id) => [id, []]));
   if (!levelIds.length) return result;
-  const rows = await unit
-    .client(tx)
-    .select({
-      levelId: qualificationLevelTrailers.levelId,
-      trailerId: qualificationLevelTrailers.trailerId,
-    })
-    .from(qualificationLevelTrailers)
-    .where(inArray(qualificationLevelTrailers.levelId, [...new Set(levelIds)]))
-    .orderBy(qualificationLevelTrailers.levelId, qualificationLevelTrailers.trailerId)
-    .for("share");
-  for (const row of rows) result.get(row.levelId)?.push(row.trailerId);
+  for (const table of [qualificationLevelTrailers, qualificationLevelTrailerTypes]) {
+    const rows = await unit
+      .client(tx)
+      .select({
+        levelId: table.levelId,
+        trailerId: table.trailerId,
+      })
+      .from(table)
+      .where(inArray(table.levelId, [...new Set(levelIds)]))
+      .orderBy(table.levelId, table.trailerId)
+      .for("share");
+    for (const row of rows) result.get(row.levelId)?.push(row.trailerId);
+  }
   return result;
 }
 
@@ -74,6 +77,7 @@ export function limitsOf(row: LevelRow, trailerIds: readonly string[]): Qualific
     distanceMinM: exact(row.distanceMinM),
     distanceMaxM: exact(row.distanceMaxM),
     trailers: {
+      ...(row.trailerBasis === "type" ? { basis: "type" as const } : {}),
       mode: row.trailerMode,
       typeIds: row.trailerMode === "selected" ? [...trailerIds].sort() : [],
     },

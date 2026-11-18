@@ -1,3 +1,4 @@
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 // The one cabinet table: declared columns, header sorting, cursor pages and content states on
 // the shared Table primitive. Server lists pass `status`, `sort` and `pagination`; small static
 // tables omit them and keep the same look and phone cards.
@@ -73,30 +74,16 @@ export type DataTableProps<Row, K extends string = string> = {
 };
 
 function SortIcon({ direction }: { direction: SortDirection | null }) {
+  const Icon = direction === "desc" ? ArrowDown : direction === "asc" ? ArrowUp : ArrowUpDown;
   return (
-    <svg
+    <Icon
+      size={12}
+      strokeWidth={1.8}
       aria-hidden="true"
+      focusable="false"
       className="data-table-sort-icon"
       data-direction={direction ?? "none"}
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path
-        d={
-          direction === "desc"
-            ? "M12 5v14M6 13l6 6 6-6"
-            : direction === "asc"
-              ? "M12 19V5M6 11l6-6 6 6"
-              : "M8 9l4-4 4 4M8 15l4 4 4-4"
-        }
-      />
-    </svg>
+    />
   );
 }
 

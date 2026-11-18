@@ -21,11 +21,11 @@ export type ResponseValue = DTO["Rsvp"]["response"];
 /** Symbols stay within the font coverage set (✓ U+2713, ✕ U+2715, ◇ U+25C7). */
 export function responseTone(response: ResponseValue): {
   tone: ResponseValue;
-  symbol: "✓" | "✕" | "◇";
+  icon: "check" | "x" | "circle-help";
 } {
   return {
     tone: response,
-    symbol: response === "participating" ? "✓" : response === "declined" ? "✕" : "◇",
+    icon: response === "participating" ? "check" : response === "declined" ? "x" : "circle-help",
   };
 }
 

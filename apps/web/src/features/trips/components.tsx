@@ -1,3 +1,4 @@
+import { Flame } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -13,11 +14,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../../shared/ui/dialog.js";
-import { FlameIcon } from "../../shared/ui/flame-icon.js";
-import { Badge, Button, Card } from "../../shared/ui/primitives.js";
+import { Button, Card } from "../../shared/ui/primitives.js";
 import { RateLimitNotice } from "../../shared/ui/rate-limit-notice.js";
 import type { AccountFailure } from "../account/transport.js";
 import { referenceFields } from "../manual-reports/model.js";
+import { OutcomeBadge, RecordingBadge } from "./badges.js";
+import { DecisionBadge, GameChip } from "./TripTable.js";
 import { type DTO, revisionFields, TripFailure } from "./transport.js";
 /** Translation key ("trips" namespace) of a safe failure message; never the raw error. */
 export function failureKey(error: unknown) {
@@ -230,18 +232,10 @@ export function TripSummary({ trip, link = true }: { trip: DTO["TripSummary"]; l
     <article className="trip-row">
       <div>
         <div className="trip-actions">
-          <Badge>{trip.game.toUpperCase()}</Badge>
-          <Badge className={`status-${trip.decision}`}>{t(trip.decision)}</Badge>
-          <Badge>{t(trip.outcome)}</Badge>
-          <Badge>
-            {t(
-              trip.recording === "partial"
-                ? "partialRecording"
-                : trip.recording === "unknown"
-                  ? "unknownRecording"
-                  : (trip.recording ?? "unknownRecording"),
-            )}
-          </Badge>
+          <GameChip game={trip.game} />
+          <DecisionBadge decision={trip.decision} />
+          <OutcomeBadge outcome={trip.outcome} />
+          <RecordingBadge recording={trip.recording} />
         </div>
         <h2>
           {link ? (
@@ -288,7 +282,10 @@ export function RecordedTelemetryFields({
       ).map(([label, category, value]) => (
         <div key={label}>
           <dt>
-            {label === "recordedHardModeResult" && <FlameIcon size={12} />} {t(label)}
+            {label === "recordedHardModeResult" && (
+              <Flame size={12} strokeWidth={1.8} aria-hidden="true" />
+            )}{" "}
+            {t(label)}
           </dt>
           <dd>{t(value && value !== "unknown" ? `${category}_${value}` : "recordedUnknown")}</dd>
         </div>

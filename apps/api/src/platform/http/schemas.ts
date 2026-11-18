@@ -1,4 +1,4 @@
-import { browserSchemaDocument } from "@vtc/contracts/runtime";
+import { browserSchemaDocument, companionSchemaDocument } from "@vtc/contracts/runtime";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import type { FastifyInstance } from "fastify";
@@ -15,6 +15,7 @@ export function createSchemaValidator(coerceTypes: false | "array" = false): Ajv
   // File-byte validation belongs to the multipart boundary in VTC-025.
   ajv.addFormat("binary", { type: "string", validate: () => true });
   ajv.addSchema(browserSchemaDocument);
+  ajv.addSchema(companionSchemaDocument);
   return ajv;
 }
 

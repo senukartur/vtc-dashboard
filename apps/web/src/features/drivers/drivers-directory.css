@@ -142,27 +142,7 @@
   flex-wrap: wrap;
   gap: 4px;
 }
-.drivers-page .drivers-self {
-  background: var(--accent-soft);
-  color: var(--focus);
-}
-.drivers-page .drivers-level {
-  display: inline-flex;
-  align-items: center;
-  max-width: 100%;
-  min-height: 20px;
-  padding: 0 7px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-badge);
-  background: var(--surface-active);
-  color: var(--foreground);
-  font-size: var(--font-small);
-}
-.drivers-page .drivers-level-none {
-  border-style: dashed;
-  background: none;
-  color: var(--muted);
-}
+
 .drivers-page :is(.drivers-unavailable, .drivers-muted, .drivers-footnote) {
   color: var(--muted);
 }

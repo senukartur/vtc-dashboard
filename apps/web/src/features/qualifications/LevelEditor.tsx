@@ -1,3 +1,4 @@
+import { Flame, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -5,8 +6,8 @@ import { useSession } from "../../app/Session.js";
 import { adrClasses, itemSchema } from "../../shared/catalog-selectors/contracts.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
-import { FlameIcon } from "../../shared/ui/flame-icon.js";
 import { InfoTip } from "../../shared/ui/info-tip.js";
+import { LabelBadge } from "../../shared/ui/label-badge.js";
 import { Badge, Button, Card, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { failureText, LimitList, needText, useLocale } from "./limits.js";
@@ -26,6 +27,7 @@ interface Draft {
   distanceMin: string;
   distanceMax: string;
   trailerMode: "any" | "selected";
+  trailerBasis: "variant" | "type";
   trailers: Trailer[];
   adrMode: "forbidden" | "selected" | "any";
   adrClasses: AdrClass[];
@@ -137,6 +139,7 @@ function initial(detail: LevelDetail | null, ladder: Level[], locale: "ru" | "en
     distanceMin: displayUnits(limits?.distanceMinM ?? null, locale),
     distanceMax: displayUnits(limits?.distanceMaxM ?? null, locale),
     trailerMode: limits?.trailers.mode ?? "any",
+    trailerBasis: detail ? (limits?.trailers.basis ?? "variant") : "type",
     trailers:
       limits?.trailers.types.map((type) => ({ id: type.entityId, label: type.label })) ?? [],
     adrMode: limits?.adr.mode ?? "any",
@@ -237,6 +240,7 @@ function Editor({
     distanceMinM: amounts.distanceMin ?? null,
     distanceMaxM: amounts.distanceMax ?? null,
     trailers: {
+      basis: draft.trailerBasis,
       mode: draft.trailerMode,
       types:
         draft.trailerMode === "selected"
@@ -260,6 +264,7 @@ function Editor({
       distanceMinM: amounts.distanceMin ?? null,
       distanceMaxM: amounts.distanceMax ?? null,
       trailers: {
+        basis: draft.trailerBasis,
         mode: draft.trailerMode,
         typeIds:
           draft.trailerMode === "selected" ? draft.trailers.map((trailer) => trailer.id) : [],
@@ -304,7 +309,7 @@ function Editor({
         <span aria-current="page">{detail ? t("edit") : t("newTitle")}</span>
       </nav>
       <header className="qualification-title-row">
-        <Badge className="badge-neutral">{game.toUpperCase()}</Badge>
+        <Badge tone={game}>{game.toUpperCase()}</Badge>
         <h1>{title}</h1>
       </header>
       <form
@@ -392,13 +397,29 @@ function Editor({
               <p className="qualification-muted">
                 {t(draft.trailerMode === "any" ? "trailersHintAny" : "trailersHintSelected")}
               </p>
+              {draft.trailerBasis === "variant" && (
+                <div className="stack">
+                  <p>{t("legacyTrailers")}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setDraft((previous) => ({ ...previous, trailerBasis: "type", trailers: [] }));
+                      setPicking(null);
+                    }}
+                  >
+                    {t("useTrailerTypes")}
+                  </Button>
+                </div>
+              )}
               {draft.trailerMode === "selected" && (
                 <div className="stack">
                   <div className="qualification-picker">
                     <CatalogSelector
                       label={t("trailerPick")}
                       game={game}
-                      kind="trailer"
+                      kind="trailer-type"
+                      disabled={draft.trailerBasis === "variant"}
                       value={picking}
                       onChange={setPicking}
                     />
@@ -500,7 +521,7 @@ function Editor({
             </fieldset>
             <fieldset className="qualification-fieldset">
               <legend className="qualification-hard-mode">
-                <FlameIcon />
+                <Flame size={13} strokeWidth={1.8} aria-hidden="true" />
                 {t("hardMode")}
                 <InfoTip label={t("hardModeTipLabel")} title={t("hardMode")}>
                   <p>{t("hardModeTip1")}</p>
@@ -634,7 +655,7 @@ function TrailerChip({
     locale = useLocale(),
     query = useCatalogQuery(
       ["qualification-trailer", trailer.id, locale],
-      `/catalogs/trailers/${trailer.id}?locale=${locale}`,
+      `/catalogs/trailer-types/${trailer.id}?locale=${locale}`,
       itemSchema,
       trailer.label === null,
     ),
@@ -644,18 +665,16 @@ function TrailerChip({
     if (trailer.label === null && fetched) onLabel(fetched);
   }, [trailer.label, fetched, onLabel]);
   return (
-    <li>
-      <Badge className="badge-neutral">
-        {name}
-        <button
-          type="button"
-          className="qualification-chip-remove"
-          aria-label={t("trailerRemove", { name })}
-          onClick={onRemove}
-        >
-          ×
-        </button>
-      </Badge>
+    <li className="qualification-selected-chip">
+      <LabelBadge>{name}</LabelBadge>
+      <button
+        type="button"
+        className="qualification-chip-remove"
+        aria-label={t("trailerRemove", { name })}
+        onClick={onRemove}
+      >
+        <X size={14} strokeWidth={1.8} aria-hidden="true" />
+      </button>
     </li>
   );
 }

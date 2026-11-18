@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CatalogSelector } from "../../shared/catalog-selectors/CatalogSelector.js";
 import {
   adrClasses,
   type CatalogItem,
@@ -90,6 +91,7 @@ export function CatalogForm({
   const translated = isTranslatable(list);
   const [code, setCode] = useState(item?.code ?? ""),
     [commonTrailer, setCommonTrailer] = useState(item?.commonTrailer ?? ""),
+    [trailerTypeId, setTrailerTypeId] = useState<string | null>(item?.trailerTypeId ?? null),
     [nameEn, setNameEn] = useState(item?.nameEn ?? ""),
     [nameRu, setNameRu] = useState(item?.nameRu ?? ""),
     [nameNative, setNameNative] = useState(item?.nameNative ?? ""),
@@ -111,6 +113,7 @@ export function CatalogForm({
     }
     const body: Record<string, unknown> = {
       code,
+      ...(list === "trailers" ? { trailerTypeId } : {}),
       ...(list === "trailers" && (commonTrailer !== "" || item?.commonTrailer)
         ? { commonTrailer: commonTrailer || null }
         : {}),
@@ -156,6 +159,15 @@ export function CatalogForm({
             <p className="field-hint">{t(list === "trailers" ? "trailerCodeHint" : "codeHint")}</p>
           )}
         </div>
+        {list === "trailers" && (
+          <CatalogSelector
+            label={t("fieldType")}
+            game={game}
+            kind="trailer-type"
+            value={trailerTypeId}
+            onChange={setTrailerTypeId}
+          />
+        )}
         {list === "trailers" && (
           <div className="catalog-field">
             <Label htmlFor={`${id}-common`}>{t("fieldCommonTrailer")}</Label>

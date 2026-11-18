@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 
 export const browserFiles = {
+  "test/e2e/badge-labels.spec.ts": "badge-labels",
   "test/e2e/dashboard.spec.ts": "dashboard",
   "test/e2e/dashboard-blocks.spec.ts": "dashboard-blocks",
   "test/e2e/dashboard-personal.spec.ts": "dashboard-personal",

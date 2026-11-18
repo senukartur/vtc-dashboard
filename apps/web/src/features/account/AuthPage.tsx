@@ -1,3 +1,4 @@
+import { ArrowRight, ChevronLeft } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -5,9 +6,9 @@ import { loginDestination } from "../../app/navigation-model.js";
 import { useSession } from "../../app/Session.js";
 import { publicContent, publicPath } from "../landing/content.js";
 import { AuthBrand } from "./AuthBrand.js";
-import { Form, emailValid, newPasswordValid, type AccountField } from "./Form.js";
-import { useCommand } from "./useCommand.js";
+import { type AccountField, emailValid, Form, newPasswordValid } from "./Form.js";
 import type { LinkHandoff } from "./link.js";
+import { useCommand } from "./useCommand.js";
 export type AuthKind = "login" | "recovery" | "reset" | "invitation";
 export function AuthPage({ kind, handoff }: { kind: AuthKind; handoff?: LinkHandoff | undefined }) {
   const { t, i18n } = useTranslation("account");
@@ -65,20 +66,7 @@ export function AuthPage({ kind, handoff }: { kind: AuthKind; handoff?: LinkHand
       <div className="auth-panel stack">
         {kind !== "login" && (
           <Link className="auth-back" to="/login">
-            <svg
-              aria-hidden="true"
-              focusable="false"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M15 6l-6 6 6 6" />
-            </svg>
+            <ChevronLeft size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
             {t("backToLogin")}
           </Link>
         )}
@@ -155,7 +143,7 @@ export function AuthPage({ kind, handoff }: { kind: AuthKind; handoff?: LinkHand
             <span>{t("notMember")}</span>
             <Link to={`${publicPath(locale)}#apply`}>
               {publicContent[locale].apply}
-              <span aria-hidden="true">→</span>
+              <ArrowRight size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
             </Link>
           </p>
         )}

@@ -146,6 +146,14 @@ export function qualificationSnapshot(
     editVersion: history.editVersion,
     limits: history.limits,
     eventExempt: result === null,
+    ...(result === null
+      ? {
+          exemptionRules: checkTrip(history.limits, e, history.trailerGroups).rules.map((rule) => ({
+            ...rule,
+            result: "pass" as const,
+          })),
+        }
+      : {}),
     outcome: result?.outcome ?? null,
     reasonCode: null,
     rules: result?.rules ?? [],

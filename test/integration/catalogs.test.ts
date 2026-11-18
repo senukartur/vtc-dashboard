@@ -130,7 +130,64 @@ const auditCount = async (operation: string) => {
   return Number(rows[0]?.n);
 };
 
-test("common trailers page once, search every body code and retain exact hidden telemetry recognition", async () => {
+test("semantic type assignment is game-scoped, row-scoped, filterable and importable without altering body codes", async () => {
+  const types = await catalogs.trailerTypes(driver, { game: "ets2", locale: "ru", limit: 100 });
+  const type = types.items.find((row) => row.code === "dryvan")!;
+  expect(type.display.label).toBe("Фургон");
+  const page = await catalogs.trailerTypes(driver, { game: "ets2", limit: 1 });
+  expect(page.total).toBe(21);
+  expect(page.nextCursor).not.toBeNull();
+  await expect(
+    catalogs.trailerTypes(driver, { game: "ats", limit: 1, cursor: page.nextCursor! }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  expect(await catalogs.get(driver, "trailers", type.id, "ru")).toMatchObject({
+    id: type.id,
+    display: { label: "Фургон", hidden: false },
+  });
+  const a = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_typed_a",
+    nameEn: "Fictional body",
+    commonTrailer: "fictional.shared",
+  });
+  const b = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "_typed_b",
+    nameEn: "Fictional body",
+    commonTrailer: "fictional.shared",
+  });
+  expect((await catalogs.trailerType(driver, a.id)).id).toBe(a.id);
+  const file = csv("game,code,trailer_type_code", "ets2,_typed_a,dryvan");
+  const preview = await catalogs.previewImport(director, "trailers", file);
+  expect(preview).toMatchObject({ errors: 0, changed: 1 });
+  await catalogs.applyImport(director, "trailers", file, newId(), preview.token!);
+  expect(await catalogs.get(driver, "trailers", a.id, "ru")).toMatchObject({
+    code: a.code,
+    trailerTypeId: type.id,
+    trailerType: { label: "Фургон" },
+  });
+  expect((await catalogs.get(driver, "trailers", b.id)).trailerTypeId).toBeNull();
+  expect(
+    (await catalogs.list(driver, "trailers", { game: "ets2", trailerTypeId: type.id })).items.map(
+      (row) => row.id,
+    ),
+  ).toEqual([a.id]);
+  expect(
+    (
+      await catalogs.list(driver, "trailers", { game: "ets2", trailerTypeId: "undefined" })
+    ).items.map((row) => row.id),
+  ).toEqual([b.id]);
+  const ats = (await catalogs.trailerTypes(driver, { game: "ats", limit: 100 })).items[0]!;
+  await expect(
+    catalogs.patch(director, "trailers", a.id, newId(), { trailerTypeId: ats.id }),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  await catalogs.patch(director, "trailers", a.id, newId(), { trailerTypeId: null });
+  expect(
+    (await catalogs.list(driver, "trailers", { game: "ets2", trailerTypeId: "undefined" })).total,
+  ).toBe(2);
+});
+
+test("catalog lists retain every original body while legacy grouping remains recognizable", async () => {
   const a = await catalogs.create(director, "trailers", newId(), {
     game: "ets2",
     code: "_fiction_a",
@@ -155,18 +212,18 @@ test("common trailers page once, search every body code and retain exact hidden 
   expect(preview).toMatchObject({ errors: 0, changed: 2 });
   await catalogs.applyImport(director, "trailers", file, newId(), preview.token as string);
   const first = await catalogs.list(driver, "trailers", { game: "ets2", limit: 1 });
-  expect(first.total).toBe(2);
+  expect(first.total).toBe(3);
   const second = await catalogs.list(driver, "trailers", {
     game: "ets2",
     limit: 1,
     cursor: first.nextCursor as string,
   });
   expect(new Set([...first.items, ...second.items].map((item) => item.id)).size).toBe(2);
-  expect(second.nextCursor).toBeNull();
+  expect(second.nextCursor).not.toBeNull();
   const group = (await catalogs.list(driver, "trailers", { game: "ets2", search: "_fiction_b" }))
     .items[0];
   expect(group).toMatchObject({ commonTrailer: "trailer.fiction_car", variantCount: 2 });
-  expect((await catalogs.summary(driver, "ets2")).lists.trailers.visible).toBe(2);
+  expect((await catalogs.summary(driver, "ets2")).lists.trailers.visible).toBe(3);
   const original = await catalogs.get(driver, "trailers", b.id);
   expect(original).toMatchObject({ id: b.id, code: "_fiction_b", nameEn: b.nameEn });
   const names = csv("game,code,name_en", "ets2,_fiction_b,Fictional imported variant");
@@ -200,14 +257,14 @@ test("common trailers page once, search every body code and retain exact hidden 
   });
   expect(
     (await catalogs.list(driver, "trailers", { game: "ets2" })).items.map((item) => item.id),
-  ).toEqual([separate.id]);
+  ).toEqual(expect.arrayContaining([a.id, separate.id]));
   expect((await catalogs.list(driver, "trailers", { game: "ets2", hidden: "only" })).total).toBe(1);
   await unit.run(async (tx) => {
     const selections = await catalogs.selectionsInTransaction(
       tx,
       [a, b].map((row) => ({ kind: "trailer" as const, id: row.id })),
     );
-    expect(selections.get(a.id)?.hidden).toBe(true);
+    expect(selections.get(a.id)?.hidden).toBe(false);
     expect(selections.get(b.id)?.hidden).toBe(true);
     for (const row of [a, b])
       expect(
@@ -284,7 +341,7 @@ test("moving or detaching one grouped member preserves the other variants and ex
   expect((await catalogs.get(driver, "trailers", c.id)).commonTrailer).toBe(
     "trailer.fiction_second",
   );
-  expect((await catalogs.list(driver, "trailers", { game: "ets2" })).total).toBe(2);
+  expect((await catalogs.list(driver, "trailers", { game: "ets2" })).total).toBe(3);
   await unit.run(async (tx) => {
     for (const item of [a, b, c])
       expect(
@@ -774,6 +831,141 @@ test("import rejects a newly linked hidden parent but keeps an unchanged hidden 
     nameEn: "Fictional renamed",
     dlcId: dlc.id,
   });
+});
+
+test.each(["ets2", "ats"] as const)(
+  "%s region source correction preserves identity, names, visibility and city links on a fresh repeated import",
+  async (game) => {
+    const pack = await catalogs.create(director, "dlcs", newId(), {
+      game,
+      code: "fictional_map",
+      nameEn: "Fictional map",
+    });
+    const region = await catalogs.create(director, "regions", newId(), {
+      game,
+      code: "fictional_region",
+      nameEn: "Exact hosted region",
+      nameRu: "Сохранённый регион",
+    });
+    const linked = await city("fictional_city", game, { regionId: region.id });
+    await catalogs.patch(director, "regions", region.id, newId(), { hidden: true });
+    const before = await catalogs.get(director, "regions", region.id);
+    const cityBefore = await catalogs.get(director, "cities", linked.id);
+    const file = csv(
+      "game,code,name_en,name_ru,dlc_code",
+      `${game},${region.code},${region.nameEn},${region.nameRu},${pack.code}`,
+    );
+    instant += 123;
+    const preview = await catalogs.previewImport(director, "regions", file);
+    expect(preview).toMatchObject({
+      added: 0,
+      changed: 1,
+      unchanged: 0,
+      errors: 0,
+      lines: [{ code: region.code, status: "changed", changedFields: ["dlc_code"] }],
+    });
+    expect(await catalogs.get(director, "regions", region.id)).toEqual(before);
+    await catalogs.applyImport(director, "regions", file, newId(), preview.token as string);
+    const corrected = await catalogs.get(director, "regions", region.id);
+    expect(corrected).toMatchObject({
+      id: region.id,
+      game,
+      code: region.code,
+      nameEn: before.nameEn,
+      nameRu: before.nameRu,
+      hidden: true,
+      dlcId: pack.id,
+      updatedAt: now().toISOString(),
+    });
+    expect(await catalogs.get(director, "cities", linked.id)).toEqual(cityBefore);
+    instant += 123;
+    // A new preview and a new key prove no-op import semantics independently of replay.
+    const fresh = await catalogs.previewImport(director, "regions", file);
+    expect(fresh).toMatchObject({ added: 0, changed: 0, unchanged: 1, errors: 0 });
+    await expect(
+      catalogs.applyImport(director, "regions", file, newId(), fresh.token as string),
+    ).resolves.toMatchObject({ added: 0, changed: 0, unchanged: 1 });
+    expect(await catalogs.get(director, "regions", region.id)).toEqual(corrected);
+    expect(await catalogs.get(director, "cities", linked.id)).toEqual(cityBefore);
+    const blank = csv(
+      "game,code,name_en,name_ru,dlc_code",
+      `${game},${region.code},${region.nameEn},,`,
+    );
+    const preserved = await catalogs.previewImport(director, "regions", blank);
+    expect(preserved).toMatchObject({ added: 0, changed: 0, unchanged: 1 });
+    await catalogs.applyImport(director, "regions", blank, newId(), preserved.token as string);
+    expect(await catalogs.get(director, "regions", region.id)).toEqual(corrected);
+  },
+);
+
+test.each(["hidden", "unknown", "other-game"] as const)(
+  "region correction rejects a newly linked %s DLC without writes",
+  async (kind) => {
+    const pack = await catalogs.create(director, "dlcs", newId(), {
+      game: kind === "other-game" ? "ats" : "ets2",
+      code: "fictional_parent",
+      nameEn: "Fictional source",
+    });
+    if (kind === "hidden")
+      await catalogs.patch(director, "dlcs", pack.id, newId(), { hidden: true });
+    const region = await catalogs.create(director, "regions", newId(), {
+      game: "ets2",
+      code: "fictional_region",
+      nameEn: "Preserved region",
+      nameRu: "Сохранено",
+    });
+    const before = await catalogs.get(director, "regions", region.id);
+    const file = csv(
+      "game,code,name_en,name_ru,dlc_code",
+      `ets2,${region.code},${region.nameEn},,${kind === "unknown" ? "absent_parent" : pack.code}`,
+    );
+    const preview = await catalogs.previewImport(director, "regions", file);
+    expect(preview).toMatchObject({ added: 0, changed: 0, errors: 1, token: null });
+    expect(preview.lines).toMatchObject([
+      {
+        status: "error",
+        issues: [
+          {
+            field: "dlc_code",
+            reason: kind === "hidden" ? "hidden_reference" : "unknown_reference",
+          },
+        ],
+      },
+    ]);
+    expect(await catalogs.get(director, "regions", region.id)).toEqual(before);
+    expect(await auditCount("catalog.imported")).toBe(0);
+  },
+);
+
+test("region source apply revalidates a newly hidden DLC and rolls back every correction", async () => {
+  const pack = await catalogs.create(director, "dlcs", newId(), {
+    game: "ets2",
+    code: "fictional_parent",
+    nameEn: "Fictional source",
+  });
+  const regions = await Promise.all(
+    ["one", "two"].map((code) =>
+      catalogs.create(director, "regions", newId(), {
+        game: "ets2",
+        code,
+        nameEn: `Region ${code}`,
+      }),
+    ),
+  );
+  const file = csv(
+    "game,code,name_en,name_ru,dlc_code",
+    ...regions.map((region) => `ets2,${region.code},${region.nameEn},,${pack.code}`),
+  );
+  const preview = await catalogs.previewImport(director, "regions", file);
+  expect(preview).toMatchObject({ added: 0, changed: 2, errors: 0 });
+  await catalogs.patch(director, "dlcs", pack.id, newId(), { hidden: true });
+  instant += 123;
+  await expect(
+    catalogs.applyImport(director, "regions", file, newId(), preview.token as string),
+  ).rejects.toMatchObject({ statusCode: 422, publicCode: "CATALOG_IMPORT_INVALID" });
+  for (const region of regions)
+    expect(await catalogs.get(director, "regions", region.id)).toEqual(region);
+  expect(await auditCount("catalog.imported")).toBe(0);
 });
 
 test("import updates only named values, never deletes and keeps parents and hidden state", async () => {

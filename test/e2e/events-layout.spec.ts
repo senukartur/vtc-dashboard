@@ -340,8 +340,8 @@ for (const locale of ["en", "ru"] as const)
         expect(side.x).toBeGreaterThanOrEqual(main.x + main.width);
       else expect(side.y).toBeGreaterThanOrEqual(main.y + main.height);
       const counts = participants.locator(".events-counts");
-      await expect(counts).toContainText(locale === "en" ? "✓ Participating: 4" : "✓ Участвуют: 4");
-      await expect(counts).toContainText(locale === "en" ? "✕ Can't attend: 1" : "✕ Не смогут: 1");
+      await expect(counts).toContainText(locale === "en" ? "Participating: 4" : "Участвуют: 4");
+      await expect(counts).toContainText(locale === "en" ? "Can't attend: 1" : "Не смогут: 1");
       const signedUp = participants.getByRole("region", {
         name: text[locale].signedUp,
         exact: true,
@@ -461,7 +461,7 @@ test(
     const counts = page
       .getByRole("region", { name: text.en.participants, exact: true })
       .locator(".events-counts");
-    await expect(counts).toContainText("✕ Can't attend: 1");
+    await expect(counts).toContainText("Can't attend: 1");
     await expect(counts).not.toHaveAttribute("role", /.+/);
     await expect(workspace(page).locator("[aria-live]")).toHaveCount(0);
     await expect(
@@ -490,7 +490,7 @@ for (const locale of ["en", "ru"] as const)
       await expect(section).toContainText(
         locale === "en" ? "Your response before the start" : "Ваш ответ до начала",
       );
-      await expect(section).toContainText(`✕ ${text[locale].declined}`);
+      await expect(section).toContainText(`${text[locale].declined}`);
       await expect(section).toContainText("Fictional own reason");
       await expect(section).toContainText(locale === "en" ? "Attended" : "Участвовал");
       await expect(page.getByRole("group", { name: text[locale].response })).toHaveCount(0);
@@ -517,7 +517,7 @@ test(
     await expect(heading).toBeFocused();
     await expect(heading).toBeInViewport();
     await expect(roster.locator(".event-attendance-row")).toHaveCount(1);
-    await expect(roster).toContainText("✕ Can't attend");
+    await expect(roster).toContainText("Can't attend");
     await expect(roster).toContainText("Fictional private RSVP reason");
     await expect(
       roster.getByText("Available after the event starts", { exact: true }),
@@ -563,7 +563,7 @@ test(
     await settledDetail(page);
     const section = page.getByRole("region", { name: text.en.response, exact: true });
     await expect(section).toContainText("Responses are closed: the event was cancelled.");
-    await expect(section).toContainText("✓ Participating");
+    await expect(section).toContainText("Participating");
     await expect(section).not.toContainText("records attendance after the start");
     await expect(workspace(page).locator(".events-header .events-status")).toHaveText("Cancelled");
     await expect(page.getByRole("button", { name: "Edit event" })).toHaveCount(0);
@@ -624,7 +624,7 @@ test(
     await page.keyboard.press("Enter");
     await settled;
     await expect(participants.getByRole("heading", { level: 2 })).toBeFocused();
-    await expect(participants.locator(".events-counts")).toContainText("✓ Participating: 0");
+    await expect(participants.locator(".events-counts")).toContainText("Participating: 0");
     await expect(counts).toHaveCount(0);
     await quiet(page);
   },

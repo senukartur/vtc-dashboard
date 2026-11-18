@@ -12,6 +12,7 @@ import {
   catalogDlcs,
   catalogRegions,
   catalogTrailers,
+  catalogTrailerTypes,
   eq,
   gt,
   inArray,
@@ -44,11 +45,13 @@ import { inspectPng, logoCodeFromName, PngError } from "./png.js";
 
 type S = components["schemas"];
 type Locale = "en" | "ru";
+type CodeResolution = { game: Game; kind: CatalogKind; code: string };
 type ListFilters = {
   hidden?: "only";
   includeHidden?: boolean;
   untranslated?: boolean;
   logo?: "missing";
+  trailerTypeId?: string;
 };
 export interface CatalogPorts {
   identity: Pick<Identity, "authorizeInTransaction" | "onboardingCompany" | "externalCommand">;
@@ -58,6 +61,7 @@ const kindTables = {
   city: catalogCities,
   cargo: catalogCargoes,
   trailer: catalogTrailers,
+  "trailer-type": catalogTrailerTypes,
 } as const;
 const tables = {
   dlcs: catalogDlcs,
@@ -73,14 +77,6 @@ const common = (list: CatalogList) => tables[list] as unknown as Common;
 const dlcParent = alias(catalogDlcs, "dlc_parent");
 const regionParent = alias(catalogRegions, "region_parent");
 const trailerPeer = alias(catalogTrailers, "trailer_peer");
-// Prefer a visible member, then the lowest immutable row ID. Pagination and totals
-// use this same predicate; every original body type remains an independent stored row.
-const trailerRepresentative = sql`NOT EXISTS (
-  SELECT 1 FROM ${catalogTrailers} AS ${sql.identifier("trailer_peer")} WHERE ${trailerPeer.game} = ${catalogTrailers.game}
-  AND ${trailerPeer.commonTrailer} = ${catalogTrailers.commonTrailer}
-  AND (${trailerPeer.hidden} < ${catalogTrailers.hidden}
-    OR (${trailerPeer.hidden} = ${catalogTrailers.hidden} AND ${trailerPeer.id} < ${catalogTrailers.id}))
-)`;
 const depotVisible = and(
   eq(catalogCompanyCities.hidden, false),
   eq(catalogCompanies.hidden, false),
@@ -165,9 +161,10 @@ export interface LogoFile {
 export interface CatalogEntity {
   id: string;
   game: Game;
-  kind: CatalogKind;
+  kind: Exclude<CatalogKind, "trailer-type">;
   hidden: boolean;
   adrClass: AdrClass | null;
+  identityKind?: "type";
 }
 
 export function createCatalogs(
@@ -202,6 +199,9 @@ export function createCatalogs(
       id: t.id,
       game: t.game,
       code: t.code,
+      trailerTypeId: list === "trailers" ? catalogTrailers.trailerTypeId : sql<string | null>`NULL`,
+      typeEn: list === "trailers" ? catalogTrailerTypes.nameEn : sql<string | null>`NULL`,
+      typeRu: list === "trailers" ? catalogTrailerTypes.nameRu : sql<string | null>`NULL`,
       commonTrailer: list === "trailers" ? catalogTrailers.commonTrailer : sql<Buffer | null>`NULL`,
       variantCount:
         list === "trailers"
@@ -235,6 +235,9 @@ export function createCatalogs(
     game: Game;
     code: Buffer;
     commonTrailer: Buffer | null;
+    trailerTypeId: string | null;
+    typeEn: string | null;
+    typeRu: string | null;
     variantCount: number;
     nameEn: string;
     nameRu: string | null;
@@ -264,6 +267,11 @@ export function createCatalogs(
     const t = common(list);
     let query = c(tx).select(selectColumns(list, true)).from(t).$dynamic();
     if (list !== "dlcs") query = query.leftJoin(dlcParent, eq(t.dlcId, dlcParent.id));
+    if (list === "trailers")
+      query = query.leftJoin(
+        catalogTrailerTypes,
+        eq(catalogTrailers.trailerTypeId, catalogTrailerTypes.id),
+      );
     if (list === "cities")
       query = query.leftJoin(regionParent, eq(catalogCities.regionId, regionParent.id));
     if (list === "companies") query = query.leftJoin(catalogCompanyLogos, companyLogoLink);
@@ -304,6 +312,11 @@ export function createCatalogs(
       ...(list === "trailers"
         ? {
             commonTrailer: row.commonTrailer?.toString() ?? null,
+            trailerTypeId: row.trailerTypeId,
+            trailerType:
+              row.trailerTypeId && row.typeEn
+                ? label(row.trailerTypeId, row.typeEn, row.typeRu, false, locale)
+                : null,
             variantCount: row.variantCount,
           }
         : {}),
@@ -334,9 +347,49 @@ export function createCatalogs(
   }
   async function itemById(tx: TxContext, list: CatalogList, id: string, locale: Locale) {
     const [row] = await fetchRows(tx, list, eq(common(list).id, id));
+    if (!row && list === "trailers") {
+      const type = await trailerTypeItem(tx, id, locale);
+      if (type) return type;
+    }
     if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
     const counts = list === "companies" ? await companyDepotCounts(tx, row.game, [id]) : undefined;
     return itemDto(list, row, locale, counts?.get(id));
+  }
+  async function trailerTypeItem(
+    tx: TxContext,
+    id: string,
+    locale: Locale,
+  ): Promise<S["CatalogItem"] | undefined> {
+    const [row] = await c(tx)
+      .select()
+      .from(catalogTrailerTypes)
+      .where(eq(catalogTrailerTypes.id, applicationId(id)));
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      game: row.game,
+      code: row.code.toString(),
+      nameEn: row.nameEn,
+      nameRu: row.nameRu,
+      hidden: false,
+      dlcId: null,
+      dlc: null,
+      display: label(row.id, row.nameEn, row.nameRu, false, locale),
+    };
+  }
+  async function trailerType(tx: TxContext, game: Game, value: unknown) {
+    if (value == null) return;
+    const [row] = await c(tx)
+      .select({ id: catalogTrailerTypes.id })
+      .from(catalogTrailerTypes)
+      .where(
+        and(
+          eq(catalogTrailerTypes.id, applicationId(value as string)),
+          eq(catalogTrailerTypes.game, game),
+        ),
+      )
+      .for("share");
+    if (!row) throw catalogError(422, "CATALOG_PARENT_INVALID");
   }
   async function parent(
     tx: TxContext,
@@ -366,6 +419,9 @@ export function createCatalogs(
       ...("nameRu" in input && !isCanonicalList(list) ? { nameRu } : {}),
       ...("nameEn" in input ? { nameEn: input.nameEn } : {}),
       ...("code" in input ? { code: requireCode(input.code as string) } : {}),
+      ...(list === "trailers" && "trailerTypeId" in input
+        ? { trailerTypeId: input.trailerTypeId }
+        : {}),
       ...(list === "trailers" && "commonTrailer" in input
         ? {
             commonTrailer:
@@ -412,13 +468,14 @@ export function createCatalogs(
       companies: ["code", "nameEn", "dlcId", "hidden"],
       cities: ["code", "nameEn", "nameRu", "nameNative", "regionId", "dlcId", "hidden"],
       cargoes: ["code", "nameEn", "nameRu", "adrClass", "dlcId", "hidden"],
-      trailers: ["code", "nameEn", "nameRu", "dlcId", "hidden", "commonTrailer"],
+      trailers: ["code", "nameEn", "nameRu", "dlcId", "hidden", "commonTrailer", "trailerTypeId"],
     }[list];
     if (Object.keys(input).some((key) => !allowed.includes(key))) throw identityError(422);
   }
-  async function resolveInTransaction(
+  async function resolveCode(
     tx: TxContext,
-    input: { game: Game; kind: CatalogKind; code: string },
+    input: CodeResolution,
+    current: boolean,
   ): Promise<
     | { status: "resolved"; id: string; adrClass: AdrClass | null }
     | { status: "unknown"; reasonCode: string }
@@ -426,10 +483,12 @@ export function createCatalogs(
     if (!validCode(input.code)) return { status: "unknown", reasonCode: "unknown_source_id" };
     const table = kindTables[input.kind];
     const adr = input.kind === "cargo" ? catalogCargoes.adrClass : sql<AdrClass | null>`NULL`;
-    const [row] = await c(tx)
+    const query = c(tx)
       .select({ id: table.id, adrClass: adr })
       .from(table)
-      .where(and(eq(table.game, input.game), eq(table.code, Buffer.from(input.code))));
+      .where(and(eq(table.game, input.game), eq(table.code, Buffer.from(input.code))))
+      .$dynamic();
+    const [row] = await (current ? query.for("share") : query);
     if (!row) return { status: "unknown", reasonCode: "unknown_source_id" };
     return { status: "resolved", id: row.id, adrClass: (row.adrClass as AdrClass | null) ?? null };
   }
@@ -438,21 +497,32 @@ export function createCatalogs(
     selections: readonly { kind: CatalogKind; id: string }[],
   ) {
     const result = new Map<string, CatalogEntity>();
-    for (const kind of ["city", "cargo", "trailer"] as const) {
-      const ids = selections.filter((s) => s.kind === kind).map((s) => applicationId(s.id));
+    for (const kind of ["city", "cargo", "trailer", "trailer-type"] as const) {
+      const ids = selections
+        .filter((s) => s.kind === kind || (kind === "trailer-type" && s.kind === "trailer"))
+        .map((s) => applicationId(s.id));
       if (!ids.length) continue;
       const table = kindTables[kind];
       const adr = kind === "cargo" ? catalogCargoes.adrClass : sql<AdrClass | null>`NULL`;
       const rows = await c(tx)
-        .select({ id: table.id, game: table.game, hidden: table.hidden, adrClass: adr })
+        .select({
+          id: table.id,
+          game: table.game,
+          hidden:
+            kind === "trailer-type"
+              ? sql<boolean>`FALSE`
+              : (table as typeof catalogTrailers).hidden,
+          adrClass: adr,
+        })
         .from(table)
         .where(inArray(table.id, [...new Set(ids)]));
       for (const row of rows)
         result.set(row.id, {
           id: row.id,
           game: row.game,
-          kind,
-          hidden: row.hidden,
+          kind: kind === "trailer-type" ? "trailer" : kind,
+          ...(kind === "trailer-type" ? { identityKind: "type" as const } : {}),
+          hidden: kind === "trailer-type" ? false : row.hidden,
           adrClass: (row.adrClass as AdrClass | null) ?? null,
         });
     }
@@ -475,7 +545,16 @@ export function createCatalogs(
     type Existing = ListRow;
     const existing = new Map<string, Existing>();
     for (const game of games) {
-      let query = c(tx).select(selectColumns(list)).from(t).$dynamic();
+      // Import planning only needs the stored type ID. Keep the read-only dictionary
+      // out of this exclusive lock; its reference rows are share-locked below.
+      let query = c(tx)
+        .select({
+          ...selectColumns(list),
+          typeEn: sql<string | null>`NULL`,
+          typeRu: sql<string | null>`NULL`,
+        })
+        .from(t)
+        .$dynamic();
       if (list !== "dlcs") query = query.leftJoin(dlcParent, eq(t.dlcId, dlcParent.id));
       if (list === "cities")
         query = query.leftJoin(regionParent, eq(catalogCities.regionId, regionParent.id));
@@ -499,6 +578,12 @@ export function createCatalogs(
     type ParentCodes = Awaited<ReturnType<typeof parentCodes>>;
     const dlcCodes: ParentCodes = list === "dlcs" ? new Map() : await parentCodes("dlc");
     const regionCodes: ParentCodes = list === "cities" ? await parentCodes("region") : new Map();
+    const typeCodes = new Map<string, string>();
+    if (list === "trailers") {
+      const q = c(tx).select().from(catalogTrailerTypes).orderBy(asc(catalogTrailerTypes.id));
+      for (const row of await (lock ? q.for("share") : q))
+        typeCodes.set(keyOf(row.game, row.code), row.id);
+    }
     const seen = new Set<string>();
     const inserts: Record<string, unknown>[] = [];
     const updates: { id: string; set: Record<string, unknown> }[] = [];
@@ -516,7 +601,17 @@ export function createCatalogs(
       const codeOk = validCode(code);
       if (!codeOk) issues.push({ field: "code", reason: code === "" ? "required" : "invalid" });
       const linkedRow = game && codeOk ? existing.get(keyOf(game, code)) : undefined;
-      const groupingOnly = list === "trailers" && !!v.common_trailer && !!linkedRow;
+      const groupingOnly =
+        list === "trailers" && (!!v.common_trailer || !!v.trailer_type_code) && !!linkedRow;
+      const typeCode = v.trailer_type_code;
+      const typeId =
+        typeCode === "undefined"
+          ? null
+          : game && typeCode
+            ? typeCodes.get(keyOf(game, typeCode))
+            : undefined;
+      if (list === "trailers" && typeCode && typeCode !== "undefined" && !typeId)
+        issues.push({ field: "trailer_type_code", reason: "unknown_reference" });
       const nameEn = v.name_en ?? "";
       if (!nameEn.trim() && (nameEn !== "" || !groupingOnly))
         issues.push({ field: "name_en", reason: "required" });
@@ -592,6 +687,7 @@ export function createCatalogs(
           ...(list === "trailers"
             ? {
                 commonTrailer: commonTrailer === undefined ? null : Buffer.from(commonTrailer),
+                trailerTypeId: typeId ?? null,
               }
             : {}),
           hidden: false,
@@ -617,6 +713,8 @@ export function createCatalogs(
         compare("region_code", "regionId", current.regionId, regionId);
       if (list === "cargoes" && adrClass !== undefined)
         compare("adr_class", "adrClass", current.adrClass, adrClass);
+      if (list === "trailers" && typeId !== undefined)
+        compare("trailer_type_code", "trailerTypeId", current.trailerTypeId, typeId);
       if (list === "trailers" && commonTrailer !== undefined) {
         if (current.commonTrailer?.toString() !== commonTrailer) {
           set.commonTrailer = Buffer.from(commonTrailer);
@@ -1024,8 +1122,149 @@ export function createCatalogs(
 
   return {
     config,
+    async companionTrailerDisplayInTransaction(
+      tx: TxContext,
+      game: Game,
+      ids: readonly string[],
+      asOf: string,
+    ) {
+      if (ids.length > 110) throw new Error("COMPANION_TRAILER_BOUND");
+      const unique = [...new Set(ids)].sort();
+      if (!unique.length) return [];
+      const variants = await c(tx)
+        .select({
+          id: catalogTrailers.id,
+          code: catalogTrailers.code,
+          group: catalogTrailers.commonTrailer,
+          nameEn: catalogTrailers.nameEn,
+          nameRu: catalogTrailers.nameRu,
+          typeId: catalogTrailers.trailerTypeId,
+        })
+        .from(catalogTrailers)
+        .where(and(eq(catalogTrailers.game, game), inArray(catalogTrailers.id, unique)))
+        .orderBy(catalogTrailers.id)
+        .for("share");
+      const types = await c(tx)
+        .select({
+          id: catalogTrailerTypes.id,
+          code: catalogTrailerTypes.code,
+          nameEn: catalogTrailerTypes.nameEn,
+          nameRu: catalogTrailerTypes.nameRu,
+        })
+        .from(catalogTrailerTypes)
+        .where(and(eq(catalogTrailerTypes.game, game), inArray(catalogTrailerTypes.id, unique)))
+        .orderBy(catalogTrailerTypes.id)
+        .for("share");
+      const byVariant = new Map(variants.map((row) => [row.id, row])),
+        byType = new Map(types.map((row) => [row.id, row]));
+      return unique.map((id) => {
+        const variant = byVariant.get(id),
+          type = byType.get(id);
+        const row = variant && type ? undefined : (variant ?? type);
+        const identityKind = !row
+          ? ("unavailable" as const)
+          : type
+            ? ("type" as const)
+            : ("variant" as const);
+        return {
+          id,
+          identityKind,
+          code: row?.code.toString() ?? null,
+          groupCode: identityKind === "variant" ? (variant?.group?.toString() ?? null) : null,
+          nameEn: row?.nameEn ?? null,
+          nameRu: row?.nameRu ?? null,
+          classification:
+            identityKind === "variant"
+              ? variant?.typeId
+                ? { state: "classified" as const, typeId: variant.typeId }
+                : { state: "unclassified" as const }
+              : {
+                  state:
+                    identityKind === "type"
+                      ? ("not_applicable" as const)
+                      : ("unavailable" as const),
+                },
+          basis: "current_catalog" as const,
+          asOf,
+        };
+      });
+    },
+    async trailerTypes(
+      actor: Actor,
+      query: { game: Game; locale?: Locale; search?: string; limit?: number; cursor?: string },
+    ) {
+      return run(async (tx): Promise<S["CatalogItemList"]> => {
+        await authority(tx, actor, false);
+        const locale = query.locale ?? "en",
+          limit = query.limit ?? 25;
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
+        const binding = [
+          actor.userId,
+          actor.sessionId,
+          actor.accessEpoch,
+          "trailer-types",
+          query.game,
+          locale,
+          query.search ?? null,
+        ];
+        let after = 0;
+        if (query.cursor) {
+          try {
+            after = Number(codec.read(binding, query.cursor));
+            if (!Number.isInteger(after) || after < 0 || after > 1000) throw new Error();
+          } catch {
+            throw identityError(409, "VERSION_CONFLICT");
+          }
+        }
+        const rows = await c(tx)
+          .select()
+          .from(catalogTrailerTypes)
+          .where(eq(catalogTrailerTypes.game, query.game))
+          .orderBy(asc(catalogTrailerTypes.code))
+          .limit(1000);
+        const matching = rows
+          .map((row) => ({
+            id: row.id,
+            game: row.game,
+            code: row.code.toString(),
+            nameEn: row.nameEn,
+            nameRu: row.nameRu,
+            hidden: false,
+            dlcId: null,
+            dlc: null,
+            display: label(row.id, row.nameEn, row.nameRu, false, locale),
+          }))
+          .filter(
+            (row) =>
+              !query.search ||
+              `${row.code} ${row.nameEn} ${row.nameRu}`
+                .toLocaleLowerCase()
+                .includes(query.search.toLocaleLowerCase()),
+          );
+        return {
+          items: matching.slice(after, after + limit),
+          total: matching.length,
+          nextCursor:
+            after + limit < matching.length ? codec.write(binding, String(after + limit)) : null,
+        };
+      });
+    },
+    async trailerType(actor: Actor, id: string, locale: Locale = "en") {
+      return run(async (tx): Promise<S["CatalogItem"]> => {
+        await authority(tx, actor, false);
+        return (
+          (await trailerTypeItem(tx, id, locale)) ??
+          itemById(tx, "trailers", applicationId(id), locale)
+        );
+      });
+    },
     /** Group membership for qualification comparison. IDs/facts remain unchanged, including hidden rows. */
-    async trailerGroupsInTransaction(tx: TxContext, game: Game, ids: readonly string[]) {
+    async trailerGroupsInTransaction(
+      tx: TxContext,
+      game: Game,
+      ids: readonly string[],
+      basis: "variant" | "type" = "variant",
+    ) {
       if (ids.length > 1010) throw new Error("CATALOG_TRAILER_BATCH_BOUND_EXCEEDED");
       const result: Record<string, string> = {};
       if (!ids.length) return result;
@@ -1033,6 +1272,7 @@ export function createCatalogs(
         .select({
           id: catalogTrailers.id,
           commonTrailer: catalogTrailers.commonTrailer,
+          trailerTypeId: catalogTrailers.trailerTypeId,
         })
         .from(catalogTrailers)
         .where(
@@ -1045,8 +1285,24 @@ export function createCatalogs(
         .orderBy(asc(catalogTrailers.id))
         .for("share");
       for (const row of rows)
-        if (row.commonTrailer !== null)
+        if (basis === "type")
+          result[row.id] = row.trailerTypeId ? `type:${row.trailerTypeId}` : "undefined";
+        else if (row.commonTrailer !== null)
           result[row.id] = `common:${game}:${row.commonTrailer.toString("hex")}`;
+      if (basis === "type") {
+        const types = await c(tx)
+          .select({ id: catalogTrailerTypes.id })
+          .from(catalogTrailerTypes)
+          .where(
+            and(
+              eq(catalogTrailerTypes.game, game),
+              inArray(catalogTrailerTypes.id, [...new Set(ids)].map(applicationId)),
+            ),
+          )
+          .orderBy(asc(catalogTrailerTypes.id))
+          .for("share");
+        for (const row of types) result[row.id] = `type:${row.id}`;
+      }
       return result;
     },
     async authorize(actor: Actor, admin = true) {
@@ -1072,7 +1328,7 @@ export function createCatalogs(
                 : {}),
             })
             .from(t)
-            .where(and(eq(t.game, game), list === "trailers" ? trailerRepresentative : undefined))
+            .where(eq(t.game, game))
             .$dynamic();
           if (list === "companies") totals.leftJoin(catalogCompanyLogos, companyLogoLink);
           const [counts] = await totals;
@@ -1112,6 +1368,7 @@ export function createCatalogs(
         if (list === "dlcs" && query.dlc) throw identityError(422);
         if (list !== "cities" && query.regionId) throw identityError(422);
         if (list !== "companies" && query.logo) throw identityError(422);
+        if (list !== "trailers" && query.trailerTypeId) throw identityError(422);
         if (isCanonicalList(list) && query.untranslated) throw identityError(422);
         const includeHidden = query.hidden !== "only" && (query.includeHidden ?? false);
         const t = common(list),
@@ -1128,7 +1385,7 @@ export function createCatalogs(
             locale,
             ...maintenanceBinding(query),
             ...canonicalOrderBinding(isCanonicalList(list)),
-            ...(list === "trailers" ? ["common-trailer-v1"] : []),
+            ...(list === "trailers" ? ["trailer-variants-v2", query.trailerTypeId ?? null] : []),
           ];
         let after: [string, string] | null = null;
         if (query.cursor) {
@@ -1143,7 +1400,11 @@ export function createCatalogs(
         const escaped = query.search?.replace(/[\\%_]/g, (v) => `\\${v}`);
         const filter = and(
           eq(t.game, query.game),
-          list === "trailers" ? trailerRepresentative : undefined,
+          list === "trailers" && query.trailerTypeId
+            ? query.trailerTypeId === "undefined"
+              ? isNull(catalogTrailers.trailerTypeId)
+              : eq(catalogTrailers.trailerTypeId, applicationId(query.trailerTypeId))
+            : undefined,
           includeHidden ? undefined : eq(t.hidden, query.hidden === "only"),
           query.untranslated ? isNull(t.nameRu) : undefined,
           query.logo === "missing" ? companyMissingLogo : undefined,
@@ -1155,19 +1416,6 @@ export function createCatalogs(
                   ? sql`${catalogCities.nameNative} LIKE ${`%${escaped}%`}`
                   : undefined,
                 sql`CONVERT(${t.code} USING utf8mb4) LIKE ${`%${escaped}%`}`,
-                list === "trailers"
-                  ? or(
-                      sql`CONVERT(${catalogTrailers.commonTrailer} USING utf8mb4) LIKE ${`%${escaped}%`}`,
-                      sql`EXISTS (
-                    SELECT 1 FROM ${catalogTrailers} AS ${sql.identifier("trailer_peer")}
-                    WHERE ${trailerPeer.game} = ${catalogTrailers.game}
-                    AND ${trailerPeer.commonTrailer} = ${catalogTrailers.commonTrailer}
-                    AND (CONVERT(${trailerPeer.code} USING utf8mb4) LIKE ${`%${escaped}%`}
-                      OR ${trailerPeer.nameEn} LIKE ${`%${escaped}%`}
-                      OR ${trailerPeer.nameRu} LIKE ${`%${escaped}%`})
-                  )`,
-                    )
-                  : undefined,
               )
             : undefined,
           list !== "dlcs" && query.dlc === "base" ? sql`${t.dlcId} IS NULL` : undefined,
@@ -1251,6 +1499,7 @@ export function createCatalogs(
           async () => {
             const id = newId();
             const fields = fieldsOf(list, input);
+            if (list === "trailers") await trailerType(tx, input.game, input.trailerTypeId);
             if (list !== "dlcs" && "dlcId" in input)
               await parent(tx, "dlc", input.game, input.dlcId as string | null);
             if (list === "cities" && "regionId" in input)
@@ -1299,7 +1548,12 @@ export function createCatalogs(
                 id: t.id,
                 game: t.game,
                 code: t.code,
-                ...(list === "trailers" ? { commonTrailer: catalogTrailers.commonTrailer } : {}),
+                ...(list === "trailers"
+                  ? {
+                      commonTrailer: catalogTrailers.commonTrailer,
+                      trailerTypeId: catalogTrailers.trailerTypeId,
+                    }
+                  : {}),
                 nameEn: t.nameEn,
                 nameRu: t.nameRu,
                 hidden: t.hidden,
@@ -1319,23 +1573,9 @@ export function createCatalogs(
             if (list === "cities" && "regionId" in input)
               await parent(tx, "region", row.game, input.regionId, row.regionId ?? null);
             const fields = fieldsOf(list, input);
+            if (list === "trailers") await trailerType(tx, row.game, input.trailerTypeId);
             if (changesFields(row, fields)) {
               try {
-                if (list === "trailers" && row.commonTrailer) {
-                  // Editing the displayed group changes shared presentation/visibility.
-                  // Never copy one member's opaque body code onto another member.
-                  const { code: _code, dlcId: _dlc, commonTrailer: _group, ...shared } = fields;
-                  if (Object.keys(shared).length)
-                    await c(tx)
-                      .update(catalogTrailers)
-                      .set({ ...shared, updatedAt: now().toISOString() })
-                      .where(
-                        and(
-                          eq(catalogTrailers.game, row.game),
-                          eq(catalogTrailers.commonTrailer, row.commonTrailer),
-                        ),
-                      );
-                }
                 await c(tx)
                   .update(t)
                   .set({ ...fields, updatedAt: now().toISOString() })
@@ -1806,7 +2046,11 @@ export function createCatalogs(
         return result as unknown as S["CatalogImportResult"];
       });
     },
-    resolveInTransaction,
+    /** Frozen ingestion keeps its existing consistent-read resolution. */
+    resolveInTransaction: (tx: TxContext, input: CodeResolution) => resolveCode(tx, input, false),
+    /** Current preview facts share the company fence and classification's locking-read view. */
+    resolveCurrentInTransaction: (tx: TxContext, input: CodeResolution) =>
+      resolveCode(tx, input, true),
     selectionsInTransaction,
     /** Published Events need safe canonical route facts without touching company logos. */
     async eventRouteCatalogInTransaction(
@@ -2024,8 +2268,14 @@ export function createCatalogs(
     ) {
       if (refs.length > 300) throw new Error("CATALOG_LABEL_BATCH_BOUND_EXCEEDED");
       const result = new Map<string, S["CatalogLabel"]>();
-      for (const kind of ["city", "cargo", "trailer"] as const) {
-        const ids = [...new Set(refs.filter((r) => r.kind === kind).map((r) => r.id))];
+      for (const kind of ["city", "cargo", "trailer", "trailer-type"] as const) {
+        const ids = [
+          ...new Set(
+            refs
+              .filter((r) => r.kind === kind || (kind === "trailer-type" && r.kind === "trailer"))
+              .map((r) => r.id),
+          ),
+        ];
         if (!ids.length) continue;
         const table = kindTables[kind];
         const native = kind === "city" ? catalogCities.nameNative : sql<string | null>`NULL`;
@@ -2035,14 +2285,24 @@ export function createCatalogs(
             nameEn: table.nameEn,
             nameRu: table.nameRu,
             nameNative: native,
-            hidden: table.hidden,
+            hidden:
+              kind === "trailer-type"
+                ? sql<boolean>`FALSE`
+                : (table as typeof catalogTrailers).hidden,
           })
           .from(table)
           .where(inArray(table.id, ids));
         for (const row of rows)
           result.set(
             row.id,
-            label(row.id, row.nameEn, row.nameRu, row.hidden, locale, row.nameNative),
+            label(
+              row.id,
+              row.nameEn,
+              row.nameRu,
+              kind === "trailer-type" ? false : row.hidden,
+              locale,
+              row.nameNative,
+            ),
           );
       }
       return result;

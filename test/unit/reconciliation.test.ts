@@ -9,7 +9,10 @@ import {
   validateReconciliationConfig,
   withinDistance,
 } from "../../apps/api/src/modules/reconciliation/matcher.ts";
-import { selectQuality } from "../../apps/api/src/modules/reconciliation/quality.ts";
+import {
+  sameTrailerContext,
+  selectQuality,
+} from "../../apps/api/src/modules/reconciliation/quality.ts";
 import type { NormalizedTripEvidence } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import {
   type Telemetry,
@@ -38,6 +41,47 @@ async function fact(): Promise<NormalizedTripEvidence> {
     };
   return f;
 }
+test("verified types bridge manual and telemetry without equating different raw chains", async () => {
+  const raw = await fact(),
+    manual = structuredClone(raw),
+    typeId = newId(),
+    rawId = newId(),
+    otherId = newId();
+  const trailer = (entityId: string, identityKind?: "type") => ({
+    status: "known" as const,
+    value: { entityId, ...(identityKind ? { identityKind } : {}) },
+    sourceRecordId: raw.sourceRecordId,
+    sourceField: "synthetic.body",
+  });
+  raw.trailers = { complete: true, items: [trailer(rawId)] };
+  manual.provider = "manual";
+  manual.factRevisionId = newId();
+  manual.trailers = { complete: true, items: [trailer(typeId, "type")] };
+  manual.fuelUsedL = {
+    status: "unknown",
+    reasonCode: "synthetic",
+    sourceRecordId: manual.sourceRecordId,
+  };
+  raw.fuelUsedL = {
+    status: "known",
+    value: "1",
+    sourceRecordId: raw.sourceRecordId,
+    sourceField: "synthetic.fuel",
+  };
+  const mapping = { [rawId]: `type:${typeId}`, [otherId]: `type:${typeId}` };
+  expect(sameTrailerContext(manual, raw, mapping)).toBe(true);
+  expect(
+    selectQuality([manual, raw], manual.factRevisionId, undefined, mapping).selected
+      ?.factRevisionId,
+  ).toBe(raw.factRevisionId);
+  expect(selectQuality([manual, raw], manual.factRevisionId, undefined, {}).reasons).toContain(
+    "quality_supported_conflict",
+  );
+  expect(sameTrailerContext(manual, raw, { [rawId]: `type:${otherId}` })).toBe(false);
+  const changed = structuredClone(raw);
+  changed.trailers.items = [trailer(otherId)];
+  expect(sameTrailerContext(raw, changed, mapping)).toBe(false);
+});
 test("explicit versioned tolerances use exact decimals and inclusive integer millisecond boundaries", async () => {
   expect(
     withinDistance(

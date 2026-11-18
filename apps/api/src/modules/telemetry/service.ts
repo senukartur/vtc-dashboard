@@ -59,6 +59,7 @@ const info = (t: Info): Info => ({
   createdAt: t.createdAt,
   lastUsedAt: t.lastUsedAt,
   revokedAt: t.revokedAt,
+  companion: t.companion ?? false,
 });
 export function createTelemetry(
   unit: UnitOfWork,
@@ -188,7 +189,7 @@ export function createTelemetry(
     tx: TxContext,
     token: Token | undefined,
     ip: string,
-    lane: "events" | "control",
+    lane: "events" | "control" | "companion",
   ) {
     const ipSlot =
       createHmac("sha256", Buffer.from(config.cursorKey, "hex"))
@@ -198,8 +199,16 @@ export function createTelemetry(
         .readUInt16BE(0) % 512;
     const buckets = [
       ...(token ? [{ key: `token:${token.id}:${lane}`, rate: 60, burst: 10 }] : []),
-      { key: `ip:${ipSlot}`, rate: config.ipPerMinute, burst: config.ipPerMinute },
-      { key: "global", rate: config.globalPerMinute, burst: config.globalPerMinute },
+      {
+        key: `${lane === "companion" ? "companion:" : ""}ip:${ipSlot}`,
+        rate: config.ipPerMinute,
+        burst: config.ipPerMinute,
+      },
+      {
+        key: lane === "companion" ? "companion:global" : "global",
+        rate: config.globalPerMinute,
+        burst: config.globalPerMinute,
+      },
     ];
     const ms = now().getTime();
     for (const b of buckets) {
@@ -231,7 +240,7 @@ export function createTelemetry(
   async function use<T>(
     bearer: string | undefined,
     ip: string,
-    lane: "events" | "control",
+    lane: "events" | "control" | "companion",
     fn: (tx: TxContext, token: Token) => Promise<T>,
     admission?: object,
   ): Promise<T> {
@@ -259,11 +268,44 @@ export function createTelemetry(
   }
   return {
     config,
-    async admit(bearer: string | undefined, ip: string, lane: "events" | "control") {
+    async companion<T>(
+      bearer: string | undefined,
+      ip: string,
+      fn: (tx: TxContext, token: Token, scope: string) => Promise<T>,
+      admission?: object,
+    ) {
+      return use(
+        bearer,
+        ip,
+        "companion",
+        async (tx, token) => {
+          if (!token.companion) throw new TelemetryError(403, "CAPABILITY_REQUIRED");
+          const scope = sign(
+            canonicalJson([
+              token.ownerId,
+              token.companyId,
+              token.accessEpoch,
+              token.identityEpoch,
+              token.credentialEpoch,
+            ]),
+          );
+          return fn(tx, token, scope);
+        },
+        admission,
+      );
+    },
+    async admit(bearer: string | undefined, ip: string, lane: "events" | "control" | "companion") {
       const outcome = await run(async (tx) => {
         const auth = await authenticate(tx, bearer),
           wait = await charge(tx, auth.token, ip, lane);
-        return auth.error ?? (wait ? new TelemetryError(429, "RATE_LIMITED", wait) : null);
+        return (
+          auth.error ??
+          (lane === "companion" && !auth.token?.companion
+            ? new TelemetryError(403, "CAPABILITY_REQUIRED")
+            : wait
+              ? new TelemetryError(429, "RATE_LIMITED", wait)
+              : null)
+        );
       });
       if (outcome) throw outcome;
       const ticket = {};
@@ -297,6 +339,7 @@ export function createTelemetry(
           identityEpoch: credential.identityEpoch,
           credentialEpoch: credential.credentialEpoch,
           scope: "ingest" as const,
+          companion: input.companion === true,
           secretHash: hash(secret),
           label: input.label,
           createdAt: at(),
@@ -352,6 +395,7 @@ export function createTelemetry(
             createdAt: tokens.createdAt,
             lastUsedAt: tokens.lastUsedAt,
             revokedAt: tokens.revokedAt,
+            companion: tokens.companion,
           })
           .from(tokens)
           .where(

@@ -1,3 +1,4 @@
+import { ArrowLeft } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
@@ -237,7 +238,8 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
       </p>
       {failure !== "notFound" && failure !== "forbidden" && (
         <Link to="/account/drivers" className="driver-back">
-          <span aria-hidden="true">←</span> {t("profile.back")}
+          <ArrowLeft size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
+          {t("profile.back")}
         </Link>
       )}
       <ProfileHeader

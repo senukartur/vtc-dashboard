@@ -1,3 +1,4 @@
+import { Search } from "lucide-react";
 import { type RefObject, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Label, Select } from "../../shared/ui/primitives.js";
@@ -42,6 +43,7 @@ export function TripListFilters({
     <fieldset className="trips-filter-group" aria-label={t("filters")}>
       <div className="trips-toolbar">
         <div className="trips-search">
+          <Search size={16} strokeWidth={1.8} aria-hidden="true" focusable="false" />
           <Label htmlFor="trip-search" className="visually-hidden">
             {t("searchPlaceholder")}
           </Label>
@@ -88,6 +90,7 @@ export function TripListFilters({
               </Label>
               <Select
                 id="trip-decision"
+                data-active={!!filters.decision}
                 value={filters.decision ?? ""}
                 onChange={(e) => onChange("decision", e.target.value)}
               >
@@ -107,6 +110,7 @@ export function TripListFilters({
             </Label>
             <Select
               id="trip-source"
+              data-active={!!filters.source}
               value={filters.source ?? ""}
               onChange={(e) => onChange("source", e.target.value)}
             >
@@ -124,6 +128,7 @@ export function TripListFilters({
             </Label>
             <Select
               id="trip-period"
+              data-active={!!effectivePeriod}
               value={effectivePeriod ?? ""}
               onChange={(e) => onChange("period", e.target.value)}
             >

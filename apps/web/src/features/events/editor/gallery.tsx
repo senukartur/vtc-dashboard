@@ -1,7 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { Plus, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { useSession } from "../../../app/Session.js";
-import { Button, Input, Label } from "../../../shared/ui/primitives.js";
+import { Badge, Button, Input, Label } from "../../../shared/ui/primitives.js";
 import { AccountFailure } from "../../account/transport.js";
 import { useTripQuery } from "../../trips/queries.js";
 import { EventFailureView } from "../components.js";
@@ -515,7 +516,7 @@ function ReadyScreenshot({
       <div className="event-editor-gallery-thumb">
         <GalleryImage eventId={eventId} media={media} />
         {media.isCover && (
-          <span className="event-editor-cover-tag event-editor-tag">{text.cover}</span>
+          <Badge className="event-editor-cover-tag event-editor-tag">{text.cover}</Badge>
         )}
         <Button
           type="button"
@@ -525,7 +526,7 @@ function ReadyScreenshot({
           aria-label={`${text.delete} ${media.position + 1}`}
           onClick={() => void update(media.id, null, onRemoved)}
         >
-          ×
+          <X size={14} strokeWidth={1.8} aria-hidden="true" />
         </Button>
       </div>
       <div className="stack">
@@ -689,7 +690,7 @@ export function EditorGallery({
         <div className="event-editor-inline">
           <div className="event-editor-file">
             <Label htmlFor={id} className="event-editor-add-image">
-              <span aria-hidden="true">+</span>
+              <Plus size={16} strokeWidth={1.8} aria-hidden="true" />
               <strong>{text.add}</strong>
               <small className="muted">{text.imageFormats}</small>
             </Label>

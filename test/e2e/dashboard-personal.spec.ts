@@ -37,7 +37,7 @@ const text = {
     chart: "My daily distance",
     trips: "Recent trips",
     allTrips: "All my trips",
-    decisions: ["✓ Accepted", "● Pending review", "✕ Rejected", "Unassessed", "✓ Accepted"],
+    decisions: ["Accepted", "Pending review", "Rejected", "Not checked yet", "Accepted"],
     companyLink: "Company overview · statistics of all drivers",
     unavailable: "Unavailable",
   },
@@ -51,7 +51,7 @@ const text = {
     chart: "Мой пробег по дням",
     trips: "Последние рейсы",
     allTrips: "Все мои рейсы",
-    decisions: ["✓ Принят", "● На проверке", "✕ Отклонено", "Не оценён", "✓ Принят"],
+    decisions: ["Принят", "На проверке", "Отклонён", "Ещё не проверен", "Принят"],
     companyLink: "Обзор компании · статистика всех водителей",
     unavailable: "Недоступно",
   },
@@ -195,7 +195,7 @@ for (const locale of ["en", "ru"] as const) {
         "ATS",
         "ETS2",
       ]);
-      await expect(trips.locator(".dashboard-decision")).toHaveText([...t.decisions]);
+      await expect(trips.locator(".trips-decision")).toHaveText([...t.decisions]);
       await expect(trips).not.toContainText("Fictional Yukon Member");
       await expect(trips.getByRole("listitem").nth(1)).toContainText(t.unavailable);
       await expect(trips.getByRole("listitem").nth(1)).not.toContainText(/\b0 (km|км)/);
@@ -233,7 +233,8 @@ for (const locale of ["en", "ru"] as const) {
       if (phone) {
         // P4: one column in DOM order with the company card before the chart.
         await expect(companyLink(page)).toBeVisible();
-        await expect(companyLink(page)).toHaveText(new RegExp(`^${t.companyLink}\\s*›$`));
+        await expect(companyLink(page)).toHaveText(t.companyLink);
+        await expect(companyLink(page).locator("svg")).toHaveClass(/lucide-chevron-right/);
         await expect(companyLink(page)).toHaveAttribute("href", "/account/company");
         const link = await box(companyLink(page));
         const order = [attention, own, qualification, event, link, chart, recent];

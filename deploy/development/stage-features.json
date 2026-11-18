@@ -42,7 +42,7 @@
     "event_drafts": [
       "SELECT",
       "INSERT",
-      "UPDATE(version,updated_by,updated_at,discarded_at,title,description,game,server,meeting_location,route,meeting_at,starts_at,ends_at,visibility,origin_city_id,destination_city_id,prescribed_cargo_id,prescribed_trailer_type_id,prescribed_mass_kg,platform,organizer_member_id,origin_depot_id,destination_depot_id,distance_km)"
+      "UPDATE(version,updated_by,updated_at,discarded_at,title,description,game,server,meeting_location,route,meeting_at,starts_at,ends_at,visibility,origin_city_id,destination_city_id,prescribed_cargo_id,prescribed_trailer_type_id,prescribed_trailer_kind_id,prescribed_mass_kg,platform,organizer_member_id,origin_depot_id,destination_depot_id,distance_km)"
     ],
     "event_metadata": ["SELECT", "INSERT", "UPDATE(published_event_id)"],
     "event_workflow_commands": ["SELECT", "INSERT"]
@@ -135,7 +135,7 @@
       "trip_decision_catchup": ["SELECT", "INSERT", "UPDATE"],
       "trip_decision_commands": ["SELECT", "INSERT"],
       "trip_decisions": ["SELECT", "INSERT"],
-      "trip_event_associations": ["SELECT", "INSERT", "UPDATE"],
+      "trip_event_associations": ["INSERT", "UPDATE"],
       "trip_fact_trailers": ["SELECT", "INSERT"],
       "trip_facts": ["SELECT", "INSERT"],
       "trip_history": ["SELECT", "INSERT", "UPDATE(fact_id,outcome,reasons)"],
@@ -143,7 +143,8 @@
       "trip_proposals": ["SELECT", "INSERT"],
       "trip_resolutions": ["SELECT", "INSERT"],
       "trip_review_work": ["SELECT", "INSERT", "UPDATE"],
-      "trips": ["SELECT", "INSERT", "UPDATE"]
+      "trips": ["SELECT", "INSERT", "UPDATE"],
+      "catalog_trailer_types": ["SELECT"]
     },
     "jobs": {
       "audit_entries": ["INSERT"],
@@ -190,6 +191,7 @@
       "source_messages": ["SELECT"],
       "source_trips": ["SELECT"],
       "trip_contribution_history": ["SELECT", "INSERT"],
+      "trip_owner_revisions": ["SELECT", "INSERT", "UPDATE"],
       "trip_contributions": ["SELECT", "INSERT", "UPDATE"],
       "trip_decision_catchup": ["SELECT", "INSERT", "UPDATE"],
       "trip_decisions": ["SELECT", "INSERT"],
@@ -201,7 +203,9 @@
       "trip_proposals": ["SELECT"],
       "trip_resolutions": ["SELECT"],
       "trip_review_work": ["SELECT", "INSERT", "UPDATE"],
-      "trips": ["SELECT", "UPDATE"]
+      "trips": ["SELECT", "UPDATE"],
+      "catalog_trailer_types": ["SELECT"],
+      "qualification_level_trailer_types": ["SELECT"]
     }
   }
 }

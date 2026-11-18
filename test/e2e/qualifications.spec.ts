@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { catalogItem, catalogList, envelope } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { switchLanguage } from "./support/locale.ts";
 import { driverId, mockQualifications, qid } from "./support/qualifications-ui.ts";
@@ -19,6 +20,48 @@ async function open(
 }
 const writes = (mock: Awaited<ReturnType<typeof mockQualifications>>) =>
   mock.requests.filter((request) => request.method !== "GET");
+
+test(
+  "legacy allowances stay explicit and switching the editor replaces variants with semantic types",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockQualifications(page, { lead: true });
+    const legacy = catalogItem(qid(700), "Fictional original body", "en"),
+      type = catalogItem(qid(701), "Box trailer", "en", { code: "dryvan" });
+    const level = mock.ladder[0]!;
+    level.limits.trailers = { mode: "selected", types: [legacy.display] };
+    await page.route("**/api/v1/catalogs/trailer-types**", (route) =>
+      route.fulfill({
+        json: new URL(route.request().url()).pathname.endsWith(type.id)
+          ? envelope(type)
+          : catalogList([type]),
+      }),
+    );
+    await page.goto(`/account/qualifications/${level.id}/edit`);
+    await switchLanguage(page, "en");
+    await expect(
+      page
+        .locator(".qualification-selected-chip")
+        .getByText("Fictional original body", { exact: true }),
+    ).toBeVisible();
+    const picker = page.getByRole("combobox", { name: "Trailer type", exact: true });
+    await expect(picker).toBeDisabled();
+    await page.getByRole("button", { name: "Switch to trailer types", exact: true }).click();
+    await expect(picker).toBeEnabled();
+    await expect(page.getByText("Fictional original body", { exact: true })).toHaveCount(0);
+    await picker.fill("Box");
+    await page.getByRole("option", { name: /Box trailer/ }).click();
+    await page
+      .locator(".qualification-picker")
+      .getByRole("button", { name: "Add", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(() => writes(mock).length).toBe(1);
+    expect(writes(mock)[0]?.body).toMatchObject({
+      limits: { trailers: { basis: "type", mode: "selected", typeIds: [type.id] } },
+    });
+  },
+);
 
 test(
   "a driver sees the ladder, their own level and a level page without management controls",

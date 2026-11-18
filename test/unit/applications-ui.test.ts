@@ -131,10 +131,10 @@ describe("mailActions", () => {
   });
 });
 
-test("applicationTone pairs each status with a symbol and a tone", () => {
-  expect(applicationTone("submitted")).toEqual({ tone: "pending", symbol: "●" });
-  expect(applicationTone("approved")).toEqual({ tone: "accepted", symbol: "✓" });
-  expect(applicationTone("rejected")).toEqual({ tone: "rejected", symbol: "✕" });
+test("applicationTone pairs each status with a icon and a tone", () => {
+  expect(applicationTone("submitted")).toEqual({ tone: "info", icon: "clock" });
+  expect(applicationTone("approved")).toEqual({ tone: "ok", icon: "check" });
+  expect(applicationTone("rejected")).toEqual({ tone: "error", icon: "x" });
 });
 
 test("every applicationsUi string is non-empty in EN and RU", () => {

@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -212,7 +213,7 @@ export function DecisionPanel({
                 aria-label={t("closeDetails")}
                 onClick={onClose}
               >
-                <span aria-hidden="true">×</span>
+                <X size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
               </Button>
             )}
           </span>

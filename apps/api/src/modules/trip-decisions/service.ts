@@ -255,8 +255,10 @@ export function createTripDecisions(
           : []),
       ]);
     }
+    const trailerTypes = (await ports.trips.trailerTypesInTransaction?.(tx, evidence)) ?? {};
     const hash = contentHash(
       canonicalJson({
+        ...(Object.keys(trailerTypes).length ? { trailerTypes } : {}),
         members: members.map((t) => [t.id, t.aliasOf, t.currentFactId]),
         facts: evidence.map((e) => e.factRevisionId).sort(),
         event,
@@ -265,7 +267,7 @@ export function createTripDecisions(
         reconciliationPending: row.reviewReasons.includes("candidate_search_overflow"),
       }),
     );
-    return { evidence, event, eventId: eventId ?? null, eventInvalid, hash };
+    return { evidence, event, eventId: eventId ?? null, eventInvalid, hash, trailerTypes };
   }
   // A proposal can introduce a trailer absent from every original source fact.
   // Fence its grouping as well, without changing support hashes for ungrouped proposals.
@@ -553,6 +555,8 @@ export function createTripDecisions(
     const selection = selectQuality(
         s.evidence.filter((f) => !holds(f).length),
         row.currentFactId,
+        undefined,
+        s.trailerTypes,
       ),
       e = selection.selected ?? current;
     const workflow = [
@@ -793,7 +797,7 @@ export function createTripDecisions(
         row = await ports.trips.adjudication.write(tx, row, {}, undefined);
         await work(tx, row, s.hash, row.reviewReasons, true);
       }
-      const selection = selectQuality(s.evidence, row.currentFactId),
+      const selection = selectQuality(s.evidence, row.currentFactId, undefined, s.trailerTypes),
         e = selection.selected ?? s.evidence.find((e) => e.factRevisionId === row.currentFactId);
       if (!e) throw identityError(409);
       const telemetry = stage3 ? selectTelemetry(s.evidence, row.currentFactId) : null;
@@ -853,7 +857,7 @@ export function createTripDecisions(
           telemetry && (await ports.trips.projectReviewSourceInTransaction(tx, telemetry));
         const data: S["TripStage3Review"] = {
           ...shared,
-          summary: { ...trip.summary, number: row.number, createdAt: row.createdAt },
+          summary: ports.trips.reviewQueueTrip(trip.summary, row.createdAt, row.number),
           effectiveFacts: trip.effectiveFacts ?? null,
           decisions: trip.decisions,
           pendingProposalId: trip.pendingProposalId,
@@ -1585,8 +1589,8 @@ export function createTripDecisions(
             if (
               !e ||
               (stage3 &&
-                selectQuality(s.evidence, prepared.row.currentFactId).selected?.factRevisionId !==
-                  e.factRevisionId)
+                selectQuality(s.evidence, prepared.row.currentFactId, undefined, s.trailerTypes)
+                  .selected?.factRevisionId !== e.factRevisionId)
             )
               throw identityError(409, "VERSION_CONFLICT");
             const manualRevision = prepared.manual.reports.find(

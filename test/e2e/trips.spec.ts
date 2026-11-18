@@ -590,7 +590,7 @@ test(
       [
         "en",
         [
-          ["Job type", "Unknown"],
+          ["Job type", "Job type unknown"],
           ["Game mode", "HaulMP"],
           ["Hard Mode", "Not qualified"],
         ],
@@ -598,7 +598,7 @@ test(
       [
         "ru",
         [
-          ["Тип заказа", "Неизвестно"],
+          ["Тип заказа", "Тип заказа неизвестен"],
           ["Режим игры", "HaulMP"],
           // Hard Mode keeps its English name in both languages.
           ["Hard Mode", "Не соответствует"],

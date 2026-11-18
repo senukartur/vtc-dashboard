@@ -19,6 +19,7 @@ import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
+import { createOwnerRevision } from "./owner-revision.js";
 import { queueClock, syncReviewReasons } from "./review-queue.js";
 import { ingestionConflictCodes } from "./service.js";
 export interface GroupSnapshot {
@@ -81,7 +82,15 @@ function withoutHeld(all: readonly NormalizedTripEvidence[], current: readonly (
     held: [...new Set(all.flatMap((f) => heldCodes(f, current)))],
   };
 }
-export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stage3Enabled = false) {
+export function createTripReconciliation(
+  unit: UnitOfWork,
+  now: () => Date,
+  stage3Enabled = false,
+  trailerTypes: (
+    tx: TxContext,
+    evidence: readonly NormalizedTripEvidence[],
+  ) => Promise<Readonly<Record<string, string>>> = async () => ({}),
+) {
   const c = (tx: TxContext) => unit.client(tx),
     groups = createTripGroups(unit),
     facts = createFactRepository(unit);
@@ -133,6 +142,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stag
   async function write(tx: TxContext, row: TripState, patch: Partial<TripState>) {
     if (row.version >= 2147483647) throw identityError(409);
     const at = now().toISOString();
+    await createOwnerRevision(unit).bump(tx, row.ownerId);
     await c(tx)
       .update(trips)
       .set({
@@ -205,7 +215,12 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stag
           primary.currentFactId,
           secondary.currentFactId,
         ]),
-        selected = selectQuality(selectable, primary.currentFactId);
+        selected = selectQuality(
+          selectable,
+          primary.currentFactId,
+          undefined,
+          await trailerTypes(tx, selectable),
+        );
       if (!selected.selected || !primary.currentFactId || !secondary.currentFactId)
         throw identityError(409);
       const credits = await c(tx)
@@ -340,7 +355,12 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stag
           );
         if (all.some((f) => !snapshot.facts.includes(f.factRevisionId))) {
           const { selectable, held } = withoutHeld(all, [root.currentFactId]),
-            choice = selectQuality(selectable, root.currentFactId);
+            choice = selectQuality(
+              selectable,
+              root.currentFactId,
+              undefined,
+              await trailerTypes(tx, selectable),
+            );
           const patch =
             root.decision === "accepted"
               ? {
@@ -383,6 +403,8 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date, stag
     },
     async searchStatus(tx: TxContext, id: string, pending: boolean) {
       const row = await groups.resolve(tx, id, true);
+      if (row.reviewReasons.includes("candidate_search_overflow") !== pending)
+        await createOwnerRevision(unit).bump(tx, row.ownerId);
       // Diagnostic state changes neither the fact/version epoch nor adjudication/credit.
       const reasons = row.reviewReasons.filter((r) => r !== "candidate_search_overflow");
       if (pending) reasons.push("candidate_search_overflow");

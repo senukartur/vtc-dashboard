@@ -122,7 +122,11 @@ export async function mockQualifications(
   });
   const limits = (input: S["QualificationLimitsInput"]): S["QualificationLimits"] => ({
     ...input,
-    trailers: { mode: input.trailers.mode, types: [] },
+    trailers: {
+      ...(input.trailers.basis ? { basis: input.trailers.basis } : {}),
+      mode: input.trailers.mode,
+      types: [],
+    },
   });
   await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);

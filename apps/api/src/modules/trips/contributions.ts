@@ -12,10 +12,12 @@ import { identityError } from "../identity/service.js";
 import { canonicalJson, contentHash, decimal } from "../sources/contracts/canonical.js";
 import { canonicalDecimal, compareDecimal } from "../sources/contracts/decimal.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
+import { createOwnerRevision } from "./owner-revision.js";
 export interface QualificationProgressTotals {
   readonly completedTrips: number;
   readonly completedDistanceM: string;
 }
+
 import { createFactRepository } from "./facts.js";
 import { createTripGroups } from "./groups.js";
 export interface ContributionChange {
@@ -84,6 +86,7 @@ export function createContributionRegister(unit: UnitOfWork) {
     return totals;
   }
   return {
+    companionRevision: createOwnerRevision(unit),
     async contexts(tx: TxContext, changes: readonly ContributionChange[]) {
       if (
         !changes.length ||
@@ -200,6 +203,7 @@ export function createContributionRegister(unit: UnitOfWork) {
           throw identityError(409, "IDEMPOTENCY_CONFLICT");
         return [];
       }
+      await createOwnerRevision(unit).bump(tx, trip.ownerId);
       if (previous)
         await c(tx)
           .update(tripContributions)

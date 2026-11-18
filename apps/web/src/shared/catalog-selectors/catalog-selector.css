@@ -60,16 +60,7 @@
   cursor: default;
   pointer-events: auto;
 }
-.catalog-chip {
-  flex: none;
-  padding: 0 4px;
-  border-radius: var(--radius-badge);
-  background: var(--surface-active);
-  color: var(--secondary);
-  font-size: var(--font-badge);
-  font-weight: 600;
-  line-height: 1.45;
-}
+
 .catalog-popup {
   position: absolute;
   top: calc(100% + 4px);

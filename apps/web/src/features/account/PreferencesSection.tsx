@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
@@ -28,19 +29,7 @@ function RowStatus({ state, saved }: { state: "pending" | "saved" | null; saved:
       className={state === "saved" ? "settings-status settings-status-saved" : "settings-status"}
     >
       {state === "saved" && (
-        <svg
-          aria-hidden="true"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M5 12l5 5 9-10" />
-        </svg>
+        <Check size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
       )}
       {state === "pending" ? t("working") : state === "saved" ? saved : ""}
     </p>

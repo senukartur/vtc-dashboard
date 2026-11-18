@@ -23,6 +23,7 @@ import {
   qualificationAssignments,
   qualificationLevels,
   qualificationLevelTrailers,
+  qualificationLevelTrailerTypes,
   sql,
 } from "@vtc/db/qualifications-schema";
 import { closed, createOutbox } from "../../platform/outbox/events.js";
@@ -42,6 +43,7 @@ import {
   type QualificationLimits,
   type QualificationSnapshot,
 } from "./check.js";
+import { createCompanionQualifications } from "./companion.js";
 import {
   type ActiveLevel,
   activeLevels,
@@ -72,7 +74,10 @@ interface Ports {
     | "authorizeInTransaction"
   >;
   trips: Pick<Trips, "contributions">;
-  catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction"> &
+  catalogs?: Pick<
+    Catalogs,
+    "selectionsInTransaction" | "labelsInTransaction" | "companionTrailerDisplayInTransaction"
+  > &
     Partial<Pick<Catalogs, "trailerGroupsInTransaction">>;
   events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
@@ -166,7 +171,11 @@ export function createQualifications(
       massMaxKg: limits.massMaxKg,
       distanceMinM: limits.distanceMinM,
       distanceMaxM: limits.distanceMaxM,
-      trailers: { mode: limits.trailers.mode, types: labelsOf(labels, limits.trailers.typeIds) },
+      trailers: {
+        ...(limits.trailers.basis ? { basis: limits.trailers.basis } : {}),
+        mode: limits.trailers.mode,
+        types: labelsOf(labels, limits.trailers.typeIds),
+      },
       adr: { mode: limits.adr.mode, classes: [...limits.adr.classes] },
       hardModeRequired: limits.hardModeRequired,
     };
@@ -445,6 +454,8 @@ export function createQualifications(
       [distanceMinM, distanceMaxM],
     ] as const)
       if (min !== null && max !== null && compareDecimal(min, max) > 0) throw identityError(422);
+    const basis = limits.trailers.basis ?? "variant";
+    if (basis !== "variant" && basis !== "type") throw identityError(422);
     const typeIds = [...new Set(limits.trailers.typeIds.map(id))].sort();
     if (
       typeIds.length !== limits.trailers.typeIds.length ||
@@ -456,12 +467,19 @@ export function createQualifications(
       if (!ports.catalogs) throw identityError(503);
       const found = await ports.catalogs.selectionsInTransaction(
         tx,
-        typeIds.map((value) => ({ kind: "trailer" as const, id: value })),
+        typeIds.map((value) => ({
+          kind: basis === "type" ? ("trailer-type" as const) : ("trailer" as const),
+          id: value,
+        })),
       );
       if (
         typeIds.some((value) => {
           const entity = found.get(value);
-          return entity?.kind !== "trailer" || entity.game !== selected;
+          return (
+            entity?.kind !== "trailer" ||
+            entity.game !== selected ||
+            (basis === "type") !== (entity.identityKind === "type")
+          );
         })
       )
         throw identityError(422);
@@ -479,7 +497,7 @@ export function createQualifications(
       massMaxKg,
       distanceMinM,
       distanceMaxM,
-      trailers: { mode: limits.trailers.mode, typeIds },
+      trailers: { ...(basis === "type" ? { basis } : {}), mode: limits.trailers.mode, typeIds },
       adr: { mode: limits.adr.mode, classes },
       hardModeRequired: limits.hardModeRequired,
     };
@@ -530,19 +548,28 @@ export function createQualifications(
     distanceMinM: limits.distanceMinM,
     distanceMaxM: limits.distanceMaxM,
     trailerMode: limits.trailers.mode,
+    trailerBasis: limits.trailers.basis ?? "variant",
     adrMode: limits.adr.mode,
     adrClasses: limits.adr.mode === "selected" ? [...limits.adr.classes] : null,
     hardModeRequired: limits.hardModeRequired,
     requiredTrips: conditions.requiredTrips,
     requiredDistanceM: conditions.requiredDistanceM,
   });
-  async function writeTrailers(tx: TxContext, level: { id: string; game: Game }, ids: string[]) {
+  async function writeTrailers(
+    tx: TxContext,
+    level: { id: string; game: Game },
+    ids: string[],
+    basis: "variant" | "type" = "variant",
+  ) {
+    await c(tx)
+      .delete(qualificationLevelTrailerTypes)
+      .where(eq(qualificationLevelTrailerTypes.levelId, level.id));
     await c(tx)
       .delete(qualificationLevelTrailers)
       .where(eq(qualificationLevelTrailers.levelId, level.id));
     if (ids.length)
       await c(tx)
-        .insert(qualificationLevelTrailers)
+        .insert(basis === "type" ? qualificationLevelTrailerTypes : qualificationLevelTrailers)
         .values(ids.map((trailerId) => ({ levelId: level.id, game: level.game, trailerId })));
   }
   // Positions are unique per game: shift rows one at a time in an order that never collides.
@@ -568,7 +595,11 @@ export function createQualifications(
       massMaxKg: limits.massMaxKg,
       distanceMinM: limits.distanceMinM,
       distanceMaxM: limits.distanceMaxM,
-      trailers: { mode: limits.trailers.mode, typeIds: [...limits.trailers.typeIds] },
+      trailers: {
+        ...(limits.trailers.basis ? { basis: limits.trailers.basis } : {}),
+        mode: limits.trailers.mode,
+        typeIds: [...limits.trailers.typeIds],
+      },
       adr: { mode: limits.adr.mode, classes: [...limits.adr.classes] },
       hardModeRequired: limits.hardModeRequired,
     },
@@ -590,6 +621,13 @@ export function createQualifications(
     transferLevelId: string | null = null,
     occurredAt = at(),
   ) {
+    const owners = await c(tx)
+      .selectDistinct({ userId: qualificationAssignments.userId })
+      .from(qualificationAssignments)
+      .where(eq(qualificationAssignments.game, level.game))
+      .orderBy(qualificationAssignments.userId);
+    for (const owner of owners)
+      await ports.trips.contributions.companionRevision.bump(tx, owner.userId);
     await audit.append(tx, {
       actorKind: "user",
       actorId: actor.userId,
@@ -692,6 +730,7 @@ export function createQualifications(
       tx,
       evidence.game,
       trailerIds,
+      level.trailerBasis,
     );
     return {
       status: "resolved" as const,
@@ -805,7 +844,7 @@ export function createQualifications(
             position: input.position,
             ...levelValues(limits, conditions),
           });
-        await writeTrailers(tx, level, limits.trailers.typeIds as string[]);
+        await writeTrailers(tx, level, limits.trailers.typeIds as string[], limits.trailers.basis);
         await levelAudit(
           tx,
           actor,
@@ -843,7 +882,7 @@ export function createQualifications(
           .update(qualificationLevels)
           .set({ name, version: level.version + 1, ...levelValues(limits, conditions) })
           .where(eq(qualificationLevels.id, level.id));
-        await writeTrailers(tx, level, limits.trailers.typeIds as string[]);
+        await writeTrailers(tx, level, limits.trailers.typeIds as string[], limits.trailers.basis);
         await levelAudit(
           tx,
           actor,
@@ -998,6 +1037,7 @@ export function createQualifications(
         return { qualification: await mine(tx, target, selected) };
       });
     },
+    companion: createCompanionQualifications(unit, ports.trips.contributions, ports.catalogs, now),
     lookupInTransaction: lookup,
     async prepareInTransaction(
       tx: TxContext,

@@ -14,6 +14,7 @@ import { decimal } from "../sources/contracts/canonical.js";
 import type { Fact, NormalizedTripEvidence, TripEntity } from "../sources/contracts/evidence.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
+import { createOwnerRevision } from "./owner-revision.js";
 import { queueClock, syncReviewReasons } from "./review-queue.js";
 
 type S = components["schemas"];
@@ -30,6 +31,8 @@ export function createTripAdjudication(
   return {
     facts: facts.read,
     async assessmentComplete(tx: TxContext, id: string) {
+      const root = await groups.resolve(tx, id, true);
+      if (root.assessmentPending) await createOwnerRevision(unit).bump(tx, root.ownerId);
       await c(tx).update(trips).set({ assessmentPending: false }).where(eq(trips.id, id));
     },
     async hasPendingAssessment(tx: TxContext) {
@@ -69,6 +72,7 @@ export function createTripAdjudication(
     ) {
       if (row.version >= 2147483647 || row.adjudicationVersion >= 2147483647)
         throw identityError(409);
+      await createOwnerRevision(unit).bump(tx, row.ownerId);
       const version = row.version + 1,
         at = now().toISOString();
       await c(tx)
@@ -181,16 +185,21 @@ export function createTripAdjudication(
               }
             : known(cargo.adrClass, "adrClass");
       }
-      if (changes.trailerTypeId)
+      if (changes.trailerTypeId) {
+        const trailer = await select(changes.trailerTypeId, "trailer", base.trailers.items[0]);
         evidence.trailers = {
           complete: true,
           items: [
-            reference(
-              (await select(changes.trailerTypeId, "trailer", base.trailers.items[0])).id,
+            known(
+              {
+                entityId: trailer.id,
+                ...(trailer.identityKind ? { identityKind: trailer.identityKind } : {}),
+              },
               "trailer",
             ),
           ],
         };
+      }
       if (changes.cargoMassKg)
         evidence.cargoMassKg = known(decimal(changes.cargoMassKg), "cargoMassKg");
       if (changes.actualDistanceM) {

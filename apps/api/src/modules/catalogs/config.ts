@@ -12,7 +12,7 @@ export type CatalogList = (typeof catalogLists)[number];
 /** Depots are not a plain list but share the import flow. */
 export type ImportList = CatalogList | "depots";
 export type Game = "ets2" | "ats";
-export type CatalogKind = "city" | "cargo" | "trailer";
+export type CatalogKind = "city" | "cargo" | "trailer" | "trailer-type";
 /**
  * Lists named only by their canonical game name: they carry no translation, so a stored
  * Russian name is never shown, searched, filtered or written. Depots read their company's name.
@@ -49,13 +49,21 @@ export const importColumns: Readonly<Record<ImportList, readonly string[]>> = {
   companies: ["game", "code", "name_en", "dlc_code"],
   depots: ["game", "company_code", "city_code", "dlc_code"],
   cargoes: ["game", "code", "name_en", "name_ru", "adr_class", "dlc_code"],
-  trailers: ["game", "code", "name_en", "name_ru", "dlc_code", "common_trailer"],
+  trailers: [
+    "game",
+    "code",
+    "name_en",
+    "name_ru",
+    "dlc_code",
+    "common_trailer",
+    "trailer_type_code",
+  ],
 };
 
 /** Columns a file header may leave out; an absent column reads as an empty cell. */
 export const optionalImportColumns: Readonly<Partial<Record<ImportList, readonly string[]>>> = {
   cities: ["name_native"],
-  trailers: ["common_trailer", "name_en", "name_ru", "dlc_code"],
+  trailers: ["common_trailer", "trailer_type_code", "name_en", "name_ru", "dlc_code"],
 };
 
 /**

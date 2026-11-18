@@ -1,14 +1,14 @@
 import type { TFunction } from "i18next";
+import { Check, CircleHelp, Flame, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { formatQuantity, type Locale } from "../../shared/formatting.js";
-import { FlameIcon } from "../../shared/ui/flame-icon.js";
 import { rangeText, useLocale } from "./limits.js";
 import type { DTO } from "./transport.js";
 import "./qualifications.css";
 
 type Rule = DTO["QualificationRuleCheck"];
 type T = TFunction<"qualifications">;
-const symbols = { pass: "✓", fail: "✕", unknown: "?" } as const;
+const icons = { pass: Check, fail: X, unknown: CircleHelp } as const;
 const resultKey = { pass: "resultPass", fail: "resultFail", unknown: "resultUnknown" } as const;
 const labels = {
   cargo_mass: "massLabel",
@@ -101,15 +101,21 @@ export function QualificationCheckList({
       {check.rules.length > 0 && (
         <ul className="qualification-check-list">
           {check.rules.map((rule) => {
-            const text = ruleTexts(t, rule, locale);
+            const text = ruleTexts(t, rule, locale),
+              Icon = icons[rule.result];
             return (
               <li key={rule.rule} data-result={rule.result}>
-                <span className="qualification-check-symbol" aria-hidden="true">
-                  {symbols[rule.result]}
-                </span>
+                <Icon
+                  size={14}
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                  className="qualification-check-symbol"
+                />
                 <span className="qualification-check-text">
                   <span className="qualification-check-title">
-                    {rule.rule === "hard_mode" && <FlameIcon size={12} />}
+                    {rule.rule === "hard_mode" && (
+                      <Flame size={12} strokeWidth={1.8} aria-hidden="true" />
+                    )}
                     {text.label}
                     <span className="qualification-muted"> · {t(resultKey[rule.result])}</span>
                   </span>

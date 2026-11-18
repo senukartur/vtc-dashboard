@@ -185,7 +185,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
   gap: var(--space);
-  align-items: start;
+  align-items: stretch;
   min-width: 0;
 }
 .dashboard-page .dashboard-personal-split,
@@ -193,8 +193,15 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space);
-  align-items: flex-start;
+  align-items: stretch;
   min-width: 0;
+}
+/* Equal card heights within each row; keep their content at its natural spacing. */
+.dashboard-page .dashboard-personal-row > .card,
+.dashboard-page .dashboard-personal-split > .card,
+.dashboard-page .dashboard-company-split > .card,
+.dashboard-page .dashboard-breakdowns > .card {
+  align-content: start;
 }
 .dashboard-page .dashboard-personal-split > *,
 .dashboard-page .dashboard-company-split > * {
@@ -381,11 +388,11 @@
   font-size: 12px;
   font-weight: 400;
 }
+
 .dashboard-page .dashboard-peak-badge {
   margin-left: 6px;
-  background: var(--accent-soft);
-  color: var(--focus);
 }
+
 .dashboard-page .dashboard-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -404,10 +411,7 @@
 .dashboard-page .dashboard-leaderboard .dashboard-distance-col {
   width: 104px;
 }
-.dashboard-page .dashboard-rank {
-  background: var(--accent-soft);
-  color: var(--focus);
-}
+
 .dashboard-page .dashboard-rank-plain {
   padding-left: 4px;
   color: var(--muted);
@@ -519,19 +523,11 @@
   text-align: right;
   overflow-wrap: anywhere;
 }
-
 /* Nearest convoy: countdown chip, participants and the own quick response. */
 .dashboard-page .dashboard-countdown {
   flex: none;
-  padding: 1px 6px;
-  border-radius: var(--radius-badge);
-  background: var(--accent-soft);
-  color: var(--focus);
-  font-size: var(--font-badge);
-  font-weight: 600;
-  line-height: 1.5;
-  white-space: nowrap;
 }
+
 .dashboard-page .dashboard-event-info,
 .dashboard-page .dashboard-rsvp-body,
 .dashboard-page .dashboard-decline {
@@ -605,7 +601,7 @@
   grid-column: 1 / -1;
   grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
   gap: var(--space);
-  align-items: start;
+  align-items: stretch;
   min-width: 0;
 }
 .dashboard-page .dashboard-breakdown-list,
@@ -720,16 +716,11 @@
 .dashboard-page .dashboard-trip + .dashboard-trip {
   border-top: 1px solid var(--border);
 }
+
 .dashboard-page .dashboard-game {
   flex: none;
-  padding: 0 5px;
-  border-radius: var(--radius-badge);
-  background: var(--accent-soft);
-  color: var(--focus);
-  font-size: var(--font-badge);
-  font-weight: 700;
-  line-height: 1.6;
 }
+
 /* Route and meta share one line when they fit; otherwise the meta wraps under the route. */
 .dashboard-page .dashboard-trip-text {
   display: flex;
@@ -783,18 +774,6 @@
   gap: 4px 6px;
 }
 /* The decision text and symbol carry the status; the tint only supports them. */
-.dashboard-page .dashboard-decision[data-decision="accepted"] {
-  background: var(--accepted-surface);
-  color: var(--accepted);
-}
-.dashboard-page .dashboard-decision[data-decision="pending_review"] {
-  background: var(--pending-surface);
-  color: var(--pending);
-}
-.dashboard-page .dashboard-decision[data-decision="rejected"] {
-  background: var(--rejected-surface);
-  color: var(--destructive);
-}
 
 /* My month: distance, trips and place side by side, then the comparison sentence. */
 .dashboard-page .dashboard-month-stats {

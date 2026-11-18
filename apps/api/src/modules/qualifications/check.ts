@@ -13,7 +13,11 @@ export interface QualificationLimits {
   readonly massMaxKg: string | null;
   readonly distanceMinM: string | null;
   readonly distanceMaxM: string | null;
-  readonly trailers: { readonly mode: "any" | "selected"; readonly typeIds: readonly string[] };
+  readonly trailers: {
+    readonly basis?: "variant" | "type";
+    readonly mode: "any" | "selected";
+    readonly typeIds: readonly string[];
+  };
   readonly adr: {
     readonly mode: "forbidden" | "selected" | "any";
     readonly classes: readonly AdrClass[];
@@ -77,6 +81,8 @@ export interface QualificationSnapshot {
   readonly editVersion: number | null;
   readonly limits: QualificationLimits | null;
   readonly eventExempt: boolean;
+  /** New exempt decisions retain observations without changing the existing browser exemption view. */
+  readonly exemptionRules?: CheckedRule[];
   readonly outcome: RuleResult | null;
   readonly reasonCode: string | null;
   readonly rules: CheckedRule[];
@@ -129,8 +135,26 @@ export function checkTrip(
   if (limits.trailers.mode === "selected") {
     const identity = (id: string) => trailerGroups[id] ?? id;
     const allowed = new Set(limits.trailers.typeIds.map(identity));
-    if (observedTrailers.some((id) => !allowed.has(identity(id)))) trailers = "fail";
+    const unclassified = (id: string) =>
+      limits.trailers.basis === "type" && (!trailerGroups[id] || trailerGroups[id] === "undefined");
+    const typeAgainstVariant = new Set(
+      limits.trailers.basis === "type"
+        ? []
+        : facts.trailers.items.flatMap((item) =>
+            item.status === "known" && item.value.identityKind === "type"
+              ? [item.value.entityId]
+              : [],
+          ),
+    );
+    if (
+      observedTrailers.some(
+        (id) => !unclassified(id) && !typeAgainstVariant.has(id) && !allowed.has(identity(id)),
+      )
+    )
+      trailers = "fail";
     else if (
+      observedTrailers.some(unclassified) ||
+      typeAgainstVariant.size > 0 ||
       !facts.trailers.complete ||
       !facts.trailers.items.length ||
       facts.trailers.items.some((item) => item.status !== "known")

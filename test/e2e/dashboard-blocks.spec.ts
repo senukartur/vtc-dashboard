@@ -33,7 +33,7 @@ const text = {
     tripsEmpty: "You have no trips yet",
     tripsError: "Could not load your recent trips",
     tripsForbidden: "No access to your trips",
-    decisions: ["✓ Accepted", "● Pending review", "✕ Rejected", "Unassessed", "✓ Accepted"],
+    decisions: ["Accepted", "Pending review", "Rejected", "Not checked yet", "Accepted"],
     noUpcoming: "No scheduled convoys",
     allEvents: "All events",
     eventError: "Could not load the upcoming event",
@@ -58,7 +58,7 @@ const text = {
     tripsEmpty: "У вас пока нет рейсов",
     tripsError: "Не удалось загрузить ваши последние рейсы",
     tripsForbidden: "Нет доступа к вашим рейсам",
-    decisions: ["✓ Принят", "● На проверке", "✕ Отклонено", "Не оценён", "✓ Принят"],
+    decisions: ["Принят", "На проверке", "Отклонён", "Ещё не проверен", "Принят"],
     noUpcoming: "Нет запланированных конвоев",
     allEvents: "Все мероприятия",
     eventError: "Не удалось загрузить ближайшее мероприятие",
@@ -438,7 +438,7 @@ for (const locale of ["en", "ru"] as const) {
       await expect(trips.locator(".dashboard-game")).toHaveText(
         own.map((trip) => trip.game.toUpperCase()),
       );
-      await expect(trips.locator(".dashboard-decision")).toHaveText([...t.decisions]);
+      await expect(trips.locator(".trips-decision")).toHaveText([...t.decisions]);
       await expect(trips.getByRole("link", { name: t.allTrips, exact: true })).toHaveAttribute(
         "href",
         "/account/trips",

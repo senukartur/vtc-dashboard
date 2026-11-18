@@ -14,7 +14,6 @@ describe("compact control size variants", () => {
     ["button", buttonVariants],
     ["input", inputVariants],
     ["select", selectVariants],
-    ["badge", badgeVariants],
     ["table", tableVariants],
   ] as const;
 
@@ -30,6 +29,14 @@ describe("compact control size variants", () => {
       expect(xs.filter((name) => name.endsWith("-xs"))).toEqual([`${base}-xs`]);
     });
   }
+
+  test("badge size aliases keep the canonical telemetry style and chosen tone", () => {
+    expect(badgeVariants({ size: "xs", tone: "ok" })).toBe(
+      badgeVariants({ size: "sm", tone: "ok" }),
+    );
+    expect(classes(badgeVariants())).toEqual(["badge", "badge-neutral"]);
+    expect(classes(badgeVariants({ tone: "ok" }))).toEqual(["badge", "badge-ok"]);
+  });
 
   test("button variant and size combine without replacing each other", () => {
     expect(classes(buttonVariants())).toEqual(["button", "button-primary"]);

@@ -1,3 +1,4 @@
+import { Check, CircleHelp, Clock, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
@@ -31,6 +32,7 @@ function Tokens() {
     issue = useWorkspaceCommand(),
     revoke = useWorkspaceCommand(),
     [label, setLabel] = useState(""),
+    [companion, setCompanion] = useState(false),
     [secret, setSecret] = useState<string | null>(null);
   const issueTrigger = useRef<HTMLButtonElement | null>(null),
     returnFocus = useRef<HTMLElement | null>(null);
@@ -66,12 +68,29 @@ function Tokens() {
                 submitter instanceof HTMLElement ? submitter : issueTrigger.current;
               const result = await issue.run("/me/telemetry-tokens", "EnvelopeTokenIssued", {
                 label: label.trim(),
+                ...(companion ? { companion: true } : {}),
               });
               if (result) {
                 setSecret(result.data.token);
               }
             }}
           >
+            <div className="stack">
+              <label className="checkbox-label" htmlFor="telemetry-companion">
+                <input
+                  id="telemetry-companion"
+                  type="checkbox"
+                  checked={companion}
+                  disabled={issue.held || issue.pending || !!recoveryId}
+                  onChange={(e) => setCompanion(e.target.checked)}
+                  aria-describedby="telemetry-companion-disclosure"
+                />{" "}
+                {t("companionGrant")}
+              </label>
+              <p id="telemetry-companion-disclosure" className="muted">
+                {t("companionDisclosure")}
+              </p>
+            </div>
             <Label htmlFor="telemetry-label">{t("tokenLabel")}</Label>
             <div className="settings-inline-form">
               <Input
@@ -147,13 +166,14 @@ function Tokens() {
             title={token.label}
             hint={
               <>
+                {token.companion && <>{t("companionEnabled")} · </>}
                 {t("created")}: {timestamp(token.createdAt)} · {t("lastUsed")}:{" "}
                 {token.lastUsedAt ? timestamp(token.lastUsedAt) : t("neverUsed")}
               </>
             }
             action={
               token.revokedAt ? (
-                <Badge>{t("revoked")}</Badge>
+                <Badge icon={X}>{t("revoked")}</Badge>
               ) : (
                 <Confirmation
                   label={`${t("revokeToken")} · ${token.label}`}
@@ -189,10 +209,10 @@ function Tokens() {
 
 function statusBadge(status: string) {
   return status === "verified" || status === "available"
-    ? "badge-accepted"
+    ? ({ tone: "ok", icon: Check } as const)
     : status === "pending" || status === "review_required" || status === "stale"
-      ? "badge-pending"
-      : undefined;
+      ? ({ tone: "warn", icon: Clock } as const)
+      : ({ tone: "neutral", icon: CircleHelp } as const);
 }
 
 function ExternalIdentity() {
@@ -235,9 +255,7 @@ function ExternalIdentity() {
             id="connections-steam"
             level={3}
             title="Steam"
-            value={
-              <Badge className={statusBadge(identity.steamStatus)}>{t(identity.steamStatus)}</Badge>
-            }
+            value={<Badge {...statusBadge(identity.steamStatus)}>{t(identity.steamStatus)}</Badge>}
             hint={
               <>
                 {identity.steamProfileUrl && (
@@ -312,7 +330,7 @@ function ExternalIdentity() {
             id="connections-truckersmp"
             level={3}
             title="TruckersMP"
-            value={<Badge className={statusBadge(truckers.status)}>{t(truckers.status)}</Badge>}
+            value={<Badge {...statusBadge(truckers.status)}>{t(truckers.status)}</Badge>}
             hint={[
               truckers.found !== null ? t(truckers.found ? "found" : "notFound") : null,
               truckers.displayName,

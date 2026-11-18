@@ -27,7 +27,7 @@ import { createOutbox, type TripEvent } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import type { Events } from "../events/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
-import { selectQuality } from "../reconciliation/quality.js";
+import { sameTrailerContext, selectQuality } from "../reconciliation/quality.js";
 import { canonicalJson, contentHash, decimal, sourceKey } from "../sources/contracts/canonical.js";
 import type {
   CompanyFact,
@@ -38,8 +38,14 @@ import type {
 import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
 import { createTripAdjudication } from "./adjudication.js";
+import { createCompanionTrips } from "./companion.js";
 import { createContributionRegister } from "./contributions.js";
-import { createFactRepository, damagePercent, effectiveGameMode } from "./facts.js";
+import {
+  createFactRepository,
+  damagePercent,
+  effectiveGameMode,
+  observedRevenue,
+} from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
 import {
   type ListOptions,
@@ -48,6 +54,7 @@ import {
   tripListQuery,
   tripSearchCondition,
 } from "./list-query.js";
+import { createOwnerRevision } from "./owner-revision.js";
 import { createTripReconciliation } from "./reconciliation.js";
 import {
   createReviewQueueRepair,
@@ -56,6 +63,7 @@ import {
   reviewRoots,
   syncReviewReasons,
 } from "./review-queue.js";
+import { reviewQueueTrip, tripDepotRefs } from "./summary-projection.js";
 
 export { type ListOptions, type TripSource, tripListQuery, tripSources } from "./list-query.js";
 
@@ -72,6 +80,7 @@ type DepotRef =
 type SummaryRead = {
   manual: ReadonlyMap<string, ManualRevisionSummary>;
   privateViewer?: Actor;
+  journalMetadata?: boolean;
 };
 
 export interface TripsConfig {
@@ -102,7 +111,13 @@ export interface TripsPorts {
     "resolveInTransaction" | "selectionsInTransaction" | "labelsInTransaction"
   > &
     Partial<
-      Pick<Catalogs, "labelSearchCondition" | "depotInTransaction" | "depotRefsInTransaction">
+      Pick<
+        Catalogs,
+        | "labelSearchCondition"
+        | "depotInTransaction"
+        | "depotRefsInTransaction"
+        | "trailerGroupsInTransaction"
+      >
     >;
   eventTitles?: Events["tripTitlesInTransaction"];
   eventAssociations?: (tx: TxContext, tripIds: string[]) => Promise<Map<string, string>>;
@@ -187,6 +202,7 @@ function differing(
   // Within one source lineage: every distinct proven trailer chain of that source trip's lower
   // revisions, including held ones.
   progression?: { proven: NormalizedTripEvidence["trailers"][] },
+  trailerTypes: Readonly<Record<string, string>> = {},
 ): string[] {
   const reasons: string[] = [];
   if (previous.outcome !== "open" && previous.outcome !== next.outcome)
@@ -233,10 +249,7 @@ function differing(
     )
       reasons.push("trailer_context_conflict");
   } else if (provenTrailers(previous.trailers)) {
-    if (
-      !next.trailers.complete ||
-      canonicalJson(trailerIds(previous.trailers)) !== canonicalJson(after)
-    )
+    if (!next.trailers.complete || !sameTrailerContext(previous, next, trailerTypes))
       reasons.push("trailer_context_conflict");
   }
   return reasons;
@@ -627,6 +640,8 @@ export function createTrips(
       existing && baseRevision !== null && baseRevision < key.revision && !terminal
         ? { proven: await provenChains(tx, existing.id, key.revision) }
         : undefined;
+    const trailerTypes =
+      previous && !supersede ? await trailerTypesInTransaction(tx, [previous, fact]) : {};
     const quality =
       previous && !supersede
         ? selectQuality(
@@ -635,12 +650,13 @@ export function createTrips(
             lineage
               ? { fromFactId: previous.factRevisionId, toFactId: fact.factRevisionId }
               : undefined,
+            trailerTypes,
           )
         : null;
     const conflicts =
       previous && !supersede && (newer || fact.outcome !== "open")
         ? [
-            ...differing(previous, fact, lineage),
+            ...differing(previous, fact, lineage, trailerTypes),
             ...(terminal ? differing(terminal, fact) : []),
             ...(ports.sourceStored ? (quality?.reasons ?? []) : []),
             ...(ports.sourceStored && quality?.selected?.factRevisionId !== fact.factRevisionId
@@ -662,6 +678,7 @@ export function createTrips(
         receivedAt: firstReceivedAt,
         deliveryMode: key.deliveryMode,
       });
+    await createOwnerRevision(unit).bump(tx, context.ownerUserId);
     await c(tx).insert(sourcePayloads).values({ messageId, content });
     await factsRepository.insert(tx, originalTripId, fact, adapter.version);
     await emit(tx, "source.snapshot_stored", tripId, trip.version, fact);
@@ -787,6 +804,19 @@ export function createTrips(
     const factMembers = new Map(membership.map((row) => [row.id, row.aliasOf ?? row.id]));
     const associations = new Map<string, string>();
     const privateViewer = read?.privateViewer;
+    const journalMetadata = privateViewer && read?.journalMetadata !== false;
+    const depotIds = journalMetadata
+      ? [
+          ...new Set(
+            [...facts.values()].flatMap(({ evidence }) =>
+              [evidence.companies?.origin.depotId, evidence.companies?.destination.depotId].filter(
+                (id): id is string => !!id,
+              ),
+            ),
+          ),
+        ]
+      : [];
+    const depots = await tripDepotRefs(tx, depotIds, ports.catalogs?.depotRefsInTransaction);
     let events: Awaited<ReturnType<Events["tripTitlesInTransaction"]>> | undefined;
     if (privateViewer && ports.eventTitles) {
       const saved = await ports.eventAssociations?.(tx, ids);
@@ -842,6 +872,21 @@ export function createTrips(
         ...(privateViewer && {
           event: event?.game === row.game ? { id: event.id, title: event.title } : null,
           gameMode: effectiveGameMode(f),
+          ...(journalMetadata && {
+            originCompany: f ? companyRef(f.companies?.origin, f.origin, depots) : null,
+            destinationCompany: f
+              ? companyRef(f.companies?.destination, f.destination, depots)
+              : null,
+            revenue: observedRevenue(f),
+            hardModeResult:
+              f?.provider === "ets2telemetry"
+                ? (f.recordedTelemetry?.hardModeResult ?? "unknown")
+                : "unknown",
+            jobType:
+              f?.provider === "ets2telemetry"
+                ? (f.recordedTelemetry?.jobType ?? "unknown")
+                : "unknown",
+          }),
         }),
       };
     });
@@ -865,7 +910,43 @@ export function createTrips(
       ],
     ]);
   }
-  const reconciliation = createTripReconciliation(unit, now, config.dispatchReviewStage3Enabled);
+  async function trailerTypesInTransaction(
+    tx: TxContext,
+    evidence: readonly NormalizedTripEvidence[],
+  ) {
+    if (
+      new Set(evidence.map((f) => f.provider)).size < 2 ||
+      !evidence.some((f) =>
+        f.trailers.items.some(
+          (item) => item.status === "known" && item.value.identityKind === "type",
+        ),
+      )
+    )
+      return {};
+    const game = evidence[0]?.game;
+    if (!game || evidence.some((f) => f.game !== game))
+      throw new Error("TRAILER_COMPARISON_GAME_MISMATCH");
+    const ids = [
+      ...new Set(
+        evidence.flatMap((f) =>
+          f.trailers.items.flatMap((item) =>
+            item.status === "known" ? [item.value.entityId] : [],
+          ),
+        ),
+      ),
+    ];
+    const mapping =
+      (await ports.catalogs?.trailerGroupsInTransaction?.(tx, game, ids, "type")) ?? {};
+    return Object.fromEntries(
+      Object.entries(mapping).filter(([, value]) => value.startsWith("type:")),
+    );
+  }
+  const reconciliation = createTripReconciliation(
+    unit,
+    now,
+    config.dispatchReviewStage3Enabled,
+    trailerTypesInTransaction,
+  );
   // Display reference of a company fact; a depot outside the effective city stays unresolved.
   function companyRef(
     fact: CompanyFact | undefined,
@@ -997,6 +1078,8 @@ export function createTrips(
   }
   return {
     config,
+    companion: createCompanionTrips(unit),
+    trailerTypesInTransaction,
     groups,
     reviewQueueRepair: createReviewQueueRepair(unit),
     adjudication: createTripAdjudication(
@@ -1068,13 +1151,14 @@ export function createTrips(
         const projected = await summaries(tx, roots, actor.locale, {
           manual,
           privateViewer: actor,
+          journalMetadata: false,
         });
         for (const [index, row] of roots.entries()) {
           const summary = projected[index];
           if (!summary) throw new Error("TRIP_SUMMARY_MISSING");
           const revision = manual.get(row.id);
           result.set(row.id, {
-            trip: { ...summary, createdAt: row.createdAt, number: row.number },
+            trip: reviewQueueTrip(summary, row.createdAt, row.number),
             manualRevision: revision
               ? { number: revision.number, submittedAt: revision.submittedAt }
               : null,
@@ -1083,6 +1167,7 @@ export function createTrips(
       }
       return result;
     },
+    reviewQueueTrip,
     projectReviewSourceInTransaction: factsRepository.projectEffective,
     prepareSourceInTransaction: async (tx: TxContext, owner: string, game: "ets2" | "ats") => {
       await ports.prepare?.(tx, owner, game);
@@ -1211,6 +1296,7 @@ export function createTrips(
         (!correction && row.decision === "accepted")
       )
         throw identityError(409);
+      await createOwnerRevision(unit).bump(tx, row.ownerId);
       await c(tx)
         .update(trips)
         .set({

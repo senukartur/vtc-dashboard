@@ -78,14 +78,14 @@ export function mailActions(input: {
 }
 
 const tones = {
-  submitted: { tone: "pending", symbol: "●" },
-  approved: { tone: "accepted", symbol: "✓" },
-  rejected: { tone: "rejected", symbol: "✕" },
+  submitted: { tone: "info", icon: "clock" },
+  approved: { tone: "ok", icon: "check" },
+  rejected: { tone: "error", icon: "x" },
 } as const;
-/** Status badges carry a symbol and text, never colour alone. */
+/** Status badges carry a icon and text, never colour alone. */
 export function applicationTone(status: ApplicationStatus): {
-  tone: "pending" | "accepted" | "rejected";
-  symbol: "●" | "✓" | "✕";
+  tone: "info" | "ok" | "error";
+  icon: "clock" | "check" | "x";
 } {
   return tones[status];
 }

@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { Check, Pencil, PenLine, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
@@ -82,8 +83,8 @@ export function CodeLabel({ code }: { code: string }) {
 export function DispatchDecisionBadge({ decision }: { decision: DTO["TripSummary"]["decision"] }) {
   const { t } = useTranslation("trips");
   return decision === "rejected" ? (
-    <Badge className="trips-decision" data-decision={decision}>
-      {t("dispatchReturned")}
+    <Badge tone="warn" icon={Pencil} className="trips-decision" data-decision={decision}>
+      {t("status_needs_fix")}
     </Badge>
   ) : (
     <DecisionBadge decision={decision} />
@@ -310,7 +311,11 @@ export function RevisionDiff({
               <th scope="row">{t(fieldLabel[row.field])}</th>
               <td>
                 <FieldValue field={row.field} value={row.current} game={game} />
-                {row.changed && <Badge className="review-changed">{t("changed")}</Badge>}
+                {row.changed && (
+                  <Badge tone="info" icon={PenLine} className="review-changed">
+                    {t("changed")}
+                  </Badge>
+                )}
               </td>
               {previous && (
                 <td className="review-previous">
@@ -479,7 +484,9 @@ export function ReviewHistory({
                       )}
                 </strong>
                 {item.kind === "decision" && item.overLimits && (
-                  <Badge className="review-marker">{t("overLimitsMarker")}</Badge>
+                  <Badge tone="warn" icon={TriangleAlert} className="review-marker">
+                    {t("overLimitsMarker")}
+                  </Badge>
                 )}
               </span>
               <span className="review-muted">
@@ -644,7 +651,8 @@ export function DecisionForm({
           aria-describedby={unavailable ? unavailableId : undefined}
           onClick={() => pick("accept")}
         >
-          <span aria-hidden="true">✓</span> {t("chooseAccept")}
+          <Check size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
+          {t("chooseAccept")}
         </button>
         <button
           type="button"
@@ -654,7 +662,8 @@ export function DecisionForm({
           aria-pressed={choice === "reject"}
           onClick={() => pick("reject")}
         >
-          <span aria-hidden="true">✕</span> {t(staged ? "dispatchReturn" : "chooseReject")}
+          <X size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
+          {t(staged ? "dispatchReturn" : "chooseReject")}
         </button>
       </fieldset>
       {unavailable && (
@@ -712,7 +721,7 @@ export function DecisionForm({
       {state.needsConfirmation && (
         <fieldset className="review-over-limits">
           <legend className="review-over-title">
-            <span aria-hidden="true">! </span>
+            <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
             {t("overTitle")}
           </legend>
           <LimitList id={limitsId} rules={state.exceeded} />

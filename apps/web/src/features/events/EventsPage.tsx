@@ -1,3 +1,4 @@
+import { Check, Clock, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -148,10 +149,22 @@ function EventRow({
           <Link to={`${publicView ? "" : "/account"}/events/${event.id}`}>{event.title}</Link>
         </h2>
         <p className="events-row-meta">
-          <span className="events-game">{event.game.toUpperCase()}</span>
+          <Badge tone={event.game} className="events-game">
+            {event.game.toUpperCase()}
+          </Badge>
           <time dateTime={event.startsAt}>{compactTime(event.startsAt, locale, timezone)}</time>
           {event.status !== "scheduled" && (
-            <Badge className={`events-status events-status-${event.status}`}>
+            <Badge
+              tone={
+                event.status === "cancelled"
+                  ? "error"
+                  : event.status === "completed"
+                    ? "ok"
+                    : "neutral"
+              }
+              icon={event.status === "cancelled" ? X : event.status === "completed" ? Check : Clock}
+              className="events-status"
+            >
               {t(event.status)}
             </Badge>
           )}

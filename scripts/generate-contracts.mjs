@@ -20,6 +20,35 @@ const generated = [
   ["browser.ts", `// Generated from the reviewed OpenAPI. Do not edit by hand.\n${types}`],
   ["schemas.json", `${schemas}\n`],
 ];
+const companion = JSON.parse(
+  await readFile(
+    new URL("../docs/contracts/telemetry-companion-v1.openapi.json", import.meta.url),
+    "utf8",
+  ),
+);
+generated.push(
+  [
+    "companion.ts",
+    `// Generated from the reviewed companion OpenAPI. Do not edit by hand.\n${astToString(await openapiTS(companion, { alphabetize: true }))}`,
+  ],
+  [
+    "companion-schemas.json",
+    `${JSON.stringify(
+      {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        $id: "urn:vtc:companion:v1",
+        $defs: JSON.parse(
+          JSON.stringify(companion.components.schemas).replaceAll(
+            "#/components/schemas/",
+            "#/$defs/",
+          ),
+        ),
+      },
+      null,
+      2,
+    )}\n`,
+  ],
+);
 await mkdir(output, { recursive: true });
 for (const [name, contents] of generated) {
   const path = new URL(name, output);

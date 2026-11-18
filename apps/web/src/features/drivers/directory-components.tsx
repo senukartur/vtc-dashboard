@@ -1,13 +1,15 @@
+import type { TFunction } from "i18next";
+import { Info } from "lucide-react";
 // Drivers directory building blocks (VTC-145): the search draft, the toolbar, the 30-day hint,
 // the relative last-trip day (VTC-160) and the DataTable columns. State and requests live in
 // DriversPage.tsx; the hint and the relative day are shared with the driver profile.
 import { Tooltip } from "radix-ui";
 import { type RefObject, useEffect, useEffectEvent, useId, useRef, useState } from "react";
-import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigationType } from "react-router-dom";
 import { formatDecimal, formatQuantity, type Locale } from "../../shared/formatting.js";
 import type { DataTableColumn } from "../../shared/ui/DataTable.js";
+import { LabelBadge } from "../../shared/ui/label-badge.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../shared/ui/popover.js";
 import { Badge, Button, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { normalizeSearch, orderedRoles, searchMaxLength } from "../admin/members-model.js";
@@ -54,7 +56,7 @@ export function InfoHint({ label, children }: { label: string; children: string 
     <Popover>
       <PopoverTrigger asChild>
         <button type="button" className="drivers-hint-button" aria-label={label}>
-          <span aria-hidden="true">i</span>
+          <Info size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
         </button>
       </PopoverTrigger>
       <PopoverContent className="drivers-hint" side="bottom">
@@ -288,14 +290,14 @@ function LevelCell({ entry, game }: { entry: DirectoryEntry; game: "ets2" | "ats
   if (view.kind === "unavailable") return <Unavailable />;
   if (view.kind === "none")
     return (
-      <span className="drivers-level drivers-level-none">
+      <Badge className="drivers-level drivers-level-none">
         <span aria-hidden="true">{t("directory.noLevel")}</span>
         <span className="visually-hidden">
           {t("directory.noLevelSpoken", { game: gameName[game] })}
         </span>
-      </span>
+      </Badge>
     );
-  return <span className="drivers-level">{view.name}</span>;
+  return <LabelBadge className="drivers-level">{view.name}</LabelBadge>;
 }
 
 type SortColumn = {
@@ -353,12 +355,16 @@ export function directoryColumns({
             </Link>
             <span className="drivers-badges">
               {orderedRoles(entry.roles).map((role) => (
-                <Badge key={role} size="xs">
+                <Badge
+                  key={role}
+                  size="xs"
+                  tone={role === "director" || role === "deputy_director" ? "info" : "neutral"}
+                >
                   {t(`roles.${role}`)}
                 </Badge>
               ))}
               {entry.id === selfId && (
-                <Badge size="xs" className="drivers-self">
+                <Badge size="xs" tone="info" className="drivers-self">
                   {t("profile.you")}
                 </Badge>
               )}

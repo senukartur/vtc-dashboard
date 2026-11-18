@@ -1,3 +1,4 @@
+import { ChevronDown, X } from "lucide-react";
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -245,34 +246,16 @@ export function DepotSelector({
               onMouseDown={keepFocus}
               onClick={clear}
             >
-              <svg
-                aria-hidden="true"
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-              >
-                <path d="M6 6l12 12M18 6L6 18" />
-              </svg>
+              <X size={13} strokeWidth={1.8} aria-hidden="true" focusable="false" />
             </button>
           )}
-          <svg
-            className="catalog-chevron"
+          <ChevronDown
+            size={13}
+            strokeWidth={1.8}
             aria-hidden="true"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
+            focusable="false"
+            className="catalog-chevron"
+          />
         </span>
         {open && (
           // biome-ignore lint/a11y/noStaticElementInteractions: mouse down only keeps input focus.

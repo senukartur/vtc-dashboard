@@ -34,8 +34,8 @@ import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/que
 import { type CompanyEvent, closed, createOutbox } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
-import type { ConfirmedEventContext } from "./contracts.js";
 import { canonicalJson, decimal } from "../sources/contracts/canonical.js";
+import type { ConfirmedEventContext } from "./contracts.js";
 import { createEventDrafts } from "./drafts.js";
 import { type Page, pagination } from "./pagination.js";
 import {
@@ -189,6 +189,11 @@ interface Ports {
   catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction"> &
     Partial<Pick<RouteCatalogs, "eventRouteCatalogInTransaction">>;
   outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
+  companionChanged?: (
+    tx: TxContext,
+    memberIds: readonly string[],
+    eventId: string,
+  ) => Promise<void>;
   tripChanged?: (tx: TxContext, eventId: string, generation: number) => Promise<void>;
   attendanceTripIds?: (
     tx: TxContext,
@@ -441,6 +446,14 @@ export function createEvents(
     };
   }
   /** A hidden row is only acceptable when the previous revision already references it. */
+  async function semanticTrailer(tx: TxContext, id: string | null) {
+    if (!id) return false;
+    if (!ports.catalogs) throw identityError(503);
+    return (
+      (await ports.catalogs.selectionsInTransaction(tx, [{ kind: "trailer", id }])).get(id)
+        ?.identityKind === "type"
+    );
+  }
   async function validateReferences(
     tx: TxContext,
     r: Pick<
@@ -599,7 +612,11 @@ export function createEvents(
   function eventMemberFacts(
     r: Pick<
       Revision,
-      "visibility" | "prescribedCargoId" | "prescribedMassKg" | "prescribedTrailerId"
+      | "visibility"
+      | "prescribedCargoId"
+      | "prescribedMassKg"
+      | "prescribedTrailerId"
+      | "prescribedTrailerKindId"
     >,
     ownResponse: Parameters<typeof responseDto>[0],
     attendanceStatus: AttendanceRevision["status"] | undefined,
@@ -610,7 +627,7 @@ export function createEvents(
       myAttendance: attendanceStatus ?? ("unconfirmed" as const),
       prescribedCargoId: r.prescribedCargoId,
       prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
-      prescribedTrailerTypeId: r.prescribedTrailerId,
+      prescribedTrailerTypeId: r.prescribedTrailerKindId ?? r.prescribedTrailerId,
     };
   }
   async function memberDto(
@@ -797,6 +814,7 @@ export function createEvents(
         prescribedCargoId: eventRevisions.prescribedCargoId,
         prescribedMassKg: eventRevisions.prescribedMassKg,
         prescribedTrailerId: eventRevisions.prescribedTrailerId,
+        prescribedTrailerKindId: eventRevisions.prescribedTrailerKindId,
       })
       .from(eventRevisions)
       .where(
@@ -839,12 +857,13 @@ export function createEvents(
       );
     const ownResponse = new Map(responses.map((row) => [row.eventId, row]));
     const ownAttendance = new Map(attendances.map((row) => [row.eventId, row.status]));
-    const privateRefs = revisions.flatMap((row) => [
-      ...(row.prescribedCargoId ? [{ kind: "cargo" as const, id: row.prescribedCargoId }] : []),
-      ...(row.prescribedTrailerId
-        ? [{ kind: "trailer" as const, id: row.prescribedTrailerId }]
-        : []),
-    ]);
+    const privateRefs = revisions.flatMap((row) => {
+      const trailerId = row.prescribedTrailerKindId ?? row.prescribedTrailerId;
+      return [
+        ...(row.prescribedCargoId ? [{ kind: "cargo" as const, id: row.prescribedCargoId }] : []),
+        ...(trailerId ? [{ kind: "trailer" as const, id: trailerId }] : []),
+      ];
+    });
     const privateLabels = await routeCatalogs.labelsInTransaction(tx, privateRefs, locale);
     const { items: projections } = await publishedEventDtos(tx, revisions, locale);
     const byEvent = new Map(projections.map((row) => [row.event.id, row]));
@@ -864,7 +883,9 @@ export function createEvents(
             ...projection,
             ...eventMemberFacts(row, ownResponse.get(id) ?? null, ownAttendance.get(id)),
             prescribedCargo: privateLabels.get(row.prescribedCargoId ?? "") ?? null,
-            prescribedTrailerType: privateLabels.get(row.prescribedTrailerId ?? "") ?? null,
+            prescribedTrailerType:
+              privateLabels.get(row.prescribedTrailerKindId ?? row.prescribedTrailerId ?? "") ??
+              null,
             responseCounts,
           },
         };
@@ -959,7 +980,8 @@ export function createEvents(
   ): Promise<S["EventStage2Public"] | S["EventStage2Member"]> {
     const refs: { kind: "cargo" | "trailer"; id: string }[] = [];
     if (actor && r.prescribedCargoId) refs.push({ kind: "cargo", id: r.prescribedCargoId });
-    if (actor && r.prescribedTrailerId) refs.push({ kind: "trailer", id: r.prescribedTrailerId });
+    const trailerId = r.prescribedTrailerKindId ?? r.prescribedTrailerId;
+    if (actor && trailerId) refs.push({ kind: "trailer", id: trailerId });
     const {
       items: [projection],
       labels,
@@ -970,7 +992,8 @@ export function createEvents(
       ...projection,
       ...(await ownEventState(tx, r, actor, receipt)),
       prescribedCargo: labels.get(r.prescribedCargoId ?? "") ?? null,
-      prescribedTrailerType: labels.get(r.prescribedTrailerId ?? "") ?? null,
+      prescribedTrailerType:
+        labels.get(r.prescribedTrailerKindId ?? r.prescribedTrailerId ?? "") ?? null,
       responseCounts: receipt?.responseCounts ?? (await readResponseCounts(tx, r.eventId)),
     };
   }
@@ -1105,6 +1128,21 @@ export function createEvents(
         );
     }
     if (type !== "event.response_changed") {
+      if (ports.companionChanged) {
+        const affected = await c(tx)
+          .select({ memberId: eventAttendances.memberId })
+          .from(eventAttendances)
+          .where(eq(eventAttendances.eventId, event.id))
+          .orderBy(eventAttendances.memberId)
+          .limit(1001)
+          .for("share");
+        if (affected.length > 1000) throw identityError(409);
+        await ports.companionChanged(
+          tx,
+          affected.map((row) => row.memberId),
+          event.id,
+        );
+      }
       await c(tx)
         .update(events)
         .set({
@@ -1134,6 +1172,7 @@ export function createEvents(
   ) {
     const id = newId();
     if (category !== "cancelled") await validateReferences(tx, value, previous);
+    const isSemanticTrailer = await semanticTrailer(tx, value.prescribedTrailerTypeId);
     const first = category === "created" || category === "published";
     const version = first ? 1 : e.version + 1,
       sequence = first ? 1 : e.changeSequence + 1;
@@ -1180,7 +1219,8 @@ export function createEvents(
         originCityId: value.originCityId,
         destinationCityId: value.destinationCityId,
         prescribedCargoId: value.prescribedCargoId,
-        prescribedTrailerId: value.prescribedTrailerTypeId,
+        prescribedTrailerId: isSemanticTrailer ? null : value.prescribedTrailerTypeId,
+        prescribedTrailerKindId: isSemanticTrailer ? value.prescribedTrailerTypeId : null,
         privateReason: reason,
       });
     if (details) await publishedRoutes?.insert(tx, id, value.game, details);
@@ -1238,7 +1278,7 @@ export function createEvents(
       originCityId: r.originCityId,
       destinationCityId: r.destinationCityId,
       prescribedCargoId: r.prescribedCargoId,
-      prescribedTrailerTypeId: r.prescribedTrailerId,
+      prescribedTrailerTypeId: r.prescribedTrailerKindId ?? r.prescribedTrailerId,
       prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
     };
   }
@@ -1336,6 +1376,7 @@ export function createEvents(
     config.draftsEnabled && publishedRoutes
       ? createEventDrafts(unit, config.cursorKey, now, {
           run,
+          semanticTrailer,
           authorize: (tx, actor, organizerId) =>
             authorize(tx, actor, "events.manage", [], organizerId),
           ...(ports.media ? { discardMedia: ports.media.discardInTransaction } : {}),
@@ -1567,7 +1608,7 @@ export function createEvents(
             attendanceStatus: "confirmed",
             prescribedCargoId: r.prescribedCargoId,
             prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
-            prescribedTrailerTypeId: r.prescribedTrailerId,
+            prescribedTrailerTypeId: r.prescribedTrailerKindId ?? r.prescribedTrailerId,
           }
         : null;
     return {

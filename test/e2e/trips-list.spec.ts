@@ -35,6 +35,28 @@ function summary(tripId: string) {
       origin: label(longCyrillicOrigin),
       destination: label("Fictional Ridge"),
       cargo: label("Fictional machinery"),
+      number: 1046,
+      hardModeResult: "qualified",
+      jobType: "world-of-trucks",
+      originCompany: {
+        state: "resolved",
+        companyId: entityId,
+        depotId: entityId,
+        name: "Fictional Renat",
+        code: "fictional_renat",
+        hidden: false,
+        logo: null,
+      },
+      destinationCompany: {
+        state: "resolved",
+        companyId: entityId,
+        depotId: entityId,
+        name: "Fictional BCP",
+        code: "fictional_bcp",
+        hidden: false,
+        logo: null,
+      },
+      revenue: { amount: "9007199254740993", currency: "EUR" },
       actualDistanceM: "755400",
       reportingAt: "2026-10-31T03:00:00.000Z",
       reportingBasis: "actual_completion",
@@ -183,10 +205,13 @@ function linkAtCellCentre(page: Page, row: number, cell: number) {
       if (!td) throw new Error("CELL_NOT_RENDERED");
       td.scrollIntoView({ block: "center" });
       const at = td.getBoundingClientRect();
-      return (
-        document.elementFromPoint(at.x + at.width / 2, at.y + at.height / 2)?.closest("a")?.id ??
-        null
-      );
+      return (() => {
+        const link = document
+          .elementFromPoint(at.x + at.width / 2, at.y + at.height / 2)
+          ?.closest("a");
+        const id = link?.getAttribute("href")?.split("/").at(-1);
+        return id ? `trip-link-${id}` : null;
+      })();
     },
     [row, cell] as const,
   );
@@ -202,291 +227,157 @@ async function capture(page: Page, info: TestInfo, name: string) {
 }
 
 test(
-  "trip list layout: tabs, compact filters, dense table or phone cards in RU and EN",
+  "trip journal separates game, cargo, delivery, recording and company decision in RU and EN",
   browserCase(["@layout"]),
   async ({ page }, info) => {
-    const { lists } = await mockList(page);
+    const { lists, details } = await mockList(page);
     await page.goto("/account/trips");
-    await catalogLanguage(page);
-    const narrow = info.project.name !== "desktop-chromium",
-      touch = await coarse(page);
-    await expect(page.getByRole("heading", { level: 1, name: "Trips", exact: true })).toBeVisible();
-    const header = page
-      .getByRole("main")
-      .locator("header")
-      .filter({ has: page.getByRole("heading", { level: 1 }) });
-    await expect(header.getByRole("link")).toHaveText(["New report"]);
-    await expect(page.getByRole("tab", { name: "Drafts (0)", exact: true })).toBeVisible();
-    if (narrow) {
-      await expect(page.getByRole("combobox", { name: "Game", exact: true })).toHaveCount(0);
-      await openFilters(page);
-    }
-    const tabs = page.getByRole("tablist", { name: "Trip scope", exact: true });
-    await expect(tabs.getByRole("tab")).toHaveCount(3);
-    await expect(
-      tabs.getByRole("tab", { name: "Accepted company trips", exact: true }),
-    ).toBeVisible();
-    await expect(tabs.getByRole("tab", { name: "My trips" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    const filters = page.getByRole("group", { name: "Filters", exact: true });
-    const game = filters.getByRole("combobox", { name: "Game", exact: true }),
-      decision = filters.getByRole("combobox", { name: "Company decision", exact: true }),
-      source = filters.getByRole("combobox", { name: "Source", exact: true });
-    await expect(game).toHaveValue("");
-    await expect(decision.locator("option").first()).toHaveText("Any decision");
-    await expect(source).toHaveValue("");
-    await expect(source.locator("option")).toHaveText(["Any source", "Telemetry", "Manual report"]);
-    const [gameBox, decisionBox, sourceBox] = [
-      await game.boundingBox(),
-      await decision.boundingBox(),
-      await source.boundingBox(),
-    ];
-    if (!gameBox || !decisionBox || !sourceBox) throw new Error("FILTERS_NOT_RENDERED");
-    if (!narrow)
-      for (const box of [decisionBox, sourceBox])
-        expect(
-          Math.abs(gameBox.y + gameBox.height / 2 - (box.y + box.height / 2)),
-        ).toBeLessThanOrEqual(4);
-    for (const box of [gameBox, decisionBox, sourceBox])
-      if (touch) expect(box.height).toBeGreaterThanOrEqual(40);
-      else expect(Math.abs(box.height - 32)).toBeLessThanOrEqual(0.5);
-    await expect(page.getByText("Times in UTC", { exact: true })).toBeVisible();
-    const trips = table(page);
-    await expect(trips).toBeVisible();
-    await expect(trips.getByRole("row")).toHaveCount(4);
-    await expect(page.getByText("0 km", { exact: true })).toBeVisible();
-    const link = rowLink(page, first);
-    await expect(link).toHaveAccessibleName(routeName(first));
-    const linkBox = await link.boundingBox();
-    expect(linkBox?.height ?? 0).toBeGreaterThanOrEqual(touch ? 40 : 30);
-    // The row link is the only control. Hit-testing shows its overlay covers the route cell in the
-    // table and the whole card on phones, but never other cells, other rows or the page chrome.
-    expect(await linkAtCellCentre(page, 0, 0)).toBe(`trip-link-${first}`);
-    expect(await linkAtCellCentre(page, 2, 0)).toBe(`trip-link-${third}`);
-    expect(await linkAtCellCentre(page, 0, 1)).toBe(narrow ? `trip-link-${first}` : null);
-    for (const target of [
-      page.getByRole("combobox", { name: "Game", exact: true }),
-      page.getByRole("tab", { name: "Accepted company trips", exact: true }),
-      page.getByRole("tab", { name: "Drafts (0)", exact: true }),
-    ])
-      await target.click({ trial: true, timeout: 2000 });
-    const nextPage = page.getByRole("button", { name: "Next page", exact: true });
-    expect((await nextPage.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(touch ? 40 : 30);
+    const narrow = info.project.name !== "desktop-chromium";
     for (const locale of ["en", "ru"] as const) {
       await catalogLanguage(page, locale);
       const ru = locale === "ru";
-      const names = ru
-        ? ["Маршрут", "Груз", "Пробег", "Источники", "Решение компании", "Завершён / подтверждён"]
-        : [
-            "Route",
-            "Cargo",
-            "Driven distance",
-            "Sources",
-            "Company decision",
-            "Completed / confirmed",
-          ];
       const current = table(page, ru ? "Список рейсов" : "Trip list");
       await expect(current).toBeVisible();
-      await expect(rowLink(page, first)).toBeVisible();
-      await expect(rowLink(page, first)).toContainText(longCyrillicOrigin);
-      await expect(header.getByRole("link")).toHaveText([ru ? "Новый отчёт" : "New report"]);
+      await expect(current.getByRole("row")).toHaveCount(4);
+      await expect(rowLink(page, first)).toHaveAccessibleName(routeName(first));
+      await expect(rowLink(page, first)).toHaveAttribute("href", `/account/trips/${first}`);
+      await expect(current.locator(".trips-outcome").first()).toHaveText(
+        ru ? "Доставлен" : "Delivered",
+      );
+      await expect(current.locator(".trips-recording").first()).toHaveText(
+        ru ? "Полная" : "Complete",
+      );
+      await expect(current.locator(".trips-decision").first()).toHaveText(
+        ru ? "Принят" : "Accepted",
+      );
+      await expect(current.getByText("0 km", { exact: true })).toHaveCount(ru ? 0 : 1);
+      await expect(
+        page.getByRole("button", { name: ru ? "Закрыть детали" : "Close details", exact: true }),
+      ).toHaveCount(0);
       if (narrow) {
-        const headBox = await current.locator("thead").boundingBox();
-        expect(headBox?.width ?? 0).toBeLessThanOrEqual(1);
-        const row = current.locator("tbody tr").first();
-        await expect(row).toHaveRole("row");
-        await expect(row.locator("td").nth(1)).toHaveRole("cell");
-        await expect(row.locator(".data-table-label").first()).toHaveAttribute(
+        await expect(current.locator(".data-table-label").first()).toHaveAttribute(
           "aria-hidden",
           "true",
         );
-        for (const text of names.slice(1))
-          await expect(row.getByText(text, { exact: true })).toBeVisible();
-        const [routeBox, cargoBox, rowBox, listBox] = [
-          await row.locator("td").first().boundingBox(),
-          await row.locator("td").nth(1).boundingBox(),
-          await row.boundingBox(),
-          await current.boundingBox(),
-        ];
-        if (!routeBox || !cargoBox || !rowBox || !listBox) throw new Error("CARD_NOT_RENDERED");
-        expect(routeBox.y + routeBox.height).toBeLessThanOrEqual(cargoBox.y + 1);
-        expect(Math.abs(rowBox.width - listBox.width)).toBeLessThanOrEqual(2);
-        // Header column widths never shrink a card cell: the route spans the card, others halve it.
-        expect(routeBox.width).toBeGreaterThanOrEqual(rowBox.width * 0.8);
-        expect(cargoBox.width).toBeGreaterThanOrEqual(rowBox.width * 0.4);
+        const route = await current.locator("tbody .trips-route").first().boundingBox();
+        const cargo = await current.locator("tbody .trips-col-cargo").first().boundingBox();
+        expect(route?.y ?? Infinity).toBeLessThan(cargo?.y ?? 0);
       } else {
+        const headings = ru
+          ? [
+              "ID",
+              "Завершение",
+              "Игра · режим",
+              "Груз",
+              "Тип заказа",
+              "Маршрут",
+              "Дистанция",
+              "Выручка",
+              "Итог",
+              "Полнота записи",
+              "Решение компании",
+              "Источники",
+              "Открыть",
+            ]
+          : [
+              "ID",
+              "Completion",
+              "Game · mode",
+              "Cargo",
+              "Job type",
+              "Route",
+              "Distance",
+              "Revenue",
+              "Outcome",
+              "Recording",
+              "Company decision",
+              "Sources",
+              "Open",
+            ];
+        const full = await current.locator("thead .trips-col-outcome").isVisible();
         await expect(current.getByRole("columnheader")).toHaveText(
-          [...names.slice(0, -1), ru ? /Завершение/ : /Completion/],
+          full ? headings : headings.filter((_, index) => index !== 8 && index !== 9),
           { useInnerText: true },
         );
       }
-      const localizedGame = page.getByRole("combobox", {
-        name: ru ? "Игра" : "Game",
-        exact: true,
-      });
-      await expect(localizedGame.locator("option")).toHaveText([ru ? "Все" : "All", "ETS2", "ATS"]);
-      const localizedSource = page.getByRole("combobox", {
-        name: ru ? "Источник" : "Source",
-        exact: true,
-      });
-      await expect(localizedSource.locator("option")).toHaveText(
-        ru
-          ? ["Любой источник", "Телеметрия", "Ручной отчёт"]
-          : ["Any source", "Telemetry", "Manual report"],
-      );
-      // The filter names a returned trip by what the driver does next; badges keep "Rejected".
+      await openFilters(page);
+      await expect(
+        page.getByRole("combobox", { name: ru ? "Источник" : "Source", exact: true }),
+      ).toBeVisible();
       await expect(
         page
           .getByRole("combobox", {
             name: ru ? "Решение компании" : "Company decision",
             exact: true,
           })
-          .locator('option[value="rejected"]'),
+          .locator("option")
+          .last(),
       ).toHaveText(ru ? "Нужно исправить" : "Needs fixes");
-      if (ru) {
-        const fallbackRow = current.locator("tbody tr").nth(2);
-        await expect(fallbackRow.getByText("Показано на английском", { exact: false })).toHaveCount(
-          3,
-        );
-        await expect(current.locator("tbody tr").first()).not.toContainText(
-          "Показано на английском",
-        );
+      const firstRow = current.locator("tbody tr").first();
+      await expect(firstRow.locator(".trips-job")).toHaveText("World of Trucks");
+      await expect(firstRow.locator(".trips-number")).toHaveText("#1046");
+      await expect(firstRow.locator(".trips-col-source > span:not(.data-table-label)")).toHaveText(
+        ru ? "Телеметрия" : "Telemetry",
+      );
+      await expect(firstRow.locator(".trips-bases")).toHaveText("Fictional Renat · Fictional BCP");
+      await expect(firstRow.locator(".trips-col-revenue")).toContainText(
+        ru ? "9 007 199 254 740 993 EUR" : "9,007,199,254,740,993 EUR",
+      );
+      await expect(firstRow.locator(".trips-distance")).toHaveText(ru ? "755 км" : "755 km");
+      await expect(firstRow.locator(".trips-hard-mode")).toHaveText("HM");
+      await expect(firstRow.locator(".trips-hard-mode svg")).toHaveClass(/lucide-flame/);
+      await expect(current.locator("tbody tr").nth(1).locator(".trips-hard-mode")).toHaveCount(0);
+      for (const row of [0, 2]) {
+        const cells = current.locator("tbody tr").nth(row).locator("td");
+        for (let cell = 0; cell < (await cells.count()); cell++)
+          if ((row === 0 || cell === 5) && (await cells.nth(cell).isVisible()))
+            expect(await linkAtCellCentre(page, row, cell)).toBe(`trip-link-${ids[row]}`);
       }
-      await expect(page.locator("body")).not.toContainText(/Достаточно суров|Yukon\?/);
+      for (const control of [page.getByRole("tab").first(), page.getByRole("searchbox")])
+        await control.click({ trial: true });
       await noOverflow(page);
-      await capture(page, info, `trips-list-${locale}`);
+      await capture(page, info, `trip-journal-${locale}`);
     }
-    await catalogLanguage(page);
-    await page.getByRole("tab", { name: "Drafts (0)", exact: true }).click();
-    await expect(page).toHaveURL(/\/account\/trips\?tab=drafts$/);
-    await expect(page.getByRole("heading", { name: "Saved drafts", exact: true })).toBeVisible();
-    await page.goto("/account/reports");
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Saved drafts", exact: true }),
-    ).toBeVisible();
+    expect(details).toEqual([]);
     expectListParams(lists);
   },
 );
 
 test(
-  "wide screens open a validated ?trip= side panel without refetching the list",
-  browserCase(["@layout", "@viewport-desktop"]),
-  async ({ page }, info) => {
-    const { lists, details, others } = await mockList(page);
-    await page.goto("/account/trips?game=ets2");
-    await catalogLanguage(page);
-    await expect(rowLink(page, second)).toBeVisible();
-    const listCount = lists.length;
-    await rowLink(page, second).click();
-    await expect(page).toHaveURL(new RegExp(`[?&]trip=${second}`));
-    await expect(page).toHaveURL(/game=ets2/);
-    const region = panel(page, second);
-    await expect(region).toBeVisible();
-    await expect(region.getByRole("heading", { level: 2 })).toBeFocused();
-    await expect(rowLink(page, second)).toHaveAttribute("aria-current", "true");
-    const [tableBox, panelBox] = [await table(page).boundingBox(), await region.boundingBox()];
-    expect(panelBox?.x ?? 0).toBeGreaterThanOrEqual((tableBox?.x ?? 0) + (tableBox?.width ?? 0));
-    for (const term of ["Actual driven distance", "Cargo", "Source outcome", "Reporting instant"])
-      await expect(region.getByText(term, { exact: true })).toBeVisible();
-    await expect(region.getByRole("listitem")).toHaveCount(1);
-    await expect(region.getByRole("listitem")).toContainText("Rejected");
-    await expect(region.getByText(reason, { exact: true })).toBeVisible();
-    await expect(region.getByRole("link", { name: "Open full page", exact: true })).toHaveAttribute(
-      "href",
-      `/account/trips/${second}`,
-    );
-    expect(details).toEqual([second]);
-    expect(lists.length).toBe(listCount);
-    const closeBox = await region.getByRole("button", { name: "Close details" }).boundingBox();
-    expect(closeBox?.width ?? 0).toBeGreaterThanOrEqual(24);
-    expect(Math.abs((closeBox?.width ?? 0) - (closeBox?.height ?? 0))).toBeLessThanOrEqual(7);
-    // Beside the panel the table drops Sources (shown in the panel) and keeps badges on one line.
-    await expect(table(page).getByRole("columnheader")).toHaveText([
-      "Route",
-      "Cargo",
-      "Driven distance",
-      "Company decision",
-      /Completion/,
-    ]);
-    await expect(table(page).locator("tbody tr").first().getByRole("cell")).toHaveCount(5);
-    const badge = table(page).locator("tbody tr").nth(1).getByText("Pending review");
-    expect((await badge.boundingBox())?.height ?? 99).toBeLessThanOrEqual(22);
-    await capture(page, info, "trips-panel-en");
-    await catalogLanguage(page, "ru");
-    await expect(
-      page.getByRole("region", { name: "Fictional Quarry → Fictional Harbor", exact: true }),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Закрыть детали", exact: true })).toBeVisible();
-    await capture(page, info, "trips-panel-ru");
-    await catalogLanguage(page);
-
-    await region.getByRole("button", { name: "Close details", exact: true }).click();
-    await expect(region).toHaveCount(0);
-    await expect(page).not.toHaveURL(/trip=/);
-    await expect(rowLink(page, second)).toBeFocused();
-    await rowLink(page, second).click();
-    await expect(panel(page, second).getByRole("heading", { level: 2 })).toBeFocused();
-    await page.keyboard.press("Escape");
-    await expect(panel(page, second)).toHaveCount(0);
-    await expect(rowLink(page, second)).toBeFocused();
-
-    await rowLink(page, first).click();
-    await expect(panel(page, first)).toBeVisible();
-    await rowLink(page, second).click();
-    await expect(panel(page, second)).toBeVisible();
-    await page.goBack();
-    await expect(panel(page, first)).toBeVisible();
-    await expect(panel(page, second)).toHaveCount(0);
-    await rowLink(page, second).click();
-    await panel(page, second).getByRole("button", { name: "Close details" }).focus();
-    await page.goBack();
-    await expect(panel(page, first)).toBeVisible();
-    await expect(rowLink(page, second)).toBeFocused();
-
-    await rowLink(page, third).click();
-    const missing = page.getByRole("region", { name: /Fictional Long Valley/ });
-    await expect(missing.getByText("This record is unavailable or inaccessible.")).toBeVisible();
-    await expect(missing.getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
+  "every cell opens the full trip page and native links support a new tab",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    await mockList(page);
+    for (const selector of [
+      ".trips-col-time",
+      ".trips-col-cargo",
+      ".trips-col-distance",
+      ".trips-col-decision",
+    ]) {
+      await page.goto("/account/trips?game=ets2&source=manual");
+      await catalogLanguage(page);
+      await rowLink(page, second).waitFor();
+      const cell = table(page).locator("tbody tr").first().locator(selector);
+      await cell.scrollIntoViewIfNeeded();
+      const box = await cell.boundingBox();
+      if (!box) throw new Error("CELL_NOT_RENDERED");
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await expect(page).toHaveURL(new RegExp(`/account/trips/${second}$`));
+      await expect(table(page)).toHaveCount(0);
+      await page.goBack();
+      await expect(page).toHaveURL(/game=ets2&source=manual/);
+      await expect(table(page)).toBeVisible();
+    }
+    await page.goto("/account/trips");
+    await rowLink(page, first).waitFor();
+    if ((page.viewportSize()?.width ?? 0) >= 768) {
+      const popup = page.context().waitForEvent("page");
+      await rowLink(page, first).click({ modifiers: ["Control"] });
+      const opened = await popup;
+      await expect(opened).toHaveURL(new RegExp(`/account/trips/${first}$`));
+      await opened.close();
+    }
     await expect(table(page)).toBeVisible();
-    await expect(rowLink(page, first)).toBeVisible();
-
-    details.length = 0;
-    await page.goto("/account/trips?trip=nope");
-    await expect(table(page)).toBeVisible();
-    await expect(page.getByRole("region")).toHaveCount(0);
-    expect(details).toEqual([]);
-
-    await page.goto(`/account/trips?trip=${first}`);
-    const deep = panel(page, first);
-    await expect(deep).toBeVisible();
-    await expect(deep.getByText("No company decisions yet.", { exact: true })).toBeVisible();
-    await expect(deep.getByText("Some facts are unavailable. Missing is not zero.")).toBeVisible();
-    await expect(deep.getByRole("heading", { level: 2 })).not.toBeFocused();
-
-    others.length = 0;
-    await page.getByRole("tab", { name: "Accepted company trips", exact: true }).click();
-    await expect(page).toHaveURL(/scope=company/);
-    await expect(page).not.toHaveURL(/trip=/);
-    await expect(page.getByRole("region")).toHaveCount(0);
-    await rowLink(page, colleague).click();
-    const shared = panel(page, colleague);
-    await expect(shared.getByText("Decision history is not included in this view.")).toBeVisible();
-    await expect(shared).not.toContainText(reason);
-    for (const field of ["Job type", "Game mode", "Hard Mode"])
-      await expect(
-        shared.locator("dt").filter({ hasText: new RegExp(`^\\s*${field}$`) }),
-      ).toHaveCount(0);
-    await expect(table(page)).toContainText("Fictional Colleague");
-    expect(others).toEqual([]);
-
-    await shared.getByRole("button", { name: "Close details" }).focus();
-    await page.setViewportSize({ width: 1100, height: 800 });
-    await expect(page.getByRole("region")).toHaveCount(0);
-    await expect(rowLink(page, colleague)).toBeFocused();
-    await expect(rowLink(page, colleague)).toHaveAttribute("href", `/account/trips/${colleague}`);
-    expectListParams(lists);
   },
 );
 
@@ -514,7 +405,7 @@ test(
 );
 
 test(
-  "keyboard reaches filters, rows and the panel in order; tabs activate manually",
+  "keyboard reaches filters and row links; Enter opens the full page and tabs activate manually",
   browserCase(["@layout"]),
   async ({ page }, info) => {
     const { lists } = await mockList(page);
@@ -548,21 +439,9 @@ test(
     ).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(rowLink(page, first)).toBeFocused();
-    if (info.project.name === "desktop-chromium") {
-      await page.keyboard.press("Enter");
-      await expect(panel(page, first).getByRole("heading", { level: 2 })).toBeFocused();
-      await page.keyboard.press("Escape");
-      await expect(panel(page, first)).toHaveCount(0);
-      await expect(rowLink(page, first)).toBeFocused();
-      await page.keyboard.press("Tab");
-      await expect(rowLink(page, second)).toBeFocused();
-      await page.keyboard.press("Enter");
-      await expect(panel(page, second).getByRole("heading", { level: 2 })).toBeFocused();
-    } else if (info.project.name === "tablet-chromium") {
-      await page.keyboard.press("Enter");
-      await expect(page).toHaveURL(new RegExp(`/account/trips/${first}$`));
-      return;
-    }
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`/account/trips/${first}$`));
+    await expect(table(page)).toHaveCount(0);
     await page.goto("/account/trips?decision=rejected");
     const mine = page.getByRole("tab", { name: "My trips", exact: true });
     await mine.focus();
@@ -589,14 +468,14 @@ test(
     const { lists } = await mockList(page, { paged: true });
     await page.goto(`/account/trips?trip=${second}`);
     await catalogLanguage(page);
-    await expect(panel(page, second)).toBeVisible();
+    await expect(panel(page, second)).toHaveCount(0);
     await page.getByRole("button", { name: "Next page", exact: true }).click();
     await expect.poll(() => lists.at(-1)?.get("cursor")).toBe("page-2");
     await expect(page).toHaveURL(new RegExp(`trip=${second}`));
-    await expect(panel(page, second)).toBeVisible();
+    await expect(panel(page, second)).toHaveCount(0);
     await page.getByRole("button", { name: "Previous page", exact: true }).click();
     await expect.poll(() => lists.at(-1)?.has("cursor")).toBe(false);
-    await expect(panel(page, second)).toBeVisible();
+    await expect(panel(page, second)).toHaveCount(0);
     await page.getByRole("combobox", { name: "Game", exact: true }).selectOption("ats");
     await expect(page).not.toHaveURL(/trip=/);
     await expect(page.getByRole("region")).toHaveCount(0);
@@ -625,7 +504,7 @@ test(
     await page.goto(`/account/trips${search}`);
     await catalogLanguage(page);
     await expect(table(page)).toBeVisible();
-    if (desktop) await expect(panel(page, second)).toBeVisible();
+    if (desktop) await expect(panel(page, second)).toHaveCount(0);
     const alerts = await countInsertedAlerts(page, ".trips-list-area");
     expire();
     await page.getByRole("button", { name: "Next page", exact: true }).click();
@@ -635,7 +514,7 @@ test(
     await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
     // The filters and the selection stay; only the page restarts.
     expect(new URL(page.url()).search).toBe(search);
-    if (desktop) await expect(panel(page, second)).toBeVisible();
+    if (desktop) await expect(panel(page, second)).toHaveCount(0);
     await page.waitForTimeout(250);
     expect(await alerts()).toBe(0);
     // One rejected cursor costs one first-page request, not a loop.
@@ -692,7 +571,7 @@ test(
     await page.goto(desktop ? `/account/trips?trip=${second}` : "/account/trips");
     await catalogLanguage(page);
     await expect(table(page)).toBeVisible();
-    if (desktop) await expect(panel(page, second)).toBeVisible();
+    if (desktop) await expect(panel(page, second)).toHaveCount(0);
     await openFilters(page);
     const source = page.getByRole("combobox", { name: "Source", exact: true });
     await source.focus();
@@ -711,10 +590,8 @@ test(
       .toBe("scope=mine&source=manual&order=completion_desc&locale=en&limit=25&cursor=page-2");
     const previous = page.getByRole("button", { name: "Previous page", exact: true });
     await expect(previous).toBeEnabled();
-    if (desktop) {
-      await rowLink(page, third).click();
-      await expect(page).toHaveURL(new RegExp(`[?&]trip=${third}`));
-    }
+    if (desktop)
+      await expect(rowLink(page, third)).toHaveAttribute("href", `/account/trips/${third}`);
     await source.selectOption("ets2telemetry");
     await expect
       .poll(last)
@@ -801,7 +678,7 @@ test(
     const search = page.getByRole("searchbox", { name: "City, cargo, trip number" });
     await expect(page.getByText("Lifetime accepted trips · 42 · 6,551.25 km")).toBeVisible();
     await expect(page.getByText("Found 1", { exact: true })).toBeVisible();
-    await expect(rowLink(page, first)).toContainText("#1046");
+    await expect(table(page).locator("tbody tr").first()).toContainText("#1046");
     await expect(page.getByText("HaulMP", { exact: true })).toBeVisible();
     const event = page.getByRole("link", { name: "Fictional Winter Convoy" });
     await expect(event).toHaveAttribute("href", `/account/events/${entityId}`);
@@ -991,7 +868,11 @@ test(
     await expect(page.getByText("Count unavailable", { exact: true })).toBeVisible();
     await expect(page.getByText("Staff confirmation", { exact: true })).toBeVisible();
     await expect(page.getByText("Reporting time", { exact: true })).toBeVisible();
-    await expect(page.locator(`#trip-time-${first}`)).toContainText("31 Oct 2026, 03:00");
+    await expect(page.locator(`#trip-time-${first}`)).toContainText("31 Oct, 03:00");
+    await expect(page.locator(`#trip-time-${first} > span`).first()).toHaveAttribute(
+      "title",
+      "31 Oct 2026, 03:00",
+    );
   },
 );
 
@@ -1047,7 +928,7 @@ test(
 
 for (const locale of ["en", "ru"] as const)
   test(
-    `the canonical city name reads as secondary text in the list and panel (${locale})`,
+    `the canonical city name reads as secondary text in the list and full page (${locale})`,
     browserCase(["@layout"]),
     async ({ page }, info) => {
       await mockList(page);
@@ -1082,7 +963,7 @@ for (const locale of ["en", "ru"] as const)
           route.fulfill({ json: envelope(trip), headers: { ETag: '"v1"' } }),
         );
         await link.click();
-        const opened = page.getByRole("region", { name: /^Крёнбург/ });
+        const opened = page.getByRole("main");
         await expect(opened).toContainText("Крёнбург · Krönburg");
         await expect(opened.locator(".catalog-native").first()).toHaveCSS("display", "inline");
       }
@@ -1090,7 +971,7 @@ for (const locale of ["en", "ru"] as const)
   );
 
 test(
-  "private trip panel localizes recorded job type and unavailable audit fields",
+  "full trip page localizes recorded job type and unavailable audit fields",
   browserCase(["@layout", "@viewport-desktop"]),
   async ({ page }) => {
     await mockList(page);
@@ -1104,22 +985,22 @@ test(
     await page.route(`**/api/v1/trips/${first}`, (route) =>
       route.fulfill({ json: view, headers: { ETag: '"v1"' } }),
     );
-    await page.goto(`/account/trips?trip=${first}`);
-    const detail = panel(page, first);
+    await page.goto(`/account/trips/${first}`);
+    const detail = page.getByRole("main");
     for (const [locale, rows] of [
       [
         "en",
         [
           ["Job type", "Cargo market"],
-          ["Game mode", "Unknown"],
+          ["Game mode", "Mode unknown"],
           ["Hard Mode", "Unknown"],
         ],
       ],
       [
         "ru",
         [
-          ["Тип заказа", "Рынок грузов для своего прицепа"],
-          ["Режим игры", "Неизвестно"],
+          ["Тип заказа", "Грузоперевозки"],
+          ["Режим игры", "Режим неизвестен"],
           // Hard Mode keeps its English name in both languages.
           ["Hard Mode", "Неизвестно"],
         ],

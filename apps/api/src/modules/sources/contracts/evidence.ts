@@ -7,7 +7,7 @@ export type Recording = "complete" | "partial" | "unknown";
 export type Fact<T> =
   | { status: "known"; value: T; sourceRecordId: string; sourceField: string }
   | { status: "unknown"; reasonCode: string; sourceRecordId: string };
-export type TripEntity = { entityId: string };
+export type TripEntity = { entityId: string; identityKind?: "type" };
 export type AdrClass = "1" | "2" | "3" | "4" | "6" | "8";
 export type ReportedTime = {
   utc: string | null;
@@ -80,6 +80,7 @@ export interface CatalogPort {
         id: string;
         game: Game;
         kind: "city" | "cargo" | "trailer";
+        identityKind?: "type";
         hidden: boolean;
         adrClass: AdrClass | null;
       }

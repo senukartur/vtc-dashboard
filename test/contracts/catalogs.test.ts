@@ -27,6 +27,26 @@ const item = {
   regionId,
   region: { ...label, entityId: regionId, label: "Fictional Region" },
 };
+test("trailer classifications keep nullable semantic IDs separate from exact body codes", () => {
+  expect(
+    validate("CatalogTrailerInput")({
+      game: "ets2",
+      code: "_fiction_body",
+      nameEn: "Fictional body",
+      trailerTypeId: id,
+    }),
+  ).toBe(true);
+  expect(
+    validate("CatalogTrailerInput")({
+      game: "ets2",
+      code: "_fiction_body",
+      nameEn: "Fictional body",
+      trailerTypeId: null,
+    }),
+  ).toBe(true);
+  expect(validate("CatalogItem")({ ...item, trailerTypeId: id, trailerType: label })).toBe(true);
+  expect(validate("CatalogItem")({ ...item, trailerTypeId: "undefined" })).toBe(false);
+});
 
 test("common trailer metadata is optional and writable only on trailer inputs", () => {
   const base = { game: "ets2", code: "_fiction_body", nameEn: "Fictional transporter" };

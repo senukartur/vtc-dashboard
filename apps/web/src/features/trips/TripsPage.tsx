@@ -1,7 +1,7 @@
-import { type MouseEvent, useEffect, useRef } from "react";
+import { X } from "lucide-react";
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { isPlainSelfClick } from "../../app/Navigation.js";
+import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import {
   accountTimeZone,
@@ -14,13 +14,11 @@ import { Button } from "../../shared/ui/primitives.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs.js";
 import { DraftList, useManualDrafts } from "../manual-reports/Drafts.js";
 import { failureKey } from "./components.js";
-import { useWideLayout } from "./layout.js";
 import { tripListFilters, tripPeriodBounds } from "./list-model.js";
 import { useTripQuery } from "./queries.js";
 import { TripListFilters } from "./TripListFilters.js";
-import { TripPanel } from "./TripPanel.js";
 import { TripTable } from "./TripTable.js";
-import { filterSearch, selectedTrip, selectionSearch } from "./transport.js";
+import { filterSearch } from "./transport.js";
 import { useSearchDraft } from "./useSearchDraft.js";
 import "./trips.css";
 import "./trips-list.css";
@@ -28,8 +26,6 @@ import "./trips-list.css";
 export function TripsPage() {
   const { t, i18n } = useTranslation("trips");
   const session = useSession();
-  const location = useLocation();
-  const wide = useWideLayout();
   const [params, setParams] = useSearchParams();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   // Period bounds need the raw saved zone, so an unknown one still falls back to All time.
@@ -74,17 +70,6 @@ export function TripsPage() {
   const stale = query.isPlaceholderData;
   const total = stale ? undefined : list?.total;
 
-  // The side panel exists only on wide layouts; narrow layouts ignore `?trip=` entirely.
-  const selected = !viewDrafts && wide ? selectedTrip(params) : null;
-  const heading = useRef<HTMLHeadingElement>(null);
-  // Focus intent from a plain row click; Back/Forward and deep links leave focus alone.
-  const focusPanel = useRef(false);
-  useEffect(() => {
-    if (!selected || !focusPanel.current) return;
-    focusPanel.current = false;
-    heading.current?.focus({ preventScroll: true });
-  }, [selected]);
-
   // Use the current URL so rapid successive updates keep each other's filters.
   function change(key: string, value: string) {
     const next = filterSearch(window.location.search, key, value);
@@ -122,23 +107,6 @@ export function TripsPage() {
     searchInput.current?.focus();
     setParams(next);
   }
-  function select(event: MouseEvent<HTMLAnchorElement>, id: string) {
-    if (!wide || !isPlainSelfClick(event)) return;
-    if (id === selected) {
-      event.preventDefault();
-      heading.current?.focus({ preventScroll: true });
-      return;
-    }
-    focusPanel.current = true;
-  }
-  function close(id: string) {
-    // The row link stays rendered while the panel goes, so focus can move before navigation.
-    (
-      document.getElementById(`trip-link-${id}`) ?? document.getElementById("main-content")
-    )?.focus();
-    setParams(selectionSearch(new URLSearchParams(window.location.search), null));
-  }
-
   const filtersActive = [
     effective.game,
     effective.decision,
@@ -156,21 +124,14 @@ export function TripsPage() {
         : "";
   const driver = list?.items.find((trip) => trip.owner.id === ownerId)?.owner.nickname;
   const body = (
-    <div className="trips-layout" data-panel={selected ? "open" : undefined}>
+    <div className="trips-layout">
       <div className="trips-list-area">
         <TripTable
           items={list?.items}
-          selectedId={selected}
           showOwner={scope === "company"}
           timezone={timezone}
           order={order}
           onOrder={(value) => change("order", value)}
-          linkFor={(id) =>
-            wide
-              ? { pathname: location.pathname, search: selectionSearch(params, id) }
-              : `/account/trips/${id}`
-          }
-          onLinkClick={select}
           state={{
             status: query.isError ? "error" : list ? "ready" : "loading",
             busy: stale,
@@ -200,20 +161,11 @@ export function TripsPage() {
           }}
         />
       </div>
-      {selected && (
-        <TripPanel
-          key={selected}
-          tripId={selected}
-          fallback={list?.items.find((trip) => trip.id === selected)}
-          headingRef={heading}
-          onClose={() => close(selected)}
-        />
-      )}
     </div>
   );
 
   return (
-    <div className="stack trip-page">
+    <div className="stack trip-page trips-journal">
       <header className="trip-heading trips-header">
         <div>
           <h1>{t("title")}</h1>
@@ -302,7 +254,8 @@ export function TripsPage() {
                     change("ownerId", "");
                   }}
                 >
-                  {driver ?? t("selectedDriver")} <span aria-hidden="true">×</span>
+                  {driver ?? t("selectedDriver")}{" "}
+                  <X size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />
                 </Button>
               )}
               <small className="trips-timezone">{t("timesIn", { timezone })}</small>

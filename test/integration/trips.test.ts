@@ -975,6 +975,14 @@ test("a concurrent reopened review hold wins under the canonical lock before ret
 });
 test("owner, reviewer and company views filter private facts before serialization and expose real absence", async () => {
   const audited = telemetryFixture("haulmp-audited") as unknown as Telemetry;
+  audited.snapshot.revenue = {
+    available: true,
+    value: {
+      raw: "9007199254740993",
+      sdkType: "s64",
+      currency: { status: "sdk-documented", code: "EUR", source: "Synthetic SDK documentation" },
+    },
+  };
   const pending = await receive(audited);
   const recordedTelemetry = {
     jobType: "freight-market",
@@ -1020,6 +1028,11 @@ test("owner, reviewer and company views filter private facts before serializatio
       "sourceRecordId",
       "eventId",
       "money",
+      "revenue",
+      "hardModeResult",
+      "jobType",
+      "originCompany",
+      "destinationCompany",
       "reviewReasonCodes",
     ])
       expect(JSON.stringify(json)).not.toContain(`"${field}"`);
@@ -1031,6 +1044,9 @@ test("owner, reviewer and company views filter private facts before serializatio
     expect(ownerResponse.json().data.effectiveFacts.recordedTelemetry).toEqual(recordedTelemetry);
     expect(ownerResponse.json().data.summary).toMatchObject({
       gameMode: "haulmp",
+      hardModeResult: "qualified",
+      jobType: "freight-market",
+      revenue: { amount: "9007199254740993", currency: "EUR" },
       event: null,
       submittedAt: null,
     });

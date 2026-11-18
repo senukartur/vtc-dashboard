@@ -1,3 +1,4 @@
+import { ArrowLeft } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useParams } from "react-router-dom";
@@ -216,7 +217,8 @@ function ReviewDetail({ tripId }: { tripId: string }) {
         </div>
         <Button asChild variant="outline">
           <Link to={back}>
-            <span aria-hidden="true">←</span> {t("queueBack")}
+            <ArrowLeft size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
+            {t("queueBack")}
           </Link>
         </Button>
       </header>

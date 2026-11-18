@@ -97,21 +97,7 @@
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
-.driver-profile-page .badge {
-  overflow-wrap: break-word;
-}
-.driver-profile-page .driver-active {
-  background: var(--accepted-surface);
-  color: var(--accepted);
-}
-.driver-profile-page .driver-former {
-  background: var(--pending-surface);
-  color: var(--pending);
-}
-.driver-profile-page .driver-self {
-  background: var(--accent-soft);
-  color: var(--focus);
-}
+
 .driver-profile-page .driver-membership {
   margin: 0;
   color: var(--muted);
@@ -126,33 +112,6 @@
   flex-wrap: wrap;
   gap: 4px 8px;
   margin: 0;
-}
-.driver-profile-page .driver-level-chip {
-  padding: 1px 7px;
-  border-radius: var(--radius-badge);
-  font-size: var(--font-small);
-  font-weight: 600;
-  line-height: 1.5;
-  overflow-wrap: break-word;
-}
-.driver-profile-page .driver-level-chip[data-game="ets2"],
-.driver-profile-page .driver-game[data-game="ets2"] {
-  background: var(--accent-soft);
-  color: var(--focus);
-}
-.driver-profile-page .driver-level-chip[data-game="ats"],
-.driver-profile-page .driver-game[data-game="ats"] {
-  background: var(--surface-active);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-  color: var(--secondary);
-}
-.driver-profile-page .driver-game {
-  flex-shrink: 0;
-  padding: 0 5px;
-  border-radius: var(--radius-badge);
-  font-size: var(--font-badge);
-  font-weight: 700;
-  line-height: 1.6;
 }
 
 /* KPI strip (VTC-160): four all-games totals in one bordered row with a "both games" caption;
@@ -309,7 +268,14 @@
   gap: 6px;
   min-width: 0;
   margin-right: auto;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+.driver-profile-page .driver-qualification-head h2 > a {
+  min-width: 0;
+  max-width: 100%;
+}
+.driver-profile-page .driver-qualification {
+  grid-template-columns: minmax(0, 1fr);
 }
 .driver-profile-page .driver-chart .driver-card-head {
   align-items: center;
@@ -458,7 +424,9 @@
 .driver-profile-page .driver-next {
   color: var(--muted);
   font-size: var(--font-small);
-  overflow-wrap: break-word;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 /* Static progression, not a control: plain text steps joined by decorative arrows; the current
    step is a soft highlight (with aria-current), so nothing looks pressable. */
@@ -478,28 +446,16 @@
   align-items: center;
   gap: 4px;
   min-width: 0;
+  max-width: 100%;
   font-size: var(--font-badge);
   line-height: 1.5;
   overflow-wrap: break-word;
 }
 .driver-profile-page .driver-ladder-arrow {
+  flex: none;
   color: var(--border-strong);
 }
-.driver-profile-page .driver-ladder-name {
-  padding: 1px 6px;
-  border-radius: var(--radius-badge);
-}
-.driver-profile-page .driver-ladder li[data-state="passed"] .driver-ladder-name {
-  color: var(--secondary);
-}
-.driver-profile-page .driver-ladder li[data-state="current"] .driver-ladder-name {
-  background: var(--accent-soft);
-  color: var(--focus);
-  font-weight: 700;
-}
-.driver-profile-page .driver-ladder li[data-state="upcoming"] .driver-ladder-name {
-  color: var(--muted);
-}
+
 .driver-profile-page .driver-progress {
   display: grid;
   gap: 6px;

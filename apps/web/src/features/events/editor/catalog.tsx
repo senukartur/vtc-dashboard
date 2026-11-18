@@ -1,4 +1,5 @@
 import { useQueries } from "@tanstack/react-query";
+import { ChevronDown } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   type CatalogItem,
@@ -14,7 +15,7 @@ import {
   useCatalogPages,
   useCatalogQuery,
 } from "../../../shared/catalog-selectors/queries.js";
-import { Button, Input, Label } from "../../../shared/ui/primitives.js";
+import { Badge, Button, Input, Label } from "../../../shared/ui/primitives.js";
 import { CompanyLogo } from "../../catalogs/CompanyLogo.js";
 import type { DTO } from "../model.js";
 import {
@@ -25,7 +26,11 @@ import {
 } from "./model.js";
 import { useEditorText } from "./text.js";
 
-export function useEditorCatalogItem(list: CatalogList, id: string | null, locale: "en" | "ru") {
+export function useEditorCatalogItem(
+  list: CatalogList | "trailer-types",
+  id: string | null,
+  locale: "en" | "ru",
+) {
   const query = useCatalogQuery(
     ["item", list, id, locale],
     `/catalogs/${list}/${id}?locale=${locale}`,
@@ -247,7 +252,7 @@ export function EditorCatalogSelector({
         caption={caption}
         required={required}
         game={game}
-        kind={kind}
+        kind={kind === "trailer" ? "trailer-type" : kind}
         value={value}
         onChange={onChange}
       />
@@ -387,27 +392,20 @@ export function DlcField({
       >
         {entries.length ? (
           entries.map((entry) => (
-            <span key={entry.id} className="event-editor-tag">
+            <Badge key={entry.id} className="event-editor-tag">
               {entry.label ?? text.retainedCatalog}
-            </span>
+            </Badge>
           ))
         ) : (
           <span className="muted">{text.chooseDlc}</span>
         )}
-        <svg
-          className="catalog-chevron event-editor-chevron"
+        <ChevronDown
+          size={13}
+          strokeWidth={1.8}
           aria-hidden="true"
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
+          focusable="false"
+          className="catalog-chevron event-editor-chevron"
+        />
       </Button>
       {open && (
         <fieldset
