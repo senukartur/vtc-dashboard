@@ -597,64 +597,70 @@ function Applications() {
           />
           {items && items.length > 0 && <TruckersmpLegend />}
           {items && items.length > 0 && (
-            <Table size="xs" className="applications-table" role="table">
-              <caption className="visually-hidden">{t("applicationsUi.listCaption")}</caption>
-              {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-              <thead role="rowgroup">
+            <div className="applications-table-scroll">
+              <Table size="xs" className="applications-table" role="table">
+                <caption className="visually-hidden">{t("applicationsUi.listCaption")}</caption>
                 {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-                <tr role="row">
-                  {columns.map((column) => (
-                    // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
-                    <th key={column} scope="col" role="columnheader">
-                      {t(`applicationsUi.${column}`)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-              <tbody role="rowgroup">
-                {items.map((app) => (
-                  // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
-                  <tr key={app.id} role="row" data-selected={selected === app.id ? "" : undefined}>
-                    {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
-                    <th scope="row" role="rowheader">
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="applications-row-button"
-                        aria-pressed={selected === app.id}
-                        onClick={() => setSelected(app.id)}
-                      >
-                        {app.fields.nickname}
-                      </Button>
-                    </th>
-                    {[
-                      <span key="games" className="applications-games">
-                        {app.fields.games.map((game) => (
-                          <Badge key={game} size="xs" tone={game}>
-                            {t(`applicationsUi.gameShort.${game}`)}
-                          </Badge>
-                        ))}
-                      </span>,
-                      <span key="truckersmp" className="applications-check-cell">
-                        <span className="applications-check-prefix" aria-hidden="true">
-                          {t("applicationsUi.colTruckersmp")}
-                        </span>
-                        <TruckersmpBadge check={app.truckersmpCheck} />
-                      </span>,
-                      dates.format(app.submittedAt),
-                      <StatusBadge key="status" status={app.status} />,
-                      ...(status === "rejected" ? [dates.format(app.decision?.decidedAt)] : []),
-                    ].map((cell, index) => (
+                <thead role="rowgroup">
+                  {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
+                  <tr role="row">
+                    {columns.map((column) => (
                       // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
-                      <td key={columns[index + 1]} role="cell">
-                        {cell}
-                      </td>
+                      <th key={column} scope="col" role="columnheader">
+                        {t(`applicationsUi.${column}`)}
+                      </th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </Table>
+                </thead>
+                {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
+                <tbody role="rowgroup">
+                  {items.map((app) => (
+                    <tr
+                      key={app.id}
+                      // biome-ignore lint/a11y/noRedundantRoles: phone cards need explicit table semantics.
+                      role="row"
+                      data-selected={selected === app.id ? "" : undefined}
+                    >
+                      {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
+                      <th scope="row" role="rowheader">
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          className="applications-row-button"
+                          aria-pressed={selected === app.id}
+                          onClick={() => setSelected(app.id)}
+                        >
+                          {app.fields.nickname}
+                        </Button>
+                      </th>
+                      {[
+                        <span key="games" className="applications-games">
+                          {app.fields.games.map((game) => (
+                            <Badge key={game} size="xs" tone={game}>
+                              {t(`applicationsUi.gameShort.${game}`)}
+                            </Badge>
+                          ))}
+                        </span>,
+                        <span key="truckersmp" className="applications-check-cell">
+                          <span className="applications-check-prefix" aria-hidden="true">
+                            {t("applicationsUi.colTruckersmp")}
+                          </span>
+                          <TruckersmpBadge check={app.truckersmpCheck} />
+                        </span>,
+                        dates.format(app.submittedAt),
+                        <StatusBadge key="status" status={app.status} />,
+                        ...(status === "rejected" ? [dates.format(app.decision?.decidedAt)] : []),
+                      ].map((cell, index) => (
+                        // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
+                        <td key={columns[index + 1]} role="cell">
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
           )}
           <p className="muted">{t("applicationsUi.historyNote")}</p>
           <Pager cursor={cursor} next={query.data?.data.data.nextCursor} setCursor={page} />

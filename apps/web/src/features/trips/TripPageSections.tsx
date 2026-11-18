@@ -30,7 +30,7 @@ export function useTripDisplay() {
 }
 
 /** A muted unknown value, optionally explained behind an info button; never rendered as zero. */
-export function UnknownValue({ hint, label }: { hint?: string; label?: string }) {
+export function UnknownValue({ hint, label }: { hint?: string; label?: ReactNode }) {
   const { t } = useTranslation("trips");
   return (
     <span className="trip-detail-unknown">
@@ -298,9 +298,17 @@ export function TripFacts({
       add(
         key,
         key === "recordedGameMode" ? (
-          <GameModeBadge mode={recorded?.gameMode ?? summary.gameMode ?? "unknown"} />
+          value ? (
+            <GameModeBadge mode={recorded?.gameMode ?? summary.gameMode ?? "unknown"} />
+          ) : (
+            <UnknownValue label={<GameModeBadge mode="unknown" />} hint={hint} />
+          )
         ) : key === "recordedJobType" ? (
-          <JobTypeBadge job={recorded?.jobType ?? "unknown"} />
+          value ? (
+            <JobTypeBadge job={recorded?.jobType ?? "unknown"} />
+          ) : (
+            <UnknownValue label={<JobTypeBadge job="unknown" />} hint={hint} />
+          )
         ) : value ? (
           t(value)
         ) : (

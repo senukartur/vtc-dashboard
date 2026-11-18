@@ -46,6 +46,21 @@
 }
 
 /* Queue table: fixed column shares keep the layout independent of long names. */
+.applications-page .applications-table-scroll {
+  min-width: 0;
+  max-width: 100%;
+}
+@media (min-width: 701px) {
+  .applications-page .applications-table-scroll {
+    overflow-x: auto;
+  }
+  .applications-page .applications-table {
+    min-width: 900px;
+  }
+  .applications-page .applications-table:has(thead th:nth-child(6)) {
+    min-width: 1050px;
+  }
+}
 .applications-page .applications-table {
   table-layout: fixed;
 }

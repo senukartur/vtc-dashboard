@@ -157,7 +157,7 @@ test(
     const sources = region(page, "Sources");
     const items = sources.getByRole("listitem");
     await expect(items).toHaveCount(1);
-    await expect(items.locator(".trip-source-head strong")).toHaveText("Telemetry");
+    await expect(items.locator(".trip-source-head > .badge:first-child")).toHaveText("Telemetry");
     await expect(fact(items, "Received")).toHaveText(/10 Nov 2026.*18:00/);
     await expect(fact(items, "Driven distance")).toHaveText("812.4005 km");
     await expect(fact(items, "Source outcome")).toHaveText("Delivered");
@@ -253,7 +253,9 @@ test(
     await expect(tile(page, "Credited")).toContainText("counts after acceptance");
     const item = region(page, "Sources").getByRole("listitem");
     await expect(item).toHaveCount(1);
-    await expect(item.locator(".trip-source-head strong")).toHaveText("Manual report");
+    await expect(item.locator(".trip-source-head > .badge:first-child")).toHaveText(
+      "Manual report",
+    );
     await expect(fact(item, "Driven distance")).toHaveText("Unavailable");
     await expect(item).not.toContainText("0 km");
 
@@ -278,7 +280,9 @@ test(
     await closeTip(page);
     await expect(fact(card, "Event")).toHaveText("Not linked");
     for (const term of ["Game mode", "Job type"]) {
-      await expect(fact(card, term)).toHaveText("Unknown");
+      await expect(fact(card, term)).toHaveText(
+        term === "Game mode" ? "Mode unknown" : "Job type unknown",
+      );
       await expect(fact(card, term).locator(".trip-detail-unknown")).toBeVisible();
       await expect(await openTip(page, fact(card, term), "Why is this unknown?")).toHaveText(
         "Manual report: telemetry did not record this trip.",
@@ -356,7 +360,7 @@ test(
 
     const sources = region(page, "Sources");
     const items = sources.getByRole("listitem");
-    await expect(items.locator(".trip-source-head strong")).toHaveText([
+    await expect(items.locator(".trip-source-head > .badge:first-child")).toHaveText([
       "Telemetry",
       "Manual report",
     ]);
@@ -369,7 +373,10 @@ test(
     await expect(tripCard(page)).toContainText(`Times in ${deviceZone}`);
     await expect(sources).toContainText(`Times in ${deviceZone}`);
     await expect(fact(items.nth(0), "Received")).toHaveText(/11 Nov 2026.*03:00/);
-    await expect(page.locator(".trip-detail-meta")).toContainText("Telemetry + Manual report");
+    await expect(page.locator(".trip-detail-meta .trip-source-badges .badge")).toHaveText([
+      "Telemetry",
+      "Manual report",
+    ]);
 
     const sender = fact(tripCard(page), "From");
     await expect(sender.locator(".company-logo")).toHaveAttribute("data-logo", "placeholder");

@@ -124,7 +124,9 @@ test(
       expect(workspaceData.reviewQueue?.waitingCount).toBeGreaterThan(0);
       expect(workspaceData.legacyReviewQueue).toBeUndefined();
       await expect(reviewer.getByRole("button", { name: "Queue", exact: true })).toBeVisible();
-      await expect(reviewer.locator(".review-queue-totals")).toContainText("Waiting");
+      await expect(reviewer.locator(".review-queue-totals")).toContainText(
+        "Awaiting decision overall",
+      );
       const waitingResponse = await reviewer.request.get(
         `/api/v1/trips?scope=review&view=stage3&status=waiting&ownerId=${fixture.userId}&limit=25`,
       );
@@ -1467,7 +1469,7 @@ test(
         page.getByText("Lifetime accepted trips · 1 · 123.4 km", { exact: true }),
       ).toBeVisible();
       expect(trip.gameMode).toBe("unknown");
-      await expect(row.locator(".trips-mode")).toHaveText("Unknown");
+      await expect(row.locator(".trips-mode")).toHaveText("Mode unknown");
 
       const search = page.getByRole("searchbox", { name: "City, cargo, trip number" });
       for (const term of [`#${trip.number}`, String(trip.number)]) {
