@@ -1,4 +1,4 @@
-FROM node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS runner-ownership
+FROM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS runner-ownership
 ARG RUNNER_UID=1000
 ARG RUNNER_GID=1000
 RUN test "$RUNNER_UID" -gt 0 && test "$RUNNER_GID" -gt 0 \
