@@ -8,6 +8,7 @@ These are original, fictional records for [telemetry HTTP v1.0, v1.1 and v1.2](.
 | `telemetry-completed.json` | Full terminal v1.0 summary; does not need the start request to arrive first |
 | `telemetry-haulmp-audited.json` | v1.1 HaulMP terminal summary with a recorded qualified Hard Mode audit |
 | `telemetry-accounting.json` | v1.2 delivery after a restart: partial recording and incomplete trailer/rule context, with complete client distance accounting and partial fuel accounting |
+| `telemetry-cargo-classification.json` | v1.3 delivery with client-reported fragile, valuable and ADR labels, retaining the earlier audit and accounting fields |
 | `telemetry-cancelled.json` | Actual cancellation with zero-valued facts preserved |
 | `telemetry-closed-partial.json` | Interrupted/late-attach recording with unavailable true start and incomplete observations |
 | `telemetry-backfill.json` | Initial automatic history upload; first snapshot of this terminal trip, not fabricated current activity |

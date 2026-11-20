@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/vtc-dashboard/contracts/telemetry-v1.schema.json",
-  "title": "Telemetry ingestion request v1.0, v1.1 and v1.2",
+  "title": "Telemetry ingestion request v1.0, v1.1, v1.2 and v1.3",
   "description": "Structural request schema only. Authorization, UTF-8 byte/depth/decimal ranges, identity conflicts, source truth and durable acknowledgement require contract semantic/integration checks.",
   "type": "object",
   "additionalProperties": false,
@@ -34,7 +34,8 @@
           "enum": [
             0,
             1,
-            2
+            2,
+            3
           ]
         }
       }
@@ -153,7 +154,8 @@
               "minor": {
                 "enum": [
                   1,
-                  2
+                  2,
+                  3
                 ]
               }
             }
@@ -188,7 +190,10 @@
           "contract": {
             "properties": {
               "minor": {
-                "const": 2
+                "enum": [
+                  2,
+                  3
+                ]
               }
             }
           }
@@ -211,6 +216,40 @@
           "snapshot": {
             "properties": {
               "accounting": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract": {
+            "properties": {
+              "minor": {
+                "const": 3
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "snapshot": {
+            "required": [
+              "cargoClassification"
+            ],
+            "properties": {
+              "cargoClassification": true
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "snapshot": {
+            "properties": {
+              "cargoClassification": false
             }
           }
         }
@@ -1348,6 +1387,9 @@
               "$ref": "#/$defs/accountingStatus"
             }
           }
+        },
+        "cargoClassification": {
+          "$ref": "#/$defs/cargoClassification"
         }
       },
       "allOf": [
@@ -1655,6 +1697,113 @@
           }
         }
       ]
+    },
+    "cargoClassification": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "fragility",
+        "fragile",
+        "valuable",
+        "adr",
+        "overweight",
+        "oversize",
+        "groups"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "fragility": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "fragile": {
+          "type": "boolean"
+        },
+        "valuable": {
+          "type": "boolean"
+        },
+        "adr": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "none",
+                    "unsupported"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "class"
+              ],
+              "properties": {
+                "state": {
+                  "const": "class"
+                },
+                "class": {
+                  "enum": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    6,
+                    8
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "overweight": {
+          "type": "boolean"
+        },
+        "oversize": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "groups": {
+          "type": "array",
+          "maxItems": 12,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "adr",
+              "bulk",
+              "construction",
+              "containers",
+              "fragile",
+              "gooseneck",
+              "inloader",
+              "liquid",
+              "livestock",
+              "machinery",
+              "oversize",
+              "refrigerated"
+            ]
+          }
+        }
+      }
     }
   }
 }

@@ -18,6 +18,7 @@ import {
   afterAll as vitestAfterAll,
   beforeAll as vitestBeforeAll,
 } from "vitest";
+import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import {
   steamEndpoint,
   steamProvider,
@@ -36,6 +37,7 @@ import {
 } from "../../apps/api/src/modules/telemetry/service.ts";
 import { createTrips } from "../../apps/api/src/modules/trips/service.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
 import {
   guardedSettings,
   reset,
@@ -715,7 +717,7 @@ test("built server uses actual bytes, frozen errors and browser CSRF/Origin guar
     const connection = await http("/api/telemetry/v1/connection", undefined, auth);
     const registered = await service.connection(bearer(issued.token), "127.0.0.1");
     expect(connection.status).toBe(200);
-    expect(connection.headers["vtc-telemetry-event-versions"]).toBe("1.0, 1.1, 1.2");
+    expect(connection.headers["vtc-telemetry-event-versions"]).toBe("1.0, 1.1, 1.2, 1.3");
     expect(connection.headers["cache-control"]).toBe("no-store");
     expect(connection.body).toEqual({
       contract: { major: 1, minor: 0 },
@@ -779,7 +781,7 @@ test("built server uses actual bytes, frozen errors and browser CSRF/Origin guar
       (
         await http(
           "/api/telemetry/v1/events",
-          Buffer.from(JSON.stringify({ ...p, contract: { major: 1, minor: 3 } })),
+          Buffer.from(JSON.stringify({ ...p, contract: { major: 1, minor: 4 } })),
           auth,
         )
       ).status,
@@ -1166,7 +1168,7 @@ test("versioned HTTP receipts preserve every audited result and reject invalid e
       });
     const before = await counts();
     for (const [payload, statusCode, code] of [
-      [{ ...p, contract: { major: 1, minor: 3 } }, 422, "UNSUPPORTED_CONTRACT"],
+      [{ ...p, contract: { major: 1, minor: 4 } }, 422, "UNSUPPORTED_CONTRACT"],
       [{ ...p, contract: { major: 1, minor: 1 } }, 400, "INVALID_PAYLOAD"],
       [{ ...p, snapshot: { ...p.snapshot, hardModeResult: "qualified" } }, 400, "INVALID_PAYLOAD"],
       [
@@ -1271,7 +1273,7 @@ test("event v1.2 HTTP receipts echo their version, replay exactly and reject inv
     ]);
     const before = await counts();
     for (const [payload, statusCode, code] of [
-      [{ ...current, contract: { major: 1, minor: 3 } }, 422, "UNSUPPORTED_CONTRACT"],
+      [{ ...current, contract: { major: 1, minor: 4 } }, 422, "UNSUPPORTED_CONTRACT"],
       [{ ...current, snapshot: withoutAccounting }, 400, "INVALID_PAYLOAD"],
       [{ ...current, snapshot: withoutAudit }, 400, "INVALID_PAYLOAD"],
       [
@@ -1327,4 +1329,45 @@ test("event v1.2 HTTP receipts echo their version, replay exactly and reject inv
   } finally {
     await app.close();
   }
+});
+
+test("event v1.3 retains reported cargo labels separately from catalog ADR", async () => {
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity });
+  const target = serviceFor(
+    unit,
+    identity,
+    createTrips(unit, tripConfig, { identity, catalogs }, now),
+  );
+  const { issued, p } = await connect(target);
+  const example = telemetryFixture("cargo-classification") as unknown as Telemetry;
+  const classification = example.snapshot.cargoClassification;
+  if (classification == null) throw new Error("Missing synthetic cargo classification");
+  const code = "fictional_cargo_classification_test";
+  await seedCatalog(unit, p.source.game, {
+    cargoes: [{ code, nameEn: "Fictional cargo classification", adrClass: "8" }],
+  });
+  p.contract = { major: 1, minor: 3 };
+  p.snapshot.job.cargoId = { available: true, value: code };
+  p.snapshot.recordingCompleteness = "partial";
+  p.snapshot.hardModeResult = "not-qualified";
+  p.snapshot.accounting = { distance: "complete", fuel: "partial" };
+  p.snapshot.cargoClassification = classification;
+
+  const stored = await target.receive(bearer(issued.token), "127.0.0.1", p);
+  expect(stored).toMatchObject({ contract: p.contract, eventId: p.eventId, status: "stored" });
+  const after = await counts();
+  expect(await target.receive(bearer(issued.token), "127.0.0.1", p)).toEqual({
+    ...stored,
+    status: "duplicate",
+  });
+  expect(await counts()).toBe(after);
+
+  const [rows] = await control.query<RowDataPacket[]>(
+    "SELECT f.adr_class,f.actual_distance_m,f.evidence FROM source_messages m JOIN trip_facts f ON f.message_id=m.id WHERE m.event_key=?",
+    [p.eventId],
+  );
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.adr_class).toBe("8");
+  expect(rows[0]?.actual_distance_m).not.toBeNull();
+  expect(rows[0]?.evidence.provenance.cargoClassification).toEqual(classification);
 });
