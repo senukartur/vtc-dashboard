@@ -1,6 +1,6 @@
 # Telemetry contract examples
 
-These are original, fictional records for [telemetry HTTP v1.0, v1.1 and v1.2](../telemetry-v1.md). They contain no real driver, game capture, source catalog corpus, account, token or active service URL. `origin: game` exercises the production-shaped request schema in a test fixture; it does not assert that a real game produced this data. Never upload these examples to a real company endpoint.
+These fictional records illustrate [telemetry HTTP v1.0–v1.3](../telemetry-v1.md). They contain no real driver, game capture, source catalog corpus, account, token or active service URL. `origin: game` exercises the production-shaped request schema in a test fixture; it does not assert that a real game produced this data. Never upload these examples to a real company endpoint.
 
 | File | Purpose |
 | --- | --- |
