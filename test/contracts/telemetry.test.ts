@@ -26,7 +26,7 @@ for (const name of telemetryExamples)
 test("telemetry structural boundary rejects unsupported versions and supplied ownership/acceptance", () => {
   for (const mutation of [
     { contract: { major: 2, minor: 0 } },
-    { contract: { major: 1, minor: 3 } },
+    { contract: { major: 1, minor: 4 } },
     { userId: "synthetic-owner" },
     { companyId: "synthetic-company" },
     { accepted: true },
@@ -116,6 +116,39 @@ test("telemetry v1.2 requires a closed accounting status that earlier versions f
   expect(validate({ ...telemetryFixture("accounting"), contract: { major: 1, minor: 3 } })).toBe(
     false,
   );
+});
+
+test("telemetry v1.3 requires a closed cargo classification and retains earlier fields", () => {
+  const p = telemetryFixture("cargo-classification");
+  const snapshot = p.snapshot as Record<string, unknown>;
+  const classification = snapshot.cargoClassification as Record<string, unknown>;
+  for (const cargoClassification of [
+    null,
+    { ...classification, adr: { state: "none" } },
+    { ...classification, fragility: null, adr: { state: "unsupported" }, oversize: false },
+  ])
+    expect(validate({ ...p, snapshot: { ...snapshot, cargoClassification } })).toBe(true);
+  for (const cargoClassification of [
+    { ...classification, version: 2 },
+    { ...classification, fragility: -1 },
+    { ...classification, fragile: 1 },
+    { ...classification, adr: { state: "class", class: 5 } },
+    { ...classification, adr: { state: "none", class: 3 } },
+    { ...classification, groups: ["liquid", "liquid"] },
+    { ...classification, groups: ["fictional"] },
+    { ...classification, archivePath: "fictional" },
+  ])
+    expect(validate({ ...p, snapshot: { ...snapshot, cargoClassification } })).toBe(false);
+  for (const key of ["cargoClassification", "hardModeResult", "accounting"]) {
+    const incomplete = { ...snapshot };
+    delete incomplete[key];
+    expect(validate({ ...p, snapshot: incomplete })).toBe(false);
+  }
+  for (const name of ["completed", "haulmp-audited", "accounting"] as const) {
+    const earlier = telemetryFixture(name);
+    const cargo = { ...(earlier.snapshot as object), cargoClassification: null };
+    expect(validate({ ...earlier, snapshot: cargo })).toBe(false);
+  }
 });
 
 test("telemetry quantities preserve unavailable and measured zero as different shapes", () => {

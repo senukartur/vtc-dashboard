@@ -82,7 +82,7 @@ test("frozen event boundary preserves exact values and rejects unsupported versi
   const p = telemetryFixture("completed");
   expect(event(parseJson(Buffer.from(JSON.stringify(p)))).eventId).toBe(p.eventId);
   for (const change of [
-    { contract: { major: 1, minor: 3 } },
+    { contract: { major: 1, minor: 4 } },
     { userId: "forged" },
     { producer: { application: "export", version: "1" } },
   ])
@@ -98,7 +98,7 @@ test("frozen event boundary preserves exact values and rejects unsupported versi
 test("event parsing classifies unsupported versions separately from invalid supported shapes", () => {
   const audited = telemetryFixture("haulmp-audited");
   expect(event(audited).contract).toEqual({ major: 1, minor: 1 });
-  expect(() => event({ ...audited, contract: { major: 1, minor: 3 } })).toThrow(
+  expect(() => event({ ...audited, contract: { major: 1, minor: 4 } })).toThrow(
     expect.objectContaining({ statusCode: 422, publicCode: "UNSUPPORTED_CONTRACT" }),
   );
   expect(() => event({ ...audited, contract: { major: 1, minor: 0 } })).toThrow(
@@ -145,10 +145,10 @@ test("event v1.2 requires its closed accounting status and keeps earlier version
     expect(() => event(p)).toThrow(
       expect.objectContaining({ statusCode: 400, publicCode: "INVALID_PAYLOAD" }),
     );
-  expect(() => event({ ...accounting, contract: { major: 1, minor: 3 } })).toThrow(
+  expect(() => event({ ...accounting, contract: { major: 1, minor: 4 } })).toThrow(
     expect.objectContaining({ statusCode: 422, publicCode: "UNSUPPORTED_CONTRACT" }),
   );
   expect(event(telemetryFixture("completed")).contract).toEqual({ major: 1, minor: 0 });
   expect(event(telemetryFixture("haulmp-audited")).contract).toEqual({ major: 1, minor: 1 });
-  expect(eventVersionAdvertisement).toBe("1.0, 1.1, 1.2");
+  expect(eventVersionAdvertisement).toBe("1.0, 1.1, 1.2, 1.3");
 });
