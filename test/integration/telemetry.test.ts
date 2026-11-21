@@ -3,6 +3,7 @@ import {
   structuralLevels,
 } from "../../apps/api/src/modules/qualifications/initialization.ts";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,6 +11,7 @@ import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db
 import { steamAccounts, steamLinks } from "@vtc/db/external-identities-schema";
 import { eq, membership } from "@vtc/db/identity-schema";
 import { telemetryTokens as tokens } from "@vtc/db/telemetry-schema";
+import { tripFacts, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
   beforeEach,
@@ -216,6 +218,184 @@ test("registration retry and rotation preserve frozen binding, receipt, first ti
     (await service.list(owner, {})).items.find((x) => x.id === replacement.info.id)?.lastUsedAt,
   ).not.toBeNull();
 });
+test("desktop terminal cargo damage survives the HTTP receipt, authorized trip reads and a held correction", async () => {
+  const { createApp: builtApp } = await import(pathToFileURL(resolve("apps/api/dist/app.js")).href);
+  const tripService = createTrips(unit, tripConfig, { identity }, now);
+  const app = await builtApp({
+    identity,
+    trips: tripService,
+    telemetry: serviceFor(unit, identity, tripService),
+    checkReadiness: async () => true,
+  });
+  const { issued, registration } = await connect();
+  const fixture = JSON.parse(
+    readFileSync(
+      new URL("../fixtures/desktop-terminal-cargo-damage.json", import.meta.url),
+      "utf8",
+    ),
+  ) as Telemetry;
+  const bind = (p: Telemetry) => ({
+    ...p,
+    eventId: newId(),
+    source: { ...p.source, tripId: newId() },
+    installationId: registration.installationId,
+    bindingId: registration.bindingId,
+  });
+  const asFraction = (measurement: Telemetry["snapshot"]["cargoDamage"]) => ({
+    ...measurement,
+    unit: "fraction",
+  });
+  const stored = (receiptId: string) =>
+    unit.run(async (tx) => {
+      const [row] = await unit
+        .client(tx)
+        .select()
+        .from(tripFacts)
+        .where(eq(tripFacts.messageId, receiptId));
+      if (!row) throw new Error("SYNTHETIC_TRIP_FACT_REQUIRED");
+      return row;
+    });
+  const detail = async (tripId: string, damage: number | null) => {
+    const ownerView = await app.inject({ url: `/api/v1/trips/${tripId}`, headers: { cookie } });
+    expect(ownerView.statusCode).toBe(200);
+    expect(ownerView.json().data).toMatchObject({
+      view: "private",
+      effectiveFacts: { cargoDamagePercent: damage },
+    });
+    expect(await tripService.detail(staff, tripId)).toMatchObject({
+      view: "private",
+      effectiveFacts: { cargoDamagePercent: damage },
+    });
+  };
+  try {
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("SYNTHETIC_ADDRESS_REQUIRED");
+    const send = (bytes: string) =>
+      new Promise<{
+        status: number;
+        receipt: { receiptId: string; contract: Telemetry["contract"] };
+      }>((accept, reject) => {
+        const req = request(
+          `http://127.0.0.1:${address.port}/api/telemetry/v1/events`,
+          {
+            method: "POST",
+            headers: {
+              authorization: bearer(issued.token),
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(bytes),
+            },
+          },
+          (response) => {
+            const chunks: string[] = [];
+            response.setEncoding("utf8");
+            response.on("data", (chunk: string) => chunks.push(chunk));
+            response.on("error", () => reject(new Error("SYNTHETIC_HTTP_FAILED")));
+            response.on("end", () => {
+              try {
+                accept({ status: response.statusCode ?? 0, receipt: JSON.parse(chunks.join("")) });
+              } catch {
+                reject(new Error("SYNTHETIC_RESPONSE_REQUIRED"));
+              }
+            });
+          },
+        );
+        req.on("error", () => reject(new Error("SYNTHETIC_HTTP_FAILED")));
+        req.end(bytes);
+      });
+    const terminal = bind(fixture);
+    const bytes = JSON.stringify(terminal);
+    const first = await send(bytes);
+    expect(first.status).toBe(202);
+    expect(first.receipt).toMatchObject({
+      eventId: terminal.eventId,
+      contract: terminal.contract,
+      status: "stored",
+    });
+    const original = await stored(first.receipt.receiptId);
+    expect(Number(original.cargoDamageFraction)).toBe(0.025);
+    expect(original.evidence).toMatchObject({
+      cargoDamageFraction: {
+        status: "known",
+        value: "0.025",
+        sourceField: "snapshot.cargoDamage",
+        sourceRecordId: first.receipt.receiptId,
+      },
+    });
+    await detail(original.canonicalTripId, 2.5);
+    const beforeRetry = await counts();
+    expect(await send(bytes)).toEqual({
+      status: 200,
+      receipt: { ...first.receipt, status: "duplicate" },
+    });
+    expect(await counts()).toBe(beforeRetry);
+
+    const zero = bind(telemetryFixture("completed") as unknown as Telemetry);
+    zero.snapshot.cargoDamage = asFraction({ available: true, value: 0 });
+    const missing = bind(telemetryFixture("haulmp-audited") as unknown as Telemetry);
+    missing.snapshot.cargoDamage = asFraction({ available: false, reason: "not-observed" });
+    for (const [payload, expected] of [
+      [zero, 0],
+      [missing, null],
+    ] as const) {
+      const result = await send(JSON.stringify(payload));
+      expect(result.status).toBe(202);
+      expect(result.receipt.contract).toEqual(payload.contract);
+      const row = await stored(result.receipt.receiptId);
+      expect(row.cargoDamageFraction === null ? null : Number(row.cargoDamageFraction)).toBe(
+        expected,
+      );
+      expect(row.evidence).toMatchObject({
+        cargoDamageFraction: {
+          status: expected === null ? "unknown" : "known",
+          sourceRecordId: result.receipt.receiptId,
+        },
+      });
+      await detail(row.canonicalTripId, expected);
+    }
+
+    // Set up a confirmed trip to exercise ingestion without involving the staff decision workflow.
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(trips)
+        .set({ decision: "accepted" })
+        .where(eq(trips.id, original.canonicalTripId)),
+    );
+    const correction = structuredClone(terminal);
+    correction.type = "trip.corrected";
+    correction.eventId = newId();
+    correction.revision++;
+    correction.snapshot.cargoDamage = asFraction({ available: true, value: 0.05 });
+    const revised = await send(JSON.stringify(correction));
+    expect(revised.status).toBe(202);
+    const revisedFact = await stored(revised.receipt.receiptId);
+    expect(revisedFact.canonicalTripId).toBe(original.canonicalTripId);
+    expect(Number(revisedFact.cargoDamageFraction)).toBe(0.05);
+    expect(revisedFact.evidence).toMatchObject({
+      cargoDamageFraction: {
+        status: "known",
+        value: "0.05",
+        sourceField: "snapshot.cargoDamage",
+        sourceRecordId: revised.receipt.receiptId,
+      },
+    });
+    const [current] = await unit.run((tx) =>
+      unit.client(tx).select().from(trips).where(eq(trips.id, original.canonicalTripId)),
+    );
+    expect(current).toMatchObject({
+      currentFactId: original.id,
+      decision: "accepted",
+      reviewHold: true,
+      correctionPending: true,
+      reviewReasons: expect.arrayContaining(["confirmed_facts_require_review"]),
+    });
+    await detail(original.canonicalTripId, 2.5);
+  } finally {
+    await app.close();
+  }
+});
+
 test("simultaneous first events on independent instances create one canonical receipt and retain conflicting revision evidence safely", async () => {
   const { issued, p } = await connect();
   const otherUnit = createUnitOfWork(guardedSettings());

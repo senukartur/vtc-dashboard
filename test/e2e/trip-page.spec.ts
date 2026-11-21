@@ -94,6 +94,35 @@ const tile = (page: Page, label: string) =>
 const status = (page: Page) => page.locator(".trip-detail-status");
 const logoRequests = (requests: string[]) => requests.filter((path) => path.endsWith("/logo"));
 const privatePaths = /\/review|\/reconciliations|\/proposals|\/manual-revisions|\/manual-reports/;
+test(
+  "trip details localize final telemetry damage and distinguish zero from unavailable",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const trip = telemetryWithEvent();
+    const facts = trip.data.view === "private" ? trip.data.effectiveFacts : null;
+    if (!facts) throw new Error("EXPECTED_PRIVATE_TELEMETRY_FACTS");
+    facts.cargoDamagePercent = 2.5;
+    await author(page, trip);
+    await page.goto(tripPath);
+    await catalogLanguage(page);
+    await loaded(page);
+    await expect(fact(tripCard(page), "Damage")).toHaveText("2.5 % of cargo");
+    await catalogLanguage(page, "ru");
+    const damage = fact(tripCard(page, "Рейс"), "Повреждения");
+    await expect(damage).toHaveText("2,5 % груза");
+
+    facts.cargoDamagePercent = 0;
+    await page.reload();
+    await catalogLanguage(page, "ru");
+    await expect(damage).toHaveText("0 % груза");
+
+    facts.cargoDamagePercent = null;
+    await page.reload();
+    await catalogLanguage(page, "ru");
+    await expect(damage).toHaveText("Недоступно");
+  },
+);
+
 /** Opens an info button inside `scope` and returns its popover. */
 async function openTip(page: Page, scope: Locator, name: string) {
   await scope.getByRole("button", { name, exact: true }).click();

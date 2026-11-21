@@ -1,0 +1,234 @@
+{
+  "bindingId": "8ce15337-0ccc-41a0-9a47-74100cfbcc32",
+  "contract": {
+    "major": 1,
+    "minor": 2
+  },
+  "createdUtcMs": 2000,
+  "delivery": {
+    "mode": "live",
+    "syncRunId": "6ae0398f-ca58-45cd-812a-d7bc99fc8f12"
+  },
+  "eventId": "4f999ebb-5d74-4fba-9648-2e383ddc61ec",
+  "installationId": "f1e9803a-54bd-4410-8b15-29e4ad6feff9",
+  "producer": {
+    "application": "ets2telemetry",
+    "version": "0.0.0-vtc-cargo-fixture"
+  },
+  "revision": 1,
+  "snapshot": {
+    "accounting": {
+      "distance": "unknown",
+      "fuel": "unknown"
+    },
+    "cargoDamage": {
+      "available": true,
+      "unit": "fraction",
+      "value": 0.025
+    },
+    "checkpointNextEventSeq": null,
+    "closeReason": "outcome",
+    "context": {
+      "dlcIds": {
+        "available": false,
+        "reason": "not-observed"
+      },
+      "gameBuild": {
+        "available": false,
+        "reason": "not-observed"
+      },
+      "mapId": {
+        "available": false,
+        "reason": "not-observed"
+      },
+      "sourceLocale": {
+        "available": false,
+        "reason": "not-observed"
+      },
+      "versions": {
+        "gameTelemetryApi": {
+          "available": true,
+          "value": {
+            "major": 1,
+            "minor": 19
+          }
+        },
+        "nativeProtocol": {
+          "major": 1,
+          "minor": 0
+        },
+        "sdkArchive": {
+          "available": true,
+          "value": "scs-sdk-1.15"
+        },
+        "telemetryApi": {
+          "available": true,
+          "value": {
+            "major": 1,
+            "minor": 1
+          }
+        }
+      }
+    },
+    "deliveredDistance": {
+      "available": true,
+      "unit": "m",
+      "value": 151250.5
+    },
+    "end": {
+      "basis": "event",
+      "eventSeq": "2",
+      "utcMs": 1791676802000
+    },
+    "evidence": {
+      "clockAnomaly": true,
+      "endObserved": false,
+      "reasons": ["trailer-context-unproven"],
+      "ruleContextComplete": false,
+      "startObserved": false
+    },
+    "expectedIncome": {
+      "available": true,
+      "value": {
+        "currency": {
+          "status": "unknown"
+        },
+        "raw": "12345",
+        "sdkType": "u64"
+      }
+    },
+    "fuelUsed": {
+      "available": false,
+      "reason": "not-observed",
+      "unit": "L"
+    },
+    "gameMode": {
+      "ambiguous": false,
+      "confidence": "none",
+      "method": "none",
+      "mode": "unknown"
+    },
+    "hardModeResult": "not-qualified",
+    "job": {
+      "cargoId": {
+        "available": true,
+        "value": "synthetic_cargo"
+      },
+      "cargoLoaded": {
+        "available": true,
+        "value": true
+      },
+      "cargoMass": {
+        "available": true,
+        "unit": "kg",
+        "value": 18000
+      },
+      "cargoName": {
+        "available": true,
+        "value": "Synthetic Cargo"
+      },
+      "cargoUnitCount": {
+        "available": true,
+        "value": 18
+      },
+      "cargoUnitMass": {
+        "available": true,
+        "unit": "kg",
+        "value": 1000
+      },
+      "destination": {
+        "cityId": {
+          "available": true,
+          "value": "synthetic_city_b"
+        },
+        "cityName": {
+          "available": true,
+          "value": "Synthetic City B"
+        },
+        "companyId": {
+          "available": true,
+          "value": "synthetic_company_b"
+        },
+        "companyName": {
+          "available": true,
+          "value": "Synthetic Company B"
+        }
+      },
+      "isSpecialJob": {
+        "available": true,
+        "value": false
+      },
+      "market": {
+        "available": true,
+        "value": "freight_market"
+      },
+      "origin": {
+        "cityId": {
+          "available": true,
+          "value": "synthetic_city_a"
+        },
+        "cityName": {
+          "available": true,
+          "value": "Synthetic City A"
+        },
+        "companyId": {
+          "available": true,
+          "value": "synthetic_company_a"
+        },
+        "companyName": {
+          "available": true,
+          "value": "Synthetic Company A"
+        }
+      }
+    },
+    "observedDistance": {
+      "available": false,
+      "reason": "not-observed",
+      "unit": "m"
+    },
+    "openedBy": "event",
+    "openedEventSeq": "1",
+    "outcome": "delivered",
+    "outcomeEventSeq": "2",
+    "penalty": {
+      "available": false,
+      "reason": "not-observed"
+    },
+    "plannedDistance": {
+      "available": true,
+      "unit": "m",
+      "value": 152000
+    },
+    "recordingCompleteness": "partial",
+    "revenue": {
+      "available": true,
+      "value": {
+        "currency": {
+          "code": "EUR",
+          "source": "scs-sdk-1.15/include/eurotrucks2/scssdk_telemetry_eut2.h#game-specific-units",
+          "status": "sdk-documented"
+        },
+        "raw": "15000",
+        "sdkType": "s64"
+      }
+    },
+    "start": {
+      "basis": "event",
+      "eventSeq": "1",
+      "utcMs": 1791676801000
+    },
+    "trailers": {
+      "complete": false,
+      "items": []
+    }
+  },
+  "source": {
+    "databaseUuid": "b15185b0-f290-4195-b4fb-ec94d2b7a67f",
+    "game": "ets2",
+    "origin": "game",
+    "pluginSessionId": "10000000-0000-4000-8000-0000000000a1",
+    "provider": "ets2telemetry",
+    "tripId": "f97f717a-8d6e-32bf-1697-632787c1fd54"
+  },
+  "type": "trip.completed"
+}
