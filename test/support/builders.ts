@@ -38,6 +38,7 @@ export const telemetryExamples = [
   "backfill",
   "haulmp-audited",
   "accounting",
+  "cargo-classification",
 ] as const;
 export type TelemetryExample = (typeof telemetryExamples)[number];
 // Read canonical committed bytes on every call: callers cannot mutate another test's fixture.

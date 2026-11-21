@@ -19,6 +19,29 @@ import schema from "./telemetry-v1.schema.json" with { type: "json" };
 
 type Available<T> = { available: true; value: T } | { available: false; reason: string };
 type AccountingStatus = "complete" | "partial" | "unknown";
+type CargoGroup =
+  | "adr"
+  | "bulk"
+  | "construction"
+  | "containers"
+  | "fragile"
+  | "gooseneck"
+  | "inloader"
+  | "liquid"
+  | "livestock"
+  | "machinery"
+  | "oversize"
+  | "refrigerated";
+type ReportedCargoClassification = {
+  version: 1;
+  fragility: number | null;
+  fragile: boolean;
+  valuable: boolean;
+  adr: { state: "none" | "unsupported" } | { state: "class"; class: 1 | 2 | 3 | 4 | 6 | 8 };
+  overweight: boolean;
+  oversize: boolean | null;
+  groups: CargoGroup[];
+};
 type Time = { utcMs: number | null; basis: ReportedTime["basis"]; eventSeq: string | null };
 // companyName is display text of the source; it is validated but never stored as a fact.
 type Place = {
@@ -28,7 +51,7 @@ type Place = {
   companyName: Available<string>;
 };
 export interface Telemetry {
-  contract: { major: 1; minor: 0 | 1 | 2 };
+  contract: { major: 1; minor: 0 | 1 | 2 | 3 };
   producer: unknown;
   createdUtcMs: number;
   eventId: string;
@@ -46,8 +69,10 @@ export interface Telemetry {
       ambiguous: boolean;
     };
     hardModeResult?: RecordedTelemetry["hardModeResult"];
-    // Required in v1.2 and forbidden earlier; fuel status is evidence only.
+    // Required since v1.2; fuel status is evidence only.
     accounting?: { distance: AccountingStatus; fuel: AccountingStatus };
+    // Required in v1.3. The server still resolves qualification ADR from its catalog.
+    cargoClassification?: ReportedCargoClassification | null;
     closeReason: string | null;
     checkpointNextEventSeq: string | null;
     outcome: Outcome;
@@ -286,7 +311,7 @@ export const telemetryAdapter: TripSourceAdapter = {
       end.verifiedActual = false;
     }
     // v1.2 carries the client's own distance accounting; earlier minors have none.
-    const distance = p.contract.minor === 2 ? (s.accounting?.distance ?? "unknown") : null;
+    const distance = p.contract.minor >= 2 ? (s.accounting?.distance ?? "unknown") : null;
     const wholeTripDistanceSupported =
       s.recordingCompleteness === "complete" &&
       start.verifiedActual &&
@@ -433,6 +458,7 @@ export const telemetryAdapter: TripSourceAdapter = {
           s.cargoDamage.available && s.cargoDamage.value > 1 ? s.cargoDamage.value : null,
         unsupportedQuantities,
         accounting: s.accounting ?? null,
+        ...(s.cargoClassification !== undefined && { cargoClassification: s.cargoClassification }),
       },
       wholeTripDistanceSupported,
       trailers: { complete: s.trailers.complete, items: trailers },
