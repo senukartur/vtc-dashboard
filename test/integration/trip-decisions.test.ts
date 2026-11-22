@@ -4727,6 +4727,39 @@ test("event v1.2 complete distance accounting shows actual distance while partia
     wholeTripDistanceSupported: false,
   });
 });
+test("event v1.2 complete distance accounting accepts a complete recording despite a client fuel accounting reason", async () => {
+  const p = payload();
+  p.contract.minor = 2;
+  p.snapshot.hardModeResult = "qualified";
+  p.snapshot.evidence.ruleContextComplete = false;
+  p.snapshot.evidence.reasons = ["accounting-unavailable"];
+  p.snapshot.accounting = { distance: "complete", fuel: "partial" };
+  const r = await receive(p),
+    row = await state(r.tripId);
+  expect(row).toMatchObject({
+    outcome: "delivered",
+    recording: "complete",
+    decision: "accepted",
+    reviewHold: false,
+  });
+  expect(row?.reviewReasons).toEqual([]);
+  expect((await credit(r.tripId))?.credited).toBe(true);
+  const review = await service.review(dispatcher, r.tripId);
+  expect(review.data.trip.effectiveFacts).toMatchObject({
+    actualDistanceM: "123400",
+    wholeTripDistanceSupported: true,
+    ruleContextComplete: false,
+  });
+  // v1.1 has no distance accounting, so the same client reason still routes review.
+  const legacy = payload();
+  legacy.contract.minor = 1;
+  legacy.snapshot.hardModeResult = "qualified";
+  legacy.snapshot.evidence.ruleContextComplete = false;
+  legacy.snapshot.evidence.reasons = ["accounting-unavailable"];
+  const held = await state((await receive(legacy)).tripId);
+  expect(held).toMatchObject({ decision: "pending_review" });
+  expect(held?.reviewReasons).toContain("whole_trip_distance_unknown");
+});
 
 const qualityHolds = [
   "quality_supported_conflict",
