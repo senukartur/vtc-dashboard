@@ -3,27 +3,44 @@ import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { tripTranslations } from "../../apps/web/src/features/trips/translations.ts";
 import { type DTO, schema } from "../../apps/web/src/features/trips/transport.ts";
 import {
+  acceptedLine,
+  associationConsequence,
   awaitingFix,
   canRevise,
   cargoLabels,
   creditState,
   damageValue,
   distanceNote,
+  eventCandidates,
+  formatRounded,
+  formatRoundedQuantity,
   latestDecision,
+  localDay,
   nextStep,
+  onTripDays,
+  qualificationSummary,
   reasonLabelKey,
   reasonLabelKeys,
   recordedValueKey,
   reportedDamage,
   revisableReportId,
+  roundedQuantity,
+  routeMatches,
   sourceOutcomeKey,
+  tripBanner,
+  tripDays,
+  tripDuration,
   tripHistory,
   tripStatus,
   tripTimes,
   unknownHintKey,
 } from "../../apps/web/src/features/trips/trip-page-model.ts";
 import {
+  acceptedTelemetry,
   asOtherMember,
+  eventMember,
+  eventPage,
+  fictionalEvent,
   fixtureReviewer,
   manualUnknown,
   needsFixManual,
@@ -35,6 +52,7 @@ import {
   otherSummary,
   pendingManual,
   reconciledAccepted,
+  returnedReason,
   returnedTrip,
   telemetryWithEvent,
   tripPageStubs,
@@ -538,4 +556,353 @@ test("every VTC-158 trip page key exists in both languages and is translated", (
     } else expect(tripTranslations.ru[key], key).not.toBe(tripTranslations.en[key]);
   }
   expect(Object.keys(tripTranslations.ru).sort()).toEqual(Object.keys(tripTranslations.en).sort());
+});
+
+// VTC-170 summary-first trip page model.
+test("quantities round half up to whole kilometres and tenths of a tonne, never through zero", () => {
+  expect(roundedQuantity("251129.8828125", "km")).toEqual({ value: "251", lessThan: false });
+  expect(formatRounded("251129.8828125", "km", "ru")).toBe("251 км");
+  expect(formatRounded("251129.8828125", "km", "en")).toBe("251 km");
+  expect(roundedQuantity("500", "km")).toEqual({ value: "1", lessThan: false });
+  expect(roundedQuantity("499", "km")).toEqual({ value: "1", lessThan: true });
+  expect(formatRounded("499", "km", "en")).toBe("< 1 km");
+  expect(roundedQuantity("0", "km")).toEqual({ value: "0", lessThan: false });
+  expect(formatRounded("0", "km", "en")).toBe("0 km");
+  expect(roundedQuantity(null, "km")).toBeNull();
+  expect(formatRounded(null, "t", "ru")).toBeNull();
+  expect(roundedQuantity("24856.900390625", "t")).toEqual({ value: "24.9", lessThan: false });
+  expect(formatRounded("24856.900390625", "t", "ru")).toBe("24,9 т");
+  expect(formatRounded("24856.900390625", "t", "en")).toBe("24.9 t");
+  expect(roundedQuantity("24950", "t")).toEqual({ value: "25", lessThan: false });
+  expect(formatRounded("24950", "t", "en")).toBe("25 t");
+  expect(roundedQuantity("40", "t")).toEqual({ value: "0.1", lessThan: true });
+  expect(formatRounded("40", "t", "en")).toBe("< 0.1 t");
+  expect(formatRounded("40", "t", "ru")).toBe("< 0,1 т");
+  expect(formatRounded("812400.5", "km", "en")).toBe("812 km");
+  expect(formatRounded("1234567890", "km", "en")).toBe("1,234,568 km");
+  expect(formatRounded("999500", "km", "en")).toBe("1,000 km");
+  expect(formatRoundedQuantity({ value: "1", lessThan: true }, "km", "ru")).toBe("< 1 км");
+});
+
+test("the banner names every status that is not accepted, with one owner action at most", () => {
+  expect(tripBanner(reconciledAccepted().data, { owner: true, staff: false })).toBeNull();
+  expect(tripBanner(undefined, { owner: true, staff: false })).toBeNull();
+
+  const fix = tripBanner(needsFixManual().data, { owner: true, staff: false });
+  expect(fix).toEqual({
+    status: "needs_fix",
+    tone: "warn",
+    counted: "notYet",
+    noteKey: "next_fix_note",
+    quote: needsFixReason,
+    reasonKeys: ["reasonOther", "code_manual_evidence_missing"],
+    heldKeys: [],
+    actor: fixtureReviewer.nickname,
+    system: false,
+    at: "2026-11-12T10:31:00.000Z",
+    action: "fix",
+  });
+  // Staff read the same status and decision, without the driver's action.
+  expect(
+    tripBanner(asOtherMember(needsFixManual()).data, { owner: false, staff: true }),
+  ).toMatchObject({
+    status: "needs_fix",
+    noteKey: "next_fix_staff_note",
+    quote: needsFixReason,
+    actor: fixtureReviewer.nickname,
+    action: null,
+  });
+
+  expect(tripBanner(returnedTrip().data, { owner: true, staff: false })).toMatchObject({
+    status: "rejected",
+    tone: "error",
+    counted: "no",
+    noteKey: "next_rejected_note",
+    quote: returnedReason,
+    actor: "Fictional Stage Four Dispatcher",
+    system: false,
+    at: "2026-11-11T10:00:00.000Z",
+    action: null,
+  });
+  const system = returnedTrip();
+  const [only] = privateView(system).decisions;
+  if (!only) throw new Error("MISSING_DECISION");
+  only.reviewer = null;
+  only.reviewerId = null;
+  only.reason = null;
+  only.reasonCodes = ["rule_mass_exceeded"];
+  expect(tripBanner(system.data, { owner: true, staff: false })).toMatchObject({
+    actor: null,
+    system: true,
+    quote: null,
+    reasonKeys: ["code_rule_mass_exceeded"],
+  });
+
+  const pending = pendingManual();
+  privateView(pending).summary.submittedAt = "2026-11-11T09:00:00.000Z";
+  expect(tripBanner(pending.data, { owner: true, staff: false })).toEqual({
+    status: "pending_review",
+    tone: "pending",
+    counted: "notYet",
+    noteKey: "next_pending_note",
+    quote: null,
+    reasonKeys: [],
+    heldKeys: ["code_manual_review_required", "reasonOther"],
+    actor: null,
+    system: false,
+    at: "2026-11-11T09:00:00.000Z",
+    action: null,
+  });
+  expect(tripBanner(pendingManual().data, { owner: true, staff: false })?.at).toBeNull();
+  expect(tripBanner(pending.data, { owner: false, staff: true })?.noteKey).toBe(
+    "next_pending_staff_note",
+  );
+
+  expect(tripBanner(openTelemetry().data, { owner: true, staff: false })).toMatchObject({
+    status: "in_progress",
+    tone: "neutral",
+    counted: "notYet",
+    noteKey: "next_open_note",
+    at: null,
+    action: null,
+  });
+  const cancelled = openTelemetry();
+  privateView(cancelled).summary.outcome = "cancelled";
+  expect(tripBanner(cancelled.data, { owner: true, staff: false })).toMatchObject({
+    status: "cancelled",
+    counted: "no",
+    noteKey: "next_cancelled_note",
+  });
+  const unassessed = openTelemetry();
+  privateView(unassessed).summary.outcome = "delivered";
+  expect(tripBanner(unassessed.data, { owner: true, staff: false })).toMatchObject({
+    status: "unassessed",
+    noteKey: "next_unassessed_note",
+  });
+  // A company summary has no next step; the banner still explains its status.
+  const summary = otherSummary();
+  (summary.data as DTO["TripSummary"]).decision = "pending_review";
+  expect(tripBanner(summary.data, { owner: false, staff: false })).toMatchObject({
+    noteKey: "next_pending_note",
+    actor: null,
+    action: null,
+  });
+});
+
+test("an accepted trip has one counted line with the rounded distance and its acceptance", () => {
+  expect(acceptedLine(acceptedTelemetry().data)).toEqual({
+    distance: { value: "812", lessThan: false },
+    game: "ets2",
+    actor: fixtureReviewer.nickname,
+    system: false,
+    at: "2026-11-11T08:15:00.000Z",
+  });
+  const unknown = acceptedTelemetry();
+  privateView(unknown).summary.actualDistanceM = null;
+  expect(acceptedLine(unknown.data)?.distance).toBeNull();
+  // An older view without decisions and another member's summary name nobody.
+  expect(acceptedLine(reconciledAccepted().data)).toMatchObject({ actor: null, at: null });
+  expect(acceptedLine(otherSummary().data)).toMatchObject({
+    distance: { value: "812", lessThan: false },
+    actor: null,
+    at: null,
+  });
+  // A later system rejection does not replace the acceptance shown on the line.
+  const mixed = acceptedTelemetry();
+  privateView(mixed).decisions.push(decision("rejected", "2026-11-12T10:00:00.000Z"));
+  expect(acceptedLine(mixed.data)?.at).toBe("2026-11-11T08:15:00.000Z");
+  expect(acceptedLine(needsFixManual().data)).toBeNull();
+  expect(acceptedLine(undefined)).toBeNull();
+});
+
+test("the collapsed check counts passed limits and takes its tone from the worst result", () => {
+  expect(qualificationSummary(privateView(telemetryWithEvent()).qualificationCheck)).toEqual({
+    passed: 4,
+    total: 5,
+    tone: "error",
+  });
+  const check = privateView(telemetryWithEvent()).qualificationCheck;
+  if (!check) throw new Error("MISSING_CHECK");
+  const passing = {
+    ...check,
+    rules: check.rules.map((rule) => ({ ...rule, result: "pass" as const })),
+  } as DTO["QualificationCheck"];
+  expect(qualificationSummary(passing)).toEqual({ passed: 5, total: 5, tone: "ok" });
+  const unknown = {
+    ...passing,
+    rules: passing.rules.map((rule, i) =>
+      i === 0 ? { ...rule, result: "unknown" as const } : rule,
+    ),
+  } as DTO["QualificationCheck"];
+  expect(qualificationSummary(unknown)).toEqual({ passed: 4, total: 5, tone: "warn" });
+  expect(qualificationSummary(privateView(manualUnknown()).qualificationCheck)).toBeNull();
+  expect(qualificationSummary(null)).toBeNull();
+});
+
+test("duration and trip days follow the actual times and the display zone", () => {
+  const times = {
+    startedAt: "2026-11-10T14:30:00.000Z",
+    completedAt: "2026-11-10T16:02:00.000Z",
+    reported: false,
+  };
+  expect(tripDuration(times)).toBe(92);
+  expect(tripDuration({ ...times, completedAt: null })).toBeNull();
+  expect(tripDuration({ ...times, completedAt: "2026-11-10T14:00:00.000Z" })).toBeNull();
+  expect(tripDuration(null)).toBeNull();
+  // 23:30 to 01:02 in Tokyo crosses midnight; in UTC the trip stays on one day.
+  expect(tripDays(times, "UTC")).toEqual(["2026-11-10"]);
+  expect(tripDays(times, "Asia/Tokyo")).toEqual(["2026-11-10", "2026-11-11"]);
+  expect(tripDays({ ...times, startedAt: null }, "UTC")).toEqual(["2026-11-10"]);
+  expect(tripDays({ ...times, completedAt: "2026-11-12T01:00:00.000Z" }, "UTC")).toEqual([
+    "2026-11-10",
+    "2026-11-11",
+    "2026-11-12",
+  ]);
+  expect(tripDays(null, "UTC")).toBeNull();
+  expect(tripDays({ startedAt: null, completedAt: null, reported: true }, "UTC")).toBeNull();
+  expect(localDay("2026-11-10T15:00:00.000Z", "Asia/Tokyo")).toBe("2026-11-11");
+  expect(localDay("not a time", "UTC")).toBeNull();
+});
+
+test("event candidates are scheduled events of the same game, newest first, matched by ID", () => {
+  const days = ["2026-11-10"];
+  const sameDay = fictionalEvent(1, "2026-11-10T09:00:00.000Z", { sameRoute: true });
+  const sameDayOther = fictionalEvent(2, "2026-11-10T20:00:00.000Z");
+  const older = fictionalEvent(3, "2026-11-01T09:00:00.000Z");
+  const otherGame = fictionalEvent(4, "2026-11-10T10:00:00.000Z", { game: "ats" });
+  const cancelled = fictionalEvent(5, "2026-11-10T11:00:00.000Z", { status: "cancelled" });
+  const candidates = eventCandidates([older, sameDay, otherGame, sameDayOther, cancelled], "ets2");
+  expect(candidates.map((event) => event.title)).toEqual([
+    sameDayOther.title,
+    sameDay.title,
+    older.title,
+  ]);
+  expect(
+    candidates.filter((event) => onTripDays(event, days, "UTC")).map((event) => event.title),
+  ).toEqual([sameDayOther.title, sameDay.title]);
+  // 20:00 UTC is the next day in Tokyo.
+  expect(onTripDays(sameDayOther, days, "Asia/Tokyo")).toBe(false);
+
+  const trip = privateView(acceptedTelemetry()).summary;
+  expect(routeMatches(sameDay, trip)).toBe(true);
+  expect(routeMatches(sameDayOther, trip)).toBe(false);
+  // Labels never decide a match; canonical IDs do.
+  const relabeled = structuredClone(sameDay);
+  if (!relabeled.origin || !relabeled.destination) throw new Error("MISSING_ROUTE");
+  relabeled.origin.label = "Another label";
+  expect(routeMatches(relabeled, trip)).toBe(true);
+  relabeled.destination.entityId = "41500000-0000-4000-8000-000000000399";
+  expect(routeMatches(relabeled, trip)).toBe(false);
+  expect(routeMatches(sameDay, { origin: null, destination: trip.destination })).toBe(false);
+
+  for (const page of [eventPage([sameDay, older], "cursor-2"), eventPage([])])
+    expect(schema("EnvelopeListEventPublic").safeParse(page).success).toBe(true);
+  for (const attendance of ["unconfirmed", "attended", "not_attended"] as const)
+    expect(
+      schema("EnvelopeEventMember").safeParse(eventMember(sameDay, attendance, "participating"))
+        .success,
+    ).toBe(true);
+});
+
+test("the link consequence follows the trip decision and the confirmed attendance only", () => {
+  const event = fictionalEvent(1, "2026-11-10T09:00:00.000Z");
+  const member = (
+    attendance: DTO["EventMember"]["myAttendance"],
+    response: DTO["Rsvp"]["response"],
+  ) => eventMember(event, attendance, response).data;
+  for (const decided of ["accepted", "rejected"] as const)
+    expect(associationConsequence(decided, null)).toEqual({
+      linkKey: "eventLinkReviewed",
+      attendanceKey: null,
+    });
+  for (const open of ["pending_review", "unassessed"] as const)
+    expect(associationConsequence(open, undefined).linkKey).toBe("eventLinkImmediate");
+  expect(associationConsequence("pending_review", member("attended", "unanswered"))).toEqual({
+    linkKey: "eventLinkImmediate",
+    attendanceKey: "eventAttended",
+  });
+  expect(
+    associationConsequence("accepted", member("not_attended", "participating")).attendanceKey,
+  ).toBe("eventNotAttended");
+  // A signup is not attendance.
+  expect(
+    associationConsequence("pending_review", member("unconfirmed", "participating")).attendanceKey,
+  ).toBe("eventSignedUp");
+  for (const response of ["unanswered", "declined"] as const)
+    expect(
+      associationConsequence("pending_review", member("unconfirmed", response)).attendanceKey,
+    ).toBe("eventNotSignedUp");
+});
+
+test("every VTC-170 trip page key exists in both languages and is translated", () => {
+  const added = [
+    "moreActions",
+    "menuLinkEvent",
+    "menuEditReport",
+    "menuRefresh",
+    "menuCopyLink",
+    "menuOpenDispatch",
+    "linkCopied",
+    "linkCopyFailed",
+    "statusRegion",
+    "bannerNotYet",
+    "bannerNo",
+    "bannerSubmitted",
+    "acceptedLine",
+    "acceptedLineNoDistance",
+    "routeRegion",
+    "stripMass",
+    "durationMinutes",
+    "durationHours",
+    "durationHoursMinutes",
+    "cargoTrailerTitle",
+    "cargoProperties",
+    "conditionsTitle",
+    "eventLinkAction",
+    "eventChangeAction",
+    "qualificationTitle",
+    "qualificationRules",
+    "showRules",
+    "hideRules",
+    "staffTitle",
+    "staffHint",
+    "timesInZone",
+    "dataInfoLabel",
+    "dataTitle",
+    "dataTelemetry",
+    "dataTelemetryNoDistance",
+    "dataManual",
+    "dataNoManual",
+    "eventDialogTitle",
+    "eventTabsLabel",
+    "eventTabDay",
+    "eventTabPast",
+    "eventRouteMatches",
+    "eventCurrent",
+    "eventPartial",
+    "eventLoadMore",
+    "eventEmptyDay",
+    "eventEmptyPast",
+    "eventHelpLabel",
+    "eventHelpTitle",
+    "eventLinkReviewed",
+    "eventLinkImmediate",
+    "eventAttended",
+    "eventNotAttended",
+    "eventSignedUp",
+    "eventNotSignedUp",
+    "eventLinkedDone",
+    "eventSentDone",
+    "closeDialog",
+  ] as const;
+  for (const key of added) {
+    expect(tripTranslations.en[key], key).toBeTruthy();
+    expect(tripTranslations.ru[key], key).toBeTruthy();
+    expect(tripTranslations.ru[key], key).not.toBe(tripTranslations.en[key]);
+  }
+  expect(tripTranslations.en.qualificationRules).toBe("Rules: {{passed}} of {{total}}");
+  expect(tripTranslations.ru.qualificationRules).toBe("Правила: {{passed}} из {{total}}");
+  // Keys VTC-169 builds on stay in place even where this page no longer renders them.
+  for (const key of ["tileCredited", "tileNext", "next_fix", "asideLabel", "fixReport"] as const)
+    expect(tripTranslations.en[key], key).toBeTruthy();
 });
