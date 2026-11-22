@@ -328,6 +328,23 @@ test("event v1.2 complete distance accounting yields actual distance without who
   const whole = await telemetryAdapter.normalize(clean("complete"), context());
   expect(whole.actualDistanceM).toMatchObject({ status: "known", value: "123400" });
   expect(whole.wholeTripDistanceSupported).toBe(true);
+  // A client reason about another quantity (here partial fuel) no longer vetoes complete distance.
+  const reasoned = (minor: 1 | 2) => {
+    const p = clean("complete");
+    p.contract.minor = minor;
+    if (minor < 2) delete (p.snapshot as { accounting?: unknown }).accounting;
+    p.snapshot.evidence.ruleContextComplete = false;
+    p.snapshot.evidence.reasons = ["accounting-unavailable"];
+    return p;
+  };
+  const fuelReason = await telemetryAdapter.normalize(reasoned(2), context());
+  expect(fuelReason.actualDistanceM).toMatchObject({ status: "known", value: "123400" });
+  expect(fuelReason.wholeTripDistanceSupported).toBe(true);
+  expect(fuelReason.reasonCodes).not.toContain("whole_trip_distance_unknown");
+  expect(fuelReason.reasonCodes).toContain("rule_context_incomplete");
+  const legacy = await telemetryAdapter.normalize(reasoned(1), context());
+  expect(legacy.wholeTripDistanceSupported).toBe(false);
+  expect(legacy.actualDistanceM.status).toBe("unknown");
   const anomaly = accounting();
   anomaly.snapshot.evidence.clockAnomaly = true;
   const unverified = await telemetryAdapter.normalize(anomaly, context());

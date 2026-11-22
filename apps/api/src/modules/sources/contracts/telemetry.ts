@@ -312,14 +312,15 @@ export const telemetryAdapter: TripSourceAdapter = {
     }
     // v1.2 carries the client's own distance accounting; earlier minors have none.
     const distance = p.contract.minor >= 2 ? (s.accounting?.distance ?? "unknown") : null;
+    // Since v1.2 complete distance accounting replaces the client quality reasons: they cover other
+    // facts (fuel, money, job context) that the dashboard checks on its own.
     const wholeTripDistanceSupported =
       s.recordingCompleteness === "complete" &&
       start.verifiedActual &&
       end.verifiedActual &&
-      s.evidence.reasons.length === 0 &&
-      (distance === null || distance === "complete");
+      (distance === null ? s.evidence.reasons.length === 0 : distance === "complete");
     // Complete v1.2 distance accounting makes the observed distance the actual total despite
-    // partial recording or client reasons; whole-trip support keeps the stricter rule above.
+    // partial recording; whole-trip support also keeps the complete-recording rule above.
     const actualDistanceEligible =
       distance === null
         ? wholeTripDistanceSupported
