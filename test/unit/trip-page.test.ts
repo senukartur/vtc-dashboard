@@ -883,6 +883,7 @@ test("every VTC-170 trip page key exists in both languages and is translated", (
     "eventLoadMore",
     "eventEmptyDay",
     "eventEmptyPast",
+    "eventEmptyLoaded",
     "eventHelpLabel",
     "eventHelpTitle",
     "eventLinkReviewed",

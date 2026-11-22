@@ -31,13 +31,16 @@ import {
 
 type Event = DTO["EventPublic"];
 type Batch = { items: Event[]; nextCursor: string | null; passedTripDay: boolean };
+/** Where the next batch starts and whether an earlier batch already passed the last trip day. */
+type BatchStart = { cursor: string | null; dayDone: boolean };
 
 /** Pages of 100 read in one batch before the dialog asks to load more (500 events). */
 const batchPages = 5;
 
 /**
- * Past events from the given cursor, oldest first as the server lists them. A batch stops after the
- * last trip day (later events cannot start on it), at the end of the list or after `batchPages`.
+ * Past events from the given cursor, oldest first as the server lists them. A batch stops at the
+ * end of the list or after `batchPages`; while the trip day scan is incomplete (`lastDay` set) it
+ * also stops once a page passes the last trip day, since later events cannot start on it.
  */
 async function readBatch(
   cursor: string | null,
@@ -91,11 +94,20 @@ function useEventBatches(
     retry: false,
     gcTime: 0,
     staleTime: 0,
-    initialPageParam: null as string | null,
-    getNextPageParam: (last: Batch) => last.nextCursor,
+    initialPageParam: { cursor: null, dayDone: false } as BatchStart,
+    getNextPageParam: (last: Batch, all: Batch[]): BatchStart | null =>
+      last.nextCursor
+        ? { cursor: last.nextCursor, dayDone: all.some((batch) => batch.passedTripDay) }
+        : null,
     queryFn: async ({ pageParam, signal }) => {
       try {
-        return await readBatch(pageParam, lastDay, timezone, signal);
+        // Once the trip day is covered, later batches (All past) read their full page budget.
+        return await readBatch(
+          pageParam.cursor,
+          pageParam.dayDone ? null : lastDay,
+          timezone,
+          signal,
+        );
       } catch (error) {
         if (error instanceof AccountFailure && !signal.aborted) {
           if (error.kind === "unauthorized") await session.confirmSessionLoss(signal);
@@ -197,8 +209,16 @@ function EventDialogBody({
         ? candidates.filter((event) => onTripDays(event, days, timezone))
         : candidates,
     dayComplete = batches.some((batch) => batch.passedTripDay) || !query.hasNextPage,
-    partial = !!query.data && (tab === "day" ? !dayComplete : query.hasNextPage),
-    showCurrent = !!current && !visible.some((event) => event.id === current.id),
+    // The tab's scan is complete: "none" is only claimed then, otherwise only the loaded part.
+    complete = tab === "day" ? dayComplete : !query.hasNextPage,
+    partial = !!query.data && !complete,
+    shown = (id: string | undefined) => visible.some((event) => event.id === id),
+    // The current and the selected event stay visible in every tab, so what Link submits is shown.
+    showCurrent = !!current && !shown(current.id),
+    pinned =
+      selected && selected !== current?.id && !shown(selected)
+        ? (candidates.find((event) => event.id === selected) ?? null)
+        : null,
     selectedMember = member.data?.data.data.event.id === selected ? member.data.data.data : null,
     consequence = associationConsequence(summary.decision, selectedMember),
     decided = summary.decision === "accepted" || summary.decision === "rejected",
@@ -226,6 +246,24 @@ function EventDialogBody({
       </label>
     </li>
   );
+  const card = (event: Event) =>
+    option(
+      event.id,
+      <>
+        <strong>{event.title}</strong>
+        <span className="trip-muted">
+          {when(event.startsAt)} · {eventRoute(event)}
+        </span>
+        {(event.id === current?.id || routeMatches(event, summary)) && (
+          <span className="trip-event-badges">
+            {routeMatches(event, summary) && <Badge tone="ok">{t("eventRouteMatches")}</Badge>}
+            {event.id === current?.id && <Badge tone="info">{t("eventCurrent")}</Badge>}
+          </span>
+        )}
+      </>,
+    );
+  // A hidden current event renders as a full card when it is among the loaded events.
+  const currentLoaded = current ? candidates.find((event) => event.id === current.id) : undefined;
   return (
     <DialogContent
       className="trip-event-dialog"
@@ -281,45 +319,33 @@ function EventDialogBody({
         <div className="trip-event-options">
           <fieldset className="trip-event-fieldset">
             <legend className="visually-hidden">{t("eventId")}</legend>
-            {visible.length || showCurrent ? (
+            {(showCurrent || pinned || visible.length > 0) && (
               <ul>
                 {showCurrent &&
                   current &&
-                  option(
-                    current.id,
-                    <>
-                      <strong>{current.title}</strong>
-                      <span className="trip-muted">{t("eventCurrent")}</span>
-                    </>,
-                  )}
-                {visible.map((event) =>
-                  option(
-                    event.id,
-                    <>
-                      <strong>{event.title}</strong>
-                      <span className="trip-muted">
-                        {when(event.startsAt)} · {eventRoute(event)}
-                      </span>
-                      {(event.id === current?.id || routeMatches(event, summary)) && (
-                        <span className="trip-event-badges">
-                          {routeMatches(event, summary) && (
-                            <Badge tone="ok">{t("eventRouteMatches")}</Badge>
-                          )}
-                          {event.id === current?.id && (
-                            <Badge tone="info">{t("eventCurrent")}</Badge>
-                          )}
-                        </span>
-                      )}
-                    </>,
-                  ),
-                )}
+                  (currentLoaded
+                    ? card(currentLoaded)
+                    : option(
+                        current.id,
+                        <>
+                          <strong>{current.title}</strong>
+                          <span className="trip-muted">{t("eventCurrent")}</span>
+                        </>,
+                      ))}
+                {pinned && card(pinned)}
+                {visible.map(card)}
               </ul>
-            ) : (
-              query.data && (
-                <p className="trip-muted">
-                  {t(tab === "day" ? "eventEmptyDay" : "eventEmptyPast")}
-                </p>
-              )
+            )}
+            {query.data && !visible.length && (
+              <p className="trip-muted">
+                {t(
+                  !complete
+                    ? "eventEmptyLoaded"
+                    : tab === "day"
+                      ? "eventEmptyDay"
+                      : "eventEmptyPast",
+                )}
+              </p>
             )}
           </fieldset>
         </div>

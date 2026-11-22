@@ -714,6 +714,7 @@ export const tripTranslations = {
     eventLoadMore: "Load more events",
     eventEmptyDay: "No events of this game started on the trip day.",
     eventEmptyPast: "No past events of this game.",
+    eventEmptyLoaded: "Nothing found in the loaded part yet.",
     eventHelpLabel: "How linking works",
     eventHelpTitle: "Linking is not attendance",
     eventLinkReviewed:
@@ -1445,6 +1446,7 @@ export const tripTranslations = {
     eventLoadMore: "Загрузить ещё мероприятия",
     eventEmptyDay: "В день рейса мероприятий этой игры не было.",
     eventEmptyPast: "Прошедших мероприятий этой игры нет.",
+    eventEmptyLoaded: "В загруженной части пока ничего не найдено.",
     eventHelpLabel: "Как работает привязка",
     eventHelpTitle: "Привязка — не участие",
     eventLinkReviewed:
