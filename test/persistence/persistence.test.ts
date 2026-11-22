@@ -80,7 +80,7 @@ import {
   withPrefixMembershipJoinedAt,
 } from "./support.ts";
 
-const currentMigrationCount = 39;
+const currentMigrationCount = 40;
 
 const values = mysqlTable("synthetic_values", {
   id: idColumn("id").primaryKey(),
@@ -208,10 +208,10 @@ async function serializedFreshMigrations(
     })),
   );
   const expectedTables = Object.keys(
-    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0038_snapshot.json"), "utf8"))
+    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0039_snapshot.json"), "utf8"))
       .tables,
   ).sort();
-  assert.equal(expectedTables.length, 104);
+  assert.equal(expectedTables.length, 106);
   const gate = await journalAckGate("finalize", currentMigrationCount);
   const lock = migrationLockName(settings.database);
   const history = async () => {
@@ -483,7 +483,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [prefix] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash,state FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 1);
+        assert.equal(await runMigrations(settings), currentMigrationCount - 38);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash,state FROM _vtc_migrations ORDER BY version LIMIT 38",

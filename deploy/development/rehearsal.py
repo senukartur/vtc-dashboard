@@ -415,7 +415,7 @@ def core():
         # prefix. Only the packaged migration journal/SQL differs; no historical image
         # behavior is inferred from this native DDL/grant-ordering proof.
         packaged = ops.activation.packaged_history(ops, image_id)
-        assert len(packaged) == 39
+        assert len(packaged) == 40
         prefix_revision = hashlib.sha256((revision + ':prefix').encode()).hexdigest()[:40]
         prefix_context = base / 'state/prefix-build'
         prefix_context.mkdir(mode=0o700)
@@ -436,11 +436,11 @@ def core():
         prefix_image = prefix_info['Id']
         assert json.loads(ops.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]['Id'] == image_id
         assert prefix_info['RootFS']['Layers'][:len(base_image['RootFS']['Layers'])] == base_image['RootFS']['Layers']
-        assert ops.activation.packaged_history(ops, prefix_image) == packaged[:38]
+        assert ops.activation.packaged_history(ops, prefix_image) == packaged[:39]
     with rehearsal_phase('initial-migration'):
         compose(['run', '--rm', '--no-deps', 'migrate'], revision=prefix_revision, image_id=prefix_image)
     with rehearsal_phase('core-controls-release-handoff'):
-        assert ops.handoff_history(prefix_revision, prefix_image) == packaged[:38]
+        assert ops.handoff_history(prefix_revision, prefix_image) == packaged[:39]
         import update_controls
         update_controls.o = ops
         os.umask(0o077)
@@ -451,6 +451,7 @@ def core():
         compose(['create', '--no-recreate', 'app', 'probe'], revision=prefix_revision, image_id=prefix_image)
         candidate_grants = (base / 'activation-grants.json').read_bytes()
         prefix_grants = json.loads(candidate_grants)
+        # The predecessor's controls lack one candidate grant, so the handoff has a real delta.
         for tables in prefix_grants.values():
             tables.pop('trip_owner_revisions', None)
         (base / 'activation-grants.json').write_text(json.dumps(prefix_grants))
@@ -512,7 +513,7 @@ def core():
         assert json.loads((base / 'state/release-handoff.json').read_text())['schemaAdvanced'] is True
         assert not (base / 'state/recovery-required').exists()
         assert not ops.activation.controls_pending(ops, prefix_revision, prefix_image)
-        print('Owned controls handoff: exact native 38-to-39 history, verified export, unchanged configuration, complete grants before first producer and trusted readiness passed', flush=True)
+        print('Owned controls handoff: exact native 39-to-40 history, verified export, unchanged configuration, complete grants before first producer and trusted readiness passed', flush=True)
     with rehearsal_phase('core-production-codec-grants'):
         notification_account_cleanup_proof(ops, revision, image_id)
         assert not ops.activation.has_published_route_history(ops, revision, image_id, fenced=True)

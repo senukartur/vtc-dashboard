@@ -113,6 +113,8 @@ export async function reset(connection: Connection) {
     "manual_draft_history",
     "manual_draft_evidence",
     "manual_drafts",
+    "manual_correction_evidence",
+    "manual_correction_submissions",
     "manual_correction_history",
     "manual_correction_requests",
     "manual_evidence_refs",

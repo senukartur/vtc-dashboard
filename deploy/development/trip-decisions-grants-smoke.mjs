@@ -216,7 +216,9 @@ try {
           cargoDamageFraction: unknown(),
           money: null,
           provenance: { synthetic: true },
-          wholeTripDistanceSupported: true,
+          // The runtime trip lacks whole-trip distance support: the director returns it and the
+          // driver corrects it (VTC-169).
+          wholeTripDistanceSupported: n !== 0,
           trailers: { complete: true, items: [known(pins.get("trailer"), "synthetic.trailer")] },
           adrCategory: unknown(),
           ruleContextComplete: false,
@@ -338,65 +340,61 @@ try {
           review = await service.review(actor, id),
           commandKey = newId(),
           input = {
-            decision: "accept",
+            decision: "reject",
             reviewedRevisionId: review.data.factRevisionId,
             factRevisionId: review.data.factRevisionId,
             proposalId: null,
-            reason: "Fictional restricted runtime acceptance",
+            reason: "Fictional restricted runtime return for fixes",
+            returnForFixes: true,
           };
-        step = "runtime_decision";
-        const accepted = await service.decide(actor, id, commandKey, review.version, input);
-        assert.equal(accepted.data.outcome, "accepted");
-        const [refreshed] = await connection.execute(
-          "SELECT primary_version FROM reconciliation_candidates WHERE active=TRUE AND primary_trip_id=? AND secondary_trip_id=?",
-          [id, refs.candidateSecondaryId],
-        );
-        assert.equal(refreshed.length, 1);
-        assert.equal(refreshed[0].primary_version, accepted.version);
+        assert.equal(review.data.correctionReview?.canReturn, true);
+        step = "runtime_return";
+        const returned = await service.decide(actor, id, commandKey, review.version, input);
+        assert.equal(returned.data.outcome, "rejected");
+        assert.ok(returned.data.reasonCodes.includes("returned_for_fixes"));
         assert.deepEqual(
           await service.decide(actor, id, commandKey, review.version, input),
-          accepted,
+          returned,
         );
         step = "runtime_correction";
         const ownerLogin = await identity.login("decision-proof-driver@example.invalid", password),
           owner = await identity.authenticate(
             new Headers({ cookie: ownerLogin.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
           );
-        const request = await manual.requestCorrection(owner, id, newId(), accepted.version, {
-          reason: "Fictional linked runtime request",
-        });
-        const proposal = await service.propose(actor, id, newId(), request.version, {
+        // The driver corrects the unconfirmed distance; the previous result stays effective.
+        const proposal = await service.propose(owner, id, newId(), returned.version, {
             reason: "Fictional supported distance correction",
             evidenceIds: [],
             actualDistanceM: "200000",
-            correctionRequestId: request.id,
           }),
-          detail = await service.getProposal(actor, id, proposal.data.id),
-          corrected = await service.proposalDecision(
-            actor,
-            id,
-            detail.data.id,
-            newId(),
-            detail.version,
-            {
-              decision: "approve",
-              reviewedRevisionId: detail.data.revisionId,
-              reason: "Fictional verified corrected distance",
-            },
-          );
-        assert.notEqual(corrected.data.basis.factRevisionId, review.data.factRevisionId);
-        const requestReadback = await manual.corrections(owner, id, {}, request.id);
-        assert.equal(requestReadback.data.status, "resolved");
-        assert.deepEqual(requestReadback.data.history.map((h) => h.status).sort(), [
-          "pending",
-          "resolved",
-        ]);
-        const related = await service.proposals(actor, id);
-        const originating = related.items.find(
-          (p) => p.kind === "correction_request" && p.correctionRequestId === request.id,
+          detail = await service.getProposal(actor, id, proposal.data.id);
+        assert.equal(detail.data.authorId, owner.userId);
+        const [submission] = await connection.execute(
+          "SELECT COUNT(*) n FROM manual_correction_submissions WHERE trip_id=?",
+          [id],
         );
-        assert.equal(originating.state, "approved");
-        assert.equal(detail.data.correctionRequestId, request.id);
+        assert.equal(Number(submission[0].n), 1);
+        step = "runtime_correction_review";
+        const corrected = await service.proposalDecision(
+          actor,
+          id,
+          detail.data.id,
+          newId(),
+          detail.version,
+          {
+            decision: "approve",
+            reviewedRevisionId: detail.data.revisionId,
+            reason: "Fictional verified corrected distance",
+          },
+        );
+        assert.equal(corrected.data.outcome, "accepted");
+        assert.notEqual(corrected.data.basis.factRevisionId, review.data.factRevisionId);
+        const [refreshed] = await connection.execute(
+          "SELECT primary_version FROM reconciliation_candidates WHERE active=TRUE AND primary_trip_id=? AND secondary_trip_id=?",
+          [id, refs.candidateSecondaryId],
+        );
+        assert.equal(refreshed.length, 1);
+        assert.equal(refreshed[0].primary_version, corrected.version);
         const [credit] = await unit.run((tx) =>
           unit.client(tx).select().from(tripContributions).where(eq(tripContributions.tripId, id)),
         );
@@ -407,9 +405,6 @@ try {
         const workspace = await workspaceSummary.readStage3(actor);
         assert.ok(workspace.legacyReviewQueue);
         assert.equal(workspace.reviewQueue, undefined);
-        await manual.requestCorrection(owner, id, newId(), corrected.version, {
-          reason: "Fictional pending request observed by restricted worker",
-        });
       } else if (phase === "produce-stage3") {
         step = "runtime_stage3_projection_and_dismissal";
         const login = await identity.login("manual-rehearsal-director@example.invalid", password);
@@ -504,18 +499,21 @@ try {
         assert.deepEqual(await read(), first);
         assert.deepEqual(await readCandidate(), replacements);
       } else {
-        step = "worker_pending_requests";
+        step = "worker_correction_reads";
         assert.equal(
           await unit.run(async (tx) => {
             await identity.qualificationContextInTransaction(tx, []);
-            return manual.hasPendingCorrectionsInTransaction(tx, refs.runtimeTripId);
+            return manual.hasPendingCorrectionsInTransaction(tx, refs.runtimeTripId, "share");
           }),
-          true,
+          false,
         );
-        await assert.rejects(
-          connection.query("UPDATE manual_correction_requests SET status=status"),
-          (e) => [1044, 1142, 1143, 1227].includes(e.errno),
-        );
+        await connection.query("SELECT 1 FROM manual_correction_evidence LIMIT 1 FOR SHARE");
+        for (const statement of [
+          "UPDATE manual_correction_requests SET status=status",
+          "UPDATE manual_correction_evidence SET trip_id=trip_id",
+          "DELETE FROM manual_correction_evidence",
+        ])
+          await assert.rejects(connection.query(statement), denied);
         step = "worker_promotion_before";
         const readCredit = async (tripId) => {
           const [row] = await unit.run((tx) =>
@@ -564,6 +562,10 @@ try {
         "DELETE FROM manual_correction_requests",
         "UPDATE manual_correction_history SET reason=reason",
         "DELETE FROM manual_correction_history",
+        "UPDATE manual_correction_evidence SET trip_id=trip_id",
+        "DELETE FROM manual_correction_evidence",
+        "UPDATE manual_correction_submissions SET created_at=created_at",
+        "DELETE FROM manual_correction_submissions",
         "UPDATE trip_decisions SET reason=reason",
         "DELETE FROM trip_decisions",
         "UPDATE trip_proposals SET reason=reason",

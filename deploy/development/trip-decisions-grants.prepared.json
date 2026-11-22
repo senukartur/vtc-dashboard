@@ -36,6 +36,7 @@
     "manual_reports": ["SELECT"],
     "manual_revisions": ["SELECT"],
     "manual_evidence_refs": ["SELECT"],
+    "manual_correction_evidence": ["SELECT"],
     "qualification_levels": ["SELECT"],
     "qualification_level_trailers": ["SELECT"],
     "identity_roles": ["SELECT", "INSERT", "DELETE"],
