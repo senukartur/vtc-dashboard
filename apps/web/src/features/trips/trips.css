@@ -149,24 +149,9 @@
 }
 
 /* Stage 4 author blocks: companies and sources (VTC-146); the check uses the shared list. */
-.trip-muted,
-.trip-company-code {
+.trip-muted {
   color: var(--muted);
   font-size: var(--font-small);
-}
-/* The 128px logo plate and a long company name wrap instead of widening a phone screen. */
-.trip-company {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  min-width: 0;
-  max-width: 100%;
-}
-.trip-company-name {
-  display: inline-flex;
-  flex-direction: column;
-  min-width: 0;
 }
 .trip-sources {
   display: grid;
@@ -205,47 +190,423 @@
   }
 }
 
-/* Trip page layout (VTC-158): header, summary tiles, main column and aside. Existing tokens only. */
+/* Summary-first trip page (VTC-170, mockup variant A): header with the actions menu, one status
+   banner, route card with its strip, detail grids, the staff block and the event dialog.
+   Existing tokens only; no animations. Breakpoints: 560px (phone) and 800px (wide). */
+.trip-detail {
+  gap: 16px;
+}
 .trip-detail-header {
   display: grid;
   gap: 10px;
 }
 .trip-detail-heading {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 12px 24px;
+  gap: 12px;
 }
 .trip-detail-title {
   display: grid;
   gap: 6px;
-  flex: 1 1 320px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 .trip-detail-title-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
+  gap: 8px 10px;
 }
 .trip-detail-title-row h1 {
   margin: 0;
   min-width: 0;
+  font-size: 1.375rem;
 }
-/* Inline flow keeps the spaces around the separators; long lines simply wrap. */
-.trip-detail-meta {
+.trip-detail-status {
+  white-space: nowrap;
+}
+.trip-detail-counted {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   margin: 0;
-  color: var(--muted);
-  line-height: 1.7;
+  color: var(--secondary);
 }
-.trip-source-badges {
+.trip-detail-counted > .lucide {
+  margin-top: 3px;
+  color: var(--badge-ok-fg);
+}
+.trip-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.trip-detail-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+.trip-menu-trigger {
+  width: var(--control-h-sm);
+  padding: 0;
+  justify-content: center;
+}
+.trip-menu-content {
+  z-index: 60;
+  min-width: 14rem;
+  max-width: min(20rem, calc(100vw - 24px));
+  padding: 4px;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px #0008;
+}
+.trip-menu-item {
+  display: flex;
+  align-items: center;
+  min-height: var(--target-min);
+  padding: 4px 10px;
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  font-size: var(--font-body);
+  text-decoration: none;
+  cursor: pointer;
+  outline: none;
+}
+.trip-menu-item[data-highlighted] {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+.trip-menu-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.trip-menu-item[data-disabled] {
+  color: var(--muted);
+  cursor: default;
+}
+/* The live region stays in the accessibility tree while empty, without taking a row. */
+.trip-detail-notice {
+  margin: 0;
+}
+.trip-detail-notice:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.trip-link-button {
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--focus);
+  font: inherit;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+.trip-link-button:hover {
+  text-decoration: underline;
+}
+
+/* Status banner: tone per status, status never by colour alone (icon and title). */
+.trip-banner {
+  --tone-fg: var(--badge-neutral-fg);
+  --tone-bg: var(--badge-neutral-bg);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--tone-fg) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tone-bg) 55%, var(--surface));
+}
+.trip-banner[data-tone="warn"] {
+  --tone-fg: var(--badge-warn-fg);
+  --tone-bg: var(--badge-warn-bg);
+}
+.trip-banner[data-tone="pending"] {
+  --tone-fg: var(--pending);
+  --tone-bg: var(--pending-surface);
+}
+.trip-banner[data-tone="error"] {
+  --tone-fg: var(--badge-error-fg);
+  --tone-bg: var(--badge-error-bg);
+}
+.trip-banner-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--tone-fg);
+  background: var(--tone-bg);
+}
+.trip-banner-body {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.trip-banner-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.trip-banner-title strong {
+  font-size: 1rem;
+}
+.trip-banner-counted {
+  padding: 1px 8px;
+  border-radius: 10px;
+  color: var(--tone-fg);
+  background: var(--tone-bg);
+  font-size: var(--font-small);
+  white-space: nowrap;
+}
+.trip-banner-text {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px;
-  vertical-align: middle;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--secondary);
 }
-/* Inline flow keeps the info button right after the last label instead of on its own line. */
+.trip-banner-action {
+  flex: none;
+}
+
+/* Route card: origin, distance and duration, destination; the strip below. */
+.trip-route {
+  --route-pad: 20px;
+  display: grid;
+  gap: 18px;
+}
+.trip-page .trip-route.card {
+  padding: var(--route-pad);
+}
+@media (max-width: 760px) {
+  .trip-route {
+    --route-pad: 16px;
+  }
+}
+.trip-route-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.trip-route-end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.trip-route-city {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.trip-route-company {
+  display: flex;
+  flex-direction: column;
+  align-items: inherit;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--muted);
+}
+.trip-company-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trip-route-middle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  text-align: center;
+}
+.trip-route-measure {
+  color: var(--secondary);
+  font-size: var(--font-small);
+}
+.trip-route-track {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  color: var(--focus);
+}
+.trip-route-dot {
+  flex: none;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--focus);
+  border-radius: 50%;
+}
+.trip-route-dot[data-end] {
+  background: var(--focus);
+}
+.trip-route-dash {
+  flex: 1;
+  border-top: 2px dashed var(--border-strong);
+}
+.trip-route-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0 calc(-1 * var(--route-pad)) calc(-1 * var(--route-pad));
+  border-top: 1px solid var(--border);
+}
+.trip-route-strip > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 16px;
+}
+.trip-route-strip > div:nth-child(n + 3) {
+  border-top: 1px solid var(--border);
+}
+.trip-route-strip > div:nth-child(even) {
+  border-left: 1px solid var(--border);
+}
+.trip-route-strip dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.trip-route-strip dd {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.trip-route-strip dd[data-zero] {
+  color: var(--badge-ok-fg);
+}
+.trip-route-strip small {
+  font-weight: 400;
+}
+@media (min-width: 560px) {
+  .trip-route-line {
+    grid-template-columns: minmax(0, 1fr) minmax(120px, 1.2fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 16px;
+  }
+  .trip-route-end[data-side="destination"] {
+    align-items: flex-end;
+    text-align: right;
+  }
+}
+@media (max-width: 559px) {
+  .trip-route-middle {
+    align-items: flex-start;
+    text-align: left;
+  }
+  .trip-route-track {
+    max-width: 220px;
+  }
+  .trip-banner-action {
+    flex: 1 1 100%;
+  }
+}
+@media (min-width: 800px) {
+  .trip-route-strip {
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+    grid-template-columns: none;
+  }
+  .trip-route-strip > div:nth-child(n + 3) {
+    border-top: 0;
+  }
+  .trip-route-strip > div + div {
+    border-left: 1px solid var(--border);
+  }
+}
+
+/* Detail grids: cargo beside conditions, qualification beside history from 800px. */
+.trip-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.trip-detail-grid:empty {
+  display: none;
+}
+@media (min-width: 800px) {
+  .trip-detail-grid:has(> :nth-child(2)) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.trip-detail-card h2 {
+  margin: 0;
+  padding-left: 9px;
+  border-left: 3px solid var(--accent);
+  font-size: var(--font-body);
+  font-weight: 600;
+  line-height: 1.2;
+}
+.trip-detail-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+.trip-detail-kv {
+  display: grid;
+  grid-template-columns: minmax(96px, 128px) minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: center;
+  margin: 0;
+}
+.trip-detail-kv > div {
+  display: contents;
+}
+/* The Hard Mode term keeps its flame icon on the same line as the text. */
+.trip-detail-kv dt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.trip-detail-kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trip-hard-mode[data-result="qualified"] {
+  color: var(--badge-ok-fg);
+}
+.trip-detail-inline,
+.trip-detail-unknown {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.trip-detail-unknown {
+  color: var(--muted);
+  font-weight: 400;
+}
+.trip-detail-list {
+  display: grid;
+  gap: 4px;
+}
+/* Inline flow keeps the cargo badges on as few lines as the width allows. */
 .trip-cargo-labels {
   min-width: 0;
   line-height: 24px;
@@ -264,110 +625,14 @@
 .trip-cargo-labels > :last-child {
   vertical-align: middle;
 }
-.trip-detail-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+.trip-qualification-rules {
+  white-space: nowrap;
 }
-.trip-detail-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
-  gap: 12px;
-}
-.trip-detail-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.trip-detail-tile[data-attention] {
-  border-color: var(--pending);
-  background: var(--pending-surface);
-}
-.trip-detail-tile-label {
-  color: var(--muted);
-  font-size: var(--font-small);
-}
-.trip-detail-tile-value {
-  font-size: 1.15rem;
-  font-weight: 600;
-}
-.trip-detail-tile-note,
-.trip-detail-inline,
-.trip-detail-unknown {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 6px;
-  min-width: 0;
-}
-.trip-detail-unknown {
-  color: var(--muted);
-  font-weight: 400;
-}
-.trip-detail-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-}
-@media (min-width: 1100px) {
-  .trip-detail-layout:has(> .trip-detail-aside) {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
-  }
-}
-.trip-detail-main,
-.trip-detail-aside {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-}
-.trip-detail-card h2 {
-  margin: 0;
-  font-size: 1rem;
-}
-.trip-detail-card-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px 12px;
-}
-.trip-detail-kv {
-  display: grid;
-  grid-template-columns: minmax(96px, 160px) minmax(0, 1fr);
-  gap: 9px 12px;
-  align-items: baseline;
+.trip-qualification-text {
   margin: 0;
 }
-.trip-detail-kv > div {
-  display: contents;
-}
-/* The Hard Mode term keeps its flame icon on the same line as the text. */
-.trip-detail-kv dt {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--muted);
-}
-.trip-detail-kv dd {
-  margin: 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.trip-detail-place {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  min-width: 0;
-  max-width: 100%;
-}
-.trip-detail-list {
-  display: grid;
-  gap: 4px;
+.trip-qualification .trip-link-button {
+  justify-self: start;
 }
 .trip-detail-evidence,
 .trip-detail-history {
@@ -393,7 +658,7 @@
   overflow-wrap: anywhere;
 }
 .trip-detail-history {
-  gap: 12px;
+  gap: 10px;
 }
 .trip-detail-history li {
   display: flex;
@@ -421,7 +686,7 @@
 }
 .trip-detail-history-body {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 .trip-detail-history-title {
@@ -438,24 +703,169 @@
   margin: 0;
   padding-left: 16px;
 }
+.trip-data-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+/* Staff block: one collapsed card; reused raw blocks inside keep their own cards. */
+.trip-staff {
+  padding: 0;
+}
+.trip-staff > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px 16px;
+}
+.trip-staff-title {
+  flex: 1 1 auto;
+}
+.trip-staff > summary .trip-muted {
+  font-weight: 400;
+}
+.trip-staff-body {
+  padding: 0 16px 16px;
+}
 /* Reused raw blocks render their own card; inside the technical card they stay flat. */
 .trip-detail-technical .card {
   padding: 0;
   border: 0;
   background: none;
 }
+
+/* Event dialog: header, tabs, a scrolling list of radio cards and fixed actions. Only the list
+   shrinks, so absent rows leave no gaps. */
+.dialog-content.trip-event-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  gap: 12px;
+  padding: 18px 20px;
+  overflow: hidden;
+}
+.dialog-content.trip-event-dialog > * {
+  flex: none;
+}
+.trip-event-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.trip-event-heading {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+.dialog-content.trip-event-dialog h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.dialog-content.trip-event-dialog .trip-event-heading p {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: var(--font-small);
+  line-height: 1.45;
+}
+.trip-event-close {
+  flex: none;
+  width: var(--control-h-sm);
+  padding: 0;
+  justify-content: center;
+}
+.trip-event-options {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.trip-event-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.dialog-content.trip-event-dialog > .trip-event-options {
+  flex: 0 1 auto;
+}
+.trip-event-options ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trip-event-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--inset);
+  cursor: pointer;
+}
+.trip-event-option[data-selected] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.trip-event-option:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.trip-event-option input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.trip-event-option-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trip-event-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.trip-event-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.dialog-content.trip-event-dialog .trip-event-state p {
+  margin: 0;
+}
+.dialog-content.trip-event-dialog .trip-event-consequence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--secondary);
+  font-size: var(--font-small);
+  line-height: 1.45;
+}
+.trip-event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 760px) {
-  .trip-detail-actions {
-    width: 100%;
-  }
-  /* Only the primary action takes the full row; secondary buttons keep their width and wrap. */
-  .trip-detail-actions > .button-primary {
-    flex: 1 1 100%;
-  }
-  .trip-detail-tile[data-attention] {
-    order: -1;
-  }
   .trip-detail-kv {
-    grid-template-columns: minmax(84px, 120px) minmax(0, 1fr);
+    grid-template-columns: minmax(84px, 112px) minmax(0, 1fr);
   }
 }

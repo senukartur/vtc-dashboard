@@ -72,32 +72,41 @@ export function ruleTexts(t: T, rule: Rule, locale: Locale) {
       };
   }
 }
-/** The five level limits applied to a trip, each with its result, the trip value and the limit. */
+/**
+ * The five level limits applied to a trip, each with its result, the trip value and the limit.
+ * `rulesOnly` leaves out the heading and the level sentence for a caller that shows its own.
+ */
 export function QualificationCheckList({
   check,
   headingLevel = 2,
   headingId,
+  rulesOnly = false,
 }: {
   check: DTO["QualificationCheck"];
   headingLevel?: 2 | 3;
   /** Lets the surrounding card or region take its accessible name from the heading. */
   headingId?: string;
+  rulesOnly?: boolean;
 }) {
   const { t } = useTranslation("qualifications"),
     locale = useLocale(),
     Heading = headingLevel === 2 ? "h2" : "h3";
   return (
     <div className="qualification-check stack">
-      <Heading id={headingId}>{t("checkTitle")}</Heading>
-      <p className="qualification-muted">
-        {check.status === "checked"
-          ? t("checkChecked", { name: check.level?.name ?? "" })
-          : check.status === "event_exempt"
-            ? t("checkEventExempt")
-            : t("checkNoLevel")}
-        {" · "}
-        {t(check.basis === "decision" ? "checkBasisDecision" : "checkBasisCurrent")}
-      </p>
+      {!rulesOnly && (
+        <>
+          <Heading id={headingId}>{t("checkTitle")}</Heading>
+          <p className="qualification-muted">
+            {check.status === "checked"
+              ? t("checkChecked", { name: check.level?.name ?? "" })
+              : check.status === "event_exempt"
+                ? t("checkEventExempt")
+                : t("checkNoLevel")}
+            {" · "}
+            {t(check.basis === "decision" ? "checkBasisDecision" : "checkBasisCurrent")}
+          </p>
+        </>
+      )}
       {check.rules.length > 0 && (
         <ul className="qualification-check-list">
           {check.rules.map((rule) => {

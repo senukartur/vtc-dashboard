@@ -635,6 +635,40 @@ async function pageLocale(page: Page) {
       .catch(() => null),
   );
 }
+/**
+ * Links the trip to a started event through the trip page dialog: Link (or Change for a linked
+ * trip) in Conditions, the event among all past ones, then the command that must succeed and close
+ * the dialog. `relink` expects the event to be linked and preselected already.
+ */
+async function linkEvent(page: Page, tripId: string, eventId: string, relink = false) {
+  const conditions = page.getByRole("region", { name: "Conditions", exact: true });
+  await conditions.getByRole("button", { name: relink ? "Change" : "Link", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Link to an event" });
+  await expect(dialog).toBeVisible();
+  const option = dialog.locator(`input[type=radio][value="${eventId}"]`);
+  if (relink) await expect(option).toBeChecked();
+  // The synthetic trip day is long past, so the event is under All past (newest first).
+  await dialog.getByRole("button", { name: "All past", exact: true }).click();
+  await expect(option).toBeVisible();
+  await option.check();
+  await expect(dialog.locator(".trip-event-consequence")).toContainText(
+    relink
+      ? "Your attendance is confirmed, so the level limits do not apply to this trip."
+      : "The trip is linked at once and checked again.",
+  );
+  const response = page.waitForResponse(
+    (r) =>
+      r.request().method() === "POST" &&
+      new URL(r.url()).pathname === `/api/v1/trips/${tripId}/event-association`,
+    { timeout: 15000 },
+  );
+  await dialog.getByRole("button", { name: "Link", exact: true }).click();
+  expect((await response).status()).toBe(200);
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("status").filter({ hasText: "The trip is linked to the event." }),
+  ).toBeVisible();
+}
 async function confirm(page: Page, label: string, commandPath?: string, expectedStatus = 201) {
   const actions = {
     "Submit for review": {
@@ -663,10 +697,6 @@ async function confirm(page: Page, label: string, commandPath?: string, expected
     "Reverse merge": {
       action: "reverse-merge",
       path: /^\/api\/v1\/reconciliations\/[0-9a-f-]{36}\/reversals$/,
-    },
-    "Associate event": {
-      action: "associate-event",
-      path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/event-association$/,
     },
   } as const;
   const descriptor = Object.hasOwn(actions, label) ? actions[label as keyof typeof actions] : null;
@@ -1000,8 +1030,8 @@ test(
       });
       expect(trip.manualRevision?.fields).not.toHaveProperty("destinationCompanyId");
       expect(trip.evidence[0]?.state).toBe("ready");
-      // The trip block of the author page names the reported company.
-      await expect(page.getByRole("region", { name: "Trip", exact: true })).toContainText(
+      // The route card of the author page names the reported company.
+      await expect(page.getByRole("region", { name: "Route", exact: true })).toContainText(
         "Fictional North Depot",
       );
     } finally {
@@ -1353,6 +1383,7 @@ test(
       phase = "RELOAD_REVERSE";
       await staffPage.goto(`/account/trips/${merged.primaryTripId}`);
       await catalogLanguage(staffPage);
+      await staffPage.locator("summary").filter({ hasText: "For dispatchers" }).click();
       await staffPage.getByText("Reconciliation history", { exact: true }).click();
       await staffPage.locator("summary").filter({ hasText: merged.id }).click();
       await staffPage
@@ -1643,26 +1674,22 @@ test(
         email: fixture.email,
         password: fixture.password,
       });
+      // The link dialog offers past events only, so wait until the synthetic event has started.
+      await expect.poll(() => Date.now() >= Date.parse(start), { timeout: 20000 }).toBe(true);
       await page.goto(`/account/trips/${report.tripId}`);
       await catalogLanguage(page);
-      await page.locator("#report-event").selectOption(event.data.event.id);
-      await confirm(page, "Associate event");
+      await linkEvent(page, report.tripId, event.data.event.id);
       let current = (await (await page.request.get(`/api/v1/trips/${report.tripId}`)).json()).data;
       expect(current.summary.decision).not.toBe("accepted");
+      expect(current.summary.event?.id).toBe(event.data.event.id);
       await resetAccountLimits();
       phase = "CONFIRMED_ATTENDANCE";
-      await expect.poll(() => Date.now() >= Date.parse(start), { timeout: 20000 }).toBe(true);
       await events.setAttendance(fixture.staff, event.data.event.id, randomUUID(), 1, {
         members: [{ memberId: fixture.userId, attendance: "attended", note: null }],
       });
       await page.reload();
       await catalogLanguage(page);
-      const select = page.locator("#report-event");
-      if ((await select.locator(`option[value="${event.data.event.id}"]`).count()) === 0) {
-        await page.getByRole("button", { name: "Past events", exact: true }).click();
-      }
-      await select.selectOption(event.data.event.id);
-      await confirm(page, "Associate event");
+      await linkEvent(page, report.tripId, event.data.event.id, true);
       await staffBrowser.addCookies((await staff.storageState()).cookies);
       const reviewer = await staffBrowser.newPage();
       await reviewer.goto(`/account/review/${report.tripId}`);

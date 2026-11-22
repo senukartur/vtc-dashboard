@@ -971,7 +971,7 @@ for (const locale of ["en", "ru"] as const)
   );
 
 test(
-  "full trip page localizes recorded job type and unavailable audit fields",
+  "full trip page localizes recorded job type and leaves unknown audit fields out",
   browserCase(["@layout", "@viewport-desktop"]),
   async ({ page }) => {
     await mockList(page);
@@ -987,24 +987,10 @@ test(
     );
     await page.goto(`/account/trips/${first}`);
     const detail = page.getByRole("main");
-    for (const [locale, rows] of [
-      [
-        "en",
-        [
-          ["Job type", "Cargo market"],
-          ["Game mode", "Mode unknown"],
-          ["Hard Mode", "Unknown"],
-        ],
-      ],
-      [
-        "ru",
-        [
-          ["Тип заказа", "Грузоперевозки"],
-          ["Режим игры", "Режим неизвестен"],
-          // Hard Mode keeps its English name in both languages.
-          ["Hard Mode", "Неизвестно"],
-        ],
-      ],
+    for (const [locale, rows, missing] of [
+      ["en", [["Job type", "Cargo market"]], ["Game mode", "Hard Mode"]],
+      // Hard Mode keeps its English name in both languages.
+      ["ru", [["Тип заказа", "Грузоперевозки"]], ["Режим игры", "Hard Mode"]],
     ] as const) {
       await catalogLanguage(page, locale);
       for (const [label, value] of rows) {
@@ -1013,6 +999,11 @@ test(
         await expect(term).toBeVisible();
         await expect(term.locator("xpath=following-sibling::dd")).toHaveText(value);
       }
+      // Unknown recorded values are left out of the trip page instead of shown as placeholders.
+      for (const label of missing)
+        await expect(
+          detail.locator("dt").filter({ hasText: new RegExp(`^\\s*${label}$`) }),
+        ).toHaveCount(0);
       await noOverflow(page);
     }
   },
