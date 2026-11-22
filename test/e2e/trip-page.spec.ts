@@ -21,6 +21,7 @@ import {
   openTelemetry,
   otherSummary,
   pendingManual,
+  reconciledAccepted,
   returnedReason,
   returnedTrip,
   senderCompanyId,
@@ -28,6 +29,7 @@ import {
   tripEventId,
   tripPageId,
   tripPrivate,
+  withoutSources,
   withRoute,
 } from "./support/trip-page-fixtures.ts";
 import { mockTrips } from "./support/trip-ui.ts";
@@ -582,7 +584,11 @@ test(
     await expect(counted(page)).toHaveText("Counted: +812 km in statistics and ETS2 qualification");
     await expect(page.locator(".trip-detail-meta")).toContainText("Driver: Fictional Other Driver");
     await expect(region(page, "Route").locator("dt")).toHaveText(["Distance"]);
-    for (const name of ["Cargo and trailer", "Conditions", "Qualification", "History"])
+    // Only the cargo itself: labels and the trailer are private.
+    const summaryCargo = region(page, "Cargo and trailer");
+    await expect(summaryCargo.locator("dt")).toHaveText(["Cargo"]);
+    await expect(fact(summaryCargo, "Cargo")).toHaveText("Fictional machine parts");
+    for (const name of ["Conditions", "Qualification", "History"])
       await expect(region(page, name)).toHaveCount(0);
     await expect(page.locator(".trip-data-note")).toHaveCount(0);
     expect(
@@ -660,6 +666,79 @@ test(
   },
 );
 
+test(
+  "staff read reconciled sources in the dispatcher block; a failed logo, selected limits and the correction request stay as before",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    // A null saved zone follows the device; staff own this trip so every block renders.
+    const { state } = await author(page, reconciledAccepted(), null, true);
+    await page.route(new RegExp(`/api/v1/catalogs/companies/${senderCompanyId}/logo`), (route) =>
+      route.fulfill({ status: 500, json: { error: { code: "PRIVATE_SENTINEL" } } }),
+    );
+    await page.goto(tripPath);
+    await catalogLanguage(page);
+    await loaded(page);
+
+    // The failed logo falls back to the placeholder plate without leaking the failure.
+    const origin = region(page, "Route").locator(".trip-route-end[data-side=origin]");
+    await expect(origin.locator(".company-logo")).toHaveAttribute("data-logo", "placeholder");
+    await expect(origin).toContainText("Fictional Logistics");
+    await expect(region(page, "Route").locator("img")).toHaveCount(0);
+    await expect(page.getByText("PRIVATE_SENTINEL")).toHaveCount(0);
+    await expect(page.locator(".trip-detail-meta > span")).toContainText([
+      "Telemetry",
+      "Manual report",
+    ]);
+    await expect(page.locator(".trip-data-note")).toContainText(
+      `Times in your time zone (${deviceZone})`,
+    );
+    // An accepted own trip offers the correction request.
+    await expect(
+      page.getByRole("heading", { name: "Request correction", exact: true }),
+    ).toBeVisible();
+
+    await page.locator("details.trip-staff > summary").click();
+    const sources = region(page, "Sources");
+    const items = sources.getByRole("listitem");
+    await expect(items.locator(".trip-source-head > .badge:first-child")).toHaveText([
+      "Telemetry",
+      "Manual report",
+    ]);
+    await expect(sources.getByText("Used for the trip", { exact: true })).toHaveCount(1);
+    await expect(items.nth(0).getByText("Used for the trip", { exact: true })).toBeVisible();
+    await expect(fact(items.nth(0), "Driven distance")).toHaveText("812.4005 km");
+    await expect(fact(items.nth(1), "Driven distance")).toHaveText("810 km");
+    await expect(fact(items.nth(1), "Source outcome")).toHaveText("Delivered");
+    await expect(sources).toContainText(`Times in ${deviceZone}`);
+    await expect(fact(items.nth(0), "Received")).toHaveText(/11 Nov 2026.*03:00/);
+
+    // A rejected own trip: no correction request; selected limits are named, never blank.
+    state.view = returnedTrip();
+    await refresh(page);
+    await expect(status(page)).toHaveText("Rejected");
+    await expect(
+      page.getByRole("heading", { name: "Request correction", exact: true }),
+    ).toHaveCount(0);
+    const check = region(page, "Qualification");
+    await check.getByRole("button", { name: "Show rules", exact: true }).click();
+    const rules = check.getByRole("listitem");
+    await expect(rules).toHaveCount(5);
+    await expect(rules.nth(2)).toContainText("Trip: Fictional Tanker · Limit: Only selected");
+    await expect(rules.nth(3)).toHaveAttribute("data-result", "fail");
+    await expect(rules.nth(3)).toContainText(
+      "Trip: 3 · Flammable liquids · Limit: Selected classes",
+    );
+
+    // No recorded source is explained inside the dispatcher block.
+    state.view = withoutSources();
+    await refresh(page);
+    const block = page.locator("details.trip-staff");
+    if ((await block.getAttribute("open")) === null) await block.locator("summary").first().click();
+    await expect(region(page, "Sources")).toContainText("No sources are recorded for this trip.");
+    await expect(region(page, "Sources").getByRole("listitem")).toHaveCount(0);
+  },
+);
+
 /** The pending own trip the dialog cases link: on 10 Nov 10:00–18:00 UTC between two cities. */
 function pendingTelemetry() {
   const trip = acceptedTelemetry("no-event");
@@ -732,7 +811,8 @@ test(
           next: "cursor-2",
         },
         "cursor-2": { items: [events.sameDay, events.later], next: "cursor-3" },
-        "cursor-3": { items: [], next: null },
+        "cursor-3": { items: [], next: "cursor-4" },
+        "cursor-4": { items: [], next: null },
       },
       {
         [events.match.id]: eventMember(events.match, "unconfirmed", "participating"),
@@ -809,11 +889,23 @@ test(
     await expect(dialog(page).getByText("Only part of the list is loaded.")).toBeVisible();
     await dialog(page).getByRole("button", { name: "Load more events" }).click();
     await expect(dialog(page).getByText("Only part of the list is loaded.")).toHaveCount(0);
-    expect(new URLSearchParams(reads.at(-1)).get("cursor")).toBe("cursor-3");
+    // Past the trip day, one Load more reads the full batch budget, not a single page.
+    expect(reads.slice(-2).map((search) => new URLSearchParams(search).get("cursor"))).toEqual([
+      "cursor-3",
+      "cursor-4",
+    ]);
     await dialog(page).locator(".trip-event-option", { hasText: events.older.title }).click();
     await expect(consequence).toContainText(
       "Your attendance is confirmed, so the level limits do not apply to this trip.",
     );
+    // A selection outside the trip day stays visible and checked on that tab.
+    await tabs.getByRole("button", { name: "On the trip day" }).click();
+    expect(await optionNames(page)).toEqual([
+      events.older.title,
+      events.sameDay.title,
+      events.match.title,
+    ]);
+    await expect(options(page).nth(0)).toBeChecked();
 
     // Cancel and Escape close without a command and return focus to the opener.
     await dialog(page).getByRole("button", { name: "Cancel" }).click();
@@ -946,6 +1038,44 @@ test(
     await dialog(page).getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(dialog(page).getByRole("alert")).toHaveCount(0);
     await expect(dialog(page).getByText("Linked now")).toBeVisible();
+  },
+);
+
+test(
+  "an incomplete scan never claims that no events exist",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await author(page, pendingTelemetry());
+    // Five empty pages fill the first batch and still leave a cursor.
+    const empty = (next: string) => ({ items: [], next });
+    const { reads } = await serveEvents(page, {
+      "": empty("c1"),
+      c1: empty("c2"),
+      c2: empty("c3"),
+      c3: empty("c4"),
+      c4: empty("c5"),
+      c5: { items: [events.match], next: null },
+    });
+    await page.goto(tripPath);
+    await catalogLanguage(page);
+    await loaded(page);
+    await fact(region(page, "Conditions"), "Event").getByRole("button", { name: "Link" }).click();
+    await expect.poll(() => reads.length).toBe(5);
+    for (const tab of ["On the trip day", "All past"]) {
+      await dialog(page).getByRole("button", { name: tab, exact: true }).click();
+      await expect(options(page)).toHaveCount(0);
+      await expect(dialog(page)).toContainText("Nothing found in the loaded part yet.");
+      await expect(dialog(page)).not.toContainText(
+        "No events of this game started on the trip day.",
+      );
+      await expect(dialog(page)).not.toContainText("No past events of this game.");
+      await expect(dialog(page).getByText("Only part of the list is loaded.")).toBeVisible();
+    }
+    await dialog(page).getByRole("button", { name: "Load more events" }).click();
+    await expect(options(page)).toHaveCount(1);
+    expect(new URLSearchParams(reads.at(-1)).get("cursor")).toBe("c5");
+    await expect(dialog(page).getByText("Only part of the list is loaded.")).toHaveCount(0);
+    await expect(dialog(page)).not.toContainText("Nothing found in the loaded part yet.");
   },
 );
 

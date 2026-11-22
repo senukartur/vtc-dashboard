@@ -141,6 +141,8 @@ export function otherSummary(): TripEnvelope {
   const summary: S["TripSummary"] = { ...view.summary, owner: { ...view.summary.owner } };
   summary.owner.id = otherOwnerId;
   summary.owner.nickname = "Fictional Other Driver";
+  // The company summary still names the cargo.
+  summary.cargo = city("41500000-0000-4000-8000-000000000363", "Fictional machine parts");
   // Company scope omits the author-only fields entirely.
   delete summary.event;
   delete summary.gameMode;
