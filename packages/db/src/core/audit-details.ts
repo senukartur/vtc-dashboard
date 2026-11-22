@@ -208,6 +208,7 @@ export type QualificationLevelValues = {
     massMaxKg: string | null;
     distanceMinM: string | null;
     distanceMaxM: string | null;
+    cargoDamageMaxPercent?: string | null;
     trailers: { basis?: "variant" | "type"; mode: "any" | "selected"; typeIds: string[] };
     adr: { mode: "forbidden" | "selected" | "any"; classes: ReturnType<typeof adrClass>[] };
     hardModeRequired: boolean;
@@ -302,6 +303,11 @@ const amount: Validator<string> = (value) => {
     return invalidDetails();
   return value;
 };
+const damagePercent: Validator<string> = (value) => {
+  const exact = amount(value);
+  if (!/^(100|(?:0|[1-9][0-9]?)(\.[0-9]{0,17}[1-9])?)$/.test(exact)) return invalidDetails();
+  return exact;
+};
 const trips: Validator<number> = (value) => {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 4294967295)
     return invalidDetails();
@@ -316,6 +322,7 @@ function levelValues(value: unknown): QualificationLevelValues {
       "massMaxKg",
       "distanceMinM",
       "distanceMaxM",
+      "cargoDamageMaxPercent",
       "trailers",
       "adr",
       "hardModeRequired",
@@ -337,6 +344,9 @@ function levelValues(value: unknown): QualificationLevelValues {
       massMaxKg: nullable(amount)(limits.massMaxKg),
       distanceMinM: nullable(amount)(limits.distanceMinM),
       distanceMaxM: nullable(amount)(limits.distanceMaxM),
+      ...("cargoDamageMaxPercent" in limits
+        ? { cargoDamageMaxPercent: nullable(damagePercent)(limits.cargoDamageMaxPercent) }
+        : {}),
       trailers: {
         ...("basis" in trailers ? { basis: oneOf("variant", "type")(trailers.basis) } : {}),
         mode: oneOf("any", "selected")(trailers.mode),

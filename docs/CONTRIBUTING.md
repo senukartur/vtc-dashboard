@@ -136,7 +136,7 @@ The [canonical trip foundation](development/trips.md) provides opt-in authorized
 
 
 VTC-025 provides opt-in [manual reports and private evidence](development/manual-reports.md). Read its migration/rollback, decoder, persistent-root, retention and prepared-grant boundaries before enabling the feature. Hosted activation remains separate.
-The [qualification guide](development/qualifications.md) documents the VTC-157 model: one RU/EN `/account/qualifications` page per game, five trip limits, promotion conditions and automatic promotion. `QUALIFICATIONS_ENABLED` defaults to false and needs no other setting. Admission and lifecycle always write assignments after migration, even while qualification HTTP remains disabled.
+The [qualification guide](development/qualifications.md) documents the VTC-157 model: one RU/EN `/account/qualifications` page per game, trip limits including optional maximum cargo damage, promotion conditions and automatic promotion. `QUALIFICATIONS_ENABLED` defaults to false and needs no other setting. Admission and lifecycle always write assignments after migration, even while qualification HTTP remains disabled.
 
 [Events backend APIs](development/events.md) are opt-in through `EVENTS_ENABLED` and an independent cursor key. The [VTC-035 event workspace](development/event-workspace.md) provides public/member views, voluntary RSVP, organizer controls and separate staff actual attendance. [VTC-036 notifications](development/notifications.md) provide opt-in durable polling/history/preferences and event reminders; VTC-037 owns their rendered UI. Default-disabled composition needs no supplemental notification grants. The [activation package](operations/notifications.md) remains unapplied until separately authorized hosted acceptance.
 

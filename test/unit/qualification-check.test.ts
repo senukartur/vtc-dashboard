@@ -105,6 +105,35 @@ function facts(overrides: Partial<NormalizedTripEvidence> = {}): NormalizedTripE
     ...overrides,
   };
 }
+test.each([
+  ["0", known("0"), "pass", "0"],
+  ["0", known("0.00000000000000000001"), "fail", "0.000000000000000001"],
+  ["2.5", known("0.025"), "pass", "2.5"],
+  ["2.5", known("0.025000000000000001"), "fail", "2.5000000000000001"],
+  ["100", known("1"), "pass", "100"],
+  ["100", known("1.01"), "unknown", null],
+  ["0", known("NaN"), "unknown", null],
+  ["0", unknown(), "unknown", null],
+] as const)(
+  "checks cargo damage %s inclusively with exact percent conversion",
+  (cap, damage, result, observedPercent) => {
+    const evidence = facts({ cargoDamageFraction: damage });
+    expect(checkTrip(open, evidence).rules.some((rule) => rule.rule === "cargo_damage")).toBe(
+      false,
+    );
+    expect(checkTrip({ ...open, cargoDamageMaxPercent: cap }, evidence).rules.at(-1)).toEqual({
+      rule: "cargo_damage",
+      result,
+      maxPercent: cap,
+      observedPercent,
+    });
+    expect(
+      checkTrip({ ...open, cargoDamageMaxPercent: cap }, { ...evidence, outcome: "open" }).rules.at(
+        -1,
+      ),
+    ).toMatchObject({ result: "unknown", observedPercent: null });
+  },
+);
 const result = (limits: QualificationLimits, evidence = facts()) => {
   const check = checkTrip(limits, evidence);
   return {

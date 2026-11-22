@@ -17,7 +17,7 @@ const limits = {
 const conditions = { requiredTrips: 5, requiredDistanceM: "500000" };
 
 describe("level commands", () => {
-  test("create and update carry a name, the five limits and the promotion conditions only", () => {
+  test("create and update carry a name, trip limits and the promotion conditions only", () => {
     const create = valid("QualificationLevelCreateInput"),
       update = valid("QualificationLevelUpdateInput"),
       input = { game: "ets2", position: 2, name: "Fictional level", limits, conditions };
@@ -40,10 +40,17 @@ describe("level commands", () => {
   test("limits and conditions are closed, exact decimals with bounded lists", () => {
     const parse = valid("QualificationLimitsInput");
     expect(parse(limits)).toBe(true);
+    for (const cargoDamageMaxPercent of [null, "0", "2.5", "100", "0.000000000000000001"])
+      expect(parse({ ...limits, cargoDamageMaxPercent })).toBe(true);
     for (const changes of [
       { massMaxKg: 20000 },
       { massMaxKg: "-1" },
       { massMaxKg: "1e3" },
+      { cargoDamageMaxPercent: 0 },
+      { cargoDamageMaxPercent: "100.000000000000000001" },
+      { cargoDamageMaxPercent: "0.0000000000000000001" },
+      { cargoDamageMaxPercent: "2.50" },
+      { cargoDamageMaxPercent: "-1" },
       { trailers: { mode: "selected", typeIds: Array.from({ length: 101 }, (_, n) => id(n)) } },
       { trailers: { mode: "selected", typeIds: [id(1), id(1)] } },
       { trailers: { mode: "some", typeIds: [] } },
@@ -169,15 +176,29 @@ describe("trip check", () => {
     reasonCode: null,
     rules,
   };
-  test("the check lists at most the five rules with their configured value and trip value", () => {
+  test("the check accepts historical five-rule views and retains exact final damage evidence", () => {
     const parse = valid("QualificationCheck");
     expect(parse(check)).toBe(true);
     for (const status of ["event_exempt", "no_level"])
       expect(parse({ ...check, status, outcome: null, rules: [] })).toBe(true);
-    expect(parse({ ...check, rules: [...rules, rules[0]] })).toBe(false);
+    const damage = {
+      rule: "cargo_damage",
+      result: "unknown",
+      maxPercent: "0",
+      observedPercent: null,
+    };
+    expect(parse({ ...check, rules: [...rules, damage] })).toBe(true);
+    expect(parse({ ...check, rules: [...rules, damage, rules[0]] })).toBe(false);
     expect(parse({ ...check, status: "resolved" })).toBe(false);
     expect(parse({ ...check, basis: "historical" })).toBe(false);
     const rule = valid("QualificationRuleCheck");
+    expect(rule({ ...damage, result: "pass", observedPercent: "0" })).toBe(true);
+    expect(rule({ ...damage, result: "fail", observedPercent: "0.00000000000000000001" })).toBe(
+      true,
+    );
+    expect(rule({ ...damage, observedPercent: 0 })).toBe(false);
+    expect(rule({ ...damage, maxPercent: "100.01" })).toBe(false);
+    expect(rule({ ...damage, observation: "0" })).toBe(false);
     expect(rule({ ...rules[0], observedKg: 0 })).toBe(false);
     expect(rule({ ...rules[0], ruleType: "max_mass" })).toBe(false);
     expect(rule({ ...rules[3], observed: "5" })).toBe(false);

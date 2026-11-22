@@ -1,7 +1,7 @@
 import { utcDateTime, utcIso } from "@vtc/db";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { canonicalJson, decimal, sourceKey } from "./canonical.js";
+import { canonicalJson, decimal, numberDecimal, sourceKey } from "./canonical.js";
 import type {
   AdrClass,
   CompanyFact,
@@ -415,10 +415,11 @@ export const telemetryAdapter: TripSourceAdapter = {
       plannedDistanceM: quantity(s.plannedDistance, "snapshot.plannedDistance"),
       deliveredDistanceM: quantity(s.deliveredDistance, "snapshot.deliveredDistance"),
       fuelUsedL: quantity(s.fuelUsed, "snapshot.fuelUsed"),
-      cargoDamageFraction:
-        s.cargoDamage.available && s.cargoDamage.value > 1
+      cargoDamageFraction: !s.cargoDamage.available
+        ? unknown(s.cargoDamage.reason)
+        : s.cargoDamage.value > 1
           ? unknown("damage_out_of_range")
-          : quantity(s.cargoDamage, "snapshot.cargoDamage"),
+          : known(numberDecimal(s.cargoDamage.value), "snapshot.cargoDamage"),
       money: { expectedIncome: s.expectedIncome, revenue: s.revenue, penalty: s.penalty },
       recordedTelemetry: {
         jobType: telemetryJobType(s.job.market),

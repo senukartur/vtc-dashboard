@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import {
   accountTimeZone,
+  formatDecimal,
   formatQuantity,
   formatUtc,
   type Locale,
@@ -35,6 +36,12 @@ export function rangeText(
   if (min !== null) return t("rangeMin", { min: format(min) });
   if (max !== null) return t("rangeMax", { max: format(max) });
   return t("unlimited");
+}
+export function damagePercentText(value: string, locale: Locale) {
+  return `${formatDecimal(value, locale)}%`;
+}
+export function damageCapText(t: T, cap: string | null | undefined, locale: Locale) {
+  return cap == null ? t("unlimited") : t("rangeMax", { max: damagePercentText(cap, locale) });
 }
 export function adrText(t: T, limits: Limits) {
   if (limits.adr.mode === "forbidden") return t("adrForbidden");
@@ -89,6 +96,7 @@ export function historyDiffs(
     pair(t("distanceLabel"), (side) =>
       rangeText(t, side.limits.distanceMinM, side.limits.distanceMaxM, "km", locale),
     ),
+    pair(t("damageLabel"), (side) => damageCapText(t, side.limits.cargoDamageMaxPercent, locale)),
     pair(t("trailersLabel"), (side) => trailersFull(t, side.limits)),
     pair(t("adrLabel"), (side) => adrText(t, side.limits)),
     pair(t("hardMode"), (side) =>
@@ -109,6 +117,8 @@ export function LimitChips({ limits }: { limits: Limits }) {
       `${t("massLabel")} ${rangeText(t, limits.massMinKg, limits.massMaxKg, "t", locale)}`,
     set.distance &&
       `${t("distanceLabel")} ${rangeText(t, limits.distanceMinM, limits.distanceMaxM, "km", locale)}`,
+    set.cargoDamage &&
+      `${t("damageLabel")} ${damageCapText(t, limits.cargoDamageMaxPercent, locale)}`,
     set.trailers && trailersText(t, limits),
     set.adr &&
       (limits.adr.mode === "forbidden"
@@ -130,7 +140,7 @@ export function LimitChips({ limits }: { limits: Limits }) {
     </span>
   );
 }
-/** All five limits with their configured values, as the detail and the editor summary show them. */
+/** All limits with their configured values, as the detail and the editor summary show them. */
 export function LimitList({ limits }: { limits: Limits }) {
   const { t } = useTranslation("qualifications"),
     locale = useLocale();
@@ -143,6 +153,10 @@ export function LimitList({ limits }: { limits: Limits }) {
       <div>
         <dt>{t("distanceLabel")}</dt>
         <dd>{rangeText(t, limits.distanceMinM, limits.distanceMaxM, "km", locale)}</dd>
+      </div>
+      <div>
+        <dt>{t("damageLabel")}</dt>
+        <dd>{damageCapText(t, limits.cargoDamageMaxPercent, locale)}</dd>
       </div>
       <div>
         <dt>{t("trailersLabel")}</dt>

@@ -2,6 +2,7 @@ import type { components } from "@vtc/contracts";
 import type { ConfirmedEventContext } from "../events/contracts.js";
 import {
   checkTrip,
+  type CargoDamageAssessment,
   QUALIFICATION_REASONS,
   QUALIFICATION_UNKNOWN,
   type QualificationSnapshot,
@@ -13,7 +14,7 @@ import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 
 type S = components["schemas"];
 export type Historical = Awaited<ReturnType<Qualifications["lookupInTransaction"]>>;
-// Only the five level limits can be waived by an explicit staff override (policy 204).
+// Only level limits can be waived by an explicit staff override (policy 204).
 export const OVER_LIMIT_CODES: ReadonlySet<string> = new Set(Object.values(QUALIFICATION_REASONS));
 export const ACCEPTED_OVER_LIMITS = "accepted_over_limits";
 const sorted = (values: readonly string[]) => [...new Set(values)].sort();
@@ -22,10 +23,11 @@ function check(
   e: NormalizedTripEvidence,
   history: Historical,
   event: ConfirmedEventContext | null,
+  damage?: CargoDamageAssessment,
 ): TripCheck | null {
   const exempt = !!event && (event.attendanceStatus ?? "confirmed") === "confirmed";
   return history.status === "resolved" && !exempt
-    ? checkTrip(history.limits, e, history.trailerGroups)
+    ? checkTrip(history.limits, e, history.trailerGroups, damage)
     : null;
 }
 // Knowledge and qualification gates of a non-open trip; callers handle open trips first.
@@ -34,6 +36,7 @@ function examine(
   history: Historical,
   event: ConfirmedEventContext | null,
   human: boolean,
+  damage?: CargoDamageAssessment,
 ) {
   const missing: string[] = [],
     violations: string[] = [];
@@ -68,16 +71,22 @@ function examine(
     e.trailers.items.some((t) => t.status !== "known")
   )
     missing.push("trailer_context_unknown");
-  const result = check(e, history, event);
+  const result = check(e, history, event, damage);
+  const missingFinalDamage =
+    e.outcome === "delivered" &&
+    !!result &&
+    (damage?.historyReasonCode !== undefined ||
+      result.rules.some((rule) => rule.rule === "cargo_damage" && rule.result === "unknown"));
   if (history.status !== "resolved") missing.push(history.reasonCode);
   else if (result) {
     violations.push(
       ...result.rules.filter((r) => r.result === "fail").map((r) => QUALIFICATION_REASONS[r.rule]),
     );
-    // A proven failure outranks unknown rules; unknown alone goes to staff review.
-    if (result.outcome === "unknown") missing.push(QUALIFICATION_UNKNOWN);
+    if (damage?.historyReasonCode) missing.push(damage.historyReasonCode);
+    // Missing applicable final damage still requires review alongside a proven qualification failure.
+    if (result.outcome === "unknown" || missingFinalDamage) missing.push(QUALIFICATION_UNKNOWN);
   }
-  return { missing, violations, result };
+  return { missing, violations, result, missingFinalDamage };
 }
 // Lifecycle and knowledge gates precede pure qualification checks. Missing evidence is never proof of violation.
 export function classify(
@@ -87,6 +96,7 @@ export function classify(
   workflow: readonly string[] = [],
   human = false,
   manualReviewRequired = false,
+  damage?: CargoDamageAssessment,
 ) {
   if (e.outcome === "open")
     return {
@@ -104,9 +114,12 @@ export function classify(
         ]),
       ].sort(),
     };
-  const { missing, violations } = examine(e, history, event, human);
+  const { missing, violations, missingFinalDamage } = examine(e, history, event, human, damage);
   if (manualReviewRequired && !human) missing.push("manual_requires_other_reviewer");
-  if ((e.provider === "manual" || manualReviewRequired) && !human)
+  if (
+    (missingFinalDamage && violations.every((code) => OVER_LIMIT_CODES.has(code))) ||
+    ((e.provider === "manual" || manualReviewRequired) && !human)
+  )
     return {
       decision: "pending_review" as const,
       reasons: [...new Set([...violations, ...missing, ...workflow])].sort(),
@@ -126,6 +139,7 @@ export function qualificationSnapshot(
   e: NormalizedTripEvidence,
   history: Historical,
   event: ConfirmedEventContext | null,
+  damage?: CargoDamageAssessment,
 ): QualificationSnapshot {
   if (history.status !== "resolved")
     return {
@@ -138,20 +152,23 @@ export function qualificationSnapshot(
       reasonCode: history.reasonCode,
       rules: [],
     };
-  const result = check(e, history, event);
+  const result = check(e, history, event, damage);
   return {
     levelId: history.levelId,
     ...(history.trailerGroups ? { trailerGroups: history.trailerGroups } : {}),
     levelName: history.levelName,
     editVersion: history.editVersion,
     limits: history.limits,
+    ...(damage ? { cargoDamageBasis: damage } : {}),
     eventExempt: result === null,
     ...(result === null
       ? {
-          exemptionRules: checkTrip(history.limits, e, history.trailerGroups).rules.map((rule) => ({
-            ...rule,
-            result: "pass" as const,
-          })),
+          exemptionRules: checkTrip(history.limits, e, history.trailerGroups, damage).rules.map(
+            (rule) => ({
+              ...rule,
+              result: "pass" as const,
+            }),
+          ),
         }
       : {}),
     outcome: result?.outcome ?? null,
@@ -172,6 +189,7 @@ export function acceptance(
   history: Historical,
   event: ConfirmedEventContext | null,
   context: AcceptanceContext,
+  damage?: CargoDamageAssessment,
 ): { mode: S["ReviewAcceptance"]["mode"]; exceeded: string[]; blockedReasonCodes: string[] } {
   const eventCodes =
     context.eventInvalid || context.eventReviewRequired ? ["event_requires_review"] : [];
@@ -181,7 +199,7 @@ export function acceptance(
       exceeded: [],
       blockedReasonCodes: sorted(["trip_open", ...eventCodes]),
     };
-  const { missing, violations, result } = examine(e, history, event, true);
+  const { missing, violations, result } = examine(e, history, event, true, damage);
   // A proven failure hides unknown rules in classify(); every limit must still be known here.
   const gaps = [
       ...missing,

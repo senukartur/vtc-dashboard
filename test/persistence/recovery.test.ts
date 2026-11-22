@@ -39,6 +39,7 @@ import {
   tripNumberPriorFolder,
 } from "./support.ts";
 
+const currentMigrationCount = 40;
 let recoveryRunning = false;
 
 async function reconciliationPhase<T>(
@@ -209,7 +210,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 39);
+      assert.equal(await runMigrations(settings), currentMigrationCount);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -266,7 +267,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 39);
+      assert.equal(await runMigrations(settings), currentMigrationCount);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -449,7 +450,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 39);
+      assert.equal(await runMigrations(guardedSettings()), currentMigrationCount);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_adr_requires_cargo','trip_trailer_shape')",
@@ -544,7 +545,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 39);
+        assert.equal(await runMigrations(settings), currentMigrationCount);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -602,7 +603,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 39);
+      assert.equal(await runMigrations(guardedSettings()), currentMigrationCount);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -657,7 +658,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 39);
+      assert.equal(await runMigrations(guardedSettings()), currentMigrationCount);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -711,7 +712,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 39);
+      assert.equal(await runMigrations(guardedSettings()), currentMigrationCount);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -794,7 +795,7 @@ await recoveryTest(
       // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
       // This is not a live backup/restore procedure and never stamps or replays the partial schema.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 39);
+      assert.equal(await runMigrations(settings), currentMigrationCount);
       assert.equal(await runMigrations(settings), 0);
       const [columns] = await connection.query<RowDataPacket[]>(
         "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
@@ -1238,7 +1239,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 19);
       await seedCatalogUpgradeRows(connection);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_facts"), 1);
-      assert.equal(await runMigrations(settings), 20);
+      assert.equal(await runMigrations(settings), currentMigrationCount - 19);
       assert.equal(await runMigrations(settings), 0);
 
       for (const table of [
@@ -1321,7 +1322,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 39);
+      assert.equal(history.length, currentMigrationCount);
       assert.ok(history.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -2642,12 +2643,12 @@ await recoveryTest(
     try {
       // Reconstruct the known empty synthetic baseline used by the sticky-failure case.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 39);
+      assert.equal(await runMigrations(settings), currentMigrationCount);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(recovered.length, 39);
+      assert.equal(recovered.length, currentMigrationCount);
       assert.ok(recovered.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -2894,15 +2895,15 @@ await recoveryTest(
       const prefix = await history();
       // 0032, the data-only 0033 catch-up, which repeats the same joined_at derivation, and the
       // data-only 0034 toggle re-copy, which repeats the 0032 toggle copy, then the 0035
-      // qualification simplification, 0036 trailer grouping, 0037 semantic types and 0038 companion.
-      assert.equal(await runMigrations(settings), 7);
+      // qualification simplification, 0036 trailer grouping, 0037 semantic types, 0038 companion and 0039 cargo damage.
+      assert.equal(await runMigrations(settings), currentMigrationCount - prefix.length);
       assert.equal(await runMigrations(settings), 0);
       const applied = await history();
-      assert.equal(applied.length, 39);
-      assert.deepEqual(applied.slice(0, -7), prefix);
+      assert.equal(applied.length, currentMigrationCount);
+      assert.deepEqual(applied.slice(0, prefix.length), prefix);
       assert.deepEqual(
-        applied.slice(-7).map((row) => row.state),
-        ["applied", "applied", "applied", "applied", "applied", "applied", "applied"],
+        applied.slice(prefix.length).map((row) => row.state),
+        Array(currentMigrationCount - prefix.length).fill("applied"),
       );
       assert.deepEqual(await joined(), expectedJoined);
       assert.deepEqual(await toggles(), expectedToggles);
@@ -3144,15 +3145,15 @@ await recoveryTest(
       );
       const prefix = await read("SELECT version,hash,state FROM _vtc_migrations ORDER BY version");
 
-      // 0033 through 0038 leave memberships alone.
-      assert.equal(await runMigrations(settings), 6);
+      // 0033 through 0039 leave memberships alone.
+      assert.equal(await runMigrations(settings), currentMigrationCount - prefix.length);
       assert.equal(await runMigrations(settings), 0);
       const applied = await read("SELECT version,hash,state FROM _vtc_migrations ORDER BY version");
-      assert.equal(applied.length, 39);
-      assert.deepEqual(applied.slice(0, -6), prefix);
+      assert.equal(applied.length, currentMigrationCount);
+      assert.deepEqual(applied.slice(0, prefix.length), prefix);
       assert.deepEqual(
-        applied.slice(-6).map((row) => row.state),
-        ["applied", "applied", "applied", "applied", "applied", "applied"],
+        applied.slice(prefix.length).map((row) => row.state),
+        Array(currentMigrationCount - prefix.length).fill("applied"),
       );
       const expected = [
         { id: director, joinedAt: t1 },
@@ -3323,15 +3324,15 @@ await recoveryTest(
       ]);
       const prefix = await history(),
         shape = await definition();
-      // 0034 through 0038 follow the 0033 prefix.
-      assert.equal(await runMigrations(settings), 5);
+      // 0034 through 0039 follow the 0033 prefix.
+      assert.equal(await runMigrations(settings), currentMigrationCount - prefix.length);
       assert.equal(await runMigrations(settings), 0);
       const applied = await history();
-      assert.equal(applied.length, 39);
-      assert.deepEqual(applied.slice(0, -5), prefix);
+      assert.equal(applied.length, currentMigrationCount);
+      assert.deepEqual(applied.slice(0, prefix.length), prefix);
       assert.deepEqual(
-        applied.slice(-5).map((row) => row.state),
-        ["applied", "applied", "applied", "applied", "applied"],
+        applied.slice(prefix.length).map((row) => row.state),
+        Array(currentMigrationCount - prefix.length).fill("applied"),
       );
       const expected = [
         { id: bothOff, flags: [0, 0, 0, 0, 0, 1, 0, 5] },

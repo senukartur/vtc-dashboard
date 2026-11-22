@@ -13,10 +13,30 @@ import {
 import type { Catalogs } from "../catalogs/service.js";
 import { compareDecimal, subtractDecimal } from "../sources/contracts/decimal.js";
 import type { ContributionRegister } from "../trips/contributions.js";
-import { conditionsMet } from "./check.js";
+import { conditionsMet, type CheckedRule, type QualificationLimits } from "./check.js";
 import { activeLevels, conditionsOf, type Game, levelTrailers, limitsOf } from "./ladder.js";
 
 type S = companionComponents["schemas"];
+/** Companion v1 keeps its closed five-rule contract. */
+export function companionLimits(limits: QualificationLimits): S["Limits"] {
+  return {
+    massMinKg: limits.massMinKg,
+    massMaxKg: limits.massMaxKg,
+    distanceMinM: limits.distanceMinM,
+    distanceMaxM: limits.distanceMaxM,
+    trailers: {
+      ...(limits.trailers.basis ? { basis: limits.trailers.basis } : {}),
+      mode: limits.trailers.mode,
+      typeIds: [...limits.trailers.typeIds],
+    },
+    adr: { mode: limits.adr.mode, classes: [...limits.adr.classes] },
+    hardModeRequired: limits.hardModeRequired,
+  };
+}
+
+export function companionRules(rules: readonly CheckedRule[]) {
+  return rules.filter((rule) => rule.rule !== "cargo_damage");
+}
 /** Caller holds the authoritative company/member fence. This facade never promotes/rechecks. */
 export function createCompanionQualifications(
   unit: UnitOfWork,
@@ -30,7 +50,7 @@ export function createCompanionQualifications(
     userId: string,
     game: Game,
     instant?: string,
-  ): Promise<S["Assignment"] | null> {
+  ): Promise<{ assignment: S["Assignment"]; cargoDamageMaxPercent: string | null } | null> {
     const rows = await c(tx)
       .select()
       .from(qualificationAssignments)
@@ -60,27 +80,26 @@ export function createCompanionQualifications(
     const trailers = await levelTrailers(unit, tx, [level.id]);
     const limits = limitsOf(level, trailers.get(level.id) ?? []);
     return {
-      id: current.id,
-      startedAt: current.assignedAt,
-      level: { id: level.id, name: level.name, editVersion: level.version },
-      limits: {
-        ...limits,
-        trailers: { ...limits.trailers, typeIds: [...limits.trailers.typeIds] },
-        adr: { mode: limits.adr.mode, classes: [...limits.adr.classes] },
+      cargoDamageMaxPercent: limits.cargoDamageMaxPercent ?? null,
+      assignment: {
+        id: current.id,
+        startedAt: current.assignedAt,
+        level: { id: level.id, name: level.name, editVersion: level.version },
+        limits: companionLimits(limits),
+        trailerDisplay:
+          (await catalogs?.companionTrailerDisplayInTransaction(
+            tx,
+            game,
+            limits.trailers.typeIds,
+            now().toISOString(),
+          )) ?? [],
       },
-      trailerDisplay:
-        (await catalogs?.companionTrailerDisplayInTransaction(
-          tx,
-          game,
-          limits.trailers.typeIds,
-          now().toISOString(),
-        )) ?? [],
     };
   }
   return {
     assignment,
     async current(tx: TxContext, ownerId: string, game: Game) {
-      const current = await assignment(tx, ownerId, game);
+      const current = (await assignment(tx, ownerId, game))?.assignment;
       if (!current)
         return { state: "assignment_missing" as const, assignment: null, progress: null };
       const ladder = await activeLevels(unit, tx, game),

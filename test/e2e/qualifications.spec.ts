@@ -122,6 +122,32 @@ test(
 );
 
 test(
+  "a lead edits and clears an exact cargo damage cap in Russian and English",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await open(page, true, `/account/qualifications/${qid(1)}/edit`);
+    const field = page.getByLabel("Maximum cargo damage (%)", { exact: true });
+    await field.fill("100.01");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(writes(mock)).toEqual([]);
+    await field.fill("2,50");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("up to 2.5%", { exact: true })).toBeVisible();
+    expect(writes(mock)[0]?.body).toMatchObject({ limits: { cargoDamageMaxPercent: "2.5" } });
+
+    await page.goto(`/account/qualifications/${qid(1)}/edit`);
+    await switchLanguage(page, "ru");
+    const translated = page.getByLabel("Максимальный ущерб грузу (%)", { exact: true });
+    await expect(translated).toHaveValue("2,5");
+    await translated.fill("");
+    await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect.poll(() => writes(mock).length).toBe(2);
+    expect(writes(mock)[1]?.body).toMatchObject({ limits: { cargoDamageMaxPercent: null } });
+  },
+);
+
+test(
   "a lead renames and reorders levels with their versions",
   browserCase(["@functional"]),
   async ({ page }) => {

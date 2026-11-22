@@ -1,5 +1,9 @@
-import { compareDecimal } from "../sources/contracts/decimal.js";
-import type { AdrClass, NormalizedTripEvidence } from "../sources/contracts/evidence.js";
+import {
+  compareDecimal,
+  isValidNonNegativeDecimal,
+  shiftDecimal,
+} from "../sources/contracts/decimal.js";
+import type { AdrClass, Fact, NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import type { QualificationProgressTotals } from "../trips/contributions.js";
 
 export type { QualificationProgressTotals };
@@ -13,6 +17,7 @@ export interface QualificationLimits {
   readonly massMaxKg: string | null;
   readonly distanceMinM: string | null;
   readonly distanceMaxM: string | null;
+  readonly cargoDamageMaxPercent?: string | null;
   readonly trailers: {
     readonly basis?: "variant" | "type";
     readonly mode: "any" | "selected";
@@ -47,6 +52,12 @@ export type CheckedRule =
       observedM: string | null;
     }
   | {
+      rule: "cargo_damage";
+      result: RuleResult;
+      maxPercent: string;
+      observedPercent: string | null;
+    }
+  | {
       rule: "trailer_types";
       result: RuleResult;
       mode: "any" | "selected";
@@ -67,6 +78,37 @@ export type CheckedRule =
       observed: "qualified" | "not-qualified" | "unknown" | null;
     };
 
+export interface CargoDamageAssessment {
+  readonly maxPercent: string | null;
+  readonly evidence: Fact<string>;
+  readonly factRevisionId: string;
+  readonly levelId: string | null;
+  readonly editVersion: number | null;
+  readonly historyReasonCode?: string;
+}
+
+export function telemetryDamage(facts: NormalizedTripEvidence): Fact<string> {
+  const damage = facts.cargoDamageFraction;
+  if (
+    facts.provider === "ets2telemetry" &&
+    facts.outcome === "delivered" &&
+    damage.status === "known" &&
+    isValidNonNegativeDecimal(damage.value) &&
+    compareDecimal(damage.value, "1") <= 0
+  )
+    return { ...damage, value: shiftDecimal(damage.value, -2) };
+  return {
+    status: "unknown",
+    reasonCode:
+      facts.outcome !== "delivered"
+        ? "final_damage_unavailable"
+        : damage.status === "unknown"
+          ? damage.reasonCode
+          : "damage_out_of_range",
+    sourceRecordId: facts.sourceRecordId,
+  };
+}
+
 export interface TripCheck {
   readonly outcome: RuleResult;
   readonly rules: CheckedRule[];
@@ -80,6 +122,7 @@ export interface QualificationSnapshot {
   readonly levelName: string | null;
   readonly editVersion: number | null;
   readonly limits: QualificationLimits | null;
+  readonly cargoDamageBasis?: CargoDamageAssessment;
   readonly eventExempt: boolean;
   /** New exempt decisions retain observations without changing the existing browser exemption view. */
   readonly exemptionRules?: CheckedRule[];
@@ -91,6 +134,7 @@ export interface QualificationSnapshot {
 /** Decision reason codes of failed limits; staff may accept any of them over the limits. */
 export const QUALIFICATION_REASONS = {
   cargo_mass: "qualification_cargo_mass",
+  cargo_damage: "qualification_cargo_damage",
   distance: "qualification_distance",
   trailer_types: "qualification_trailer",
   adr: "qualification_adr",
@@ -119,6 +163,7 @@ export function checkTrip(
   limits: QualificationLimits,
   facts: NormalizedTripEvidence,
   trailerGroups: Readonly<Record<string, string>> = {},
+  damage?: CargoDamageAssessment,
 ): TripCheck {
   const mass = known(facts.cargoMassKg.status === "known" ? facts.cargoMassKg.value : null);
   const distance = known(
@@ -219,6 +264,22 @@ export function checkTrip(
       observed: hardModeObserved,
     },
   ];
+  const maxPercent = damage ? damage.maxPercent : limits.cargoDamageMaxPercent;
+  if (maxPercent != null) {
+    const evidence = damage?.evidence ?? telemetryDamage(facts);
+    const observedPercent =
+      evidence.status === "known" &&
+      isValidNonNegativeDecimal(evidence.value) &&
+      compareDecimal(evidence.value, "100") <= 0
+        ? evidence.value
+        : null;
+    rules.push({
+      rule: "cargo_damage",
+      result: range(null, maxPercent, observedPercent),
+      maxPercent,
+      observedPercent,
+    });
+  }
   const outcome: RuleResult = rules.some((r) => r.result === "fail")
     ? "fail"
     : rules.some((r) => r.result === "unknown")

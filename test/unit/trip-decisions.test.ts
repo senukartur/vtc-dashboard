@@ -45,6 +45,26 @@ const unresolved = (attributionBasis: Historical["attributionBasis"]): Historica
   attributionAt: null,
 });
 describe("trip decision knowledge/lifecycle gates", () => {
+  test("missing delivered cargo damage holds other qualification failures and cannot be waived", () => {
+    const evidence = {
+      ...createSyntheticTripEvidence(),
+      cargoDamageFraction: unknownFact<string>(),
+    };
+    const capped = level({ cargoDamageMaxPercent: "0", massMaxKg: "1" });
+    const context = { hasTelemetrySource: true, eventInvalid: false, eventReviewRequired: false };
+    expect(classify(evidence, capped, null)).toEqual({
+      decision: "pending_review",
+      reasons: ["qualification_cargo_mass", "qualification_unknown"],
+    });
+    expect(classify({ ...evidence, outcome: "cancelled" }, capped, null).decision).toBe("rejected");
+    expect(classify({ ...evidence, actualDistanceM: knownFact("0") }, capped, null).decision).toBe(
+      "rejected",
+    );
+    expect(acceptance(evidence, capped, null, context)).toMatchObject({
+      mode: "unavailable",
+      blockedReasonCodes: expect.arrayContaining(["qualification_unknown"]),
+    });
+  });
   test("accepts supported completion, rejects proven violations and keeps uncontested open unassessed", () => {
     const e = createSyntheticTripEvidence();
     expect(classify(e, history, null).decision).toBe("accepted");

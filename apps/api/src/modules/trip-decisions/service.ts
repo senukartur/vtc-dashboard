@@ -29,11 +29,15 @@ import { tripDecisionCoordinator } from "../../use-cases/trip-decisions.js";
 import type { Events } from "../events/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { ManualReports } from "../manual-reports/service.js";
-import type { QualificationSnapshot } from "../qualifications/check.js";
+import {
+  type CargoDamageAssessment,
+  type QualificationSnapshot,
+  telemetryDamage,
+} from "../qualifications/check.js";
 import type { Qualifications } from "../qualifications/service.js";
 import { selectQuality } from "../reconciliation/quality.js";
 import type { Reconciliation } from "../reconciliation/service.js";
-import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
+import { canonicalJson, contentHash, numberDecimal } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import type { TripState } from "../trips/groups.js";
 import { ingestionConflictCodes, type Trips } from "../trips/service.js";
@@ -42,6 +46,7 @@ import {
   acceptance,
   classify,
   evaluationSnapshot,
+  type Historical,
   qualificationSnapshot,
 } from "./evaluation.js";
 import { type Page, pagination } from "./pagination.js";
@@ -123,7 +128,7 @@ function safeSourceFacts(e: NormalizedTripEvidence): S["SafeSourceFact"][] {
   }));
 }
 
-function selectTelemetry(evidence: NormalizedTripEvidence[], preferredId: string | null) {
+function selectTelemetry(evidence: readonly NormalizedTripEvidence[], preferredId: string | null) {
   return selectQuality(
     evidence.filter((fact) => fact.provider === "ets2telemetry"),
     preferredId,
@@ -160,6 +165,54 @@ export function createTripDecisions(
     if (config.dispatchReviewStage3Enabled && prepared.row.ownerId === actor.userId)
       throw identityError(403, "SELF_REVIEW_FORBIDDEN");
     return prepared;
+  }
+  async function assessDamage(
+    tx: TxContext,
+    e: NormalizedTripEvidence,
+    h: Historical,
+    evidence: readonly NormalizedTripEvidence[],
+    preferredId: string | null,
+  ): Promise<CargoDamageAssessment | undefined> {
+    const fact = e.provider === "manual" ? (selectTelemetry(evidence, preferredId) ?? e) : e;
+    const history = fact === e ? h : await ports.qualifications.lookupInTransaction(tx, fact);
+    const maxPercent =
+      history.status === "resolved" ? (history.limits.cargoDamageMaxPercent ?? null) : null;
+    if (maxPercent === null && (h.status !== "resolved" || h.limits.cargoDamageMaxPercent == null))
+      return;
+    let observation = telemetryDamage(fact);
+    if (fact.provider === "manual" && maxPercent !== null) {
+      const provenance = fact.provenance as { reportId?: string; revisionId?: string } | null;
+      const value =
+        provenance?.reportId && provenance.revisionId
+          ? await ports.manual.assessedDamageInTransaction(tx, {
+              sourceRecordId: fact.sourceRecordId,
+              reportId: provenance.reportId,
+              revisionId: provenance.revisionId,
+              ownerId: fact.ownerUserId,
+            })
+          : null;
+      observation =
+        value !== null && Number.isFinite(value) && value >= 0 && value <= 100
+          ? {
+              status: "known",
+              sourceField: "manualRevision.cargoDamagePercent",
+              sourceRecordId: fact.sourceRecordId,
+              value: numberDecimal(value),
+            }
+          : {
+              status: "unknown",
+              sourceRecordId: fact.sourceRecordId,
+              reasonCode: "manual_damage_unavailable",
+            };
+    }
+    return {
+      maxPercent,
+      evidence: observation,
+      factRevisionId: fact.factRevisionId,
+      levelId: history.status === "resolved" ? history.levelId : null,
+      editVersion: history.status === "resolved" ? history.editVersion : null,
+      ...(history.status === "unresolved" ? { historyReasonCode: history.reasonCode } : {}),
+    };
   }
   async function confirmation(
     tx: TxContext,
@@ -304,8 +357,9 @@ export function createTripDecisions(
     actor: Actor,
     row: TripState,
     live: () => Promise<QualificationSnapshot | null>,
+    retainDecided = true,
   ): Promise<S["QualificationCheck"] | null> {
-    if (row.decision === "accepted" || row.decision === "rejected") {
+    if (retainDecided && (row.decision === "accepted" || row.decision === "rejected")) {
       const stored = (await latest(tx, row.id))?.qualificationSnapshot;
       if (stored)
         return ports.qualifications.checkViewInTransaction(
@@ -384,14 +438,21 @@ export function createTripDecisions(
       previous = await latest(tx, row.id);
     const manualConfirmedAt = await confirmation(tx, row, e, decidedAt);
     const h = await ports.qualifications.lookupInTransaction(tx, e, manualConfirmedAt),
-      evaluation = classify(e, h, s.event?.confirmedEvent ?? null, [], true),
+      damage = await assessDamage(tx, e, h, s.evidence, row.currentFactId),
+      evaluation = classify(e, h, s.event?.confirmedEvent ?? null, [], true, false, damage),
       allowed =
         outcome === "accepted"
-          ? acceptance(e, h, s.event?.confirmedEvent ?? null, {
-              hasTelemetrySource: s.evidence.some((f) => f.provider === "ets2telemetry"),
-              eventInvalid: s.eventInvalid,
-              eventReviewRequired: !!s.event?.reviewRequired,
-            })
+          ? acceptance(
+              e,
+              h,
+              s.event?.confirmedEvent ?? null,
+              {
+                hasTelemetrySource: s.evidence.some((f) => f.provider === "ets2telemetry"),
+                eventInvalid: s.eventInvalid,
+                eventReviewRequired: !!s.event?.reviewRequired,
+              },
+              damage,
+            )
           : null;
     // The flag must match the mode the reviewer saw: a missing or stale confirmation never
     // accepts, and nothing else can waive a gate.
@@ -419,6 +480,7 @@ export function createTripDecisions(
             eventInvalid: s.eventInvalid,
             eventReviewRequired: !!s.event?.reviewRequired,
           },
+          await assessDamage(tx, telemetry, historical, s.evidence, row.currentFactId),
         );
         if (telemetryAcceptance.mode !== "ordinary")
           throw identityError(409, "RESOLUTION_REQUIRED");
@@ -476,6 +538,7 @@ export function createTripDecisions(
           e,
           h,
           s.event?.confirmedEvent ?? null,
+          damage,
         ) as unknown as Record<string, unknown>,
         eventId: basis.eventId,
         eventRevisionId: s.event?.eventRevisionId ?? null,
@@ -575,6 +638,7 @@ export function createTripDecisions(
         prepared.manual.reports.length > 0 &&
           row.decision !== "accepted" &&
           row.decision !== "rejected",
+        await assessDamage(tx, e, h, s.evidence, row.currentFactId),
       ),
       // Violations would otherwise reject automatically despite the held revision.
       evaluation =
@@ -809,33 +873,37 @@ export function createTripDecisions(
           ? ["self_review_forbidden"]
           : [];
       const event = s.event?.confirmedEvent ?? null;
-      const allowed = acceptance(evaluated, h, event, {
+      const context = {
         hasTelemetrySource: s.evidence.some((f) => f.provider === "ets2telemetry"),
         eventInvalid: s.eventInvalid,
         eventReviewRequired: !!s.event?.reviewRequired,
-      });
-      const ownMode =
-        evaluated === e
-          ? allowed
-          : acceptance(
-              e,
-              await ports.qualifications.lookupInTransaction(
-                tx,
-                e,
-                await confirmation(tx, row, e, decidedAt),
-              ),
-              event,
-              {
-                hasTelemetrySource: true,
-                eventInvalid: s.eventInvalid,
-                eventReviewRequired: !!s.event?.reviewRequired,
-              },
-            );
+      };
+      const damage = await assessDamage(tx, evaluated, h, s.evidence, row.currentFactId);
+      const allowed = acceptance(evaluated, h, event, context, damage);
+      let ownMode = allowed;
+      if (evaluated !== e) {
+        const ownHistory = await ports.qualifications.lookupInTransaction(
+          tx,
+          e,
+          await confirmation(tx, row, e, decidedAt),
+        );
+        ownMode = acceptance(
+          e,
+          ownHistory,
+          event,
+          context,
+          await assessDamage(tx, e, ownHistory, s.evidence, row.currentFactId),
+        );
+      }
       const shared = {
         factRevisionId: e.factRevisionId,
         evaluation: evaluationSnapshot(evaluated, h, event, confirmedAt),
-        qualificationCheck: (await qualificationView(tx, actor, row, async () =>
-          qualificationSnapshot(evaluated, h, event),
+        qualificationCheck: (await qualificationView(
+          tx,
+          actor,
+          row,
+          async () => qualificationSnapshot(evaluated, h, event, damage),
+          !row.reviewHold && !row.correctionPending,
         )) as S["QualificationCheck"],
         acceptance: {
           mode:
@@ -953,7 +1021,10 @@ export function createTripDecisions(
           e,
           await confirmation(tx, row, e, at()),
         );
-        return qualificationSnapshot(e, h, event?.confirmedEvent ?? null);
+        const evidence =
+          e.provider === "manual" ? await ports.trips.reconciliation.evidence(tx, memberIds) : [];
+        const damage = await assessDamage(tx, e, h, evidence, row.currentFactId);
+        return qualificationSnapshot(e, h, event?.confirmedEvent ?? null, damage);
       }),
       manualRevision: projection?.manualRevision ?? null,
       evidence: projection?.evidence ?? [],
@@ -1163,7 +1234,8 @@ export function createTripDecisions(
           e,
           await confirmation(tx, row, e, decidedAt),
         ),
-        outcome = classify(e, h, s.event?.confirmedEvent ?? null, [], true);
+        damage = await assessDamage(tx, e, h, s.evidence, row.currentFactId),
+        outcome = classify(e, h, s.event?.confirmedEvent ?? null, [], true, false, damage);
       if (outcome.decision !== "accepted" && outcome.decision !== "rejected")
         throw identityError(409, "RESOLUTION_REQUIRED");
       result = await commitDecision(

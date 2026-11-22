@@ -126,7 +126,7 @@ test(
         ('${id(52)}','${id(1)}',3,'fictional-e3','promotion.review_required','company','qualification','${id(30)}',1,UTC_TIMESTAMP(3),1)`,
     ];
     for (const statement of seed) await control.query(statement);
-    expect(await runMigrations(settings)).toBe(4);
+    expect(await runMigrations(settings)).toBe(5);
     expect(await runMigrations(settings)).toBe(0);
 
     await expectThreeTableModel();
@@ -189,7 +189,7 @@ test(
     // A fresh migration reaches the same model: the three tables, no old tables, the same shape
     // and the structural levels in order.
     await reset(control);
-    expect(await runMigrations(settings)).toBe(39);
+    expect(await runMigrations(settings)).toBe(40);
     await expectThreeTableModel();
     expect(await schema()).toEqual(upgraded);
     expect(

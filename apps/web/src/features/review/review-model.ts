@@ -43,6 +43,7 @@ export const decisions: readonly QueueDecision[] = [
 /** The five level-limit failures; the older rule codes stay for decisions recorded before. */
 export const overLimitCodes: ReadonlySet<string> = new Set([
   "qualification_cargo_mass",
+  "qualification_cargo_damage",
   "qualification_distance",
   "qualification_trailer",
   "qualification_adr",

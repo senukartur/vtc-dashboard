@@ -225,6 +225,7 @@ const openLimits: S["QualificationLimitsInput"] = {
   massMaxKg: null,
   distanceMinM: null,
   distanceMaxM: null,
+  cargoDamageMaxPercent: null,
   trailers: { mode: "any", typeIds: [] },
   adr: { mode: "any", classes: [] },
   hardModeRequired: false,
@@ -406,6 +407,144 @@ async function resolveDistance(
     }),
   };
 }
+
+test("a coherent terminal revision supplies damage even when the opening observed a different value", async () => {
+  await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "2.5" });
+  try {
+    for (const [damage, verdict] of [
+      [{ available: true, value: 0.025, unit: "fraction" }, "accepted"],
+      [{ available: true, value: 0.02500000000000001, unit: "fraction" }, "rejected"],
+      [{ available: false, reason: "not-observed", unit: "fraction" }, "pending_review"],
+    ] as const) {
+      const opened = payload("started");
+      const openingDamage = { available: true, value: 0.4, unit: "fraction" } as const;
+      opened.snapshot.cargoDamage = openingDamage;
+      const initial = await receive(opened);
+      const delivery = payload();
+      delivery.source = structuredClone(opened.source);
+      delivery.snapshot.start = structuredClone(opened.snapshot.start);
+      delivery.revision = 2;
+      delivery.snapshot.cargoDamage = { ...damage };
+      const completed = await receive(delivery);
+      expect(completed.tripId).toBe(initial.tripId);
+      expect(await state(initial.tripId)).toMatchObject({
+        currentFactId: await factOf(completed),
+        outcome: "delivered",
+        decision: verdict,
+      });
+      const view = await tripsService.detail(owner, initial.tripId);
+      expect(view).toMatchObject({
+        qualificationCheck: {
+          rules: expect.arrayContaining([
+            {
+              rule: "cargo_damage",
+              maxPercent: "2.5",
+              observedPercent: damage.available
+                ? verdict === "accepted"
+                  ? "2.5"
+                  : "2.500000000000001"
+                : null,
+              result: damage.available ? (verdict === "accepted" ? "pass" : "fail") : "unknown",
+            },
+          ]),
+        },
+      });
+      const before = await state(initial.tripId);
+      expect((await receive(delivery)).duplicate).toBe(true);
+      expect(await state(initial.tripId)).toEqual(before);
+      if (verdict === "accepted") {
+        const contribution = await credit(initial.tripId);
+        const correction = structuredClone(delivery);
+        correction.eventId = newId();
+        correction.revision = 3;
+        correction.type = "trip.corrected";
+        correction.snapshot.cargoDamage = { ...openingDamage };
+        await receive(correction);
+        expect(await state(initial.tripId)).toMatchObject({
+          currentFactId: await factOf(completed),
+          decision: "accepted",
+          correctionPending: true,
+        });
+        expect(await credit(initial.tripId)).toEqual(contribution);
+        expect(await tripsService.detail(owner, initial.tripId)).toMatchObject({
+          qualificationCheck: {
+            basis: "decision",
+            rules: expect.arrayContaining([
+              { rule: "cargo_damage", maxPercent: "2.5", observedPercent: "2.5", result: "pass" },
+            ]),
+          },
+        });
+      }
+    }
+    await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "0" });
+    const tiny = payload();
+    const tinyDamage = { available: true, value: 1e-20, unit: "fraction" } as const;
+    tiny.snapshot.cargoDamage = tinyDamage;
+    const receipt = await receive(tiny);
+    expect(await state(receipt.tripId)).toMatchObject({ decision: "rejected" });
+    expect(await tripsService.detail(owner, receipt.tripId)).toMatchObject({
+      qualificationCheck: {
+        basis: "decision",
+        rules: expect.arrayContaining([
+          {
+            rule: "cargo_damage",
+            maxPercent: "0",
+            observedPercent: "0.000000000000000001",
+            result: "fail",
+          },
+        ]),
+      },
+    });
+  } finally {
+    await configureFirstLevel({ massMaxKg: "20000" });
+  }
+});
+
+test("immutable manual damage drives review, over-limit confirmation and retained snapshots", async () => {
+  // These pending revisions predate the level configuration.
+  const zero = await report(owner, manual, { cargoDamagePercent: 0 });
+  const tiny = await report(owner, manual, { cargoDamagePercent: 1e-20 });
+  const missing = await report(owner, manual, { cargoMassKg: "21000" });
+  await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "0" });
+  try {
+    expect((await decide(zero.tripId)).data.outcome).toBe("accepted");
+    const review = await service.review(dispatcher, tiny.tripId);
+    expect(review.data.acceptance.mode).toBe("over_limits");
+    const failure = {
+      rule: "cargo_damage",
+      maxPercent: "0",
+      observedPercent: "0.00000000000000000001",
+      result: "fail",
+    };
+    expect(review.data.qualificationCheck.rules).toContainEqual(failure);
+    await expect(overLimitDecide(tiny.tripId, false)).rejects.toMatchObject({ statusCode: 409 });
+    const accepted = await overLimitDecide(tiny.tripId, true);
+    expect(accepted.data).toMatchObject({
+      outcome: "accepted",
+      acceptedOverLimits: true,
+      reasonCodes: ["qualification_cargo_damage", "accepted_over_limits"],
+    });
+    const unknown = await service.review(dispatcher, missing.tripId);
+    expect(unknown.data.acceptance).toMatchObject({
+      mode: "unavailable",
+      blockedReasonCodes: ["qualification_unknown"],
+    });
+    expect(unknown.data.qualificationCheck.rules).toContainEqual({
+      rule: "cargo_damage",
+      maxPercent: "0",
+      observedPercent: null,
+      result: "unknown",
+    });
+    await expect(overLimitDecide(missing.tripId, true)).rejects.toMatchObject({ statusCode: 409 });
+
+    await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "100" });
+    expect(await tripsService.detail(owner, tiny.tripId)).toMatchObject({
+      qualificationCheck: { basis: "decision", rules: expect.arrayContaining([failure]) },
+    });
+  } finally {
+    await configureFirstLevel({ massMaxKg: "20000" });
+  }
+});
 
 test("sufficient HaulMP telemetry accepts once regardless of its recorded audit; exact replay has no second effect", async () => {
   const p = payload();
@@ -4421,6 +4560,70 @@ test("Stage 3 Dispatch selectors share authorized counts, exact filters, ordered
   } finally {
     await app.close();
     await offApp.close();
+  }
+});
+
+test("both review APIs apply the governing telemetry damage on its historical level", async () => {
+  const on = composedModules(undefined, true);
+  const { trips, manualReports, tripDecisions } = on;
+  if (!trips || !manualReports || !tripDecisions) throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+  const author = await member();
+  await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "0" });
+  try {
+    const telemetry = payload();
+    const damage = { available: true, value: 0.025, unit: "fraction" } as const;
+    telemetry.snapshot.cargoDamage = damage;
+    const alternativeMass = { available: true, value: 19000, unit: "kg" } as const;
+    telemetry.snapshot.job.cargoMass = alternativeMass;
+    await qualifications.changeMember(director, author.userId, "ets2", {
+      levelId: structuralLevels.ets2[1],
+      reason: "Fictional later qualification assignment",
+    });
+    const submitted = await report(author, manualReports, { cargoDamagePercent: 0 });
+    const before = await state(submitted.tripId);
+    if (!before) throw new Error("SYNTHETIC_TRIP_REQUIRED");
+    await retryTransaction(unit, (tx) =>
+      trips.storeInTransaction(tx, "ets2telemetry", telemetry, {
+        ownerUserId: author.userId,
+        connection: { state: "unknown", referenceId: null },
+        canonical: { tripId: submitted.tripId, expectedVersion: before.version },
+      }),
+    );
+
+    for (const stage3 of [false, true]) {
+      const review = stage3
+        ? await tripDecisions.reviewStage3(dispatcher, submitted.tripId)
+        : await tripDecisions.review(dispatcher, submitted.tripId);
+      expect(review.data.acceptance).toMatchObject({
+        mode: "unavailable",
+        blockedReasonCodes: ["telemetry_source_present"],
+      });
+      expect(review.data.qualificationCheck.rules).toContainEqual({
+        rule: "cargo_damage",
+        maxPercent: "0",
+        observedPercent: "2.5",
+        result: "fail",
+      });
+      await expect(
+        tripDecisions.decide(
+          dispatcher,
+          submitted.tripId,
+          newId(),
+          review.version,
+          {
+            decision: "accept",
+            factRevisionId: review.data.factRevisionId,
+            reviewedRevisionId: submitted.currentRevision.id,
+            proposalId: null,
+            reason: "Fictional attempted acceptance",
+          },
+          stage3,
+        ),
+      ).rejects.toMatchObject({ statusCode: 409 });
+    }
+    expect(await credit(submitted.tripId)).toBeUndefined();
+  } finally {
+    await configureFirstLevel({ massMaxKg: "20000" });
   }
 });
 

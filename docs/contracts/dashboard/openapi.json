@@ -29814,6 +29814,15 @@
           },
           "hardModeRequired": {
             "type": "boolean"
+          },
+          "cargoDamageMaxPercent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 21,
+            "pattern": "^(100|(?:0|[1-9][0-9]?)(\\.[0-9]{0,17}[1-9])?)$",
+            "description": "Inclusive maximum cargo damage as a canonical percentage. Null means the limit is disabled."
           }
         },
         "required": [
@@ -29940,6 +29949,15 @@
           },
           "hardModeRequired": {
             "type": "boolean"
+          },
+          "cargoDamageMaxPercent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 21,
+            "pattern": "^(100|(?:0|[1-9][0-9]?)(\\.[0-9]{0,17}[1-9])?)$",
+            "description": "Inclusive maximum cargo damage as a canonical percentage. Null disables the limit. An omitted field preserves the saved cap on update and disables it on creation."
           }
         },
         "required": [
@@ -31025,6 +31043,42 @@
               "observed"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rule": {
+                "const": "cargo_damage"
+              },
+              "result": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "maxPercent": {
+                "type": "string",
+                "maxLength": 21,
+                "pattern": "^(100|(?:0|[1-9][0-9]?)(\\.[0-9]{0,17}[1-9])?)$"
+              },
+              "observedPercent": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 326,
+                "pattern": "^(100|(?:0|[1-9][0-9]?)(\\.[0-9]*[1-9])?)$"
+              }
+            },
+            "required": [
+              "rule",
+              "result",
+              "maxPercent",
+              "observedPercent"
+            ]
           }
         ],
         "description": "One of the five level limits applied to the trip with its configured value. An unset limit passes with null bounds or the any mode. Unknown observed values are null, never zero."
@@ -31089,7 +31143,7 @@
             "items": {
               "$ref": "#/components/schemas/QualificationRuleCheck"
             },
-            "maxItems": 5
+            "maxItems": 6
           }
         },
         "required": [

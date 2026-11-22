@@ -67,11 +67,19 @@ export function decimal(value: number | string): string {
     // Controlled text uses bounded decimal spelling; only IEEE numbers need exponent expansion.
     if (value.length > 39 || !/^(0|[1-9]\d*)(\.\d+)?$/.test(value))
       throw new Error("INVALID_NONNEGATIVE_DECIMAL");
-  } else if (!Number.isFinite(value) || value < 0) {
-    throw new Error("INVALID_NONNEGATIVE_DECIMAL");
   }
+  const text = typeof value === "number" ? numberDecimal(value) : value;
+  const [whole = "", fraction = ""] = text.split(".");
+  if (whole.length > 20 || fraction.length > 18) throw new Error("DECIMAL_PRECISION_EXCEEDED");
+  const trimmed = fraction.replace(/0+$/, "");
+  return trimmed ? `${whole}.${trimmed}` : whole;
+}
+
+/** Expand the canonical spelling of a finite non-negative number without rounding. */
+export function numberDecimal(value: number): string {
+  if (!Number.isFinite(value) || value < 0) throw new Error("INVALID_NONNEGATIVE_DECIMAL");
   let text = String(value);
-  if (typeof value === "number" && text.includes("e")) {
+  if (text.includes("e")) {
     const [mantissa = "", power = "0"] = text.split("e");
     const [whole = "", fraction = ""] = mantissa.split(".");
     const digits = whole + fraction,
@@ -83,9 +91,5 @@ export function decimal(value: number | string): string {
           ? digits + "0".repeat(position - digits.length)
           : `${digits.slice(0, position)}.${digits.slice(position)}`;
   }
-  if (!/^(0|[1-9]\d*)(\.\d+)?$/.test(text)) throw new Error("INVALID_NONNEGATIVE_DECIMAL");
-  const [whole = "", fraction = ""] = text.split(".");
-  if (whole.length > 20 || fraction.length > 18) throw new Error("DECIMAL_PRECISION_EXCEEDED");
-  const trimmed = fraction.replace(/0+$/, "");
-  return trimmed ? `${whole}.${trimmed}` : whole;
+  return text;
 }

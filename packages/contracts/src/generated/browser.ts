@@ -5558,6 +5558,8 @@ export interface components {
                 /** @enum {string} */
                 mode: "forbidden" | "selected" | "any";
             };
+            /** @description Inclusive maximum cargo damage as a canonical percentage. Null means the limit is disabled. */
+            cargoDamageMaxPercent?: string | null;
             distanceMaxM: components["schemas"]["Decimal"] | null;
             distanceMinM: components["schemas"]["Decimal"] | null;
             hardModeRequired: boolean;
@@ -5581,6 +5583,8 @@ export interface components {
                 /** @enum {string} */
                 mode: "forbidden" | "selected" | "any";
             };
+            /** @description Inclusive maximum cargo damage as a canonical percentage. Null disables the limit. An omitted field preserves the saved cap on update and disables it on creation. */
+            cargoDamageMaxPercent?: string | null;
             distanceMaxM: components["schemas"]["Decimal"] | null;
             distanceMinM: components["schemas"]["Decimal"] | null;
             hardModeRequired: boolean;
@@ -5650,6 +5654,13 @@ export interface components {
             result: "pass" | "fail" | "unknown";
             /** @constant */
             rule: "hard_mode";
+        } | {
+            maxPercent: string;
+            observedPercent: string | null;
+            /** @enum {string} */
+            result: "pass" | "fail" | "unknown";
+            /** @constant */
+            rule: "cargo_damage";
         };
         ReadAllInput: {
             throughCursor: string;
