@@ -7,10 +7,23 @@ import {
   utcDateTime,
   utcIso,
 } from "@vtc/db";
-import { and, eq, isNull, sql, tripHistory, tripResolutions, trips } from "@vtc/db/trips-schema";
+import {
+  and,
+  eq,
+  inArray,
+  isNull,
+  sourceMessages,
+  sourceTrips,
+  sql,
+  tripFacts,
+  tripHistory,
+  tripResolutions,
+  trips,
+} from "@vtc/db/trips-schema";
+import { alias } from "drizzle-orm/mysql-core";
 import type { Catalogs } from "../catalogs/service.js";
 import { identityError } from "../identity/service.js";
-import { decimal } from "../sources/contracts/canonical.js";
+import { canonicalJson, decimal } from "../sources/contracts/canonical.js";
 import type { Fact, NormalizedTripEvidence, TripEntity } from "../sources/contracts/evidence.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
@@ -18,6 +31,42 @@ import { createOwnerRevision } from "./owner-revision.js";
 import { queueClock, syncReviewReasons } from "./review-queue.js";
 
 type S = components["schemas"];
+export const damageRevisionReasons: ReadonlySet<string> = new Set([
+  "damage_out_of_range",
+  "quality_supported_conflict",
+  "quality_cannot_replace_supported_snapshot",
+]);
+
+// The review exception cannot replace independent facts or staff-supported provenance.
+function damageCorrectionBasis(e: NormalizedTripEvidence) {
+  const fact = (value: Fact<unknown>) =>
+    value.status === "known" ? [value.value, value.sourceField] : [value.reasonCode];
+  return canonicalJson({
+    outcome: e.outcome,
+    recording: e.recording,
+    start: e.start,
+    end: e.end,
+    wholeTripDistanceSupported: e.wholeTripDistanceSupported,
+    ruleContextComplete: e.ruleContextComplete,
+    fields: [
+      e.origin,
+      e.destination,
+      e.cargo,
+      e.adrCategory,
+      e.cargoMassKg,
+      e.actualDistanceM,
+      e.measuredSegmentM,
+      e.plannedDistanceM,
+      e.deliveredDistanceM,
+      e.fuelUsedL,
+    ].map(fact),
+    trailers: [e.trailers.complete, e.trailers.items.map(fact)],
+    recordedTelemetry: e.recordedTelemetry ?? null,
+    companies: e.companies ?? null,
+    money: e.money,
+    reasons: e.reasonCodes.filter((code) => !damageRevisionReasons.has(code)).sort(),
+  });
+}
 export function createTripAdjudication(
   unit: UnitOfWork,
   catalogs?: Pick<Catalogs, "selectionsInTransaction">,
@@ -30,6 +79,67 @@ export function createTripAdjudication(
     groups = createTripGroups(unit);
   return {
     facts: facts.read,
+    /** Prove the locked support's latest delivery is a later revision of the same persisted source. */
+    async telemetryDamageSuccessor(
+      tx: TxContext,
+      row: TripState,
+      members: readonly TripState[],
+      retained: NormalizedTripEvidence,
+      evidence: readonly NormalizedTripEvidence[],
+    ) {
+      const memberIds = members.map((member) => member.id);
+      const latestMessage = alias(sourceMessages, "latest_damage_message");
+      const latestFact = alias(tripFacts, "latest_damage_fact");
+      const [link] = await c(tx)
+        .select({ factId: latestFact.id, retainedKind: tripFacts.kind })
+        .from(tripFacts)
+        .innerJoin(
+          sourceMessages,
+          eq(
+            sourceMessages.id,
+            sql`COALESCE(${tripFacts.messageId},${tripFacts.derivedSourceMessageId})`,
+          ),
+        )
+        .innerJoin(sourceTrips, eq(sourceTrips.id, sourceMessages.sourceTripId))
+        .innerJoin(
+          latestMessage,
+          and(
+            eq(latestMessage.sourceTripId, sourceTrips.id),
+            eq(latestMessage.provider, "ets2telemetry"),
+            eq(latestMessage.revision, sourceTrips.latestRevision),
+            sql`CAST(${latestMessage.revision} AS UNSIGNED) > CAST(${sourceMessages.revision} AS UNSIGNED)`,
+          ),
+        )
+        .innerJoin(
+          latestFact,
+          and(
+            eq(latestFact.messageId, latestMessage.id),
+            eq(latestFact.canonicalTripId, sourceTrips.canonicalTripId),
+          ),
+        )
+        .where(
+          and(
+            eq(tripFacts.id, retained.factRevisionId),
+            eq(tripFacts.outcome, "delivered"),
+            eq(latestFact.outcome, "delivered"),
+            eq(sourceTrips.provider, "ets2telemetry"),
+            eq(sourceTrips.ownerId, row.ownerId),
+            eq(sourceTrips.game, row.game),
+            inArray(sourceTrips.canonicalTripId, memberIds),
+            inArray(tripFacts.canonicalTripId, memberIds),
+          ),
+        )
+        .for("share");
+      if (!link) return null;
+      const fact = evidence.find((item) => item.factRevisionId === link.factId);
+      if (!fact) return null;
+      return {
+        fact,
+        preservesFacts:
+          link.retainedKind === "source" &&
+          damageCorrectionBasis(retained) === damageCorrectionBasis(fact),
+      };
+    },
     async assessmentComplete(tx: TxContext, id: string) {
       const root = await groups.resolve(tx, id, true);
       if (root.assessmentPending) await createOwnerRevision(unit).bump(tx, root.ownerId);

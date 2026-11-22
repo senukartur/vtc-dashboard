@@ -5436,7 +5436,7 @@ export interface components {
             /** Format: uuid */
             reviewerId: string;
         };
-        /** @description The driver's level limits checked against the trip. decision reads the snapshot stored with the company decision; current checks a pending trip against the level at its attribution time. checked always lists the five rules; event_exempt (company event trip) and no_level list none. */
+        /** @description The driver's level limits checked against the trip. Decision basis reads the stored snapshot. Current basis evaluates pending trips or held results under active staff review. Checked includes the base rules and cargo damage when a cap applies. Event-exempt and no-level results have no rules. */
         QualificationCheck: {
             /** @enum {string} */
             basis: "decision" | "current";
@@ -5612,7 +5612,7 @@ export interface components {
             distanceM: components["schemas"]["Decimal"];
             trips: number;
         };
-        /** @description One of the five level limits applied to the trip with its configured value. An unset limit passes with null bounds or the any mode. Unknown observed values are null, never zero. */
+        /** @description A level rule applied to the trip with its result, configured value and observation. Configured cargo damage adds a rule. Unknown observations are null. */
         QualificationRuleCheck: {
             maxKg: components["schemas"]["Decimal"] | null;
             minKg: components["schemas"]["Decimal"] | null;
@@ -5655,6 +5655,8 @@ export interface components {
             /** @constant */
             rule: "hard_mode";
         } | {
+            /** @description Historical level used for cargo damage if it differs from the check's level. */
+            basisLevelName?: string;
             maxPercent: string;
             observedPercent: string | null;
             /** @enum {string} */

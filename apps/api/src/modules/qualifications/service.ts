@@ -772,7 +772,10 @@ export function createQualifications(
   function ruleDto(
     rule: CheckedRule,
     labels: Map<string, S["CatalogLabel"]>,
+    damageLevelName: string | undefined,
   ): S["QualificationRuleCheck"] {
+    if (rule.rule === "cargo_damage" && damageLevelName)
+      return { ...rule, basisLevelName: damageLevelName };
     if (rule.rule !== "trailer_types") return rule;
     return {
       rule: rule.rule,
@@ -1163,6 +1166,9 @@ export function createQualifications(
         rule.rule === "trailer_types" ? [...rule.allowedIds, ...rule.observedIds] : [],
       );
       const labels = await trailerLabels(tx, trailerIds.slice(0, 300), await locale(tx, actor));
+      const damageLevel = snapshot.cargoDamageBasis;
+      const damageLevelName =
+        damageLevel?.levelId !== snapshot.levelId ? damageLevel?.levelName : undefined;
       return {
         status: snapshot.eventExempt ? "event_exempt" : snapshot.levelId ? "checked" : "no_level",
         basis,
@@ -1172,7 +1178,7 @@ export function createQualifications(
             : null,
         outcome: snapshot.outcome,
         reasonCode: snapshot.reasonCode,
-        rules: snapshot.rules.map((rule) => ruleDto(rule, labels)),
+        rules: snapshot.rules.map((rule) => ruleDto(rule, labels, damageLevelName)),
       };
     },
   };

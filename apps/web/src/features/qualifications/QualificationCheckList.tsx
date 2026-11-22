@@ -29,13 +29,17 @@ export function ruleTexts(t: T, rule: Rule, locale: Locale) {
         observed: rule.observedKg === null ? unknown : formatQuantity(rule.observedKg, "t", locale),
         limit: rangeText(t, rule.minKg, rule.maxKg, "t", locale),
       };
-    case "cargo_damage":
+    case "cargo_damage": {
+      const limit = damageCapText(t, rule.maxPercent, locale);
       return {
         label: t(labels.cargo_damage),
         observed:
           rule.observedPercent === null ? unknown : damagePercentText(rule.observedPercent, locale),
-        limit: damageCapText(t, rule.maxPercent, locale),
+        limit: rule.basisLevelName
+          ? t("damageLimitLevel", { limit, level: rule.basisLevelName })
+          : limit,
       };
+    }
     case "distance":
       return {
         label: t(labels.distance),

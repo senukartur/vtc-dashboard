@@ -196,6 +196,8 @@ describe("trip check", () => {
     expect(rule({ ...damage, result: "fail", observedPercent: "0.00000000000000000001" })).toBe(
       true,
     );
+    expect(rule({ ...damage, basisLevelName: "Fictional earlier level" })).toBe(true);
+    expect(rule({ ...damage, basisLevelName: "" })).toBe(false);
     expect(rule({ ...damage, observedPercent: 0 })).toBe(false);
     expect(rule({ ...damage, maxPercent: "100.01" })).toBe(false);
     expect(rule({ ...damage, observation: "0" })).toBe(false);

@@ -4563,12 +4563,210 @@ test("Stage 3 Dispatch selectors share authorized counts, exact filters, ordered
   }
 });
 
+test.each(["above cap", "missing", "unrelated change"] as const)(
+  "a held same-source delivered revision with %s cannot be accepted on the old damage",
+  async (scenario) => {
+    const on = composedModules(undefined, true);
+    const { trips, tripDecisions } = on;
+    if (!trips || !tripDecisions) throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+    const author = await member();
+    const login = await on.identity.login(`${dispatcher.userId}@example.invalid`, password);
+    const viewer = { cookie: login.cookies.map((value) => value.split(";", 1)[0]).join("; ") };
+    const actor = await on.identity.authenticate(new Headers(viewer));
+    const app = await createApp({ ...on, checkReadiness: async () => true });
+    await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "2.5" });
+    try {
+      const store = (telemetry: Telemetry) =>
+        retryTransaction(unit, (tx) =>
+          trips.storeInTransaction(tx, "ets2telemetry", telemetry, {
+            ownerUserId: author.userId,
+            connection: { state: "unknown", referenceId: null },
+          }),
+        );
+      const original = payload();
+      const equal = { available: true, value: 0.025, unit: "fraction" } as const;
+      original.snapshot.cargoDamage = equal;
+      const { tripId, sourceRecordId } = await store(original);
+      const originalId = await factOf({ sourceRecordId });
+      const before = await credit(tripId);
+      if (!originalId || !before) throw new Error("SYNTHETIC_CREDIT_REQUIRED");
+      expect(before).toMatchObject({ credited: true, factId: originalId });
+      const staleProposal =
+        scenario === "missing"
+          ? await tripDecisions.propose(
+              actor,
+              tripId,
+              newId(),
+              (await tripDecisions.review(actor, tripId)).version,
+              { actualDistanceM: "123400", evidenceIds: [], reason: "Fictional prior resolution" },
+            )
+          : null;
+
+      const revision = structuredClone(original);
+      revision.eventId = newId();
+      revision.revision = 10;
+      revision.type = "trip.corrected";
+      const damage =
+        scenario === "missing"
+          ? ({ available: false, reason: "not-observed", unit: "fraction" } as const)
+          : ({ available: true, value: 0.4, unit: "fraction" } as const);
+      revision.snapshot.cargoDamage = { ...damage };
+      if (scenario === "unrelated change")
+        for (const field of ["observedDistance", "deliveredDistance"] as const) {
+          const distance = revision.snapshot[field];
+          if (distance.available) distance.value = 130000;
+        }
+      const revised = await store(revision);
+      const revisedId = await factOf(revised);
+      if (!revisedId) throw new Error("SYNTHETIC_CORRECTED_FACT_REQUIRED");
+      expect(revised.tripId).toBe(tripId);
+      const retained = await state(tripId);
+      expect(retained).toMatchObject({
+        decision: "accepted",
+        reviewHold: true,
+        correctionPending: true,
+        currentFactId: originalId,
+      });
+      expect(await credit(tripId)).toEqual(before);
+
+      const path = `/api/v1/trips/${tripId}`;
+      const get = (url: string) => app.inject({ url, headers: viewer });
+      const post = (url: string, etag: string, body: object, key = newId()) =>
+        app.inject({
+          method: "POST",
+          url,
+          headers: {
+            ...viewer,
+            origin,
+            "if-match": etag,
+            "idempotency-key": key,
+            "content-type": "application/json",
+            "x-csrf-token": csrfProtection(on.identity.config).issue(viewer, actor).token,
+          },
+          payload: body,
+        });
+      const direct = (factId: string, decision: "accept" | "reject") => ({
+        factRevisionId: factId,
+        reviewedRevisionId: factId,
+        proposalId: null,
+        decision,
+        reason: "Fictional final telemetry review",
+      });
+      const selectNew = scenario !== "unrelated change";
+      const rule = {
+        rule: "cargo_damage",
+        maxPercent: "2.5",
+        observedPercent: scenario === "missing" ? null : selectNew ? "40" : "2.5",
+        result: scenario === "missing" ? "unknown" : selectNew ? "fail" : "pass",
+      };
+
+      for (const query of ["", "?view=stage3"]) {
+        const checked = await get(`${path}/review${query}`);
+        expect(checked.statusCode).toBe(200);
+        expect(checked.json().data).toMatchObject({
+          factRevisionId: selectNew ? revisedId : originalId,
+          qualificationCheck: { basis: "current", rules: expect.arrayContaining([rule]) },
+          acceptance: { mode: "unavailable" },
+        });
+        const stale = await post(
+          `${path}/decisions${query}`,
+          String(checked.headers.etag),
+          direct(originalId, "accept"),
+        );
+        expect(stale.statusCode).toBe(409);
+        const attempted = await post(
+          `${path}/decisions${query}`,
+          String(checked.headers.etag),
+          direct(revisedId, "accept"),
+        );
+        expect(attempted.statusCode).toBe(409);
+      }
+      expect(await credit(tripId)).toEqual(before);
+      if (staleProposal) {
+        const oldPath = `${path}/proposals/${staleProposal.data.id}`;
+        const oldDetail = await get(oldPath);
+        expect(oldDetail.statusCode).toBe(200);
+        expect(oldDetail.json().data).toMatchObject({ baseFactRevisionId: originalId });
+        const stale = await post(`${oldPath}/decisions`, String(oldDetail.headers.etag), {
+          decision: "approve",
+          reviewedRevisionId: oldDetail.json().data.revisionId,
+          reason: "Fictional stale approval attempt",
+        });
+        expect(stale.statusCode).toBe(409);
+      }
+      const staged = await get(`${path}/review?view=stage3`);
+      if (scenario === "above cap") {
+        const key = newId();
+        const reject = () =>
+          post(
+            `${path}/decisions?view=stage3`,
+            String(staged.headers.etag),
+            direct(revisedId, "reject"),
+            key,
+          );
+        const reply = await reject();
+        expect(reply.statusCode).toBe(200);
+        expect(reply.json().data).toMatchObject({
+          outcome: "rejected",
+          reasonCodes: ["qualification_cargo_damage"],
+          basis: { factRevisionId: revisedId },
+        });
+        const revoked = await credit(tripId);
+        expect(revoked).toMatchObject({ credited: false, version: before.version + 1 });
+        const replay = await reject();
+        expect(replay.statusCode).toBe(200);
+        expect(replay.json().data).toEqual(reply.json().data);
+        expect(await credit(tripId)).toEqual(revoked);
+        expect(await state(tripId)).toMatchObject({
+          currentFactId: revisedId,
+          decision: "rejected",
+          reviewHold: false,
+        });
+        expect(await trips.detail(author, tripId)).toMatchObject({
+          qualificationCheck: { basis: "decision", rules: expect.arrayContaining([rule]) },
+        });
+      } else {
+        const proposed = await post(`${path}/resolution-proposals`, String(staged.headers.etag), {
+          actualDistanceM: "123400",
+          evidenceIds: [],
+          reason: "Fictional distance evidence",
+        });
+        if (scenario === "missing") {
+          expect(proposed.statusCode).toBe(201);
+          const proposalPath = `${path}/proposals/${proposed.json().data.id}`;
+          const detail = await get(proposalPath);
+          expect(detail.statusCode).toBe(200);
+          expect(detail.json().data).toMatchObject({ baseFactRevisionId: revisedId });
+          const approval = await post(`${proposalPath}/decisions`, String(detail.headers.etag), {
+            decision: "approve",
+            reviewedRevisionId: detail.json().data.revisionId,
+            reason: "Fictional attempted approval",
+          });
+          expect(approval.statusCode).toBe(409);
+        } else {
+          expect(proposed.statusCode).toBe(409);
+        }
+        expect(await state(tripId)).toMatchObject({
+          decision: "accepted",
+          reviewHold: true,
+          correctionPending: true,
+          currentFactId: originalId,
+        });
+        expect(await credit(tripId)).toEqual(before);
+      }
+    } finally {
+      await app.close();
+      await configureFirstLevel({ massMaxKg: "20000" });
+    }
+  },
+);
+
 test("both review APIs apply the governing telemetry damage on its historical level", async () => {
   const on = composedModules(undefined, true);
   const { trips, manualReports, tripDecisions } = on;
   if (!trips || !manualReports || !tripDecisions) throw new Error("SYNTHETIC_COMPOSITION_MISSING");
   const author = await member();
-  await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "0" });
+  const first = await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "0" });
   try {
     const telemetry = payload();
     const damage = { available: true, value: 0.025, unit: "fraction" } as const;
@@ -4598,8 +4796,10 @@ test("both review APIs apply the governing telemetry damage on its historical le
         mode: "unavailable",
         blockedReasonCodes: ["telemetry_source_present"],
       });
+      expect(review.data.qualificationCheck.level?.id).toBe(structuralLevels.ets2[stage3 ? 0 : 1]);
       expect(review.data.qualificationCheck.rules).toContainEqual({
         rule: "cargo_damage",
+        ...(stage3 ? {} : { basisLevelName: first.level.name }),
         maxPercent: "0",
         observedPercent: "2.5",
         result: "fail",

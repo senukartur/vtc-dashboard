@@ -83,6 +83,7 @@ export interface CargoDamageAssessment {
   readonly evidence: Fact<string>;
   readonly factRevisionId: string;
   readonly levelId: string | null;
+  readonly levelName?: string;
   readonly editVersion: number | null;
   readonly historyReasonCode?: string;
 }
