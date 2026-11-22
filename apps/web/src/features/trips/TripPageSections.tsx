@@ -119,39 +119,30 @@ type Fields = DTO["ManualReportReadFields"];
 
 /**
  * The company of one route end: the effective fact's resolved company with its logo plate, else,
- * when the fact carries no company field, the company the manual report selected. An unresolved or
- * missing company is left out; its provider code stays in the technical details.
+ * when the fact carries no company field, the company the manual report selected (name only). An
+ * unresolved or missing company is left out; its provider code stays in the technical details.
  */
-function RouteCompany({
-  facts,
-  fields,
-  side,
-}: {
-  facts: Facts | null;
-  fields: Fields | null;
-  side: "origin" | "destination";
-}) {
+function routeCompany(
+  facts: Facts | null,
+  fields: Fields | null,
+  side: "origin" | "destination",
+): { logo: ReactNode; name: ReactNode } | null {
   const key = side === "origin" ? "originCompany" : "destinationCompany";
   if (facts && key in facts) {
     const company = facts[key];
     if (company?.state !== "resolved") return null;
-    return (
-      <span className="trip-route-company" data-company="resolved">
-        <CompanyLogo companyId={company.companyId} logo={company.logo} />
-        <span className="trip-company-name">{company.name}</span>
-      </span>
-    );
+    return {
+      logo: <CompanyLogo companyId={company.companyId} logo={company.logo} />,
+      name: company.name,
+    };
   }
   const reported = fields?.[side === "origin" ? "originCompanyId" : "destinationCompanyId"];
-  return reported && fields ? (
-    <span className="trip-route-company" data-company="reported">
-      <span className="trip-company-name">
-        <CatalogEntryName list="companies" id={reported} game={fields.game} />
-      </span>
-    </span>
-  ) : null;
+  return reported && fields
+    ? { logo: null, name: <CatalogEntryName list="companies" id={reported} game={fields.game} /> }
+    : null;
 }
 
+/** One route end as in the mockup: the logo plate beside a column of city, company and time. */
 function RouteEnd({
   side,
   city,
@@ -160,24 +151,34 @@ function RouteEnd({
 }: {
   side: "origin" | "destination";
   city: DTO["CatalogLabel"] | null;
-  company: ReactNode;
+  company: { logo: ReactNode; name: ReactNode } | null;
   at: string | null | undefined;
 }) {
   const { locale, timezone } = useTripDisplay(),
     when = useWhen();
   return (
     <div className="trip-route-end" data-side={side}>
-      {company}
-      {city && (
-        <span className="trip-route-city">
-          <PlaceName value={city} />
-        </span>
-      )}
-      {at && (
-        <time className="trip-muted" dateTime={at} title={formatUtc(at, locale, timezone)}>
-          {when(at)}
-        </time>
-      )}
+      {company?.logo && <span className="trip-route-logo">{company.logo}</span>}
+      <div className="trip-route-text">
+        {city && (
+          <span className="trip-route-city">
+            <PlaceName value={city} />
+          </span>
+        )}
+        {company && (
+          <span
+            className="trip-route-company trip-company-name"
+            data-company={company.logo ? "resolved" : "reported"}
+          >
+            {company.name}
+          </span>
+        )}
+        {at && (
+          <time className="trip-muted" dateTime={at} title={formatUtc(at, locale, timezone)}>
+            {when(at)}
+          </time>
+        )}
+      </div>
     </div>
   );
 }
@@ -231,7 +232,7 @@ export function TripRoute({
         <RouteEnd
           side="origin"
           city={summary.origin}
-          company={view && <RouteCompany facts={facts} fields={fields} side="origin" />}
+          company={view && routeCompany(facts, fields, "origin")}
           at={times?.startedAt}
         />
         <div className="trip-route-middle">
@@ -248,7 +249,7 @@ export function TripRoute({
         <RouteEnd
           side="destination"
           city={summary.destination}
-          company={view && <RouteCompany facts={facts} fields={fields} side="destination" />}
+          company={view && routeCompany(facts, fields, "destination")}
           at={times?.completedAt}
         />
       </div>

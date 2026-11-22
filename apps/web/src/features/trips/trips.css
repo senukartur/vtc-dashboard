@@ -406,25 +406,37 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
+/* A route end: the logo plate beside a column of city (first, bold), company and time. */
 .trip-route-end {
   display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.trip-route-text {
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 2px;
   min-width: 0;
 }
 .trip-route-city {
   font-size: 1rem;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .trip-route-company {
-  display: flex;
-  flex-direction: column;
-  align-items: inherit;
-  gap: 6px;
   min-width: 0;
-  max-width: 100%;
   color: var(--muted);
+}
+/* A compact plate keeps room for the text column beside it. */
+.trip-route-logo {
+  display: flex;
+  flex: none;
+}
+.trip-route-logo .company-logo,
+.trip-route-logo .company-logo img {
+  width: 64px;
+  height: 32px;
 }
 .trip-company-name {
   min-width: 0;
@@ -505,8 +517,11 @@
     gap: 16px;
   }
   .trip-route-end[data-side="destination"] {
-    align-items: flex-end;
+    flex-direction: row-reverse;
     text-align: right;
+  }
+  .trip-route-end[data-side="destination"] .trip-route-text {
+    align-items: flex-end;
   }
 }
 @media (max-width: 559px) {
