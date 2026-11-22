@@ -43,7 +43,9 @@ Administrative roles add permissions to the user's member roles; game qualificat
 | Read own pending/rejected reports and evidence | Yes | Yes | Yes | Yes |
 | Review other members' manual/disputed trips and evidence | No | Yes | Yes | Yes |
 | Accept another member's manual report over ordinary qualification limits, after explicit confirmation | No | Yes | Yes | Yes |
-| Approve own manual report | No | No | No | No |
+| Correct own trip facts (a correction proposal) | Yes | Through member role | Through member role | Through member role |
+| Edit another member's trip facts | No | No | No | No |
+| Approve own manual report or own correction | No | No | No | No |
 | Review applications and send or copy invitations | No | No | Yes | Yes |
 | Manage events and confirm actual participation | No | No | Yes | Yes |
 | View an accessible event's participant and decliner lists | Yes | Yes | Yes | Yes |
@@ -106,7 +108,8 @@ Membership application review and event management belong to the director and de
 | View a manual report awaiting review, rejection reasons, or attached evidence | The report's author and authorized staff: dispatchers reviewing trips, directors, and deputies. This information is not generally visible to other members. |
 | Review membership applications | Director or deputy. |
 | Create and manage events | Director or deputy. |
-| Review manual reports and disputed trips | Dispatcher, director, or deputy. A manual report must be reviewed by someone other than its author; no role may approve its own report. |
+| Review manual reports and disputed trips | Dispatcher, director, or deputy: accept, return for fixes or reject. A manual report or correction must be reviewed by someone other than its author; no role may approve its own report or correction. |
+| Correct trip facts | Only the trip's author; staff never edit trip facts. |
 | Configure company-wide webhook integrations | Director or deputy; external provider adapters remain deferred as defined on the Later cards in Trello. |
 | Transfer company leadership | Serving director only, with additional verification. |
 
@@ -209,12 +212,14 @@ Application review is the director's or deputy's responsibility. The required em
 
 - Every manual report requires a different authorized reviewer. Dispatchers, deputies, and directors may not approve their own manual reports; there are no role-based exceptions.
 - An authorized reviewer other than the author may, at their discretion, accept a manual report that breaks ordinary qualification limits when no event exception applies. Before acceptance, show every exceeded limit and require explicit confirmation. Record the decision as accepted over limits, together with the reviewer. This waives only qualification limits, not other report requirements or review rules; the accepted trip then follows the ordinary statistics and progress rules. Telemetry trips cannot be accepted over limits: once their historical facts are supported, automatic validation accepts or rejects them, and staff review of a telemetry trip (for example, one with unknown historical qualification) cannot waive a qualification limit. The waiver applies only while the canonical trip has no telemetry source. If matching telemetry exists or arrives later, its automatic validation governs: a limit breach cannot be accepted over limits, and an earlier over-limit acceptance is withdrawn through the reconciliation review for late telemetry, which recalculates the affected totals and progress.
-- The author may correct a rejected manual report and resubmit it for review.
+- On 2026-11-22 the owner decided that drivers correct their own trips and staff only review them. A reviewer accepts, returns for fixes or rejects. Returning is a rejection the author may fix; it is offered only when something is correctable, and a manual report can always be returned. Rejecting is final: the author can neither revise the report nor propose values. Every human rejection recorded before this decision stays final; no data is migrated.
+- The author may correct a manual report returned for fixes and resubmit it for review.
 - Resubmission creates a new report revision for the same canonical trip. Preserve the previous version, rejection reason, and review history.
 - A corrected submission must not create a second trip or duplicate statistics, qualification progress, or other trip effects.
 - Every manual report must include at least one screenshot of the trip completion/results screen. Telemetry-confirmed trips do not require a screenshot.
 - While a report awaits a decision, its author may edit it; preserve the changes in its revision history. A review decision must apply to the revision actually reviewed.
-- After acceptance, the author requests a correction from a dispatcher, deputy, or director instead of directly editing the accepted record. Staff changes must retain an audit history and recalculate affected statistics. The prohibition on approving one's own manual report still applies.
+- After acceptance, the author proposes corrected values, citing at least one of the report's screenshots, instead of directly editing the accepted record. The accepted result stays in effect until a different dispatcher, deputy, or director approves or declines the proposal. An approved correction retains an audit history and recalculates affected statistics. The prohibition on approving one's own manual report or correction still applies. A text-only correction request recorded earlier can only be declined.
+- A telemetry trip awaiting review or returned for fixes can be corrected by its author only for facts the telemetry did not confirm: unresolved cities, cargo, trailer or cargo mass, a whole-trip distance the recording could not support, and unobserved start or completion. Confirmed facts stay locked. A reason is required and a screenshot is optional. An accepted or finally rejected telemetry trip cannot be corrected. A partial recording can be accepted only through an approved correction that supplies the whole-trip distance, with both actual times observed or corrected.
 - There is no submission deadline for manual reports in the MVP. Staff confirmation determines the reporting period, qualification, rules and progress attribution for all manual reports.
 
 The current manual form requires game, origin and destination cities, cargo, cargo mass, trailer type, actual driven distance, reference start and completion, and at least one screenshot. The two reference timestamps are at or before server time on submission, and start precedes completion. Event association, comment, cargo damage from 0 to 100 percent, and origin and destination companies are optional. Each selected company must have a visible depot in the corresponding selected city and game. Earlier reports can lack reference dates and remain readable.
@@ -252,10 +257,10 @@ The current manual form requires game, origin and destination cities, cargo, car
 4. A user holding both driver and dispatcher roles retains normal driver capabilities and receives trip-review permissions. The user cannot approve its own manual report. The same restriction applies to a director.
 5. A director or deputy can review applications and manage events. Trainee, Driver, or Dispatcher roles alone do not grant those management permissions.
 6. An applicant must supply a nickname, invitation email, Steam profile link, and at least one of ETS2/ATS. The applicant can omit Discord and the introduction.
-7. An author corrects a rejected report and resubmits it. Staff can inspect the prior revision and rejection reason; the system retains one canonical trip and sends the new revision for review.
+7. An author corrects a report returned for fixes and resubmits it. Staff can inspect the prior revision and rejection reason; the system retains one canonical trip and sends the new revision for review.
 8. A manual report without a completion-screen screenshot cannot be submitted. A telemetry-confirmed trip does not require a screenshot.
 9. An author edits a pending report. The revision history retains the previous values, and a reviewer cannot approve an obsolete revision as if it were the current report.
-10. An author requests a correction to an accepted report. An authorized staff member records the correction with its history; affected statistics are recalculated without creating another trip.
+10. An author proposes corrected values for an accepted report. A different authorized staff member approves the correction, which is recorded with its history; affected statistics are recalculated without creating another trip. Until then the accepted result stays in effect.
 11. A driver supplies reference start and completion for a manual report and provides the required evidence. Its age alone does not prevent submission. Once confirmed, it belongs to the reporting period containing its confirmation time, is checked against the qualification/rules at confirmation, and contributes to that game-specific level's progress.
 12. Staff edit a level's limits after a trip starts but before it is decided. The decision checks the level the driver held at the attribution time against that level's current limits and stores a snapshot of the level name, limits and results. Later edits never change the decided trip.
 13. A driver meets every set promotion condition of the current level. The driver moves to the next level at once; the change is audited and the driver is notified.
