@@ -6,7 +6,7 @@ import { useSession } from "../../app/Session.js";
 import { useWorkspaceSummary } from "../../app/workspace-summary.js";
 import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Pager } from "../../shared/ui/pager.js";
-import { Button, Card, Label } from "../../shared/ui/primitives.js";
+import { Button, Card } from "../../shared/ui/primitives.js";
 import { EventSelect } from "../manual-reports/fields.js";
 import { DecisionPanel } from "../review/DecisionPanel.js";
 import { dispatchSearch } from "../review/dispatch-model.js";
@@ -15,6 +15,12 @@ import { ProposalList } from "../review/ReviewPanel.js";
 import { ReconciliationHistory } from "../review/reconciliation-parts.js";
 import { queueSearch } from "../review/review-model.js";
 import { Confirm, Failure, Fields, Revision, State } from "./components.js";
+import {
+  type CorrectionField,
+  correctableFacts,
+  proposedChanges,
+  unconfirmedFields,
+} from "./correction-model.js";
 import { useTripCommand, useTripQuery } from "./queries.js";
 import { TripHeader, TripHistory, TripTiles } from "./TripPageOverview.js";
 import {
@@ -27,9 +33,12 @@ import { TripTechnicalDetails } from "./TripTechnicalDetails.js";
 import { type DTO, validId } from "./transport.js";
 import {
   awaitingFix,
+  canCorrect,
+  latestDecision,
   nextStep,
   privateOf,
   revisableReportId,
+  type TripStatus,
   tripStatus,
 } from "./trip-page-model.js";
 import "./trips.css";
@@ -61,7 +70,20 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
     reportId = revisableReportId(view, selfId),
     fixPending = awaitingFix(view),
     status = summary ? tripStatus(summary, fixPending) : null,
-    next = nextStep(view, { owner, staff });
+    next = nextStep(view, { owner, staff }),
+    correctable = canCorrect(view, selfId),
+    // The driver's corrections feed the history; the pending one marks its values inline.
+    proposals = useTripQuery(
+      `/trips/${tripId}/proposals?limit=25`,
+      "EnvelopeListTripProposal",
+      validId(tripId) && !review && !!own && (owner || staff),
+    ),
+    proposalItems = proposals.data?.data.data.items ?? [],
+    pending = proposalItems.find((p) => p.id === own?.pendingProposalId) ?? null,
+    marks = own
+      ? { unconfirmed: unconfirmedFields(own), proposed: proposedChanges(pending) }
+      : undefined,
+    correctPath = summary ? `/account/trips/${summary.id}/correct` : null;
   if (review && !staff)
     return (
       <Card>
@@ -87,6 +109,11 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
           <Link to={`/account/reports/${reportId}/edit`}>{t("revise")}</Link>
         </Button>
       )}
+      {correctable && !reportId && correctPath && status !== "needs_fix" && (
+        <Button asChild variant="outline">
+          <Link to={correctPath}>{t(status === "accepted" ? "proposeCorrection" : "fixTrip")}</Link>
+        </Button>
+      )}
       {staff && summary && (
         <Button asChild variant="outline">
           <Link to={`/account/review/${summary.id}`}>{t("review")}</Link>
@@ -106,6 +133,16 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
       {summary && (
         <>
           {!own && <p className="trip-muted">{t("summaryView")}</p>}
+          {own && status && (owner || staff) && (
+            <TripCorrectionBanner
+              view={own}
+              status={status}
+              owner={owner}
+              pending={!!own.pendingProposalId}
+              correctPath={correctable && !reportId ? correctPath : null}
+              reportPath={reportId ? `/account/reports/${reportId}/edit` : null}
+            />
+          )}
           <TripTiles
             summary={summary}
             facts={own?.effectiveFacts}
@@ -114,14 +151,11 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
           />
           <div className="trip-detail-layout">
             <div className="trip-detail-main">
-              <TripFacts summary={summary} view={own} />
+              <TripFacts summary={summary} view={own} {...(marks ? { marks } : {})} />
               {own && (own.evidence.length > 0 || own.manualRevision) && (
                 <TripEvidence evidence={own.evidence} />
               )}
               {own && <TripSources sources={own.sources} />}
-              {own && submitOwn && summary.decision === "accepted" && (
-                <OwnerCorrection view={own} etag={query.data?.etag ?? null} />
-              )}
               {own && submitOwn && (
                 <OwnerAssociation
                   tripId={summary.id}
@@ -132,7 +166,7 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
             </div>
             {own && (
               <aside className="trip-detail-aside" aria-label={t("asideLabel")}>
-                <TripHistory view={own} />
+                <TripHistory view={own} proposals={proposalItems} />
                 <TripQualificationCheck check={own.qualificationCheck} />
               </aside>
             )}
@@ -154,44 +188,73 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
     </div>
   );
 }
-/** The owner's correction request for an accepted trip; the accepted result stays effective. */
-function OwnerCorrection({ view, etag }: { view: DTO["TripPrivate"]; etag: string | null }) {
+/**
+ * The correction state above the trip (VTC-169): a return for fixes with what to fix and the fix
+ * action, a pending correction with the rule that the previous result stays in effect, or a final
+ * rejection without actions. Nothing for other states.
+ */
+function TripCorrectionBanner({
+  view,
+  status,
+  owner,
+  pending,
+  correctPath,
+  reportPath,
+}: {
+  view: DTO["TripPrivate"];
+  status: TripStatus;
+  owner: boolean;
+  pending: boolean;
+  correctPath: string | null;
+  reportPath: string | null;
+}) {
   const { t } = useTranslation("trips"),
-    [reason, setReason] = useState(""),
-    command = useTripCommand();
+    latest = latestDecision(view.decisions);
+  if (pending)
+    return (
+      <Card className="trip-banner" data-state="correction_pending" role="status">
+        <strong>{t("correctionPendingTitle")}</strong>
+        <p>{t("correctionPendingNote")}</p>
+      </Card>
+    );
+  if (status === "rejected" && owner)
+    return (
+      <Card className="trip-banner" data-state="rejected">
+        <strong>{t("rejectedFinalTitle")}</strong>
+        <p>{t("rejectedFinalNote")}</p>
+      </Card>
+    );
+  if (status !== "needs_fix") return null;
+  const fields: CorrectionField[] = correctableFacts(view.correction).map((fact) => fact.field);
   return (
-    <Card className="stack">
-      <h2>{t("correction")}</h2>
-      <p>{t("correctionHelp")}</p>
-      <Label htmlFor="correction-reason">{t("reason")}</Label>
-      <textarea
-        className="input"
-        id="correction-reason"
-        maxLength={4000}
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-      />
-      <Failure error={command.failure} seconds={command.seconds} />
-      <Confirm
-        label={t("correction")}
-        guard={JSON.stringify([etag, reason])}
-        disabled={!reason.trim() || command.seconds > 0}
-        pending={command.pending}
-        failure={command.failure}
-        onConfirm={async () => {
-          const r = await command.run(
-            `/trips/${view.summary.id}/correction-requests`,
-            { reason: reason.trim() },
-            "EnvelopeCommandResult",
-            etag,
-          );
-          if (r) setReason("");
-          return r;
-        }}
-      >
-        <p>{t("correctionConfirmText")}</p>
-        <p className="trip-detail-quote">{reason}</p>
-      </Confirm>
+    <Card className="trip-banner" data-state="needs_fix" data-attention="true">
+      <strong>{t("fixBannerTitle")}</strong>
+      {owner ? (
+        <>
+          <p>{t(reportPath ? "fixBannerReport" : "fixBannerTelemetry")}</p>
+          {!reportPath && fields.length > 0 && (
+            <p>
+              {t("fixBannerFields", {
+                fields: fields.map((field) => t(`correctField_${field}`)).join(", "),
+              })}
+            </p>
+          )}
+          {latest?.reason && (
+            <p className="trip-detail-quote">
+              {latest.reviewer?.nickname ?? t("system")}: {t("quoted", { text: latest.reason })}
+            </p>
+          )}
+          {correctPath && !reportPath && (
+            <div className="trip-actions">
+              <Button asChild>
+                <Link to={correctPath}>{t("fixTrip")}</Link>
+              </Button>
+            </div>
+          )}
+        </>
+      ) : (
+        <p>{t("fixBannerStaff")}</p>
+      )}
     </Card>
   );
 }
@@ -285,7 +348,7 @@ function PrivateHistory({ tripId }: { tripId: string }) {
         ))}
       </div>
       {tab === "proposals" ? (
-        <ProposalList tripId={tripId} etag={null} self />
+        <ProposalList tripId={tripId} />
       ) : (
         <State query={query} rateLimitNotice />
       )}

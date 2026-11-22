@@ -202,21 +202,23 @@ test(
       expect(detail.sources.telemetry?.normalizedFacts.actualDistanceM).toBe("123400");
       expect(detail.sources.manual?.manualRevision.id).toBeTruthy();
 
-      await reviewer.locator("#review-choice-reject").click();
+      await reviewer.locator("#review-choice-return").click();
       const returnForm = reviewer.locator(".review-form");
       const returnReason = returnForm.getByRole("textbox", { name: "Reason for return" });
       await expect(returnReason).toHaveAttribute("aria-invalid", "true");
       await returnReason.fill("Fictional distance requires correction");
       const returned = await committed(
         `/api/v1/trips/${mixed.tripId}/decisions`,
-        () =>
-          returnForm.getByRole("button", { name: "Return for fixes", exact: true }).last().click(),
+        () => returnForm.getByRole("button", { name: "Return trip", exact: true }).click(),
         "stage3",
       );
-      expect(((await returned.json()) as Schemas["EnvelopeDecision"]).data).toMatchObject({
+      expect(returned.request().postDataJSON()).toMatchObject({ returnForFixes: true });
+      const returnedDecision = ((await returned.json()) as Schemas["EnvelopeDecision"]).data;
+      expect(returnedDecision).toMatchObject({
         outcome: "rejected",
         reason: "Fictional distance requires correction",
       });
+      expect(returnedDecision.reasonCodes).toContain("returned_for_fixes");
       await reviewer.goto(`/account/review?tab=resolved&ownerId=${fixture.userId}`);
       await expect(
         reviewer
@@ -646,18 +648,15 @@ async function confirm(page: Page, label: string, commandPath?: string, expected
       path: /^\/api\/v1\/manual-reports\/[0-9a-f-]{36}\/revisions$/,
     },
     "Reject trip": { action: "reject-trip", path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/decisions$/ },
+    "Return trip": { action: "return-trip", path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/decisions$/ },
     "Accept trip": { action: "accept-trip", path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/decisions$/ },
-    "Propose supported resolution": {
-      action: "propose-resolution",
-      path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/resolution-proposals$/,
-    },
     "Approve proposal": {
       action: "approve-proposal",
       path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/proposals\/[0-9a-f-]{36}\/decisions$/,
     },
-    "Request correction": {
-      action: "request-correction",
-      path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/correction-requests$/,
+    "Send correction": {
+      action: "send-correction",
+      path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/corrections$/,
     },
     "Merge trips": { action: "merge-trips", path: /^\/api\/v1\/reconciliations$/ },
     "Reverse merge": {
@@ -704,7 +703,14 @@ async function confirm(page: Page, label: string, commandPath?: string, expected
   page.on("requestfailed", failed);
   try {
     // The decision panel names the submit button after the chosen outcome; choosing is idempotent.
-    const choice = label === "Reject trip" ? "reject" : label === "Accept trip" ? "accept" : null;
+    const choice =
+      label === "Reject trip"
+        ? "reject"
+        : label === "Return trip"
+          ? "return"
+          : label === "Accept trip" || label === "Approve proposal"
+            ? "accept"
+            : null;
     if (choice) await page.locator(`#review-choice-${choice}`).click();
     await page.getByRole("button", { name: label, exact: true }).click();
     const response = commandPath
@@ -925,14 +931,7 @@ async function proposal(staff: Awaited<ReturnType<typeof staffContext>>, tripId:
     (p: { state: string; kind: string }) => p.state === "pending" && p.kind === "resolution",
   );
 }
-/** Opens the review page's "Corrections and resolution" disclosure (open while a proposal is pending). */
-async function corrections(page: Page) {
-  const disclosure = page.locator("details.review-corrections");
-  await expect(disclosure).toBeVisible();
-  if (!(await disclosure.evaluate((node) => (node as HTMLDetailsElement).open)))
-    await disclosure.locator(":scope > summary").click();
-  await expect(disclosure).toHaveAttribute("open", "");
-}
+/** Approves the driver's pending correction from the review decision (VTC-169). */
 async function approve(
   page: Page,
   staff: Awaited<ReturnType<typeof staffContext>>,
@@ -940,9 +939,12 @@ async function approve(
 ) {
   const p = await proposal(staff, tripId);
   if (!p) throw Error("SYNTHETIC_PROPOSAL_MISSING");
-  await corrections(page);
-  await page.locator("summary").filter({ hasText: p.id }).click();
-  await page.locator(`#proposal-${p.id}`).fill("Fictional verified proposal");
+  await page.reload();
+  await catalogLanguage(page);
+  // A pending correction turns the decision into a field-by-field comparison.
+  await expect(page.locator(".review-correction")).toBeVisible();
+  await page.locator("#review-choice-accept").click();
+  await page.locator("#review-reason").fill("Fictional verified proposal");
   await confirm(page, "Approve proposal");
 }
 test(
@@ -1029,7 +1031,7 @@ test(
       | "UPLOAD_SUBMIT"
       | "STALE_DECISION"
       | "RESUBMIT_ACCEPT"
-      | "STAFF_RESOLUTION"
+      | "RETURNED_ACCEPT"
       | "CORRECTION"
       | "TELEMETRY_ATTACHMENT"
       | "DUPLICATE_MERGE"
@@ -1097,9 +1099,10 @@ test(
       await catalogLanguage(staffPage);
       await resetAccountLimits();
       phase = "STALE_DECISION";
-      await staffPage.locator("#review-choice-reject").click();
-      await staffPage.locator("#review-reason").fill("Fictional rejection after current review");
-      await staffPage.getByRole("button", { name: "Reject trip", exact: true }).click();
+      // Unresolved cargo is correctable, so the reviewer returns the report for fixes.
+      await staffPage.locator("#review-choice-return").click();
+      await staffPage.locator("#review-reason").fill("Fictional return after current review");
+      await staffPage.getByRole("button", { name: "Return trip", exact: true }).click();
       await page.goto(`/account/reports/${reportId}/edit`);
       await catalogLanguage(page);
       await page
@@ -1157,29 +1160,25 @@ test(
         staffPage.getByRole("alert").filter({ hasText: "record changed" }),
       ).toBeVisible();
       await expect(staffPage.locator("#review-reason")).toHaveValue(
-        "Fictional rejection after current review",
+        "Fictional return after current review",
       );
-      await confirm(staffPage, "Reject trip");
+      await confirm(staffPage, "Return trip");
       await resetAccountLimits();
       phase = "RESUBMIT_ACCEPT";
+      // The driver, not staff, fixes the returned report: the cargo becomes a catalog row.
       await page.goto(`/account/reports/${reportId}/edit`);
       await catalogLanguage(page);
+      await chooseCatalogRow(page, "Cargo", "Fictional fixture_crates", "fixture_crates");
       await page
         .getByLabel("Comment (optional)", { exact: true })
-        .fill("Fictional revised rejected report");
+        .fill("Fictional revised returned report");
       await confirm(page, "Revise and resubmit");
       await staffPage.reload();
       await catalogLanguage(staffPage);
       await resetAccountLimits();
-      phase = "STAFF_RESOLUTION";
-      await corrections(staffPage);
-      await staffPage.getByText("Propose supported resolution", { exact: true }).click();
-      await chooseCatalogRow(staffPage, "Cargo", "Fictional fixture_crates", "fixture_crates");
-      await staffPage
-        .locator("#resolution-reason")
-        .fill("Fictional cargo confirmed from screenshot");
-      await confirm(staffPage, "Propose supported resolution");
-      await approve(staffPage, staff, tripId);
+      phase = "RETURNED_ACCEPT";
+      await staffPage.locator("#review-reason").fill("Fictional cargo confirmed from screenshot");
+      await confirm(staffPage, "Accept trip");
       current = (await (await page.request.get(`/api/v1/trips/${tripId}`)).json()).data;
       expect(current.summary.decision).toBe("accepted");
       expect(current.decisions.some((d: { outcome: string }) => d.outcome === "rejected")).toBe(
@@ -1187,10 +1186,14 @@ test(
       );
       await resetAccountLimits();
       phase = "CORRECTION";
-      await page.reload();
+      // An accepted report takes the driver's own correction, citing its screenshot.
+      await page.goto(`/account/trips/${tripId}`);
       await catalogLanguage(page);
+      await page.getByRole("link", { name: "Propose a correction", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/account/trips/${tripId}/correct$`));
+      await page.getByLabel("Whole-trip distance, km", { exact: true }).fill("123");
       await page.locator("#correction-reason").fill("Fictional distance needs correction");
-      const correctionPath = `/api/v1/trips/${tripId}/correction-requests`;
+      const correctionPath = `/api/v1/trips/${tripId}/corrections`;
       let releaseReceipt = () => {},
         receiptHeld = false;
       const receiptGate = new Promise<void>((resolve) => {
@@ -1205,7 +1208,7 @@ test(
         await route.fulfill({ response });
       };
       await page.route(`**${correctionPath}`, holdReceipt);
-      const correction = confirm(page, "Request correction", correctionPath);
+      const correction = confirm(page, "Send correction", correctionPath);
       void correction.catch(() => {});
       try {
         await expect.poll(() => receiptHeld, { timeout: 15000 }).toBe(true);
@@ -1222,23 +1225,19 @@ test(
         await correction.catch(() => {});
         await page.unroute(`**${correctionPath}`, holdReceipt);
       }
+      await expect(page).toHaveURL(new RegExp(`/account/trips/${tripId}$`));
+      // The accepted result stays until a reviewer approves the proposed value.
       current = (await (await page.request.get(`/api/v1/trips/${tripId}`)).json()).data;
       expect(current.summary.actualDistanceM).toBe("123400");
-      const requests = (
-        await (
-          await page.request.get(`/api/v1/trips/${tripId}/correction-requests?limit=25`)
-        ).json()
-      ).data.items;
-      expect(requests.filter((r: { status: string }) => r.status === "pending")).toHaveLength(1);
-      const requestId = requests.find((r: { status: string }) => r.status === "pending").id;
-      await staffPage.reload();
-      await catalogLanguage(staffPage);
-      await corrections(staffPage);
-      await staffPage.getByText("Propose supported resolution", { exact: true }).click();
-      await staffPage.locator("#resolution-request").selectOption(requestId);
-      await staffPage.locator("#resolution-actualDistanceM").fill("123000");
-      await staffPage.locator("#resolution-reason").fill("Fictional verified distance correction");
-      await confirm(staffPage, "Propose supported resolution");
+      expect(current.summary.decision).toBe("accepted");
+      await expect(page.locator(".trip-banner[data-state=correction_pending]")).toBeVisible();
+      const pending = await proposal(staff, tripId);
+      expect(pending).toMatchObject({
+        authorId: fixture.userId,
+        changes: { actualDistanceM: "123000" },
+        correctionRequestId: null,
+      });
+      expect(pending.evidence.map((e: { id: string }) => e.id)).toEqual(evidenceIds);
       await approve(staffPage, staff, tripId);
       current = (await (await page.request.get(`/api/v1/trips/${tripId}`)).json()).data;
       expect(current.summary.actualDistanceM).toBe("123000");

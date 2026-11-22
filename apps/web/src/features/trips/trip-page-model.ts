@@ -24,6 +24,32 @@ export function privateOf(view: DTO["TripView"] | undefined): Private | null {
   return view?.view === "private" ? view : null;
 }
 
+/** Extra reason code of a reviewer's "return for fixes" (VTC-169). */
+export const returnedForFixesCode = "returned_for_fixes";
+
+const reportBacked = (own: Private) => {
+  const revision = own.manualRevision;
+  return !!revision && "reportId" in revision;
+};
+/**
+ * A rejection the driver may fix: a reviewer returned it for fixes, or the system rejected a
+ * report-backed revision. Any other human rejection is final (VTC-169, owner decision D2).
+ */
+function fixableRejection(own: Private, decision: Decision | null) {
+  if (!decision || decision.outcome !== "rejected") return false;
+  // A legacy revision has no report to revise, so a return leaves the driver nothing to do.
+  if (returnedDecision(decision)) return reportBacked(own) || !own.manualRevision;
+  return !decision.reviewerId && reportBacked(own);
+}
+/** A reviewer's return for fixes (VTC-169), as opposed to a final or system rejection. */
+export function returnedDecision(decision: Decision) {
+  return (
+    decision.outcome === "rejected" &&
+    !!decision.reviewerId &&
+    decision.reasonCodes.includes(returnedForFixesCode)
+  );
+}
+
 /** The report of the current manual revision when the signed-in owner may still revise it. */
 export function revisableReportId(
   view: DTO["TripView"] | undefined,
@@ -32,8 +58,16 @@ export function revisableReportId(
   const own = privateOf(view);
   if (!own || !selfId || own.summary.owner.id !== selfId) return null;
   if (own.summary.decision === "accepted") return null;
+  // A final rejection leaves the driver nothing to revise.
+  if (own.summary.decision === "rejected" && !awaitingFix(own)) return null;
   const revision = own.manualRevision;
   return revision && "reportId" in revision ? revision.reportId : null;
+}
+
+/** Whether the signed-in owner may open the correction page now (the server decides). */
+export function canCorrect(view: DTO["TripView"] | undefined, selfId: string | undefined) {
+  const own = privateOf(view);
+  return !!own && !!selfId && own.summary.owner.id === selfId && !!own.correction?.canPropose;
 }
 
 /** Owner, a decision other than acceptance and a report-backed revision (legacy revisions cannot). */
@@ -42,15 +76,14 @@ export function canRevise(view: DTO["TripView"] | undefined, selfId: string | un
 }
 
 /**
- * The trip waits for its driver's fix: a rejected private view whose current revision is
- * report-backed. It depends on the trip data only, so every viewer reads the same status, credit and
- * history; only the owner may act on it (`canRevise`).
+ * The trip waits for its driver's fix: the latest decision is a return for fixes (or a system
+ * rejection of a report). It depends on the trip data only, so every viewer reads the same
+ * status, credit and history; only the owner may act on it.
  */
 export function awaitingFix(view: DTO["TripView"] | undefined): boolean {
   const own = privateOf(view);
   if (own?.summary.decision !== "rejected") return false;
-  const revision = own.manualRevision;
-  return !!revision && "reportId" in revision;
+  return fixableRejection(own, latestDecision(own.decisions));
 }
 
 export type TripStatus =
@@ -96,7 +129,13 @@ export function reasonLabelKey(code: string): TripKey {
 
 /** Labels of reason codes without duplicates; the over-limits code is shown by its own marker. */
 export function reasonLabelKeys(codes: readonly string[]): TripKey[] {
-  return [...new Set(codes.filter((code) => code !== "accepted_over_limits").map(reasonLabelKey))];
+  return [
+    ...new Set(
+      codes
+        .filter((code) => code !== "accepted_over_limits" && code !== returnedForFixesCode)
+        .map(reasonLabelKey),
+    ),
+  ];
 }
 
 export type NextStep = {
@@ -149,7 +188,10 @@ export function nextStep(
   switch (status) {
     case "needs_fix":
       return owner
-        ? step("next_fix", "next_fix_note", { attention: true, ...decided() })
+        ? step("next_fix", reportBacked(own) ? "next_fix_note" : "next_fix_telemetry_note", {
+            attention: true,
+            ...decided(),
+          })
         : step("next_fix_staff", "next_fix_staff_note", decided());
     case "pending_review":
       return staff && !owner
@@ -320,7 +362,7 @@ export function recordedValueKey(
 
 export type HistoryEntry = {
   id: string;
-  kind: "telemetry" | "submitted" | "accepted" | "returned" | "rejected";
+  kind: "telemetry" | "submitted" | "proposed" | "accepted" | "returned" | "rejected";
   titleKey: TripKey;
   /** Revision number for a later submission. */
   number: number | null;
@@ -336,6 +378,7 @@ export type HistoryEntry = {
 const rank: Record<HistoryEntry["kind"], number> = {
   telemetry: 0,
   submitted: 1,
+  proposed: 1,
   accepted: 2,
   returned: 2,
   rejected: 2,
@@ -343,9 +386,13 @@ const rank: Record<HistoryEntry["kind"], number> = {
 
 /**
  * Author-safe trip history, oldest first; at the same instant a submission precedes a decision. A
- * reviewer's rejection reads as returned for fixes only for a report-backed (revisable) revision.
+ * rejection reads as returned for fixes when the driver may fix it; the driver's own corrections
+ * (proposals with values) read as proposed corrections.
  */
-export function tripHistory(view: Private): HistoryEntry[] {
+export function tripHistory(
+  view: Private,
+  proposals: readonly DTO["TripProposal"][] = [],
+): HistoryEntry[] {
   const entries: HistoryEntry[] = [];
   const telemetry = view.sources?.find((source) => source.kind === "ets2telemetry");
   if (telemetry)
@@ -375,11 +422,25 @@ export function tripHistory(view: Private): HistoryEntry[] {
       reasonKeys: [],
       overLimits: false,
     });
+  for (const proposal of proposals)
+    if (proposal.changes && proposal.authorId === view.summary.owner.id)
+      entries.push({
+        id: proposal.id,
+        kind: "proposed",
+        titleKey: "history_proposed",
+        number: null,
+        at: proposal.createdAt,
+        actor: view.summary.owner.nickname,
+        system: false,
+        quote: proposal.reason,
+        reasonKeys: [],
+        overLimits: false,
+      });
   for (const decision of view.decisions) {
     const kind =
       decision.outcome === "accepted"
         ? "accepted"
-        : decision.reviewer && revision && "reportId" in revision
+        : returnedDecision(decision) && fixableRejection(view, decision)
           ? "returned"
           : "rejected";
     entries.push({

@@ -468,9 +468,13 @@ test(
     await expect(sender).toContainText("Fictional Logistics");
     await expect(tripCard(page).locator("img")).toHaveCount(0);
     await expect(page.getByText("PRIVATE_SENTINEL")).toHaveCount(0);
+    // Accepted telemetry is final for its driver: no correction request or proposal (VTC-169).
     await expect(
       page.getByRole("heading", { name: "Request correction", exact: true }),
-    ).toBeVisible();
+    ).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Propose a correction", exact: true })).toHaveCount(
+      0,
+    );
   },
 );
 
@@ -483,8 +487,11 @@ test(
     await catalogLanguage(page);
     await loaded(page);
 
-    // Without a report to revise the trip is rejected, not returned for fixes.
+    // A rejection without a return is final: rejected, not returned for fixes (VTC-169).
     await expect(status(page)).toHaveText("Rejected");
+    await expect(page.locator(".trip-banner[data-state=rejected]")).toContainText(
+      "The rejection is final; the trip needs no action.",
+    );
     await expect(page.getByRole("link", { name: "Fix the report", exact: true })).toHaveCount(0);
     await expect(tile(page, "Credited")).toContainText("No");
     await expect(tile(page, "What next")).toContainText("Not counted");

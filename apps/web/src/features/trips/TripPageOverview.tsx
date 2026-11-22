@@ -208,12 +208,21 @@ export function TripTiles({
   );
 }
 
-/** Receipts, submissions and decisions, oldest first, with reviewer comments and reasons. */
-export function TripHistory({ view }: { view: DTO["TripPrivate"] }) {
+/**
+ * Receipts, submissions, the driver's corrections and decisions, oldest first, with reviewer
+ * comments and reasons.
+ */
+export function TripHistory({
+  view,
+  proposals,
+}: {
+  view: DTO["TripPrivate"];
+  proposals?: readonly DTO["TripProposal"][];
+}) {
   const { t } = useTranslation("trips"),
     when = useWhen(),
     id = useId(),
-    entries = tripHistory(view);
+    entries = tripHistory(view, proposals);
   return (
     <Card className="stack trip-detail-card" aria-labelledby={id}>
       <h2 id={id}>{t("reviewHistory")}</h2>

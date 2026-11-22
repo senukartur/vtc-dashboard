@@ -19,6 +19,7 @@ import {
   OutcomeBadge,
   SourceBadge,
 } from "./badges.js";
+import type { Changes, CorrectionField } from "./correction-model.js";
 import { CatalogName } from "./TripTable.js";
 import { type DTO, revisionFields } from "./transport.js";
 import { recordedValueKey, reportedDamage, tripTimes, unknownHintKey } from "./trip-page-model.js";
@@ -206,6 +207,79 @@ function Trailers({
   );
 }
 
+/** Correction marks of the trip facts (VTC-169): unconfirmed facts and pending proposed values. */
+export type CorrectionMarks = {
+  unconfirmed: ReadonlySet<CorrectionField>;
+  proposed: Changes;
+};
+const entityList = {
+  originCityId: "cities",
+  destinationCityId: "cities",
+  cargoId: "cargoes",
+  trailerTypeId: "trailers",
+} as const satisfies Partial<Record<CorrectionField, CatalogList>>;
+
+/** One corrected or reported value of a correctable fact in display units. */
+export function CorrectionValue({
+  field,
+  value,
+  game,
+}: {
+  field: CorrectionField;
+  value: string;
+  game: DTO["TripSummary"]["game"];
+}) {
+  const { locale, timezone } = useTripDisplay();
+  switch (field) {
+    case "actualDistanceM":
+      return <>{formatQuantity(value, "km", locale)}</>;
+    case "cargoMassKg":
+      return <>{formatQuantity(value, "t", locale)}</>;
+    case "actualStartAt":
+    case "actualCompletedAt":
+      return <time dateTime={value}>{formatUtc(value, locale, timezone)}</time>;
+    default:
+      return <CatalogEntryName list={entityList[field]} id={value} game={game} />;
+  }
+}
+
+/**
+ * The mark after a correctable fact: the pending proposed value ("251 → 312 km · correction under
+ * review"), else "not confirmed" for an unconfirmed telemetry fact, else nothing.
+ */
+function CorrectionMark({
+  field,
+  marks,
+  game,
+}: {
+  field: CorrectionField;
+  marks: CorrectionMarks | undefined;
+  game: DTO["TripSummary"]["game"];
+}) {
+  const { t } = useTranslation("trips"),
+    proposed = marks?.proposed[field];
+  if (proposed)
+    return (
+      <span className="trip-correction-proposed" data-field={field}>
+        <span aria-hidden="true">→ </span>
+        <span className="visually-hidden">{t("correctionProposed")}: </span>
+        <CorrectionValue field={field} value={proposed} game={game} />
+        <span className="trip-muted"> · {t("correctionPendingInline")}</span>
+      </span>
+    );
+  if (!marks?.unconfirmed.has(field)) return null;
+  return (
+    <span className="trip-correction-unconfirmed" data-field={field}>
+      <Badge tone="warn" className="trip-unconfirmed">
+        {t("unconfirmed")}
+      </Badge>
+      <InfoTip label={t("unconfirmed")}>
+        <p>{t("unconfirmedHelp")}</p>
+      </InfoTip>
+    </span>
+  );
+}
+
 function Time({
   value,
   reported,
@@ -232,9 +306,11 @@ function Time({
 export function TripFacts({
   summary,
   view,
+  marks,
 }: {
   summary: DTO["TripSummary"];
   view: DTO["TripPrivate"] | null;
+  marks?: CorrectionMarks;
 }) {
   const { t } = useTranslation("trips"),
     { locale, timezone } = useTripDisplay(),
@@ -249,27 +325,79 @@ export function TripFacts({
     rows: { key: string; term: ReactNode; value: ReactNode }[] = [];
   const add = (key: string, value: ReactNode, term: ReactNode = t(key)) =>
     rows.push({ key, term, value });
-  add("factFrom", <Place city={summary.origin} company={placeCompany(facts, fields, "origin")} />);
+  const mark = (field: CorrectionField) => (
+    <CorrectionMark field={field} marks={marks} game={summary.game} />
+  );
+  const marked = (value: ReactNode, ...fields: CorrectionField[]) =>
+    fields.some((field) => marks?.proposed[field] || marks?.unconfirmed.has(field)) ? (
+      <span className="trip-detail-inline trip-correction-row">
+        {value}
+        {fields.map((field) => (
+          <span key={field}>{mark(field)}</span>
+        ))}
+      </span>
+    ) : (
+      value
+    );
+  // The tiles show the distance; the facts repeat it only to mark or correct it.
+  if (marks?.proposed.actualDistanceM || marks?.unconfirmed.has("actualDistanceM"))
+    add(
+      "factDistance",
+      marked(
+        summary.actualDistanceM === null ? (
+          <UnknownValue hint="distanceUnknownHelp" />
+        ) : (
+          formatQuantity(summary.actualDistanceM, "km", locale)
+        ),
+        "actualDistanceM",
+      ),
+    );
+  add(
+    "factFrom",
+    marked(
+      <Place city={summary.origin} company={placeCompany(facts, fields, "origin")} />,
+      "originCityId",
+    ),
+  );
   add(
     "factTo",
-    <Place city={summary.destination} company={placeCompany(facts, fields, "destination")} />,
+    marked(
+      <Place city={summary.destination} company={placeCompany(facts, fields, "destination")} />,
+      "destinationCityId",
+    ),
   );
   add(
     "cargo",
-    <span className="trip-detail-inline">
-      <span>
-        <Label value={summary.cargo} />
-        {facts?.cargoMassKg && ` · ${formatQuantity(facts.cargoMassKg, "t", locale)}`}
-      </span>
-      <CargoLabelBadges classification={facts?.cargoClassification} />
-    </span>,
+    marked(
+      <span className="trip-detail-inline">
+        <span>
+          <Label value={summary.cargo} />
+          {facts?.cargoMassKg && ` · ${formatQuantity(facts.cargoMassKg, "t", locale)}`}
+        </span>
+        <CargoLabelBadges classification={facts?.cargoClassification} />
+      </span>,
+      "cargoId",
+      "cargoMassKg",
+    ),
   );
   if (view) {
-    add("factTrailer", <Trailers facts={facts} fields={fields} game={summary.game} />);
-    add("factStarted", <Time value={times?.startedAt} reported={!!times?.reported} hint={hint} />);
+    add(
+      "factTrailer",
+      marked(<Trailers facts={facts} fields={fields} game={summary.game} />, "trailerTypeId"),
+    );
+    add(
+      "factStarted",
+      marked(
+        <Time value={times?.startedAt} reported={!!times?.reported} hint={hint} />,
+        "actualStartAt",
+      ),
+    );
     add(
       "factCompleted",
-      <Time value={times?.completedAt} reported={!!times?.reported} hint={hint} />,
+      marked(
+        <Time value={times?.completedAt} reported={!!times?.reported} hint={hint} />,
+        "actualCompletedAt",
+      ),
     );
     add(
       "factDamage",

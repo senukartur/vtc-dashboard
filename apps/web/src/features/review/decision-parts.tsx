@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, Pencil, PenLine, TriangleAlert, X } from "lucide-react";
+import { Check, Pencil, PenLine, TriangleAlert, Undo2, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
@@ -33,10 +33,13 @@ import {
   type Choice,
   type DiffRow,
   decisionBody,
+  decisionChoices,
   decisionState,
   diffRows,
   type HistoryItem,
+  type ProposalMode,
   previousRevision,
+  proposalBody,
   type ReviewData,
 } from "./review-model.js";
 
@@ -80,9 +83,16 @@ export function CodeLabel({ code }: { code: string }) {
   );
 }
 
-export function DispatchDecisionBadge({ decision }: { decision: DTO["TripSummary"]["decision"] }) {
+/** Stage 3 decision badge: "Needs fixes" only for a return for fixes, never a final rejection. */
+export function DispatchDecisionBadge({
+  decision,
+  returned,
+}: {
+  decision: DTO["TripSummary"]["decision"];
+  returned: boolean;
+}) {
   const { t } = useTranslation("trips");
-  return decision === "rejected" ? (
+  return decision === "rejected" && returned ? (
     <Badge tone="warn" icon={Pencil} className="trips-decision" data-decision={decision}>
       {t("status_needs_fix")}
     </Badge>
@@ -478,8 +488,8 @@ export function ReviewHistory({
                   {item.kind === "revision"
                     ? t("revisionSubmitted", { number: item.number })
                     : t(
-                        staged && item.outcome === "rejected" && item.reviewer
-                          ? "dispatchReturned"
+                        item.outcome === "rejected" && item.returned
+                          ? "history_returned"
                           : `outcome_${item.outcome}`,
                       )}
                 </strong>
@@ -532,20 +542,24 @@ function LimitList({ id, rules }: { id?: string; rules: DTO["QualificationRuleCh
 }
 
 /**
- * Accept or reject the visible revision. The form mirrors the server's review read: own reports
- * get a note and no controls, unavailable acceptance is explained, and an over-limit acceptance
- * needs an explicit confirmation that resets whenever the review version changes.
+ * Accept, return for fixes or reject the visible revision. The form mirrors the server's review
+ * read: own reports get a note and no controls, unavailable acceptance is explained, an over-limit
+ * acceptance needs an explicit confirmation that resets whenever the review version changes, and a
+ * return is offered only when something is correctable. With a pending proposal the form decides
+ * the proposal (and with it the trip) instead (VTC-169).
  */
 export function DecisionForm({
   tripId,
   review,
   etag,
   staged = false,
+  proposal = null,
 }: {
   tripId: string;
   review: ReviewData;
   etag: string | null;
   staged?: boolean;
+  proposal?: ProposalMode | null;
 }) {
   const { t } = useTranslation("trips"),
     command = useTripCommand(),
@@ -561,7 +575,8 @@ export function DecisionForm({
     visibleId = useId(),
     unavailableId = useId(),
     limitsId = useId(),
-    blockerId = useId();
+    blockerId = useId(),
+    choiceHelpId = useId();
   // The checkbox confirms the limits of one review version; a refreshed review needs a new tick.
   const confirmed = confirmation.value && confirmation.etag === etag,
     state = decisionState({
@@ -571,8 +586,18 @@ export function DecisionForm({
       confirmed,
       seconds: command.seconds,
       optionalAcceptReason: staged,
+      proposal,
     }),
-    mode = review.acceptance.mode,
+    { choices, canReturn } = decisionChoices(review, proposal),
+    // Declining another proposal, or one on an accepted trip, keeps the trip decision.
+    declineOnly = !!proposal && !(proposal.authored && review.trip.summary.decision !== "accepted"),
+    // A proposal is accepted on its derived revision; an old-format request never.
+    acceptMode = proposal
+      ? proposal.oldFormat
+        ? "unavailable"
+        : (review.correctionReview?.proposalAcceptance ?? review.acceptance).mode
+      : review.acceptance.mode,
+    unavailable = acceptMode === "unavailable",
     decided = ["accepted", "rejected"].includes(review.trip.summary.decision);
   // A closing confirmation returns focus to its trigger, which may be disabled by then (for
   // example after a conflict reset the checkbox). Only if focus fell back to the document, move
@@ -617,16 +642,36 @@ export function DecisionForm({
         </div>
       </section>
     );
-  const unavailable = mode === "unavailable",
-    body = choice ? decisionBody({ review, choice, reason, confirmed }) : null,
-    overLimits = body?.confirmOverLimits === true,
-    reasonInvalid = staged && choice === "reject" && !reason.trim(),
-    reasonOptional = staged && choice === "accept";
+  const body = choice ? decisionBody({ review, choice, reason, confirmed }) : null,
+    proposed = choice && proposal ? proposalBody({ review, proposal, choice, reason }) : null,
+    overLimits = !proposal && body?.confirmOverLimits === true,
+    // Stage 3 lets an acceptance go without a note; a return, rejection or proposal needs one.
+    reasonOptional = staged && choice === "accept" && !proposal,
+    reasonInvalid = staged && !!choice && choice !== "accept" && !reason.trim();
   function pick(next: Choice) {
     if (next === "accept" && unavailable) return;
     setChoice(next);
     setSuccess(false);
   }
+  const choiceLabel = (value: Choice) =>
+    value === "accept"
+      ? t("chooseAccept")
+      : value === "return"
+        ? t("chooseReturn")
+        : t(declineOnly ? "chooseDecline" : "chooseReject");
+  const submitLabel = !choice
+    ? t("recordDecision")
+    : proposal
+      ? t(
+          choice === "accept"
+            ? "approve"
+            : choice === "return"
+              ? "returnTrip"
+              : declineOnly
+                ? "rejectProposal"
+                : "reject",
+        )
+      : t(choice === "return" ? "returnTrip" : choice);
   const blockerText =
     state.blocker && state.blocker !== "wait"
       ? t(
@@ -637,40 +682,59 @@ export function DecisionForm({
               : `blocker_${state.blocker}`,
         )
       : null;
+  const icon = { accept: Check, return: Undo2, reject: X } as const;
   return (
     <section className="review-section review-form" aria-labelledby={headingId}>
       {title}
-      <fieldset className="review-choice" aria-labelledby={headingId}>
-        <button
-          type="button"
-          id="review-choice-accept"
-          className="review-choice-item"
-          data-choice="accept"
-          aria-pressed={choice === "accept"}
-          aria-disabled={unavailable || undefined}
-          aria-describedby={unavailable ? unavailableId : undefined}
-          onClick={() => pick("accept")}
-        >
-          <Check size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
-          {t("chooseAccept")}
-        </button>
-        <button
-          type="button"
-          id="review-choice-reject"
-          className="review-choice-item"
-          data-choice="reject"
-          aria-pressed={choice === "reject"}
-          onClick={() => pick("reject")}
-        >
-          <X size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
-          {t(staged ? "dispatchReturn" : "chooseReject")}
-        </button>
+      {review.correctionReview?.blockedOnlyByEditable && !proposal && (
+        <p className="review-note" role="note" data-note="author-can-fix">
+          {t("authorCanFix")}
+        </p>
+      )}
+      <fieldset className="review-choice" aria-labelledby={headingId} data-choices={choices.length}>
+        {choices.map((value) => {
+          const Icon = icon[value];
+          return (
+            <button
+              key={value}
+              type="button"
+              id={`review-choice-${value}`}
+              className="review-choice-item"
+              data-choice={value}
+              aria-pressed={choice === value}
+              aria-disabled={(value === "accept" && unavailable) || undefined}
+              aria-describedby={value === "accept" && unavailable ? unavailableId : undefined}
+              onClick={() => pick(value)}
+            >
+              <Icon size={14} strokeWidth={1.8} aria-hidden="true" focusable="false" />{" "}
+              {choiceLabel(value)}
+            </button>
+          );
+        })}
       </fieldset>
+      {(choice === "return" || (choice === "reject" && !declineOnly)) && (
+        <small id={choiceHelpId} className="review-muted" data-help={choice}>
+          {t(choice === "return" ? "returnHelp" : "rejectFinalHelp")}
+        </small>
+      )}
+      {!canReturn && !proposal && review.correctionReview && (
+        <small className="review-muted" data-note="return-unavailable">
+          {t("returnUnavailable")}
+        </small>
+      )}
       {unavailable && (
         <div id={unavailableId} className="review-note">
           {state.blockedCodes.length ? (
             <>
-              <p>{t(staged ? "dispatchAcceptUnavailable" : "acceptUnavailable")}</p>
+              <p>
+                {t(
+                  proposal
+                    ? "correctionAcceptUnavailable"
+                    : staged
+                      ? "dispatchAcceptUnavailable"
+                      : "acceptUnavailable",
+                )}
+              </p>
               <ul>
                 {state.blockedCodes.map((code) => (
                   <li key={code}>
@@ -680,7 +744,15 @@ export function DecisionForm({
               </ul>
             </>
           ) : (
-            <p>{t(staged ? "dispatchAcceptUnavailable" : "blocker_unavailable")}</p>
+            <p>
+              {t(
+                proposal?.oldFormat
+                  ? "oldFormatHelp"
+                  : staged
+                    ? "dispatchAcceptUnavailable"
+                    : "blocker_unavailable",
+              )}
+            </p>
           )}
         </div>
       )}
@@ -689,7 +761,7 @@ export function DecisionForm({
           {t(
             reasonOptional
               ? "dispatchOptionalNote"
-              : staged && choice === "reject"
+              : choice === "return"
                 ? "dispatchReturnReason"
                 : state.reasonLabel === "rejection"
                   ? "reasonRejection"
@@ -699,7 +771,7 @@ export function DecisionForm({
         <textarea
           id="review-reason"
           className="input"
-          required={!staged || choice === "reject"}
+          required={!reasonOptional}
           aria-invalid={reasonInvalid || undefined}
           maxLength={2048}
           aria-describedby={reasonInvalid ? `${visibleId} ${blockerId}` : visibleId}
@@ -745,16 +817,11 @@ export function DecisionForm({
       {success && <p role="status">{t("success")}</p>}
       <div className="review-submit">
         <Confirm
-          label={t(
-            staged && choice === "reject"
-              ? "dispatchReturn"
-              : state.submitLabel === "record"
-                ? "recordDecision"
-                : state.submitLabel,
-          )}
+          label={submitLabel}
           variant="default"
           guard={JSON.stringify([
             etag,
+            proposal?.proposal.revisionId,
             body?.reviewedRevisionId,
             review.factRevisionId,
             reason,
@@ -762,11 +829,22 @@ export function DecisionForm({
             confirmed,
             overLimits,
           ])}
-          disabled={!state.canSubmit || (staged && !etag)}
+          disabled={!state.canSubmit || ((staged || !!proposal) && !etag)}
           pending={command.pending}
           failure={command.failure}
           describedBy={blockerText ? blockerId : undefined}
           onConfirm={async () => {
+            if (proposal) {
+              if (!proposed || !etag) return;
+              const r = await command.run(
+                `/trips/${tripId}/proposals/${proposal.proposal.id}/decisions`,
+                proposed,
+                "EnvelopeTripProposalDecision",
+                etag,
+              );
+              if (r) setSuccess(true);
+              return r;
+            }
             if (!body || (staged && !etag)) return;
             const r = await command.run(
               `/trips/${tripId}/decisions${staged ? "?view=stage3" : ""}`,
@@ -781,11 +859,11 @@ export function DecisionForm({
           <div className="review-confirm">
             <Fields
               values={{
-                decision: choice
-                  ? t(staged && choice === "reject" ? "dispatchReturn" : choice)
-                  : null,
+                decision: choice ? choiceLabel(choice) : null,
                 version: review.trip.summary.version,
-                reviewedRevisionId: body?.reviewedRevisionId,
+                reviewedRevisionId: proposal
+                  ? proposal.proposal.revisionId
+                  : body?.reviewedRevisionId,
                 factRevisionId: review.factRevisionId,
               }}
             />

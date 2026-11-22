@@ -242,7 +242,7 @@ export function needsFixManual(variant: "effective" | "no-fact" | "unknown-damag
     {
       id: "41500000-0000-4000-8000-000000000371",
       outcome: "rejected",
-      reasonCodes: ["SYNTHETIC_REJECTED", "manual_evidence_missing"],
+      reasonCodes: ["SYNTHETIC_REJECTED", "manual_evidence_missing", "returned_for_fixes"],
       reason: needsFixReason,
       decidedAt: "2026-11-12T10:31:00.000Z",
       reviewerId: fixtureReviewer.id,
@@ -300,6 +300,125 @@ export function withTrailer() {
   return envelope;
 }
 
+// VTC-169 driver correction states. Every value is fictional.
+export const correctionReturnReason = "Fictional recording misses the whole-trip distance";
+export const correctionDriverReason = "Fictional odometer photo shows the whole route";
+export const unlistedCargoCode = "fixture_unlisted_cargo";
+export const correctionProposalId = "41500000-0000-4000-8000-000000000380";
+const returnDecision = (factRevisionId: string, codes: string[]): S["Decision"] => ({
+  id: "41500000-0000-4000-8000-000000000381",
+  outcome: "rejected",
+  reasonCodes: [...codes, "returned_for_fixes"],
+  reason: correctionReturnReason,
+  decidedAt: "2026-11-12T10:31:00.000Z",
+  reviewerId: fixtureReviewer.id,
+  reviewer: { ...fixtureReviewer },
+  acceptedOverLimits: false,
+  reviewedRevisionId: null,
+  basis: decisionBasis(factRevisionId),
+});
+
+/**
+ * C1: a telemetry trip its reviewer returned for fixes: the whole-trip distance is unsupported and
+ * the cargo code is not in the catalog, so the driver can correct exactly these two facts.
+ */
+export function needsFixTelemetry() {
+  const { envelope, view, facts } = stage4("telemetry");
+  view.summary.decision = "rejected";
+  view.summary.event = null;
+  view.summary.sourceKinds = ["ets2telemetry"];
+  view.summary.actualDistanceM = "251000";
+  facts.actualDistanceM = "251000";
+  view.sources = (view.sources ?? []).filter((source) => source.kind === "ets2telemetry");
+  view.reviewReasonCodes = ["whole_trip_distance_unknown", "cargo_unknown"];
+  view.decisions = [
+    returnDecision(facts.factRevisionId, ["whole_trip_distance_unknown", "cargo_unknown"]),
+  ];
+  view.correction = {
+    baseFactRevisionId: facts.factRevisionId,
+    canPropose: true,
+    fields: [
+      {
+        field: "actualDistanceM",
+        reported: "251000",
+        reasonCode: "whole_trip_distance_unknown",
+        sourceCode: null,
+      },
+      {
+        field: "cargoId",
+        reported: null,
+        reasonCode: "cargo_unknown",
+        sourceCode: unlistedCargoCode,
+      },
+    ],
+  };
+  return envelope;
+}
+
+/** C2: the same trip after its driver sent a correction: back in review with the proposal. */
+export function pendingCorrection() {
+  const envelope = needsFixTelemetry();
+  const view = envelope.data as TripPrivate;
+  view.summary.decision = "pending_review";
+  view.pendingProposalId = correctionProposalId;
+  if (view.correction) view.correction.canPropose = false;
+  return envelope;
+}
+
+/** The driver's pending correction of C1 as the proposal reads return it. */
+export function correctionProposal(cargoId: string, tripId = tripPageId): S["TripProposal"] {
+  const proposal = structuredClone(
+    cases.find((c) => c.id === "getTripProposal:success")?.response as S["EnvelopeTripProposal"],
+  ).data;
+  return {
+    ...proposal,
+    id: correctionProposalId,
+    revisionId: "41500000-0000-4000-8000-000000000382",
+    tripId,
+    kind: "resolution",
+    authorId: fixtureId,
+    baseFactRevisionId: "41500000-0000-4000-8000-000000000310",
+    createdAt: "2026-11-12T11:00:00.000Z",
+    reason: correctionDriverReason,
+    evidence: [],
+    changes: { actualDistanceM: "312000", cargoId },
+    correctionRequestId: null,
+    state: "pending",
+    review: null,
+  };
+}
+
+/** C3: an accepted manual report its driver can still correct through a proposal. */
+export function acceptedManualCorrectable() {
+  const envelope = needsFixManual();
+  const view = envelope.data as TripPrivate;
+  const facts = view.effectiveFacts as S["EffectiveTripFacts"];
+  view.summary.decision = "accepted";
+  view.reviewReasonCodes = [];
+  view.decisions = [
+    {
+      ...returnDecision(facts.factRevisionId, []),
+      outcome: "accepted",
+      reasonCodes: [],
+      reason: "Fictional screenshot matches the report",
+    },
+  ];
+  view.correction = {
+    baseFactRevisionId: facts.factRevisionId,
+    canPropose: true,
+    fields: [
+      {
+        field: "actualDistanceM",
+        reported: facts.actualDistanceM,
+        reasonCode: null,
+        sourceCode: null,
+      },
+      { field: "cargoMassKg", reported: "18000", reasonCode: null, sourceCode: null },
+    ],
+  };
+  return envelope;
+}
+
 /** The private view inside a stub envelope. */
 export const tripPrivate = (envelope: TripEnvelope) => envelope.data as TripPrivate;
 
@@ -337,5 +456,8 @@ export function tripPageStubs(): Record<string, TripEnvelope> {
     openTelemetry: openTelemetry(),
     withTrailer: withTrailer(),
     staffNeedsFix: asOtherMember(needsFixManual()),
+    needsFixTelemetry: needsFixTelemetry(),
+    pendingCorrection: pendingCorrection(),
+    acceptedManualCorrectable: acceptedManualCorrectable(),
   };
 }

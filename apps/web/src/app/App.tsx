@@ -61,6 +61,11 @@ const TripDetailPage = lazy(() =>
     default: module.TripDetailPage,
   })),
 );
+const TripCorrectionPage = lazy(() =>
+  import("../features/trips/TripCorrectionPage.js").then((module) => ({
+    default: module.TripCorrectionPage,
+  })),
+);
 const ReportsPage = lazy(() =>
   import("../features/manual-reports/ManualReportPage.js").then((module) => ({
     default: module.ReportsPage,
@@ -126,6 +131,7 @@ const accountRoutes: Record<RouteId, ReactElement> = {
   companyOverview: <DashboardPage view="company" />,
   trips: <TripsPage />,
   trip: <TripDetailPage />,
+  correctTrip: <TripCorrectionPage />,
   reports: <ReportsPage />,
   newReport: <ManualReportPage kind="new" />,
   draft: <ManualReportPage kind="draft" />,

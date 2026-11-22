@@ -12,9 +12,12 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { State } from "../trips/components.js";
+import { oldFormatProposal } from "../trips/correction-model.js";
 import { useTripQuery } from "../trips/queries.js";
 import { CatalogName, DecisionBadge, GameChip } from "../trips/TripTable.js";
 import type { DTO } from "../trips/transport.js";
+import { latestDecision } from "../trips/trip-page-model.js";
+import { ClientReasons, CorrectionComparison } from "./correction-parts.js";
 import {
   DecisionForm,
   DispatchDecisionBadge,
@@ -26,8 +29,14 @@ import {
   TripFacts,
 } from "./decision-parts.js";
 import { stagedReview } from "./dispatch-model.js";
-import { ReviewCorrections } from "./ReviewPanel.js";
-import { historyItems, isOwn, queueType, reviewType, selfReviewCode } from "./review-model.js";
+import {
+  historyItems,
+  isOwn,
+  type ProposalMode,
+  queueType,
+  reviewType,
+  selfReviewCode,
+} from "./review-model.js";
 import { SourceComparison } from "./SourceComparison.js";
 import "./review.css";
 import { accountTimeZone } from "../../shared/formatting.js";
@@ -86,7 +95,30 @@ export function DecisionPanel({
     // The queue row names the heading first so the focused heading does not change on load.
     titled = fallback ?? summary,
     type = fallback ? queueType(fallback) : review ? reviewType(review.trip) : null,
-    own = summary ? isOwn(summary, session.self?.member.id) : false;
+    own = summary ? isOwn(summary, session.self?.member.id) : false,
+    pendingId = review?.trip.pendingProposalId ?? null,
+    // A pending proposal is decided through the same form (VTC-169).
+    pendingRead = useTripQuery(
+      `/trips/${tripId}/proposals/${pendingId}`,
+      "EnvelopeTripProposal",
+      !!pendingId,
+    ),
+    pendingProposal = pendingRead.data?.data.data,
+    proposalMode: ProposalMode | null =
+      review && pendingProposal?.id === pendingId && pendingProposal.state === "pending"
+        ? {
+            proposal: pendingProposal,
+            authored:
+              !!pendingProposal.changes &&
+              pendingProposal.authorId === review.trip.summary.owner.id,
+            oldFormat: oldFormatProposal(pendingProposal),
+          }
+        : null,
+    // The form waits for the pending proposal; deciding the trip around it would conflict.
+    formReady = !pendingId || !!proposalMode,
+    returned =
+      !!review?.trip.decisions.length &&
+      !!latestDecision(review.trip.decisions)?.reasonCodes.includes("returned_for_fixes");
   const section = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     if (variant !== "side") return;
@@ -168,9 +200,24 @@ export function DecisionPanel({
     ),
     check = review && <ReviewQualificationCheck check={review.qualificationCheck} />,
     log = review && <ReviewHistory items={history} timezone={timezone} staged={staged} />,
-    form = review && (
-      <DecisionForm key={tripId} tripId={tripId} review={review} etag={etag} staged={staged} />
-    );
+    correction = review && proposalMode && (
+      <CorrectionComparison trip={review.trip} mode={proposalMode} />
+    ),
+    client = review && <ClientReasons review={review.correctionReview} />,
+    form =
+      review &&
+      (formReady ? (
+        <DecisionForm
+          key={`${tripId}:${pendingId ?? ""}`}
+          tripId={tripId}
+          review={review}
+          etag={etag}
+          staged={staged}
+          proposal={proposalMode}
+        />
+      ) : (
+        <State query={pendingRead} />
+      ));
   return (
     <section
       ref={section}
@@ -183,7 +230,7 @@ export function DecisionPanel({
           {summary && <GameChip game={summary.game} />}
           {summary &&
             (staged ? (
-              <DispatchDecisionBadge decision={summary.decision} />
+              <DispatchDecisionBadge decision={summary.decision} returned={returned} />
             ) : (
               <DecisionBadge decision={summary.decision} />
             ))}
@@ -245,7 +292,9 @@ export function DecisionPanel({
           (variant === "page" ? (
             <div className="review-decision-columns">
               <div className="review-column">
+                {correction}
                 {comparison}
+                {client}
                 {leading}
                 {diff}
                 {trailing}
@@ -259,7 +308,9 @@ export function DecisionPanel({
             </div>
           ) : (
             <>
+              {correction}
               {comparison}
+              {client}
               {leading}
               {diff}
               {trailing}
@@ -269,14 +320,6 @@ export function DecisionPanel({
               {!staged && form}
             </>
           ))}
-        {review && variant === "page" && (
-          <ReviewCorrections
-            tripId={tripId}
-            trip={review.trip}
-            etag={etag}
-            self={review.blockedReasonCodes.includes(selfReviewCode)}
-          />
-        )}
       </div>
       {staged && review && variant === "page" && children && (
         <div className="review-decision-body">{children}</div>

@@ -425,7 +425,7 @@ function ManualEditor({
         <Card className="stack">
           <p>{t("acceptedEdit")}</p>
           <Button asChild>
-            <Link to={`/account/trips/${report.tripId}`}>{t("correction")}</Link>
+            <Link to={`/account/trips/${report.tripId}/correct`}>{t("correction")}</Link>
           </Button>
         </Card>
       )}
@@ -666,10 +666,7 @@ function ManualEditor({
                 <State query={targets} />
                 {target && <State query={selectedTarget} />}
                 {targetSummary?.decision === "accepted" && (
-                  <p role="alert">
-                    {t("acceptedTarget")}{" "}
-                    <Link to={`/account/trips/${targetSummary.id}`}>{t("correction")}</Link>
-                  </p>
+                  <p role="alert">{t("acceptedTarget")}</p>
                 )}
               </div>
             )}

@@ -117,7 +117,12 @@ export function DispatchQueueTable({
       className: "dispatch-reason review-muted",
       cell: (item) => (
         <>
-          {item.state === "resolved" && <DispatchDecisionBadge decision={item.outcome} />}
+          {item.state === "resolved" && (
+            <DispatchDecisionBadge
+              decision={item.outcome}
+              returned={item.reasonCodes.includes("returned_for_fixes")}
+            />
+          )}
           <ReviewReasonList codes={item.reasonCodes} />
         </>
       ),

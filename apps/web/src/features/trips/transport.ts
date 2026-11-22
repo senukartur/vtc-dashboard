@@ -35,22 +35,6 @@ defs.TripProposal = {
     },
   ],
 };
-const resolution = defs.ResolutionInput;
-if (!resolution) throw new Error("MISSING_TRIP_CONTRACT");
-const resolutionBase = { ...resolution };
-delete resolutionBase.if;
-delete resolutionBase.then;
-const resolutionProperties = resolution.properties as Record<string, unknown>;
-defs.ResolutionInput = {
-  oneOf: [
-    { ...resolutionBase, properties: { ...resolutionProperties, correctionRequestId: false } },
-    {
-      ...resolutionBase,
-      required: [...(resolution.required as string[]), "correctionRequestId"],
-      ...(resolution.then as object),
-    },
-  ],
-};
 export function schema<K extends keyof DTO>(name: K): z.ZodType<DTO[K]> {
   let result = schemas.get(name);
   if (!result) {

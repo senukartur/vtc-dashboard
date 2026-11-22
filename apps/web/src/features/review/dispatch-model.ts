@@ -168,14 +168,23 @@ export function stagedReview(value: DTO["TripStage3Review"]): ReviewData {
       manualRevision: value.sources.manual?.manualRevision ?? null,
       pendingProposalId: value.pendingProposalId,
       reviewReasonCodes: value.reviewReasonCodes,
+      correction: value.correction ?? null,
     },
+    ...(value.correctionReview ? { correctionReview: value.correctionReview } : {}),
   };
 }
 
 export function stagedDecisionInput(
   body: DirectDecisionInput,
 ): DTO["TripStage3AcceptInput"] | DTO["TripStage3ReturnInput"] {
-  const { decision, factRevisionId, reviewedRevisionId, reason, confirmOverLimits } = body;
+  const {
+    decision,
+    factRevisionId,
+    reviewedRevisionId,
+    reason,
+    confirmOverLimits,
+    returnForFixes,
+  } = body;
   const snapshot = { factRevisionId, reviewedRevisionId, proposalId: null };
   return decision === "accept"
     ? {
@@ -184,5 +193,5 @@ export function stagedDecisionInput(
         ...(reason ? { reason } : {}),
         ...(confirmOverLimits ? { confirmOverLimits } : {}),
       }
-    : { ...snapshot, decision, reason };
+    : { ...snapshot, decision, reason, ...(returnForFixes ? { returnForFixes } : {}) };
 }

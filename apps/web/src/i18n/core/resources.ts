@@ -88,6 +88,7 @@ export const core = {
         newReport: "New report",
         draft: "Draft",
         revise: "Revise report",
+        correctTrip: "Trip correction",
       },
       account: {
         security: "Account and security",
@@ -228,6 +229,7 @@ export const core = {
         newReport: "Новый отчёт",
         draft: "Черновик",
         revise: "Исправление отчёта",
+        correctTrip: "Исправление рейса",
       },
       account: {
         security: "Аккаунт и безопасность",

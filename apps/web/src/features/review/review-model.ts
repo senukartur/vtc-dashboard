@@ -16,7 +16,8 @@ export type QueueParams = {
 };
 export type QueueType = "late_telemetry" | "resubmission" | "manual" | "telemetry";
 export type RuleFlag = "exceeded" | "check" | "none";
-export type Choice = "accept" | "reject";
+/** Return and reject share the reject decision; a return stores `returned_for_fixes` (VTC-169). */
+export type Choice = "accept" | "return" | "reject";
 export type ReviewTrip = Pick<
   DTO["TripPrivate"],
   | "summary"
@@ -26,11 +27,25 @@ export type ReviewTrip = Pick<
   | "decisions"
   | "pendingProposalId"
   | "reviewReasonCodes"
+  | "correction"
 >;
 export type ReviewData = Pick<
   DTO["Review"],
-  "acceptance" | "blockedReasonCodes" | "canDecide" | "factRevisionId" | "qualificationCheck"
+  | "acceptance"
+  | "blockedReasonCodes"
+  | "canDecide"
+  | "factRevisionId"
+  | "qualificationCheck"
+  | "correctionReview"
 > & { trip: ReviewTrip };
+/** The pending proposal the decision form decides instead of the trip itself. */
+export type ProposalMode = {
+  proposal: DTO["TripProposal"];
+  /** The driver's own correction (values by the trip owner): its decline can return or reject. */
+  authored: boolean;
+  /** A text-only request released before VTC-169: it can only be declined. */
+  oldFormat: boolean;
+};
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const decisions: readonly QueueDecision[] = [
@@ -243,6 +258,7 @@ export type Blocker =
   | "blocked"
   | "choice"
   | "unavailable"
+  | "return"
   | "reason"
   | "length"
   | "confirm"
@@ -254,9 +270,25 @@ export type DecisionState = {
   exceeded: DTO["QualificationRuleCheck"][];
   blockedCodes: string[];
   reasonLabel: "rejection" | "note";
-  submitLabel: "reject" | "accept" | "record";
+  submitLabel: "reject" | "accept" | "record" | "return";
   blocker: Blocker;
+  /** "Return for fixes" is offered: something is correctable (server `canReturn`). */
+  canReturn: boolean;
 };
+
+/**
+ * The choices the form offers. A return needs something correctable; an accepted trip's or another
+ * proposal's decline only declines the proposal, so it offers no return.
+ */
+export function decisionChoices(review: ReviewData, proposal: ProposalMode | null = null) {
+  const canReturn =
+    !!review.correctionReview?.canReturn &&
+    (!proposal || (proposal.authored && review.trip.summary.decision !== "accepted"));
+  return {
+    canReturn,
+    choices: (canReturn ? ["accept", "return", "reject"] : ["accept", "reject"]) as Choice[],
+  };
+}
 
 /** What the decision form allows right now. The server still enforces every rule. */
 export function decisionState({
@@ -266,6 +298,7 @@ export function decisionState({
   confirmed,
   seconds,
   optionalAcceptReason = false,
+  proposal = null,
 }: {
   review: ReviewData;
   choice: Choice | null;
@@ -273,15 +306,25 @@ export function decisionState({
   confirmed: boolean;
   seconds: number;
   optionalAcceptReason?: boolean;
+  proposal?: ProposalMode | null;
 }): DecisionState {
-  const mode = review.acceptance.mode,
+  // A proposal is accepted on its derived fact revision; an old-format request never.
+  const acceptance = proposal
+      ? proposal.oldFormat
+        ? { mode: "unavailable" as const, blockedReasonCodes: [] }
+        : (review.correctionReview?.proposalAcceptance ?? review.acceptance)
+      : review.acceptance,
+    mode = proposal && acceptance.mode === "over_limits" ? "ordinary" : acceptance.mode,
+    { canReturn } = decisionChoices(review, proposal),
     trimmed = reason.trim(),
     self = review.blockedReasonCodes.includes(selfReviewCode),
     exceeded =
       mode === "over_limits"
         ? review.qualificationCheck.rules.filter((rule) => rule.result === "fail")
         : [],
-    needsConfirmation = choice === "accept" && mode === "over_limits";
+    needsConfirmation = choice === "accept" && mode === "over_limits",
+    // A proposal decision always needs a comment.
+    optional = optionalAcceptReason && !proposal;
   const blocker: Blocker = self
     ? "self"
     : !review.canDecide
@@ -290,23 +333,26 @@ export function decisionState({
         ? "choice"
         : choice === "accept" && mode === "unavailable"
           ? "unavailable"
-          : !trimmed && !(optionalAcceptReason && choice === "accept")
-            ? "reason"
-            : trimmed.length > reasonLimit
-              ? "length"
-              : needsConfirmation && !confirmed
-                ? "confirm"
-                : seconds > 0
-                  ? "wait"
-                  : null;
+          : choice === "return" && !canReturn
+            ? "return"
+            : !trimmed && !(optional && choice === "accept")
+              ? "reason"
+              : trimmed.length > reasonLimit
+                ? "length"
+                : needsConfirmation && !confirmed
+                  ? "confirm"
+                  : seconds > 0
+                    ? "wait"
+                    : null;
   return {
     canSubmit: blocker === null,
     needsConfirmation,
     exceeded,
-    blockedCodes: mode === "unavailable" ? review.acceptance.blockedReasonCodes : [],
-    reasonLabel: choice === "reject" ? "rejection" : "note",
+    blockedCodes: mode === "unavailable" ? acceptance.blockedReasonCodes : [],
+    reasonLabel: choice === "accept" || !choice ? "note" : "rejection",
     submitLabel: choice ?? "record",
     blocker,
+    canReturn,
   };
 }
 
@@ -325,7 +371,7 @@ export function decisionBody({
   confirmed: boolean;
 }): DirectDecisionInput {
   return {
-    decision: choice,
+    decision: choice === "accept" ? "accept" : "reject",
     reviewedRevisionId: review.trip.manualRevision?.id ?? review.factRevisionId,
     factRevisionId: review.factRevisionId,
     proposalId: null,
@@ -333,6 +379,33 @@ export function decisionBody({
     ...(choice === "accept" && review.acceptance.mode === "over_limits" && confirmed
       ? { confirmOverLimits: true }
       : {}),
+    ...(choice === "return" ? { returnForFixes: true } : {}),
+  };
+}
+
+/**
+ * Exact ProposalDecisionInput. Accepting approves the proposal; returning or rejecting the
+ * driver's correction declines it and records the trip decision in the same command. Any other
+ * decline only declines the proposal and keeps the effective result.
+ */
+export function proposalBody({
+  review,
+  proposal,
+  choice,
+  reason,
+}: {
+  review: ReviewData;
+  proposal: ProposalMode;
+  choice: Choice;
+  reason: string;
+}): DTO["ProposalDecisionInput"] {
+  const base = { reviewedRevisionId: proposal.proposal.revisionId, reason: reason.trim() };
+  if (choice === "accept") return { ...base, decision: "approve" };
+  const decides = proposal.authored && review.trip.summary.decision !== "accepted";
+  return {
+    ...base,
+    decision: "reject",
+    ...(decides ? { tripDecision: choice === "return" ? "returned_for_fixes" : "rejected" } : {}),
   };
 }
 
@@ -345,6 +418,8 @@ export type HistoryItem =
       reviewer: string | null;
       reason: string | null;
       overLimits: boolean;
+      /** A reviewer's return for fixes rather than a final rejection. */
+      returned: boolean;
       at: string;
     };
 
@@ -367,6 +442,7 @@ export function historyItems(
       reviewer: decision.reviewer?.nickname ?? null,
       reason: decision.reason,
       overLimits: decision.acceptedOverLimits,
+      returned: decision.reasonCodes.includes("returned_for_fixes"),
       at: decision.decidedAt,
     })),
   ];
