@@ -245,6 +245,25 @@
   gap: 4px;
   vertical-align: middle;
 }
+/* Inline flow keeps the info button right after the last label instead of on its own line. */
+.trip-cargo-labels {
+  min-width: 0;
+  line-height: 24px;
+}
+.trip-cargo-labels > ul {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trip-cargo-labels li {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.trip-cargo-labels > :last-child {
+  vertical-align: middle;
+}
 .trip-detail-actions {
   display: flex;
   flex-wrap: wrap;

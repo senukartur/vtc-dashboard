@@ -5,6 +5,7 @@ import { type DTO, schema } from "../../apps/web/src/features/trips/transport.ts
 import {
   awaitingFix,
   canRevise,
+  cargoLabels,
   creditState,
   damageValue,
   distanceNote,
@@ -480,6 +481,45 @@ test("unknown recorded values say whether telemetry recorded the trip at all", (
   expect(recordedValueKey("telemetryJob", "unknown")).toBeNull();
   expect(recordedValueKey("telemetryAudit", undefined)).toBeNull();
   expect(recordedValueKey("telemetryAudit", "not-qualified")).toBe("telemetryAudit_not-qualified");
+});
+
+test("reported cargo labels list ADR, flags and groups once, in display order", () => {
+  const base = {
+    fragile: false,
+    valuable: false,
+    adr: { state: "none" },
+    overweight: false,
+    oversize: null,
+    groups: [],
+  } satisfies DTO["TripCargoClassification"];
+  expect(cargoLabels(undefined)).toEqual([]);
+  expect(cargoLabels(base)).toEqual([]);
+  expect(
+    cargoLabels({
+      fragile: true,
+      valuable: true,
+      adr: { state: "class", class: 3 },
+      overweight: true,
+      oversize: true,
+      groups: ["liquid", "fragile", "oversize", "refrigerated"],
+    }),
+  ).toEqual([
+    { label: "adr", adrClass: 3 },
+    { label: "fragile" },
+    { label: "valuable" },
+    { label: "overweight" },
+    { label: "oversize" },
+    { label: "liquid" },
+    { label: "refrigerated" },
+  ]);
+  // A group without its flag still shows the label; an unmapped ADR value shows plain ADR.
+  expect(
+    cargoLabels({ ...base, adr: { state: "unsupported" }, groups: ["fragile", "oversize"] }),
+  ).toEqual([{ label: "adrUnsupported" }, { label: "fragile" }, { label: "oversize" }]);
+  for (const label of ["fragile", "valuable", "overweight", "oversize", "gooseneck"] as const) {
+    const key = `cargoLabel_${label}` as const;
+    expect(tripTranslations.ru[key]).not.toBe(tripTranslations.en[key]);
+  }
 });
 
 test("every VTC-158 trip page key exists in both languages and is translated", () => {

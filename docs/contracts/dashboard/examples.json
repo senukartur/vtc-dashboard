@@ -9231,6 +9231,19 @@
                 "trailersComplete": true,
                 "wholeTripDistanceSupported": true,
                 "ruleContextComplete": true,
+                "cargoClassification": {
+                  "fragile": true,
+                  "valuable": false,
+                  "adr": {
+                    "state": "class",
+                    "class": 3
+                  },
+                  "overweight": false,
+                  "oversize": null,
+                  "groups": [
+                    "liquid"
+                  ]
+                },
                 "cargoDamagePercent": null
               },
               "facts": [

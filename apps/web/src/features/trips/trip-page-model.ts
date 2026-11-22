@@ -280,6 +280,34 @@ export function unknownHintKey(summary: Pick<Summary, "sourceKinds">): TripKey {
     : "unknownHelpNoTelemetry";
 }
 
+export type CargoLabel =
+  | "adr"
+  | "adrUnsupported"
+  | "valuable"
+  | "overweight"
+  | DTO["TripCargoClassification"]["groups"][number];
+
+/**
+ * Cargo labels the telemetry client reported, in display order: ADR, the flags, then the other
+ * groups. The fragile and oversize groups merge into their flags; no report gives no labels.
+ */
+export function cargoLabels(
+  classification: DTO["TripCargoClassification"] | undefined,
+): { label: CargoLabel; adrClass?: number }[] {
+  if (!classification) return [];
+  const { adr, groups } = classification,
+    labels: { label: CargoLabel; adrClass?: number }[] = [];
+  if (adr.state === "class") labels.push({ label: "adr", adrClass: adr.class });
+  if (adr.state === "unsupported") labels.push({ label: "adrUnsupported" });
+  if (classification.fragile || groups.includes("fragile")) labels.push({ label: "fragile" });
+  if (classification.valuable) labels.push({ label: "valuable" });
+  if (classification.overweight) labels.push({ label: "overweight" });
+  if (classification.oversize || groups.includes("oversize")) labels.push({ label: "oversize" });
+  for (const group of groups)
+    if (group !== "fragile" && group !== "oversize") labels.push({ label: group });
+  return labels;
+}
+
 /** Translation key of a recorded game mode, job type or Hard Mode result; null when unknown. */
 export function recordedValueKey(
   category: "telemetryMode" | "telemetryJob" | "telemetryAudit",
