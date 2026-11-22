@@ -1,4 +1,4 @@
-FROM node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS base
+FROM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS base
 RUN npm install --global pnpm@12.14.0
 WORKDIR /workspace
 
@@ -22,7 +22,7 @@ COPY . .
 RUN pnpm check && pnpm build
 RUN pnpm --filter @vtc/api deploy --prod --legacy /out
 
-FROM node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS production
+FROM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS production
 ARG VTC_REVISION=local
 LABEL org.opencontainers.image.revision=$VTC_REVISION
 ENV NODE_ENV=production SERVE_WEB=true WEB_ROOT=/app/public API_HOST=0.0.0.0 API_PORT=3000
