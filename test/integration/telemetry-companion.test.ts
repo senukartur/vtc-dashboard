@@ -142,17 +142,21 @@ const batch = (items: C["SourceRequest"][]): C["ResultBatchInput"] => ({
 async function results(items: C["SourceRequest"][], auth = authorization) {
   return modules.telemetryCompanion!.results(auth, ip, batch(items));
 }
-async function httpResults(items: C["SourceRequest"][]) {
+async function loopbackPort() {
   if (!app.server.listening) await app.listen({ host: "127.0.0.1", port: 0 });
   const address = app.server.address();
   if (!address || typeof address === "string") throw new Error("SYNTHETIC_HTTP_ADDRESS_REQUIRED");
+  return address.port;
+}
+async function httpResults(items: C["SourceRequest"][]) {
+  const port = await loopbackPort();
   const payload = JSON.stringify(batch(items));
   return new Promise<{ status: number | undefined; headers: IncomingHttpHeaders; body: string }>(
     (resolve, reject) => {
       const request = httpRequest(
         {
           host: "127.0.0.1",
-          port: address.port,
+          port,
           path: prefix + "/results",
           method: "POST",
           headers: {
@@ -933,15 +937,13 @@ test("conditional requests reauthorize epochs/revocation; rate budget survives a
 });
 
 test("real loopback HTTP returns the authenticated companion snapshot", async () => {
-  await app.listen({ host: "127.0.0.1", port: 0 });
-  const address = app.server.address();
-  if (!address || typeof address === "string") throw new Error("SYNTHETIC_HTTP_ADDRESS_REQUIRED");
+  const port = await loopbackPort();
   const response = await new Promise<{ status: number | undefined; body: string }>(
     (resolve, reject) => {
       const req = httpRequest(
         {
           host: "127.0.0.1",
-          port: address.port,
+          port,
           path: `${prefix}/qualification/ets2`,
           headers: { authorization },
         },

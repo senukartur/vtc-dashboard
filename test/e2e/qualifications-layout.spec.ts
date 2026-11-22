@@ -29,6 +29,7 @@ const text = {
     conditionsTip: "Fill in at least one field.",
     savingLabel: "About saving",
     savingTip: "New limits apply to trips checked after saving.",
+    adrLabel: "Dangerous goods (ADR)",
     adrSelected: "Selected classes",
     adrLong: "4 · Flammable solids",
     summary: "What drivers will see",
@@ -58,6 +59,7 @@ const text = {
     conditionsTip: "Заполните хотя бы одно поле.",
     savingLabel: "О сохранении",
     savingTip: "Новые ограничения применяются к рейсам, которые проверят после сохранения.",
+    adrLabel: "Опасные грузы (ADR)",
     adrSelected: "Выбранные классы",
     adrLong: "4 · Легковоспламеняющиеся твёрдые вещества",
     summary: "Так это увидят водители",
@@ -183,9 +185,10 @@ for (const locale of ["en", "ru"] as const)
       await hardModeLabel(summary.locator(".qualification-hard-mode"));
       await page.getByRole("button", { name: s.adrSelected, exact: true }).click();
       // Before a class is chosen the summary names the mode instead of an empty value.
-      await expect(summary.locator(".qualification-limit-list > div").nth(3)).toContainText(
-        s.adrSelected,
-      );
+      const adr = summary.locator(".qualification-limit-list > div").filter({
+        has: page.locator(`dt:text-is(${JSON.stringify(s.adrLabel)})`),
+      });
+      await expect(adr.locator("dd")).toHaveText(s.adrSelected);
       const longest = page.getByRole("button", { name: s.adrLong, exact: true });
       await expect(longest).toBeVisible();
       expect(await longest.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
