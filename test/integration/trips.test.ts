@@ -1081,6 +1081,41 @@ test("owner, reviewer and company views filter private facts before serializatio
     await app.close();
   }
 });
+test("private trip views show reported cargo labels and the company summary never does", async () => {
+  const p = telemetryFixture("cargo-classification") as unknown as Telemetry;
+  const stored = await receive(p);
+  const labels = {
+    fragile: true,
+    valuable: true,
+    adr: { state: "class", class: 3 },
+    overweight: false,
+    oversize: null,
+    groups: ["liquid"],
+  };
+  expect(await service.detail(staff, stored.tripId)).toMatchObject({
+    view: "private",
+    effectiveFacts: { cargoClassification: labels },
+  });
+  await unit.run((tx) =>
+    unit.client(tx).update(trips).set({ decision: "accepted" }).where(eq(trips.id, stored.tripId)),
+  );
+  const app = await createApp({ checkReadiness: async () => true, identity, trips: service });
+  try {
+    const read = (cookie: string) =>
+      app.inject({ url: `/api/v1/trips/${stored.tripId}`, headers: { cookie } });
+    const own = await read(ownerCookie);
+    // The response validator closes EffectiveTripFacts, so a 200 proves the declared shape.
+    expect(own.statusCode).toBe(200);
+    expect(own.json().data.effectiveFacts.cargoClassification).toEqual(labels);
+    expect(JSON.stringify(own.json())).not.toContain('"fragility"');
+    const company = await read(otherCookie);
+    expect(company.statusCode).toBe(200);
+    expect(company.json().data.view).toBe("summary");
+    expect(JSON.stringify(company.json())).not.toContain('"cargoClassification"');
+  } finally {
+    await app.close();
+  }
+});
 test("keyset cursors bind actor/session/epoch/scope/filter and current authority is checked every page", async () => {
   for (let n = 0; n < 3; n++) {
     const p = fixture();

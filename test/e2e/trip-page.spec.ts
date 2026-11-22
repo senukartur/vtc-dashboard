@@ -123,6 +123,62 @@ test(
   },
 );
 
+test(
+  "trip details show the reported cargo labels beside the cargo in both languages",
+  browserCase(["@layout"]),
+  async ({ page }, info) => {
+    const trip = telemetryWithEvent();
+    const facts = trip.data.view === "private" ? trip.data.effectiveFacts : null;
+    if (!facts) throw new Error("EXPECTED_PRIVATE_TELEMETRY_FACTS");
+    facts.cargoClassification = {
+      fragile: true,
+      valuable: true,
+      adr: { state: "class", class: 3 },
+      overweight: true,
+      oversize: null,
+      groups: ["liquid", "refrigerated"],
+    };
+    await author(page, trip);
+    await page.goto(tripPath);
+    for (const [locale, card, term, labels, tipName] of [
+      [
+        "en",
+        "Trip",
+        "Cargo",
+        ["ADR 3", "Fragile", "Valuable", "Heavy", "Liquid", "Refrigerated"],
+        "About cargo labels",
+      ],
+      [
+        "ru",
+        "Рейс",
+        "Груз",
+        ["ADR 3", "Хрупкий", "Ценный", "Тяжёлый", "Наливной", "Рефрижератор"],
+        "О метках груза",
+      ],
+    ] as const) {
+      await catalogLanguage(page, locale);
+      await loaded(page);
+      const cargo = fact(tripCard(page, card), term);
+      const list = cargo.getByRole("list");
+      await expect(list.getByRole("listitem")).toHaveText([...labels]);
+      const tip = await openTip(page, cargo, tipName);
+      await expect(tip).toContainText(locale === "en" ? "company catalog" : "каталога компании");
+      await closeTip(page);
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        .toBe(true);
+      await tripCard(page, card).screenshot({
+        path: info.outputPath(`trip-cargo-labels-${locale}.png`),
+      });
+    }
+    // Without a report the cargo row carries no labels and no info button.
+    delete facts.cargoClassification;
+    await page.reload();
+    await loaded(page);
+    await expect(fact(tripCard(page, "Рейс"), "Груз").getByRole("list")).toHaveCount(0);
+  },
+);
+
 /** Opens an info button inside `scope` and returns its popover. */
 async function openTip(page: Page, scope: Locator, name: string) {
   await scope.getByRole("button", { name, exact: true }).click();

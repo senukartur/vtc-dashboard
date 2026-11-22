@@ -23,7 +23,10 @@ import {
   tripListCursor,
 } from "../../apps/api/src/modules/trips/list-query.ts";
 import { tripEvent } from "../../apps/api/src/platform/outbox/events.ts";
-import { observedRevenue } from "../../apps/api/src/modules/trips/facts.ts";
+import {
+  observedRevenue,
+  reportedCargoClassification,
+} from "../../apps/api/src/modules/trips/facts.ts";
 import { telemetryFixture } from "../support/builders.ts";
 
 test("journal revenue preserves signed 64-bit integers, zero and documented currency without guessing", () => {
@@ -217,6 +220,45 @@ test("telemetry keeps allowlisted job and recorded audit classifications indepen
     gameMode: "haulmp",
     hardModeResult: "unknown",
   });
+});
+
+test("trip facts show the reported cargo labels without raw values and never for replaced cargo", async () => {
+  const p = telemetryFixture("cargo-classification") as unknown as Telemetry;
+  const fact = await telemetryAdapter.normalize(p, context());
+  expect(reportedCargoClassification(fact)).toEqual({
+    fragile: true,
+    valuable: true,
+    adr: { state: "class", class: 3 },
+    overweight: false,
+    oversize: null,
+    groups: ["liquid"],
+  });
+  const cargo = { entityId: newId() };
+  expect(
+    reportedCargoClassification({
+      ...fact,
+      cargo: {
+        status: "known",
+        value: cargo,
+        sourceRecordId: "x",
+        sourceField: "resolution/r/cargo",
+      },
+    }),
+  ).toBeUndefined();
+  for (const cargoClassification of [
+    null,
+    { ...p.snapshot.cargoClassification, adr: { state: "class", class: 5 } },
+    { ...p.snapshot.cargoClassification, oversize: "yes" },
+  ])
+    expect(
+      reportedCargoClassification({ ...fact, provenance: { cargoClassification } }),
+    ).toBeUndefined();
+  expect(reportedCargoClassification({ ...fact, provider: "manual" })).toBeUndefined();
+  p.contract.minor = 2;
+  delete p.snapshot.cargoClassification;
+  expect(
+    reportedCargoClassification(await telemetryAdapter.normalize(p, context())),
+  ).toBeUndefined();
 });
 
 test("partial coverage and unsupported time bases never become whole-trip distance or actual occurrence", async () => {

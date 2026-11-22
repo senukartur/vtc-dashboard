@@ -3817,6 +3817,7 @@ export interface components {
             actualDistanceM: components["schemas"]["Decimal"] | null;
             actualStartAt: string | null;
             cargo: components["schemas"]["EffectiveCatalogPin"] | null;
+            cargoClassification?: components["schemas"]["TripCargoClassification"];
             /** @description Cargo damage percentage of the effective fact. Null when unknown. */
             cargoDamagePercent?: number | null;
             cargoMassKg: components["schemas"]["Decimal"] | null;
@@ -5895,6 +5896,29 @@ export interface components {
             info: components["schemas"]["TokenInfo"];
             token: string;
         };
+        /** @description Cargo labels the telemetry client read from the game files and reported for this telemetry fact (event v1.3). Display only: qualification checks keep the catalog ADR class. Absent when the source predates v1.3 or the client had no classification. */
+        TripCargoClassification: {
+            /** @description none: no ADR class; unsupported: an ADR value the client could not map; class: the reported ADR class. */
+            adr: {
+                /** @constant */
+                state: "none";
+            } | {
+                /** @constant */
+                state: "unsupported";
+            } | {
+                /** @enum {integer} */
+                class: 1 | 2 | 3 | 4 | 6 | 8;
+                /** @constant */
+                state: "class";
+            };
+            fragile: boolean;
+            /** @description Supported cargo groups other than ADR, which the adr field carries. */
+            groups: ("bulk" | "construction" | "containers" | "fragile" | "gooseneck" | "inloader" | "liquid" | "livestock" | "machinery" | "oversize" | "refrigerated")[];
+            /** @description Null when the game files did not say. */
+            oversize: boolean | null;
+            overweight: boolean;
+            valuable: boolean;
+        };
         TripPrivate: {
             decisions: components["schemas"]["Decision"][];
             effectiveFacts?: components["schemas"]["EffectiveTripFacts"] | null;
@@ -6153,6 +6177,7 @@ export interface components {
             actualDistanceM: components["schemas"]["Decimal"] | null;
             actualStartAt: string | null;
             cargo: components["schemas"]["EffectiveCatalogPin"] | null;
+            cargoClassification?: components["schemas"]["TripCargoClassification"];
             /** @description Percentage from normalized telemetry damage fraction. Null when the value is unavailable or invalid. */
             cargoDamagePercent: number | null;
             cargoMassKg: components["schemas"]["Decimal"] | null;

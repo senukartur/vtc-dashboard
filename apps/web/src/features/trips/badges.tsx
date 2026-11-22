@@ -4,22 +4,35 @@ import {
   Circle,
   CircleHelp,
   Clock,
+  Cog,
+  Construction,
+  Container,
+  Droplets,
   FileText,
   Flame,
+  FlaskConical,
+  Gem,
   Globe,
+  Layers,
+  MoveHorizontal,
   Package,
+  PawPrint,
   Pencil,
+  Snowflake,
   TriangleAlert,
   Truck,
   UserRound,
   UsersRound,
+  Weight,
+  Wine,
   X,
   Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { InfoTip } from "../../shared/ui/info-tip.js";
 import { Badge } from "../../shared/ui/primitives.js";
 import { type DTO, tripSourceLabels } from "./transport.js";
-import type { TripStatus } from "./trip-page-model.js";
+import { type CargoLabel, cargoLabels, type TripStatus } from "./trip-page-model.js";
 
 const statusLook = {
   accepted: { tone: "ok", icon: Check },
@@ -135,6 +148,54 @@ export function HardModeBadge({
       {compact ? "HM" : "Hard Mode"}
     </Badge>
   ) : null;
+}
+
+const cargoLook = {
+  adr: { tone: "warn", icon: FlaskConical },
+  adrUnsupported: { tone: "warn", icon: FlaskConical },
+  fragile: { tone: "info", icon: Wine },
+  valuable: { tone: "info", icon: Gem },
+  overweight: { tone: "neutral", icon: Weight },
+  oversize: { tone: "neutral", icon: MoveHorizontal },
+  bulk: { tone: "neutral", icon: Layers },
+  construction: { tone: "neutral", icon: Construction },
+  containers: { tone: "neutral", icon: Container },
+  gooseneck: { tone: "neutral", icon: Truck },
+  inloader: { tone: "neutral", icon: Package },
+  liquid: { tone: "neutral", icon: Droplets },
+  livestock: { tone: "neutral", icon: PawPrint },
+  machinery: { tone: "neutral", icon: Cog },
+  refrigerated: { tone: "neutral", icon: Snowflake },
+} as const satisfies Record<CargoLabel, unknown>;
+
+/**
+ * The cargo labels the telemetry client reported, with one info tip on where they come from.
+ * Nothing renders without a report.
+ */
+export function CargoLabelBadges({
+  classification,
+}: {
+  classification: DTO["TripCargoClassification"] | undefined;
+}) {
+  const { t } = useTranslation("trips"),
+    labels = cargoLabels(classification);
+  if (!labels.length) return null;
+  return (
+    <span className="trip-cargo-labels">
+      <ul aria-label={t("cargoLabels")}>
+        {labels.map(({ label, adrClass }) => (
+          <li key={label}>
+            <Badge {...cargoLook[label]} data-cargo-label={label}>
+              {t(`cargoLabel_${label}`, { class: adrClass })}
+            </Badge>
+          </li>
+        ))}
+      </ul>
+      <InfoTip label={t("cargoLabelsInfoLabel")}>
+        <p>{t("cargoLabelsHelp")}</p>
+      </InfoTip>
+    </span>
+  );
 }
 
 export function SourceBadge({ source }: { source: DTO["TripSummary"]["sourceKinds"][number] }) {

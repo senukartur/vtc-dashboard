@@ -12,7 +12,13 @@ import { CompanyLogo } from "../catalogs/CompanyLogo.js";
 import { formatDamage } from "../manual-reports/model.js";
 import { QualificationCheckList } from "../qualifications/QualificationCheckList.js";
 import { EvidenceViewer } from "../review/decision-parts.js";
-import { GameModeBadge, JobTypeBadge, OutcomeBadge, SourceBadge } from "./badges.js";
+import {
+  CargoLabelBadges,
+  GameModeBadge,
+  JobTypeBadge,
+  OutcomeBadge,
+  SourceBadge,
+} from "./badges.js";
 import { CatalogName } from "./TripTable.js";
 import { type DTO, revisionFields } from "./transport.js";
 import { recordedValueKey, reportedDamage, tripTimes, unknownHintKey } from "./trip-page-model.js";
@@ -250,9 +256,12 @@ export function TripFacts({
   );
   add(
     "cargo",
-    <span>
-      <Label value={summary.cargo} />
-      {facts?.cargoMassKg && ` · ${formatQuantity(facts.cargoMassKg, "t", locale)}`}
+    <span className="trip-detail-inline">
+      <span>
+        <Label value={summary.cargo} />
+        {facts?.cargoMassKg && ` · ${formatQuantity(facts.cargoMassKg, "t", locale)}`}
+      </span>
+      <CargoLabelBadges classification={facts?.cargoClassification} />
     </span>,
   );
   if (view) {

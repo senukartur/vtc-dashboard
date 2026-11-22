@@ -45,6 +45,63 @@ export function effectiveGameMode(
     : "unknown";
 }
 
+type CargoClassification = components["schemas"]["TripCargoClassification"];
+const adrClasses = new Set([1, 2, 3, 4, 6, 8]);
+const cargoGroups = new Set<string>([
+  "bulk",
+  "construction",
+  "containers",
+  "fragile",
+  "gooseneck",
+  "inloader",
+  "liquid",
+  "livestock",
+  "machinery",
+  "oversize",
+  "refrigerated",
+]);
+
+/**
+ * Display labels the telemetry client reported in event v1.3, without its raw fragility value.
+ * The ADR group is carried by `adr`. A missing, null or malformed report reads as none, and so
+ * does a report on a fact whose cargo a staff resolution replaced: it described the old cargo.
+ */
+export function reportedCargoClassification(
+  evidence: Pick<NormalizedTripEvidence, "provider" | "provenance" | "cargo">,
+): CargoClassification | undefined {
+  if (evidence.provider !== "ets2telemetry") return undefined;
+  if (evidence.cargo.status === "known" && evidence.cargo.sourceField.startsWith("resolution/"))
+    return undefined;
+  const c = (evidence.provenance as { cargoClassification?: unknown } | null)
+    ?.cargoClassification as Record<string, unknown> | null | undefined;
+  if (!c || typeof c !== "object") return undefined;
+  const { fragile, valuable, overweight, oversize, groups } = c;
+  const adr = c.adr as { state?: unknown; class?: unknown } | null | undefined;
+  if (
+    typeof fragile !== "boolean" ||
+    typeof valuable !== "boolean" ||
+    typeof overweight !== "boolean" ||
+    (oversize !== null && typeof oversize !== "boolean") ||
+    !Array.isArray(groups)
+  )
+    return undefined;
+  let reportedAdr: CargoClassification["adr"];
+  if (adr?.state === "none" || adr?.state === "unsupported") reportedAdr = { state: adr.state };
+  else if (adr?.state === "class" && adrClasses.has(adr.class as number))
+    reportedAdr = { state: "class", class: adr.class as 1 | 2 | 3 | 4 | 6 | 8 };
+  else return undefined;
+  return {
+    fragile,
+    valuable,
+    adr: reportedAdr,
+    overweight,
+    oversize,
+    groups: [...new Set(groups)].filter((group): group is CargoClassification["groups"][number] =>
+      cargoGroups.has(group),
+    ),
+  };
+}
+
 /** Exact observed revenue only; no expected-income fallback or inferred game currency. */
 export function observedRevenue(
   evidence: Pick<NormalizedTripEvidence, "provider" | "money"> | undefined,
@@ -452,6 +509,7 @@ function effectiveFacts(
   const pin = (value: Fact<TripEntity>) =>
     value.status === "known" ? { entityId: value.value.entityId } : null;
   const quantity = (value: Fact<string>) => (value.status === "known" ? value.value : null);
+  const cargoClassification = reportedCargoClassification(f);
   return {
     factRevisionId: f.factRevisionId,
     provider: f.provider,
@@ -468,5 +526,6 @@ function effectiveFacts(
     wholeTripDistanceSupported: f.wholeTripDistanceSupported,
     ruleContextComplete: f.ruleContextComplete,
     ...(recordedTelemetry && { recordedTelemetry }),
+    ...(cargoClassification && { cargoClassification }),
   };
 }

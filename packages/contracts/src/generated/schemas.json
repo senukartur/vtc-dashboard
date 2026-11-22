@@ -7327,6 +7327,9 @@
           ],
           "additionalProperties": false
         },
+        "cargoClassification": {
+          "$ref": "#/$defs/TripCargoClassification"
+        },
         "cargoDamagePercent": {
           "anyOf": [
             {
@@ -7376,6 +7379,116 @@
         "trailersComplete",
         "wholeTripDistanceSupported",
         "ruleContextComplete"
+      ],
+      "additionalProperties": false
+    },
+    "TripCargoClassification": {
+      "type": "object",
+      "description": "Cargo labels the telemetry client read from the game files and reported for this telemetry fact (event v1.3). Display only: qualification checks keep the catalog ADR class. Absent when the source predates v1.3 or the client had no classification.",
+      "properties": {
+        "fragile": {
+          "type": "boolean"
+        },
+        "valuable": {
+          "type": "boolean"
+        },
+        "adr": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "none"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unsupported"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "class"
+                },
+                "class": {
+                  "type": "integer",
+                  "enum": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    6,
+                    8
+                  ]
+                }
+              },
+              "required": [
+                "state",
+                "class"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "description": "none: no ADR class; unsupported: an ADR value the client could not map; class: the reported ADR class."
+        },
+        "overweight": {
+          "type": "boolean"
+        },
+        "oversize": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the game files did not say."
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "bulk",
+              "construction",
+              "containers",
+              "fragile",
+              "gooseneck",
+              "inloader",
+              "liquid",
+              "livestock",
+              "machinery",
+              "oversize",
+              "refrigerated"
+            ]
+          },
+          "uniqueItems": true,
+          "maxItems": 11,
+          "description": "Supported cargo groups other than ADR, which the adr field carries."
+        }
+      },
+      "required": [
+        "fragile",
+        "valuable",
+        "adr",
+        "overweight",
+        "oversize",
+        "groups"
       ],
       "additionalProperties": false
     },
@@ -12905,6 +13018,9 @@
             "hardModeResult"
           ],
           "additionalProperties": false
+        },
+        "cargoClassification": {
+          "$ref": "#/$defs/TripCargoClassification"
         },
         "sourceRecordId": {
           "$ref": "#/$defs/Id",
