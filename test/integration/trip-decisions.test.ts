@@ -4604,7 +4604,7 @@ test.each(["above cap", "missing", "unrelated change"] as const)(
 
       const revision = structuredClone(original);
       revision.eventId = newId();
-      revision.revision = 2;
+      revision.revision = original.revision + 1;
       revision.type = "trip.corrected";
       const damage =
         scenario === "missing"
@@ -4728,7 +4728,7 @@ test.each(["above cap", "missing", "unrelated change"] as const)(
 
         const later = structuredClone(revision);
         later.eventId = newId();
-        later.revision = 10;
+        later.revision = revision.revision + 1;
         const passing = { available: true, value: 0.01, unit: "fraction" } as const;
         later.snapshot.cargoDamage = passing;
         const latestFactId = await factOf(await store(later));
@@ -4845,7 +4845,7 @@ test("verified proposed event attendance exempts a held damage correction throug
     expect(credited?.credited).toBe(true);
     const revision = structuredClone(p);
     revision.eventId = newId();
-    revision.revision = 2;
+    revision.revision = p.revision + 1;
     revision.type = "trip.corrected";
     const overCap = { available: true, value: 0.4, unit: "fraction" } as const;
     revision.snapshot.cargoDamage = overCap;
@@ -4937,7 +4937,7 @@ test("a corrected damage review preserves the approved source attribution throug
 
     const later = structuredClone(p);
     later.eventId = newId();
-    later.revision = 2;
+    later.revision = p.revision + 1;
     later.type = "trip.corrected";
     const overCap = { available: true, value: 0.4, unit: "fraction" } as const;
     later.snapshot.cargoDamage = overCap;
