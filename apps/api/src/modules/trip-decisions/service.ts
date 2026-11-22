@@ -372,12 +372,26 @@ export function createTripDecisions(
     if (!row.reviewHold || !row.correctionPending || row.outcome !== "delivered") return null;
     const retained = s.evidence.find((fact) => fact.factRevisionId === row.currentFactId);
     if (retained?.provider !== "ets2telemetry") return null;
+    const attendance = s.event?.confirmedEvent;
+    if (
+      !s.eventInvalid &&
+      !s.event?.reviewRequired &&
+      attendance &&
+      (attendance.attendanceStatus ?? "confirmed") === "confirmed"
+    )
+      return null;
+
+    const confirmed = await latest(tx, row.id);
+    const reviewed = new Set(confirmed?.supportingFacts);
+    if (confirmed) reviewed.add(confirmed.factId);
+    const supported = new Set(s.evidence.map((fact) => fact.factRevisionId));
     const successor = await ports.trips.adjudication.telemetryDamageSuccessor(
       tx,
       row,
       members,
       retained,
       s.evidence,
+      [...reviewed].filter((id) => !supported.has(id)),
     );
     if (!successor) return null;
     const before = telemetryDamage(retained);
@@ -388,35 +402,29 @@ export function createTripDecisions(
         : after.status === "unknown"
     )
       return null;
-    const attendance = s.event?.confirmedEvent;
-    if (
-      !s.eventOverridden &&
-      !s.eventInvalid &&
-      !s.event?.reviewRequired &&
-      attendance &&
-      (attendance.attendanceStatus ?? "confirmed") === "confirmed"
-    )
-      return null;
     const currentLevel = await ports.qualifications.lookupInTransaction(tx, retained);
-    const nextLevel = successor.preservesFacts
+    const nextLevel = successor.equivalentRaw
       ? currentLevel
       : await ports.qualifications.lookupInTransaction(tx, successor.fact);
     const capApplies = (history: Historical) =>
       history.status === "resolved" && history.limits.cargoDamageMaxPercent != null;
     if (!capApplies(currentLevel) && !capApplies(nextLevel)) return null;
 
-    const confirmed = await latest(tx, row.id);
-    const reviewed = new Set(confirmed?.supportingFacts);
-    const supported = new Set(s.evidence.map((fact) => fact.factRevisionId));
+    // The raw predecessor can drop out of live matching after staff derive a replacement from it.
+    // Other absent support must be an earlier revision of this exact persisted telemetry source.
+    const predecessorSupport = new Set([successor.predecessorId, ...successor.retiredSupport]);
     const onlyDamageHold = row.reviewReasons.every(
       (code) =>
         damageRevisionReasons.has(code) ||
         code === "confirmed_facts_require_review" ||
         code === "source_evidence_requires_review" ||
+        (successor.requiresResolution &&
+          ingestionConflictCodes.has(code) &&
+          successor.fact.reasonCodes.includes(code)) ||
         (confirmed?.reasonCodes.includes(code) ?? false),
     );
     const selectable =
-      successor.preservesFacts &&
+      successor.equivalentRaw &&
       capApplies(nextLevel) &&
       confirmed?.factId === retained.factRevisionId &&
       confirmed.outcome === row.decision &&
@@ -427,9 +435,10 @@ export function createTripDecisions(
       confirmed.eventRevisionId === (s.event?.eventRevisionId ?? null) &&
       confirmed.attendanceRevisionId === (s.event?.attendanceRevisionId ?? null) &&
       onlyDamageHold &&
-      [...reviewed].every((id) => supported.has(id)) &&
+      [...reviewed].every((id) => supported.has(id) || predecessorSupport.has(id)) &&
       [...supported].every((id) => id === successor.fact.factRevisionId || reviewed.has(id));
-    return { fact: successor.fact, selectable };
+    const mode = !selectable ? "blocked" : successor.requiresResolution ? "resolution" : "direct";
+    return { fact: successor.fact, retained, mode } as const;
   }
   // A decided trip shows the check stored with its decision; a pending trip is checked live.
   async function qualificationView(
@@ -942,17 +951,21 @@ export function createTripDecisions(
         await work(tx, row, s.hash, row.reviewReasons, true);
       }
       const correction = await heldDamageCorrection(tx, row, members, s);
-      const corrected = correction?.selectable ? correction.fact : null;
+      const corrected = correction?.mode === "direct" ? correction.fact : null;
+      const needsResolution = correction?.mode === "resolution";
       const selection = selectQuality(s.evidence, row.currentFactId, undefined, s.trailerTypes);
       const e =
         corrected ??
+        (needsResolution ? correction.retained : null) ??
         selection.selected ??
         s.evidence.find((f) => f.factRevisionId === row.currentFactId);
       if (!e) throw identityError(409);
       const telemetry = stage3
-        ? (corrected ?? selectTelemetry(s.evidence, row.currentFactId))
+        ? needsResolution
+          ? correction.fact
+          : (corrected ?? selectTelemetry(s.evidence, row.currentFactId))
         : null;
-      const evaluated = telemetry ?? e;
+      const evaluated = needsResolution ? correction.retained : (telemetry ?? e);
       const decidedAt = at(),
         confirmedAt = await confirmation(tx, row, evaluated, decidedAt),
         h = await ports.qualifications.lookupInTransaction(tx, evaluated, confirmedAt),
@@ -965,7 +978,15 @@ export function createTripDecisions(
         eventInvalid: s.eventInvalid,
         eventReviewRequired: !!s.event?.reviewRequired,
       };
-      const damage = await assessDamage(tx, evaluated, h, s.evidence, row.currentFactId);
+      const assessed = await assessDamage(tx, evaluated, h, s.evidence, row.currentFactId);
+      const damage =
+        needsResolution && assessed
+          ? {
+              ...assessed,
+              evidence: telemetryDamage(correction.fact),
+              factRevisionId: correction.fact.factRevisionId,
+            }
+          : assessed;
       const allowed = acceptance(evaluated, h, event, context, damage);
       let ownMode = allowed;
       if (evaluated !== e) {
@@ -1007,8 +1028,10 @@ export function createTripDecisions(
             ]),
           ].sort(),
         },
-        canDecide: blocked.length === 0,
-        blockedReasonCodes: blocked,
+        canDecide: blocked.length === 0 && !needsResolution,
+        blockedReasonCodes: needsResolution
+          ? [...blocked, "confirmed_facts_require_review"]
+          : blocked,
       };
       const trip = await privateProjection(tx, row, actor);
       if (stage3) {
@@ -1140,11 +1163,11 @@ export function createTripDecisions(
       await ports.manual.correctionRequestInTransaction(tx, actor, row.id, correctionRequestId);
     const s = await support(tx, row, members, eventId ?? undefined);
     const correction = await heldDamageCorrection(tx, row, members, s);
-    const base = correction?.selectable
-      ? correction.fact
-      : s.evidence.find((e) => e.factRevisionId === row.currentFactId);
-    if (!base || (correction && !correction.selectable))
-      throw identityError(409, "RESOLUTION_REQUIRED");
+    const base =
+      correction && correction.mode !== "blocked"
+        ? correction.fact
+        : s.evidence.find((e) => e.factRevisionId === row.currentFactId);
+    if (!base || correction?.mode === "blocked") throw identityError(409, "RESOLUTION_REQUIRED");
     const id = newId(),
       revisionId = newId(),
       createdAt = at();
@@ -1162,6 +1185,12 @@ export function createTripDecisions(
           createdAt,
         )
       : undefined;
+    if (
+      correction?.mode === "resolution" &&
+      (!derived ||
+        !ports.trips.adjudication.preservesDamageResolution(correction.retained, derived))
+    )
+      throw identityError(409, "RESOLUTION_REQUIRED");
     if (raw?.qualificationAssignmentId) {
       const h = await ports.qualifications.lookupInTransaction(
         tx,
@@ -1247,11 +1276,11 @@ export function createTripDecisions(
     const s = await support(tx, row, members, p.eventId ?? undefined);
     const correction =
       value.decision === "approve" ? await heldDamageCorrection(tx, row, members, s) : null;
-    const corrected = correction?.selectable ? correction.fact : null;
+    const corrected = correction && correction.mode !== "blocked" ? correction.fact : null;
     if (
       value.decision === "approve" &&
       (p.baseFactId !== (corrected?.factRevisionId ?? row.currentFactId) ||
-        (correction && !corrected))
+        correction?.mode === "blocked")
     )
       throw identityError(409, "VERSION_CONFLICT");
     const derived = p.derivedFactId
@@ -1259,6 +1288,12 @@ export function createTripDecisions(
           ?.evidence
       : undefined;
     if (p.derivedFactId && !derived) throw identityError(409, "VERSION_CONFLICT");
+    if (
+      correction?.mode === "resolution" &&
+      (!derived ||
+        !ports.trips.adjudication.preservesDamageResolution(correction.retained, derived))
+    )
+      throw identityError(409, "RESOLUTION_REQUIRED");
     const currentHash = await proposalSupportHash(tx, row, s.hash, derived);
     if (value.decision === "approve" && !p.supportHash.equals(currentHash))
       throw identityError(409, "VERSION_CONFLICT");
@@ -1319,7 +1354,13 @@ export function createTripDecisions(
       reviewVersion = row.version;
     if (value.decision === "approve") {
       if (p.eventId) {
-        if (s.eventInvalid || s.event?.reviewRequired) throw identityError(409);
+        if (
+          s.eventInvalid ||
+          s.event?.reviewRequired ||
+          (s.event?.eventRevisionId ?? null) !== p.eventRevisionId ||
+          (s.event?.attendanceRevisionId ?? null) !== p.attendanceRevisionId
+        )
+          throw identityError(409, "VERSION_CONFLICT");
         await c(tx)
           .insert(tripEventAssociations)
           .values({ tripId: row.id, eventId: p.eventId })
@@ -1762,7 +1803,7 @@ export function createTripDecisions(
             if (!reviewedSupport?.supportHash.equals(s.hash))
               throw identityError(409, "VERSION_CONFLICT");
             const correction = await heldDamageCorrection(tx, prepared.row, prepared.members, s);
-            const corrected = correction?.selectable ? correction.fact : null;
+            const corrected = correction?.mode === "direct" ? correction.fact : null;
             const selected =
               corrected ??
               (stage3
@@ -1771,7 +1812,10 @@ export function createTripDecisions(
                 : null);
             if (!e || ((corrected || stage3) && selected?.factRevisionId !== e.factRevisionId))
               throw identityError(409, "VERSION_CONFLICT");
-            if (value.decision === "accept" && correction && !corrected)
+            if (
+              correction?.mode === "resolution" ||
+              (value.decision === "accept" && correction?.mode === "blocked")
+            )
               throw identityError(409, "RESOLUTION_REQUIRED");
             const manualRevision = prepared.manual.reports.find(
               (r) => r.revisionId === value.reviewedRevisionId,

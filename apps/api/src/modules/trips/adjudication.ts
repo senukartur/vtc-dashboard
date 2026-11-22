@@ -29,6 +29,7 @@ import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
 import { createOwnerRevision } from "./owner-revision.js";
 import { queueClock, syncReviewReasons } from "./review-queue.js";
+import { ingestionConflictCodes } from "./service.js";
 
 type S = components["schemas"];
 export const damageRevisionReasons: ReadonlySet<string> = new Set([
@@ -40,7 +41,9 @@ export const damageRevisionReasons: ReadonlySet<string> = new Set([
 // The review exception cannot replace independent facts or staff-supported provenance.
 function damageCorrectionBasis(e: NormalizedTripEvidence) {
   const fact = (value: Fact<unknown>) =>
-    value.status === "known" ? [value.value, value.sourceField] : [value.reasonCode];
+    value.status === "known"
+      ? [value.value, value.sourceField.replace(/^resolution\/[^/]+\//, "resolution/")]
+      : [value.reasonCode];
   return canonicalJson({
     outcome: e.outcome,
     recording: e.recording,
@@ -64,7 +67,9 @@ function damageCorrectionBasis(e: NormalizedTripEvidence) {
     recordedTelemetry: e.recordedTelemetry ?? null,
     companies: e.companies ?? null,
     money: e.money,
-    reasons: e.reasonCodes.filter((code) => !damageRevisionReasons.has(code)).sort(),
+    reasons: e.reasonCodes
+      .filter((code) => !damageRevisionReasons.has(code) && !ingestionConflictCodes.has(code))
+      .sort(),
   });
 }
 export function createTripAdjudication(
@@ -86,12 +91,20 @@ export function createTripAdjudication(
       members: readonly TripState[],
       retained: NormalizedTripEvidence,
       evidence: readonly NormalizedTripEvidence[],
+      absentSupport: readonly string[],
     ) {
       const memberIds = members.map((member) => member.id);
+      const sourcePredecessor = alias(tripFacts, "damage_source_predecessor");
       const latestMessage = alias(sourceMessages, "latest_damage_message");
       const latestFact = alias(tripFacts, "latest_damage_fact");
       const [link] = await c(tx)
-        .select({ factId: latestFact.id, retainedKind: tripFacts.kind })
+        .select({
+          factId: latestFact.id,
+          predecessorId: sourcePredecessor.id,
+          retainedKind: tripFacts.kind,
+          retainedRevision: sourceMessages.revision,
+          sourceId: sourceTrips.id,
+        })
         .from(tripFacts)
         .innerJoin(
           sourceMessages,
@@ -101,6 +114,13 @@ export function createTripAdjudication(
           ),
         )
         .innerJoin(sourceTrips, eq(sourceTrips.id, sourceMessages.sourceTripId))
+        .innerJoin(
+          sourcePredecessor,
+          and(
+            eq(sourcePredecessor.messageId, sourceMessages.id),
+            eq(sourcePredecessor.canonicalTripId, sourceTrips.canonicalTripId),
+          ),
+        )
         .innerJoin(
           latestMessage,
           and(
@@ -133,12 +153,45 @@ export function createTripAdjudication(
       if (!link) return null;
       const fact = evidence.find((item) => item.factRevisionId === link.factId);
       if (!fact) return null;
+      const requiresResolution = link.retainedKind === "derived";
+      const predecessor = requiresResolution
+        ? (await facts.read(tx, [link.predecessorId], true)).get(link.predecessorId)?.evidence
+        : retained;
+      const equivalentRaw =
+        !!predecessor && damageCorrectionBasis(predecessor) === damageCorrectionBasis(fact);
+      const olderSupport =
+        equivalentRaw && absentSupport.length
+          ? await c(tx)
+              .select({ id: tripFacts.id })
+              .from(tripFacts)
+              .innerJoin(
+                sourceMessages,
+                eq(
+                  sourceMessages.id,
+                  sql`COALESCE(${tripFacts.messageId},${tripFacts.derivedSourceMessageId})`,
+                ),
+              )
+              .where(
+                and(
+                  inArray(tripFacts.id, absentSupport),
+                  inArray(tripFacts.canonicalTripId, memberIds),
+                  eq(sourceMessages.sourceTripId, link.sourceId),
+                  sql`CAST(${sourceMessages.revision} AS UNSIGNED) < CAST(${link.retainedRevision} AS UNSIGNED)`,
+                ),
+              )
+              .for("share")
+          : [];
       return {
         fact,
-        preservesFacts:
-          link.retainedKind === "source" &&
-          damageCorrectionBasis(retained) === damageCorrectionBasis(fact),
+        predecessorId: link.predecessorId,
+        retiredSupport: olderSupport.map(({ id }) => id),
+        equivalentRaw,
+        requiresResolution,
       };
+    },
+    /** Reapproval can replace the source message while preserving every other supported fact. */
+    preservesDamageResolution(retained: NormalizedTripEvidence, proposed: NormalizedTripEvidence) {
+      return damageCorrectionBasis(retained) === damageCorrectionBasis(proposed);
     },
     async assessmentComplete(tx: TxContext, id: string) {
       const root = await groups.resolve(tx, id, true);
