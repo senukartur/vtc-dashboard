@@ -2378,6 +2378,16 @@
               "type": "null"
             }
           ]
+        },
+        "correction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TripCorrectionState"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -2552,6 +2562,9 @@
             "minLength": 1,
             "maxLength": 128
           }
+        },
+        "correctionReview": {
+          "$ref": "#/$defs/TripCorrectionReview"
         }
       },
       "required": [
@@ -2606,6 +2619,10 @@
         "confirmOverLimits": {
           "type": "boolean",
           "description": "Optional, false when omitted. Explicit reviewer confirmation to accept a manual report over qualification limits. Only valid with decision accept and a null proposalId (422 otherwise). Required when the review acceptance mode is over_limits and rejected with 409 when it is ordinary or unavailable."
+        },
+        "returnForFixes": {
+          "type": "boolean",
+          "description": "Optional, false when omitted. Only with decision reject and a null proposalId (422 otherwise). Stores the extra reason code returned_for_fixes: the author may correct the trip. 409 when nothing is correctable. A plain rejection is final."
         }
       },
       "required": [
@@ -2616,95 +2633,6 @@
         "reason"
       ],
       "additionalProperties": false
-    },
-    "ResolutionInput": {
-      "type": "object",
-      "properties": {
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048
-        },
-        "evidenceIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          }
-        },
-        "actualDistanceM": {
-          "type": "string",
-          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-          "maxLength": 64
-        },
-        "actualStartAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        },
-        "actualCompletedAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        },
-        "qualificationAssignmentId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "originCityId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "destinationCityId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "cargoId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "cargoMassKg": {
-          "type": "string",
-          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
-          "maxLength": 64
-        },
-        "trailerTypeId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "correctionRequestId": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "description": "Optional exact pending author correction request; omitted and null are equivalent. Requires an actual supported correction field."
-        }
-      },
-      "required": [
-        "reason",
-        "evidenceIds"
-      ],
-      "additionalProperties": false,
-      "minProperties": 3,
-      "if": {
-        "required": [
-          "correctionRequestId"
-        ],
-        "properties": {
-          "correctionRequestId": {}
-        }
-      },
-      "then": {
-        "minProperties": 4
-      }
     },
     "ProposalDecisionInput": {
       "type": "object",
@@ -2725,6 +2653,14 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048
+        },
+        "tripDecision": {
+          "type": "string",
+          "enum": [
+            "returned_for_fixes",
+            "rejected"
+          ],
+          "description": "Optional, only with decision reject (422 otherwise). Declines the proposal and records a trip rejection on the current revision in the same transaction: returned_for_fixes lets the author correct again, rejected is final. 409 on an accepted trip, or for returned_for_fixes when nothing is correctable. Omitted declines the proposal only, keeping the effective result."
         }
       },
       "required": [
@@ -13177,6 +13113,19 @@
             "telemetry"
           ],
           "additionalProperties": false
+        },
+        "correction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TripCorrectionState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correctionReview": {
+          "$ref": "#/$defs/TripCorrectionReview"
         }
       },
       "required": [
@@ -13273,6 +13222,10 @@
           "minLength": 1,
           "maxLength": 2048,
           "pattern": "\\S"
+        },
+        "returnForFixes": {
+          "type": "boolean",
+          "description": "Optional, false when omitted. Only with decision reject and a null proposalId (422 otherwise). Stores the extra reason code returned_for_fixes: the author may correct the trip. 409 when nothing is correctable. A plain rejection is final."
         }
       },
       "required": [
@@ -18505,6 +18458,212 @@
         }
       },
       "description": "Observed telemetry revenue only. Null currency means the source did not document its currency; it is never inferred from the game."
+    },
+    "TripCorrectionField": {
+      "type": "string",
+      "enum": [
+        "actualDistanceM",
+        "actualStartAt",
+        "actualCompletedAt",
+        "originCityId",
+        "destinationCityId",
+        "cargoId",
+        "cargoMassKg",
+        "trailerTypeId"
+      ],
+      "description": "A fact a trip author can correct. Editability follows the fact state, never reason codes."
+    },
+    "TripCorrectionInput": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "maxItems": 100
+        },
+        "actualDistanceM": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+          "maxLength": 64
+        },
+        "actualStartAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "actualCompletedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "originCityId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "destinationCityId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "cargoId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "cargoMassKg": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+          "maxLength": 64
+        },
+        "trailerTypeId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      },
+      "required": [
+        "reason",
+        "evidenceIds"
+      ],
+      "additionalProperties": false,
+      "minProperties": 3,
+      "description": "At least one correctable fact. Times are UTC and only correct telemetry trips. evidenceIds cite ready screenshots of the author: uploads or the report's own; duplicates and more than the configured per-report maximum are 422."
+    },
+    "TripCorrectionFact": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/TripCorrectionField"
+        },
+        "reported": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The value the source reported, even when unconfirmed: decimal metres or kilograms, a UTC instant or a catalog entity ID. Null when nothing was reported."
+        },
+        "sourceCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Raw catalog code the telemetry client reported for an unrecognized entity."
+        },
+        "reasonCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the fact is unconfirmed, when known."
+        }
+      },
+      "required": [
+        "field",
+        "reported",
+        "sourceCode",
+        "reasonCode"
+      ],
+      "additionalProperties": false
+    },
+    "TripCorrectionState": {
+      "type": "object",
+      "properties": {
+        "baseFactRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TripCorrectionFact"
+          },
+          "maxItems": 8,
+          "description": "Correctable facts of the current fact; every other fact is locked."
+        },
+        "canPropose": {
+          "type": "boolean",
+          "description": "The viewer is the author with trips.submit_own and the trip accepts a correction now."
+        }
+      },
+      "required": [
+        "baseFactRevisionId",
+        "fields",
+        "canPropose"
+      ],
+      "additionalProperties": false,
+      "description": "VTC-169 correction state of a private trip; omitted by older responses."
+    },
+    "TripCorrectionReview": {
+      "type": "object",
+      "properties": {
+        "canReturn": {
+          "type": "boolean",
+          "description": "A return for fixes is possible: the group has a manual report or the current fact has a correctable fact."
+        },
+        "blockedOnlyByEditable": {
+          "type": "boolean",
+          "description": "Acceptance is blocked only by facts the author can correct."
+        },
+        "proposalAcceptance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewAcceptance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the pending correction could be accepted; null without one."
+        },
+        "clientReasonCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "maxItems": 32,
+          "description": "Raw quality reasons the telemetry client reported (snapshot.evidence.reasons)."
+        }
+      },
+      "required": [
+        "canReturn",
+        "blockedOnlyByEditable",
+        "proposalAcceptance",
+        "clientReasonCodes"
+      ],
+      "additionalProperties": false,
+      "description": "Reviewer-only correction context; omitted by older responses."
     }
   }
 }

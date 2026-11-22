@@ -79,6 +79,7 @@ let control: Connection,
   trips: Trips,
   qualifications: Qualifications,
   decisions: TripDecisions,
+  manual: ReturnType<typeof createManualReports>,
   service: Notifications,
   stagedNotifications: Notifications;
 let director: Actor,
@@ -150,7 +151,7 @@ beforeAll(async () => {
     now,
   );
   const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
-  const manual = createManualReports(
+  manual = createManualReports(
     unit,
     { key: key(), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
     { identity, catalogs, trips },
@@ -2364,6 +2365,97 @@ test("manual review notifications require the current revision or pending correc
   );
   await drain();
   expect(categories((await service.poll(owner)).items)).toHaveLength(2);
+});
+test("a driver correction notifies its reviewers while the proposal is unreviewed (VTC-169 D3)", async () => {
+  // A complete v1.1 trip held only because its whole-trip distance is unsupported.
+  const p = payload("completed");
+  p.contract.minor = 1;
+  p.snapshot.hardModeResult = "qualified";
+  p.snapshot.evidence.ruleContextComplete = false;
+  p.snapshot.evidence.reasons = ["accounting-unavailable"];
+  const saved = await receive(p),
+    [[row]] = await control.query<RowDataPacket[]>(
+      "SELECT version,decision FROM trips WHERE id=?",
+      [Buffer.from(saved.tripId)],
+    );
+  expect(row?.decision).toBe("pending_review");
+  const proposed = await decisions.propose(owner, saved.tripId, newId(), row?.version, {
+    reason: "Fictional private correction reason",
+    evidenceIds: [],
+    actualDistanceM: "250000",
+  });
+  await drain();
+  const corrections = async (actor: Actor) =>
+    (await service.poll(actor, { limit: 100 })).items.filter(
+      (r) => r.category === "trip.correction_requested",
+    );
+  expect(await corrections(owner)).toHaveLength(1);
+  expect(await corrections(dispatcher)).toHaveLength(1);
+  expect(await corrections(observer)).toEqual([]);
+  expect(JSON.stringify(await service.history(dispatcher))).not.toContain("private");
+  const [[emitted]] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM outbox_events WHERE CAST(type AS CHAR)='manual.correction_requested' AND JSON_UNQUOTE(JSON_EXTRACT(data,'$.resourceId'))=?",
+    [proposed.data.id],
+  );
+  expect(Number(emitted?.n)).toBe(1);
+  const event: DomainEvent = {
+    eventId: newId(),
+    type: "manual.correction_requested",
+    schemaVersion: 1,
+    aggregate: { kind: "trip", id: saved.tripId, version: proposed.version },
+    occurredAt: iso(),
+    correlationId: newId(),
+    causationId: null,
+    data: { resourceId: proposed.data.id, tripId: saved.tripId },
+  };
+  // Once the proposal is reviewed a replayed event notifies nobody.
+  const detail = await decisions.getProposal(dispatcher, saved.tripId, proposed.data.id);
+  await control.execute(
+    "INSERT INTO trip_proposal_reviews (proposal_id,actor_id,outcome,reviewed_revision_id,reason,decided_at) VALUES (?,?,'reject',?,?,UTC_TIMESTAMP(3))",
+    [
+      Buffer.from(proposed.data.id),
+      Buffer.from(dispatcher.userId),
+      Buffer.from(detail.data.revisionId),
+      "Fictional review",
+    ],
+  );
+  await unit.run((tx) =>
+    createOutbox(unit, { notifications: true }).append(tx, { ...event, eventId: newId() }),
+  );
+  await drain();
+  expect(await corrections(dispatcher)).toHaveLength(1);
+  // A reference to another trip is a conflict in both owning modules, never a guess.
+  const other = (await receive()).tripId;
+  const lookup = (read: (tx: Parameters<Parameters<typeof unit.run>[0]>[0]) => Promise<unknown>) =>
+    unit.run(async (tx) => {
+      await identity.notificationContextInTransaction(tx);
+      return read(tx);
+    });
+  await expect(
+    lookup((tx) =>
+      manual.notificationReviewInTransaction(
+        tx,
+        "manual.correction_requested",
+        other,
+        proposed.data.id,
+        other,
+      ),
+    ),
+  ).rejects.toThrow("NOTIFICATION_MANUAL_REFERENCE_CONFLICT");
+  await expect(
+    lookup((tx) => decisions.notificationProposalInTransaction(tx, proposed.data.id, other)),
+  ).rejects.toThrow("NOTIFICATION_PROPOSAL_REFERENCE_CONFLICT");
+  expect(
+    await lookup((tx) =>
+      manual.notificationReviewInTransaction(
+        tx,
+        "manual.correction_requested",
+        saved.tripId,
+        proposed.data.id,
+        saved.tripId,
+      ),
+    ),
+  ).toEqual({ kind: "proposal" });
 });
 test("workers replay legacy route text and use ordered city/depot identity after activation", async () => {
   const { id, input } = await participating();

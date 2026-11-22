@@ -21,8 +21,10 @@ import {
   lte,
   manualBlobGenerations,
   manualCommands,
+  manualCorrectionEvidence,
   manualCorrectionHistory,
   manualCorrectionRequests,
+  manualCorrectionSubmissions,
   manualDraftEvidence,
   manualDraftHistory,
   manualDrafts,
@@ -187,8 +189,7 @@ type Receipt =
       legacyReviewReasons?: S["TripPrivate"]["reviewReasonCodes"];
     }
   | { kind: "draft"; id: string; version: number }
-  | { kind: "discard"; id: string; version: number }
-  | { kind: "correction"; id: string; version: number };
+  | { kind: "discard"; id: string; version: number };
 export function createManualReports(
   unit: UnitOfWork,
   config: ManualConfig,
@@ -470,12 +471,21 @@ export function createManualReports(
     if (!row) throw manualError(404);
     if (row.ownerId !== actor.userId) {
       if (!current.capabilities.includes("trips.review")) throw manualError(404);
+      // A reviewer reads a screenshot once a report revision or a driver correction cites it.
       const [ref] = await c(tx)
         .select({ id: manualEvidenceReferences.evidenceId })
         .from(manualEvidenceReferences)
         .where(eq(manualEvidenceReferences.evidenceId, id))
         .for("share");
-      if (!ref) throw manualError(404);
+      const [cited] = ref
+        ? [ref]
+        : await c(tx)
+            .select({ id: manualCorrectionEvidence.evidenceId })
+            .from(manualCorrectionEvidence)
+            .where(eq(manualCorrectionEvidence.evidenceId, id))
+            .limit(1)
+            .for("share");
+      if (!cited) throw manualError(404);
     }
     if (row.state === "deleting") throw transition();
     return row;
@@ -707,6 +717,9 @@ export function createManualReports(
       );
       if (trip.game !== fields.game || !["pending_review", "rejected"].includes(trip.decision))
         throw manualError(409);
+      // A final rejection (VTC-169) leaves nothing for the author to fix.
+      if (trip.decision === "rejected" && !(await ports.trips.fixAllowedInTransaction(tx, trip.id)))
+        throw manualError(409);
       tripId = trip.id;
     } else if (target) {
       const trip = await ports.trips.manualGateInTransaction(
@@ -717,6 +730,8 @@ export function createManualReports(
         true,
       );
       if (trip.game !== fields.game || trip.decision === "accepted") throw manualError(409);
+      if (trip.decision === "rejected" && !(await ports.trips.fixAllowedInTransaction(tx, trip.id)))
+        throw manualError(409);
       tripId = trip.id;
     } else tripId = await ports.trips.reserveManualInTransaction(tx, actor.userId, fields.game);
     const [oldRevision] = existing?.currentRevisionId
@@ -1233,7 +1248,7 @@ export function createManualReports(
       aggregateId: string,
       resourceId: string,
       tripId: string,
-    ) {
+    ): Promise<boolean | { kind: "proposal" }> {
       if (kind === "manual.correction_requested") {
         const [row] = await c(tx)
           .select({
@@ -1243,9 +1258,20 @@ export function createManualReports(
           .from(manualCorrectionRequests)
           .where(eq(manualCorrectionRequests.id, applicationId(resourceId)))
           .for("share");
-        if (!row || row.tripId !== tripId || aggregateId !== tripId)
+        if (row) {
+          if (row.tripId !== tripId || aggregateId !== tripId)
+            throw new Error("NOTIFICATION_MANUAL_REFERENCE_CONFLICT");
+          return row.status === "pending";
+        }
+        // A driver correction (VTC-169): its proposal state is owned by Acceptance.
+        const [submission] = await c(tx)
+          .select({ tripId: manualCorrectionSubmissions.tripId })
+          .from(manualCorrectionSubmissions)
+          .where(eq(manualCorrectionSubmissions.id, applicationId(resourceId)))
+          .for("share");
+        if (!submission || submission.tripId !== tripId || aggregateId !== tripId)
           throw new Error("NOTIFICATION_MANUAL_REFERENCE_CONFLICT");
-        return row.status === "pending";
+        return { kind: "proposal" };
       }
       const [row] = await c(tx)
         .select({
@@ -1713,68 +1739,6 @@ export function createManualReports(
         return { ...result, items: result.items.map(revisionDto) };
       });
     },
-    requestCorrection(
-      actor: Actor,
-      id: string,
-      key: string,
-      expected: number,
-      value: S["ReasonInput"],
-    ) {
-      value = input("ReasonInput", value);
-      return command(
-        actor,
-        key,
-        `trip/${applicationId(id)}/correction`,
-        { expected, ...value },
-        async (tx) => {
-          const trip = await ports.trips.manualGateInTransaction(tx, actor.userId, id, expected);
-          if (trip.decision !== "accepted") throw manualError(409);
-          await gateTripEvidence(tx, id);
-          const [report] = await c(tx)
-            .select()
-            .from(manualReports)
-            .where(eq(manualReports.tripId, id))
-            .orderBy(desc(manualReports.createdAt), desc(manualReports.id))
-            .limit(1);
-          const requestId = newId();
-          await c(tx)
-            .insert(manualCorrectionRequests)
-            .values({
-              id: requestId,
-              ownerId: actor.userId,
-              tripId: id,
-              baseTripVersion: expected,
-              baseRevisionId: report?.currentRevisionId ?? null,
-              reason: value.reason,
-              status: "pending",
-              requestedAt: at(),
-            });
-          await c(tx)
-            .insert(manualCorrectionHistory)
-            .values({ id: newId(), requestId, status: "pending", recordedAt: at() });
-          await c(tx)
-            .insert(manualReviewGates)
-            .values({ tripId: id, underReview: true })
-            .onDuplicateKeyUpdate({ set: { underReview: true } });
-          const version = await ports.trips.manualPendingInTransaction(tx, id, true);
-          await auditWrite(tx, actor, id, true);
-          await emit(tx, "manual.correction_requested", id, version, requestId, id);
-          await ports.trips.correctionRequestedInTransaction(
-            tx,
-            id,
-            requestId,
-            actor,
-            value.reason,
-          );
-          return { kind: "correction", id: requestId, version };
-        },
-        async (tx, r) => {
-          if (r.kind !== "correction") throw Error("MANUAL_RECEIPT_INVALID");
-          await privateTrip(tx, actor, id);
-          return { id: r.id, version: r.version };
-        },
-      );
-    },
     corrections(actor: Actor, tripId: string, page: Page = {}, requestId?: string) {
       return run(async (tx) => {
         const trip = await privateTrip(tx, actor, tripId),
@@ -2143,6 +2107,7 @@ export function createManualReports(
       ownerId: string,
       ids: string[],
       validateReady = true,
+      proposalId?: string,
     ) {
       if (ids.length > config.maxFilesPerReport || new Set(ids).size !== ids.length)
         throw manualError(422);
@@ -2154,9 +2119,25 @@ export function createManualReports(
             .where(inArray(manualEvidenceReferences.evidenceId, ids))
             .for("share")
         : [];
+      // A driver correction (VTC-169) also cites its own uploads.
+      const cited =
+        ids.length && proposalId
+          ? await c(tx)
+              .select({ evidenceId: manualCorrectionEvidence.evidenceId })
+              .from(manualCorrectionEvidence)
+              .where(
+                and(
+                  eq(manualCorrectionEvidence.correctionId, applicationId(proposalId)),
+                  inArray(manualCorrectionEvidence.evidenceId, ids),
+                ),
+              )
+              .for("share")
+          : [];
       if (
         ids.some(
-          (id) => !refs.some((r) => r.evidenceId === id && members.some((t) => t.id === r.tripId)),
+          (id) =>
+            !refs.some((r) => r.evidenceId === id && members.some((t) => t.id === r.tripId)) &&
+            !cited.some((r) => r.evidenceId === id),
         )
       )
         throw manualError(422);
@@ -2171,8 +2152,12 @@ export function createManualReports(
           ).map(evidenceDto)
         : [];
     },
-    async hasPendingCorrectionsInTransaction(tx: TxContext, tripId: string) {
-      const members = await ports.trips.groups.members(tx, [tripId], true);
+    async hasPendingCorrectionsInTransaction(
+      tx: TxContext,
+      tripId: string,
+      lock: true | "share" = true,
+    ) {
+      const members = await ports.trips.groups.members(tx, [tripId], lock);
       const [pending] = await c(tx)
         .select({ id: manualCorrectionRequests.id })
         .from(manualCorrectionRequests)
@@ -2188,6 +2173,76 @@ export function createManualReports(
         .limit(1)
         .for("share");
       return !!pending;
+    },
+    /**
+     * Screenshots a driver correction cites (VTC-169), in the caller's trip-locked transaction.
+     * Every ID is a screenshot of the author. The cited and the group's referenced screenshots are
+     * locked in one sorted batch: deleting is a retryable transition, unfinished uploads are 409.
+     * A correction of a manual report cites at least one screenshot of the report. Returns the
+     * cited uploads that the report does not reference yet.
+     */
+    async correctionEvidenceInTransaction(
+      tx: TxContext,
+      actor: Actor,
+      tripId: string,
+      ids: string[],
+      manualBase: boolean,
+    ) {
+      if (ids.length > config.maxFilesPerReport || new Set(ids).size !== ids.length)
+        throw manualError(422);
+      const members = await ports.trips.groups.members(tx, [tripId], true);
+      const reportIds = new Set(
+        (
+          await c(tx)
+            .select({ id: manualEvidenceReferences.evidenceId })
+            .from(manualEvidenceReferences)
+            .where(
+              inArray(
+                manualEvidenceReferences.tripId,
+                members.map((t) => t.id),
+              ),
+            )
+            .for("share")
+        ).map((r) => r.id),
+      );
+      if (manualBase && !ids.some((id) => reportIds.has(id))) throw manualError(422);
+      const all = [...new Set([...ids, ...(await groupEvidenceIds(tx, tripId))])].sort();
+      const rows = all.length
+        ? await c(tx)
+            .select()
+            .from(manualEvidence)
+            .where(inArray(manualEvidence.id, all))
+            .orderBy(asc(manualEvidence.id))
+            .for("update")
+        : [];
+      const cited = rows.filter((row) => ids.includes(row.id));
+      if (cited.length !== ids.length || cited.some((row) => row.ownerId !== actor.userId))
+        throw manualError(404);
+      if (rows.some((row) => row.state === "deleting")) throw transition();
+      if (cited.some((row) => row.state !== "ready")) throw manualError(409);
+      return ids.filter((id) => !reportIds.has(id));
+    },
+    /**
+     * Records a driver correction (VTC-169) after Acceptance created its proposal: the immutable
+     * submission, its newly cited uploads, audit and the existing correction notification event.
+     */
+    async correctionSubmittedInTransaction(
+      tx: TxContext,
+      actor: Actor,
+      tripId: string,
+      proposalId: string,
+      tripVersion: number,
+      uploads: string[],
+    ) {
+      await c(tx)
+        .insert(manualCorrectionSubmissions)
+        .values({ id: proposalId, ownerId: actor.userId, tripId, createdAt: at() });
+      if (uploads.length)
+        await c(tx)
+          .insert(manualCorrectionEvidence)
+          .values(uploads.map((evidenceId) => ({ evidenceId, correctionId: proposalId, tripId })));
+      await auditWrite(tx, actor, tripId, true);
+      await emit(tx, "manual.correction_requested", tripId, tripVersion, proposalId, tripId);
     },
     correctionRequestInTransaction: correctionRequestForReview,
     async completeCorrectionInTransaction(
@@ -2496,36 +2551,52 @@ export function createManualReports(
     }
     return result;
   }
-  async function gateTripEvidence(tx: TxContext, tripId: string) {
-    const refs = await c(tx)
+  // Screenshots referenced by a report revision or a driver correction of the canonical group.
+  async function groupEvidenceIds(tx: TxContext, tripId: string) {
+    const memberIds = (await ports.trips.groups.members(tx, [tripId], true)).map((t) => t.id);
+    const reports = await c(tx)
       .select({ id: manualEvidenceReferences.evidenceId })
       .from(manualEvidenceReferences)
-      .where(
-        inArray(
-          manualEvidenceReferences.tripId,
-          (await ports.trips.groups.members(tx, [tripId], true)).map((t) => t.id),
-        ),
-      )
+      .where(inArray(manualEvidenceReferences.tripId, memberIds))
       .for("share");
-    if (refs.length) {
+    const corrections = await c(tx)
+      .select({ id: manualCorrectionEvidence.evidenceId })
+      .from(manualCorrectionEvidence)
+      .where(inArray(manualCorrectionEvidence.tripId, memberIds))
+      .for("share");
+    return [...new Set([...reports, ...corrections].map((r) => r.id))].sort();
+  }
+  async function gateTripEvidence(tx: TxContext, tripId: string) {
+    const ids = await groupEvidenceIds(tx, tripId);
+    if (ids.length) {
       const rows = await c(tx)
         .select()
         .from(manualEvidence)
-        .where(inArray(manualEvidence.id, [...new Set(refs.map((r) => r.id))].sort()))
+        .where(inArray(manualEvidence.id, ids))
         .orderBy(asc(manualEvidence.id))
         .for("update");
       if (rows.some((row) => row.state === "deleting")) throw transition();
     }
   }
+  // Trips citing one screenshot through either reference table.
+  async function referencingTrips(tx: TxContext, id: string, lock: boolean) {
+    const reports = c(tx)
+      .select({ tripId: manualEvidenceReferences.tripId })
+      .from(manualEvidenceReferences)
+      .where(eq(manualEvidenceReferences.evidenceId, applicationId(id)));
+    const corrections = c(tx)
+      .select({ tripId: manualCorrectionEvidence.tripId })
+      .from(manualCorrectionEvidence)
+      .where(eq(manualCorrectionEvidence.evidenceId, applicationId(id)));
+    const rows = [
+      ...(await (lock ? reports.for("share") : reports)),
+      ...(await (lock ? corrections.for("share") : corrections)),
+    ];
+    return [...new Set(rows.map((r) => r.tripId))].sort();
+  }
   async function reserveExpiry(id: string): Promise<boolean> {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const discover = await run((tx) =>
-        c(tx)
-          .select({ tripId: manualEvidenceReferences.tripId })
-          .from(manualEvidenceReferences)
-          .where(eq(manualEvidenceReferences.evidenceId, applicationId(id))),
-      );
-      const tripIds = [...new Set(discover.map((r) => r.tripId))].sort();
+      const tripIds = await run((tx) => referencingTrips(tx, id, false));
       const outcome = await run(async (tx) => {
         // Current shared trip locks fence decisions without granting a cleanup worker domain writes.
         if (tripIds.length)
@@ -2546,14 +2617,8 @@ export function createManualReports(
           .where(eq(manualEvidence.id, id))
           .for("update");
         if (row?.state !== "ready") return false;
-        const refs = await c(tx)
-          .select({ tripId: manualEvidenceReferences.tripId })
-          .from(manualEvidenceReferences)
-          .where(eq(manualEvidenceReferences.evidenceId, id))
-          .for("share");
-        if (
-          canonicalJson([...new Set(refs.map((r) => r.tripId))].sort()) !== canonicalJson(tripIds)
-        )
+        // A report or correction reference committed after discovery changes the fence.
+        if (canonicalJson(await referencingTrips(tx, id, true)) !== canonicalJson(tripIds))
           return "retry" as const;
         await c(tx)
           .update(manualEvidence)

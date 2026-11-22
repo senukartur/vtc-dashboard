@@ -140,13 +140,14 @@ export async function registerTripDecisionRoutes(
       return envelope(result.data, r);
     },
   );
-  app.post<{ Params: { tripId: string }; Body: S["ResolutionInput"] }>(
-    "/api/v1/trips/:tripId/resolution-proposals",
+  // The trip author corrects unconfirmed facts (VTC-169); staff resolutions are retired.
+  app.post<{ Params: { tripId: string }; Body: S["TripCorrectionInput"] }>(
+    "/api/v1/trips/:tripId/corrections",
     {
       schema: {
         params,
         querystring: empty,
-        body: ref("ResolutionInput"),
+        body: ref("TripCorrectionInput"),
         response: { 201: ref("EnvelopeCommandResult") },
       },
     },

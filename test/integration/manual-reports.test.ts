@@ -322,6 +322,8 @@ beforeEach(async () => {
     "manual_draft_history",
     "manual_draft_evidence",
     "manual_drafts",
+    "manual_correction_evidence",
+    "manual_correction_submissions",
     "manual_correction_history",
     "manual_correction_requests",
     "manual_evidence_refs",
@@ -478,7 +480,7 @@ test("manual event fallback omits a wrong-game reference and shows the matching 
   expect(matching?.event).toEqual({ id: ets2.id, title: ets2.title });
 });
 
-test("same-ETag revisions race safely, rejected edits retain history, and accepted correction requests preserve effective results", async () => {
+test("same-ETag revisions race safely, rejected edits retain history, and accepted reports refuse revision with their result intact", async () => {
   const image = await upload(),
     key = newId(),
     report = await submit(image.id, key),
@@ -527,15 +529,9 @@ test("same-ETag revisions race safely, rejected edits retain history, and accept
       expectedTripVersion: next.tripVersion,
     }),
   ).rejects.toMatchObject({ statusCode: 409 });
-  const request = await manual.requestCorrection(owner, next.tripId, newId(), next.tripVersion, {
-    reason: "Fictional correction explanation",
-  });
-  expect(await manual.corrections(owner, next.tripId, {}, request.id)).toMatchObject({
-    data: { id: request.id, baseRevisionId: next.currentRevision.id, status: "pending" },
-    version: request.version,
-  });
+  // Accepted reports are corrected through driver proposals (VTC-169), never by a revision.
   const [trip] = await unit.run((tx) => tripService.statesInTransaction(tx, [next.tripId]));
-  expect(trip).toMatchObject({ decision: "accepted", correctionPending: true, reviewHold: true });
+  expect(trip).toMatchObject({ decision: "accepted", correctionPending: false, reviewHold: false });
   expect(await counts()).toMatchObject({ trips: 1, reports: 1, revisions: 3 });
 });
 

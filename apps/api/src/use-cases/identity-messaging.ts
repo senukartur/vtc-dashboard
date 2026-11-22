@@ -223,15 +223,9 @@ export function composeIdentity(
                   if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
                   return tripDecisions.eventAssociationsInTransaction(tx, ids);
                 },
-                correctionRequested: async (tx, id, requestId, actor, reason) => {
+                fixAllowed: (tx, id) => {
                   if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
-                  await tripDecisions.correctionRequestedInTransaction(
-                    tx,
-                    id,
-                    requestId,
-                    actor,
-                    reason,
-                  );
+                  return tripDecisions.fixAllowedInTransaction(tx, id);
                 },
               }
             : {}),

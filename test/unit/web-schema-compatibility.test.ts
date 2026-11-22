@@ -5,13 +5,12 @@ import { type DTO, schema } from "../../apps/web/src/features/dashboard/transpor
 // The web builds response validators with zod's z.fromJSONSchema over the generated document.
 // The reader rejects keywords such as dependentRequired, dependentSchemas and if/then/else, so
 // every contract schema must convert. Only these existing schemas use if/then/else and are known
-// exceptions; trips/transport.ts rewrites ResolutionInput before converting it.
+// exceptions; trips/transport.ts rewrites TripProposal before converting it.
 const knownUnsupported = [
   "EnvelopeListTripProposal",
   "EnvelopeTripProposal",
   "EnvelopeTripProposalDecision",
   "ListTripProposal",
-  "ResolutionInput",
   "TripProposal",
 ];
 

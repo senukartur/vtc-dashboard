@@ -94,7 +94,9 @@ interface Ports {
   qualifications: Pick<Qualifications, "notificationAssignmentInTransaction">;
   decisions: Pick<
     TripDecisions,
-    "notificationDecisionInTransaction" | "notificationCurrentDecisionsInTransaction"
+    | "notificationDecisionInTransaction"
+    | "notificationCurrentDecisionsInTransaction"
+    | "notificationProposalInTransaction"
   >;
 }
 export function eventReference(raw: unknown) {
@@ -569,14 +571,23 @@ export function createNotifications(
       };
     }
     if (e.type === "manual.report_submitted" || e.type === "manual.correction_requested") {
+      const review = await ports.manual.notificationReviewInTransaction(
+        tx,
+        e.type,
+        e.aggregate.id,
+        e.data.resourceId,
+        e.data.tripId as string,
+      );
+      // A driver correction (VTC-169) waits while its proposal is unreviewed; a legacy text request
+      // while it is pending. Either reviewed before delivery notifies nobody.
       if (
-        !(await ports.manual.notificationReviewInTransaction(
-          tx,
-          e.type,
-          e.aggregate.id,
-          e.data.resourceId,
-          e.data.tripId as string,
-        ))
+        typeof review === "object"
+          ? !(await ports.decisions.notificationProposalInTransaction(
+              tx,
+              e.data.resourceId,
+              e.data.tripId as string,
+            ))
+          : !review
       )
         return null;
       const trip = await ports.trips.notificationStateInTransaction(tx, e.data.tripId as string);
