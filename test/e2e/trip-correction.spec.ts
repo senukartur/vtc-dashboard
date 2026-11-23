@@ -84,7 +84,9 @@ test(
       "Open the correction page, enter the unconfirmed facts and send the trip back.",
     );
     await expect(box).toContainText("What to fix: Whole-trip distance, km, Cargo");
-    await expect(box.locator(".trip-detail-quote")).toHaveText(`"${correctionReturnReason}"`);
+    await expect(box.locator(".trip-detail-quote")).toHaveText(
+      `"${correctionReturnReason}" · Whole-trip distance is unknown, Cargo is unknown`,
+    );
     await expect(box.locator(".trip-banner-body > .trip-muted")).toContainText(
       "Fictional Stage Four Dispatcher",
     );
