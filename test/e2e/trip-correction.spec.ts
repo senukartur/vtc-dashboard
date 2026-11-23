@@ -66,6 +66,9 @@ async function shot(page: Page, info: TestInfo, name: string) {
   await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true });
 }
 const banner = (page: Page) => page.locator(".trip-banner");
+// The trip page's single status banner (variant A, VTC-170).
+const statusBanner = (page: Page, name = "Trip status") =>
+  page.getByRole("region", { name, exact: true });
 
 test(
   "a returned telemetry trip names its unconfirmed facts and opens the correction page in both languages",
@@ -74,19 +77,21 @@ test(
     await author(page, needsFixTelemetry());
     await page.goto(tripPath);
     await catalogLanguage(page);
-    await expect(page.locator(".trip-detail-tiles")).toBeVisible();
     await expect(page.locator(".trip-detail-status")).toHaveText("Needs fixes");
-    await expect(banner(page)).toHaveAttribute("data-state", "needs_fix");
-    await expect(banner(page)).toContainText(
-      "The reviewer returned the trip. Correct the unconfirmed facts and send it for review again.",
+    const box = statusBanner(page);
+    await expect(box).toHaveAttribute("data-status", "needs_fix");
+    await expect(box.locator(".trip-banner-text").first()).toHaveText(
+      "Open the correction page, enter the unconfirmed facts and send the trip back.",
     );
-    await expect(banner(page)).toContainText("What to fix: Whole-trip distance, km, Cargo");
-    await expect(banner(page)).toContainText(
-      `Fictional Stage Four Dispatcher: "${correctionReturnReason}"`,
+    await expect(box).toContainText("What to fix: Whole-trip distance, km, Cargo");
+    await expect(box.locator(".trip-detail-quote")).toHaveText(`"${correctionReturnReason}"`);
+    await expect(box.locator(".trip-banner-body > .trip-muted")).toContainText(
+      "Fictional Stage Four Dispatcher",
     );
     // One action: the banner's button; the header repeats nothing while the trip needs fixes.
     const fix = page.getByRole("link", { name: "Correct the trip", exact: true });
     await expect(fix).toHaveCount(1);
+    await expect(box.getByRole("link")).toHaveText("Correct the trip");
     await expect(fix).toHaveAttribute("href", correctPath);
     await expect(page.locator(".trip-correction-unconfirmed")).not.toHaveCount(0);
     await expect(page.locator('.trip-correction-unconfirmed[data-field="cargoId"]')).toContainText(
@@ -99,7 +104,9 @@ test(
     await shot(page, info, "trip-needs-fix-en");
     await catalogLanguage(page, "ru");
     await expect(page.locator(".trip-detail-status")).toHaveText("Нужно исправить");
-    await expect(page.getByRole("link", { name: "Исправить рейс", exact: true })).toBeVisible();
+    await expect(
+      statusBanner(page, "Статус рейса").getByRole("link", { name: "Исправить рейс", exact: true }),
+    ).toBeVisible();
     await expect(page.locator('.trip-correction-unconfirmed[data-field="cargoId"]')).toContainText(
       "не подтверждён",
     );
@@ -186,9 +193,10 @@ test(
     expect(state.posts[0]?.headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
 
     await expect(page.locator(".trip-detail-status")).toHaveText("Pending review");
-    await expect(banner(page)).toHaveAttribute("data-state", "correction_pending");
-    await expect(banner(page)).toContainText("Correction under review");
-    await expect(banner(page)).toContainText(
+    const box = statusBanner(page);
+    await expect(box).toHaveAttribute("data-status", "pending_review");
+    await expect(box.locator(".trip-banner-title strong")).toHaveText("Correction under review");
+    await expect(box.locator(".trip-banner-text")).toHaveText(
       "Until the decision, the previous result stays in effect.",
     );
     await expect(
@@ -217,7 +225,7 @@ test(
     await page.goto(tripPath);
     await catalogLanguage(page);
     await expect(page.locator(".trip-detail-status")).toHaveText("Accepted");
-    await expect(banner(page)).toHaveCount(0);
+    await expect(statusBanner(page)).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Fix the report", exact: true })).toHaveCount(0);
     await page.getByRole("link", { name: "Propose a correction", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`${correctPath}$`));
@@ -243,8 +251,12 @@ test(
     state.view = returnedTrip();
     await page.reload();
     await expect(page.locator(".trip-detail-status")).toHaveText("Rejected");
-    await expect(banner(page)).toHaveAttribute("data-state", "rejected");
-    await expect(banner(page)).toContainText("The rejection is final; the trip needs no action.");
+    const box = statusBanner(page);
+    await expect(box).toHaveAttribute("data-status", "rejected");
+    await expect(box.locator(".trip-banner-text")).toHaveText(
+      "The rejection is final; the trip does not count.",
+    );
+    await expect(box.getByRole("link")).toHaveCount(0);
     for (const name of ["Correct the trip", "Propose a correction", "Fix the report"])
       await expect(page.getByRole("link", { name, exact: true })).toHaveCount(0);
     await page.goto(correctPath);

@@ -139,14 +139,16 @@ function CorrectionForm({
         </div>
       </header>
       {returned && (
-        <Card className="trip-banner" data-state="needs_fix" data-attention="true">
-          <strong>
-            {t("correctReturnedBy", { name: returned.reviewer?.nickname ?? t("system") })}
-          </strong>
-          {returned.reason && (
-            <p className="trip-detail-quote">{t("quoted", { text: returned.reason })}</p>
-          )}
-        </Card>
+        <section className="trip-banner" data-tone="warn" data-status="needs_fix">
+          <div className="trip-banner-body">
+            <strong>
+              {t("correctReturnedBy", { name: returned.reviewer?.nickname ?? t("system") })}
+            </strong>
+            {returned.reason && (
+              <span className="trip-detail-quote">{t("quoted", { text: returned.reason })}</span>
+            )}
+          </div>
+        </section>
       )}
       <Card className="stack" aria-labelledby={`${headingId}-editable`}>
         <h2 id={`${headingId}-editable`}>{t("correctEditable")}</h2>

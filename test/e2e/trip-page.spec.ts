@@ -403,7 +403,7 @@ const banners = {
       [
         "Rejected",
         "not counted",
-        "The trip was rejected and does not count.",
+        "The rejection is final; the trip does not count.",
         "Fictional Stage Four Dispatcher, 11 Nov, 10:00",
       ],
       ["In progress", "not counted yet", "The trip is still in progress in the game.", ""],
@@ -435,7 +435,7 @@ const banners = {
       [
         "Отклонён",
         "не засчитан",
-        "Рейс отклонён и не учитывается.",
+        "Отклонение окончательное; рейс не учитывается.",
         "Fictional Stage Four Dispatcher, 11 нояб., 10:00",
       ],
       ["Выполняется", "пока не засчитан", "Рейс ещё идёт в игре.", ""],
@@ -640,7 +640,7 @@ test(
     await expect(status(page)).toHaveText("Needs fixes");
     await expect(page.locator(".trip-detail-meta")).toContainText("Driver: Fictional Other Driver");
     await expect(banner(page).locator(".trip-banner-text")).toHaveText(
-      "The report was returned to the driver for fixes.",
+      "The trip was returned to the driver for fixes.",
     );
     const block = page.locator("details.trip-staff");
     await expect(block.locator("summary")).toHaveText(
@@ -675,7 +675,7 @@ test(
 );
 
 test(
-  "staff read reconciled sources in the dispatcher block; a failed logo, selected limits and the correction request stay as before",
+  "staff read reconciled sources in the dispatcher block; a failed logo, selected limits stay as before and accepted telemetry offers no correction",
   browserCase(["@functional"]),
   async ({ page }) => {
     // A null saved zone follows the device; staff own this trip so every block renders.

@@ -1268,7 +1268,10 @@ test(
       current = (await (await page.request.get(`/api/v1/trips/${tripId}`)).json()).data;
       expect(current.summary.actualDistanceM).toBe("123400");
       expect(current.summary.decision).toBe("accepted");
-      await expect(page.locator(".trip-banner[data-state=correction_pending]")).toBeVisible();
+      // An accepted trip keeps no status banner; its header names the correction under review.
+      await expect(
+        page.locator(".trip-detail-header").getByText("Correction under review", { exact: true }),
+      ).toBeVisible();
       const pending = await proposal(staff, tripId);
       expect(pending).toMatchObject({
         authorId: fixture.userId,

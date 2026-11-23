@@ -16,6 +16,7 @@ import {
   canCorrect,
   nextStep,
   revisableReportId,
+  tripBanner,
   tripHistory,
 } from "../../apps/web/src/features/trips/trip-page-model.ts";
 import {
@@ -178,6 +179,35 @@ test("a return for fixes needs the driver; a rejection without it is final (D2)"
     decision.reasonCodes = decision.reasonCodes.filter((code) => code !== "returned_for_fixes");
   expect(awaitingFix(legacy)).toBe(false);
   expect(revisableReportId(legacy, fixtureId)).toBeNull();
+});
+
+test("the status banner carries the driver's fix and the correction under review (variant A)", () => {
+  const owner = { owner: true, staff: false };
+  expect(tripBanner(tripPrivate(needsFixTelemetry()), owner)).toMatchObject({
+    status: "needs_fix",
+    tone: "warn",
+    noteKey: "next_fix_telemetry_note",
+    action: "fix",
+  });
+  // Staff read the same status without the driver's action.
+  expect(tripBanner(tripPrivate(needsFixTelemetry()), { owner: false, staff: true })).toMatchObject(
+    {
+      status: "needs_fix",
+      noteKey: "next_fix_staff_note",
+      action: null,
+    },
+  );
+  expect(tripBanner(tripPrivate(pendingCorrection()), owner)).toMatchObject({
+    status: "pending_review",
+    noteKey: "next_correction_note",
+    action: null,
+  });
+  // A final rejection is no fix; an accepted report keeps no banner while it stays correctable.
+  expect(tripBanner(tripPrivate(returnedTrip()), owner)).toMatchObject({
+    status: "rejected",
+    action: null,
+  });
+  expect(tripBanner(tripPrivate(acceptedManualCorrectable()), owner)).toBeNull();
 });
 
 test("history lists the return and the driver's proposed correction in time order", () => {
