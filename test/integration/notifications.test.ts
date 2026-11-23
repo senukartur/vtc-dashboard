@@ -2413,7 +2413,13 @@ test("a driver correction notifies its reviewers while the proposal is unreviewe
     causationId: null,
     data: { resourceId: proposed.data.id, tripId: saved.tripId },
   };
-  // Once the proposal is reviewed a replayed event notifies nobody.
+  // Once the proposal is reviewed the owning check stops the delivery itself, so a replay (or a
+  // first delivery after the review) notifies nobody rather than being deduplicated.
+  const deliverable = () =>
+    unit.run((tx) =>
+      decisions.notificationProposalInTransaction(tx, proposed.data.id, saved.tripId),
+    );
+  expect(await deliverable()).toBe(true);
   const detail = await decisions.getProposal(dispatcher, saved.tripId, proposed.data.id);
   await control.execute(
     "INSERT INTO trip_proposal_reviews (proposal_id,actor_id,outcome,reviewed_revision_id,reason,decided_at) VALUES (?,?,'reject',?,?,UTC_TIMESTAMP(3))",
@@ -2424,6 +2430,7 @@ test("a driver correction notifies its reviewers while the proposal is unreviewe
       "Fictional review",
     ],
   );
+  expect(await deliverable()).toBe(false);
   await unit.run((tx) =>
     createOutbox(unit, { notifications: true }).append(tx, { ...event, eventId: newId() }),
   );

@@ -1,7 +1,16 @@
 import type { components } from "@vtc/contracts";
 import type { TxContext, UnitOfWork } from "@vtc/db";
-import { and, desc, eq, gt, sql, tripDecisions } from "@vtc/db/trip-decisions-schema";
-import { isNotNull, notExists, or, type SQLWrapper, type Subquery } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  sql,
+  tripDecisions,
+  tripProposalReviews,
+  tripProposals,
+} from "@vtc/db/trip-decisions-schema";
+import { isNotNull, isNull, notExists, or, type SQLWrapper, type Subquery } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 
 type ReturnedTrips = NonNullable<components["schemas"]["WorkspaceSummary"]["tripsNeedingFixes"]>;
@@ -65,6 +74,20 @@ export function createTripDecisionWorkspace(unit: UnitOfWork, sources: ReturnedT
                   and(
                     eq(newer.tripId, tripDecisions.tripId),
                     gt(newer.sequence, tripDecisions.sequence),
+                  ),
+                ),
+            ),
+            // The driver's correction under review already answers the return (VTC-169).
+            notExists(
+              client
+                .select({ id: tripProposals.id })
+                .from(tripProposals)
+                .leftJoin(tripProposalReviews, eq(tripProposalReviews.proposalId, tripProposals.id))
+                .where(
+                  and(
+                    eq(tripProposals.tripId, tripDecisions.tripId),
+                    eq(tripProposals.authorId, viewerId),
+                    isNull(tripProposalReviews.proposalId),
                   ),
                 ),
             ),

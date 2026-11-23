@@ -1009,6 +1009,225 @@ test("a return lets the driver correct again, stale support blocks approval and 
   });
 });
 
+/** Rows a correction or its review may write for a trip, to prove a rollback left none. */
+async function correctionRows(tripId: string) {
+  const [rows] = await control.execute<RowDataPacket[]>(
+    "SELECT (SELECT COUNT(*) FROM trip_proposals WHERE trip_id=?) proposals, (SELECT COUNT(*) FROM trip_proposal_reviews r JOIN trip_proposals p ON p.id=r.proposal_id WHERE p.trip_id=?) reviews, (SELECT COUNT(*) FROM trip_resolutions WHERE trip_id=?) resolutions, (SELECT COUNT(*) FROM manual_correction_submissions WHERE trip_id=?) submissions, (SELECT COUNT(*) FROM trip_decisions WHERE trip_id=?) decisions, (SELECT COUNT(*) FROM trip_facts WHERE canonical_trip_id=?) facts",
+    [tripId, tripId, tripId, tripId, tripId, tripId],
+  );
+  return Object.fromEntries(
+    Object.entries(rows[0] ?? {}).map(([key, value]) => [key, Number(value)]),
+  );
+}
+
+test("an author correction racing a reviewer decision, or another correction, commits at most once", async () => {
+  // The driver's correction and a final rejection race on the same trip version.
+  const raced = await receive(heldPayload()),
+    review = await service.review(dispatcher, raced.tripId);
+  const results = await Promise.allSettled([
+    correct(raced.tripId, { actualDistanceM: "200000" }),
+    service.decide(dispatcher, raced.tripId, newId(), review.version, {
+      decision: "reject",
+      reviewedRevisionId: review.data.factRevisionId,
+      factRevisionId: review.data.factRevisionId,
+      proposalId: null,
+      reason: "Fictional concurrent final rejection",
+    }),
+  ]);
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  for (const result of results)
+    if (result.status === "rejected") expect(result.reason).toMatchObject({ statusCode: 409 });
+  const rows = await correctionRows(raced.tripId);
+  if (results[0]?.status === "fulfilled") {
+    expect(rows).toMatchObject({ proposals: 1, submissions: 1, decisions: 0 });
+    expect((await state(raced.tripId))?.decision).toBe("pending_review");
+  } else {
+    expect(rows).toMatchObject({ proposals: 0, submissions: 0, decisions: 1 });
+    expect((await state(raced.tripId))?.decision).toBe("rejected");
+  }
+
+  // Two corrections on one version: one wins, the other is a 409 conflict.
+  const twice = await receive(heldPayload()),
+    version = (await state(twice.tripId))?.version as number;
+  const send = (distance: string) =>
+    service.propose(owner, twice.tripId, newId(), version, {
+      reason: "Fictional concurrent driver correction",
+      evidenceIds: [],
+      actualDistanceM: distance,
+    });
+  const pair = await Promise.allSettled([send("200000"), send("210000")]);
+  expect(pair.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  expect(pair.find((result) => result.status === "rejected")).toMatchObject({
+    reason: { statusCode: 409 },
+  });
+  expect(await correctionRows(twice.tripId)).toMatchObject({ proposals: 1, submissions: 1 });
+});
+
+test("a failing correction step or trip decision inside a proposal review rolls back every row", async () => {
+  const faulty = (overrides: {
+    manual?: Partial<ManualReports>;
+    qualifications?: Partial<typeof qualifications>;
+  }) =>
+    createTripDecisions(
+      unit,
+      service.config,
+      {
+        identity,
+        trips: tripsService,
+        qualifications: { ...qualifications, ...overrides.qualifications },
+        manual: { ...manual, ...overrides.manual },
+        events,
+      },
+      now,
+    );
+  // The submission record fails after the proposal, resolution and derived fact were written.
+  const r = await receive(heldPayload()),
+    before = { rows: await correctionRows(r.tripId), state: await state(r.tripId) };
+  await expect(
+    faulty({
+      manual: {
+        correctionSubmittedInTransaction: async () => {
+          throw new Error("SYNTHETIC_SUBMISSION_FAILURE");
+        },
+      },
+    }).propose(owner, r.tripId, newId(), before.state?.version as number, {
+      reason: "Fictional rolled back correction",
+      evidenceIds: [await screenshot()],
+      actualDistanceM: "200000",
+    }),
+  ).rejects.toThrow("SYNTHETIC_SUBMISSION_FAILURE");
+  expect(await correctionRows(r.tripId)).toEqual(before.rows);
+  expect(await state(r.tripId)).toEqual(before.state);
+
+  // A return through the proposal review fails while crediting: no review or decision remains.
+  const proposed = await correct(r.tripId, { actualDistanceM: "200000" }),
+    detail = await service.getProposal(dispatcher, r.tripId, proposed.data.id),
+    pending = { rows: await correctionRows(r.tripId), state: await state(r.tripId) };
+  await expect(
+    faulty({
+      qualifications: {
+        replaceContributionsInTransaction: async () => {
+          throw new Error("SYNTHETIC_CREDIT_FAILURE");
+        },
+      },
+    }).proposalDecision(deputy, r.tripId, proposed.data.id, newId(), detail.version, {
+      decision: "reject",
+      reviewedRevisionId: detail.data.revisionId,
+      reason: "Fictional rolled back return",
+      tripDecision: "returned_for_fixes",
+    }),
+  ).rejects.toThrow("SYNTHETIC_CREDIT_FAILURE");
+  expect(await correctionRows(r.tripId)).toEqual(pending.rows);
+  expect(await state(r.tripId)).toEqual(pending.state);
+  expect((await service.getProposal(dispatcher, r.tripId, proposed.data.id)).data.state).toBe(
+    "pending",
+  );
+});
+
+test("a declined or approved correction protects its screenshot until a year after the decision", async () => {
+  const time = instant;
+  try {
+    for (const outcome of ["reject", "approve"] as const) {
+      const r = await receive(heldPayload()),
+        shot = await screenshot(),
+        proposed = await correct(r.tripId, { actualDistanceM: "200000" }, owner, [shot]),
+        detail = await service.getProposal(dispatcher, r.tripId, proposed.data.id),
+        decidedAt = instant;
+      await decideProposal(deputy, r.tripId, proposed.data.id, newId(), detail.version, {
+        decision: outcome,
+        reviewedRevisionId: detail.data.revisionId,
+        reason: `Fictional ${outcome} of a cited screenshot`,
+        ...(outcome === "reject" ? { tripDecision: "returned_for_fixes" as const } : {}),
+      });
+      const boundary = new Date(decidedAt);
+      boundary.setUTCFullYear(boundary.getUTCFullYear() + 1);
+      instant = decidedAt + 200 * 86400000;
+      expect(await manual.reserveExpiry(shot)).toBe(false);
+      instant = boundary.getTime() - 1;
+      expect(await manual.reserveExpiry(shot)).toBe(false);
+      instant = boundary.getTime();
+      expect(await manual.reserveExpiry(shot)).toBe(true);
+      instant = time;
+    }
+  } finally {
+    instant = time;
+  }
+});
+
+test("a final rejection refuses a manual revision and a report attached to the rejected trip (D2)", async () => {
+  const submitted = await report();
+  await decide(submitted.tripId, "reject");
+  const fields = submitted.currentRevision.fields;
+  if (!("origin" in fields)) throw new Error("SYNTHETIC_MANUAL_V2_REQUIRED");
+  const rejected = await state(submitted.tripId);
+  await expect(
+    manual.reviseReport(owner, submitted.id, newId(), submitted.version, {
+      fields: { ...fields, ...manualReferenceDates, actualDistanceM: "124000" },
+      expectedTripVersion: rejected?.version as number,
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  // A telemetry trip rejected for good takes no new report either.
+  const telemetry = await receive(heldPayload());
+  await decide(telemetry.tripId, "reject");
+  const final = await state(telemetry.tripId);
+  await expect(
+    manual.submitReport(owner, newId(), {
+      fields: { ...fields, ...manualReferenceDates },
+      targetTrip: { tripId: telemetry.tripId, expectedVersion: final?.version as number },
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  expect(await state(telemetry.tripId)).toEqual(final);
+  expect(await state(submitted.tripId)).toEqual(rejected);
+});
+
+test("a pending staff-authored resolution from before VTC-169 can still be approved or declined", async () => {
+  for (const outcome of ["approve", "reject"] as const) {
+    const r = await receive(heldPayload()),
+      proposed = await correct(r.tripId, { actualDistanceM: "200000" });
+    // Rewrite the driver's correction into the shape a released staff resolution left behind.
+    await control.execute("UPDATE trip_proposals SET author_id=? WHERE id=?", [
+      dispatcher.userId,
+      proposed.data.id,
+    ]);
+    await control.execute(
+      "UPDATE trip_resolutions SET author_id=? WHERE id=(SELECT resolution_id FROM trip_proposals WHERE id=?)",
+      [dispatcher.userId, proposed.data.id],
+    );
+    await control.execute("DELETE FROM manual_correction_submissions WHERE id=?", [
+      proposed.data.id,
+    ]);
+    const detail = await service.getProposal(deputy, r.tripId, proposed.data.id);
+    expect(detail.data).toMatchObject({ authorId: dispatcher.userId, state: "pending" });
+    // Its author never reviews it.
+    await expect(
+      service.proposalDecision(dispatcher, r.tripId, proposed.data.id, newId(), detail.version, {
+        decision: outcome,
+        reviewedRevisionId: detail.data.revisionId,
+        reason: "Fictional self review",
+      }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    const result = await service.proposalDecision(
+      deputy,
+      r.tripId,
+      proposed.data.id,
+      newId(),
+      detail.version,
+      {
+        decision: outcome,
+        reviewedRevisionId: detail.data.revisionId,
+        reason: `Fictional ${outcome} of a released resolution`,
+      },
+    );
+    expect((await service.getProposal(deputy, r.tripId, proposed.data.id)).data.state).toBe(
+      outcome === "approve" ? "approved" : "rejected",
+    );
+    if (outcome === "approve") {
+      expect(result.data).toMatchObject({ outcome: "accepted" });
+      expect((await credit(r.tripId))?.credited).toBe(true);
+    } else expect((await state(r.tripId))?.decision).toBe("pending_review");
+  }
+});
+
 test("manual times and staff-only assignment IDs cannot fabricate qualification", async () => {
   const r = await report();
   await decide(r.tripId);
@@ -4366,6 +4585,37 @@ test("workspace returns a rejected author revision until resubmission and follow
     count: 1,
     items: [{ tripId: submitted.tripId, latestReturnReason: "Fictional updated author feedback" }],
   });
+});
+
+test("workspace stops asking to fix a returned trip while its driver's correction is under review", async () => {
+  const workspace = returnedTripFixture();
+  const read = (tx: TxContext) => workspace.workspaceReturnedTripsInTransaction(tx, owner.userId);
+  const before = (await unit.run(read)).count;
+  const r = await receive(heldPayload());
+  const returnWith = async (proposalId: string, reason: string) => {
+    const detail = await service.getProposal(dispatcher, r.tripId, proposalId);
+    await decideProposal(deputy, r.tripId, proposalId, newId(), detail.version, {
+      decision: "reject",
+      reviewedRevisionId: detail.data.revisionId,
+      reason,
+      tripDecision: "returned_for_fixes",
+    });
+  };
+  const first = await correct(r.tripId, { actualDistanceM: "200000" });
+  await returnWith(first.data.id, "Fictional distance still unproven");
+  const returned = await unit.run(read);
+  expect(returned.count).toBe(before + 1);
+  expect(returned.items).toContainEqual({
+    tripId: r.tripId,
+    latestReturnReason: "Fictional distance still unproven",
+  });
+  // The pending correction answers the return; a decline with another return asks again.
+  const second = await correct(r.tripId, { actualDistanceM: "210000" });
+  const pending = await unit.run(read);
+  expect(pending.count).toBe(before);
+  expect(pending.items.map((item) => item.tripId)).not.toContain(r.tripId);
+  await returnWith(second.data.id, "Fictional odometer still unreadable");
+  expect((await unit.run(read)).count).toBe(before + 1);
 });
 
 test("workspace ignores alias and proposal decisions but accepts an explicit root review of an alias-held revision", async () => {
