@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { stagedDecisionInput } from "../../apps/web/src/features/review/dispatch-model.ts";
 import {
@@ -8,6 +8,7 @@ import {
   type ProposalMode,
   proposalBody,
 } from "../../apps/web/src/features/review/review-model.ts";
+import { tripTranslations } from "../../apps/web/src/features/trips/translations.ts";
 import type { DTO } from "../../apps/web/src/features/trips/transport.ts";
 import { correctionProposal } from "../e2e/support/trip-page-fixtures.ts";
 
@@ -155,4 +156,23 @@ test("an old-format request can only be declined and never decides the trip", ()
     reviewedRevisionId: old.proposal.revisionId,
     reason: "Fictional decline",
   });
+});
+
+test("every quality reason code of the telemetry contract examples has an EN and RU label", () => {
+  const folder = "docs/contracts/examples";
+  const codes = new Set<string>();
+  for (const name of readdirSync(folder).filter((file) => /^telemetry-.*\.json$/.test(file))) {
+    const example = JSON.parse(readFileSync(`${folder}/${name}`, "utf8")) as {
+      snapshot?: { evidence?: { reasons?: string[] } };
+    };
+    for (const code of example.snapshot?.evidence?.reasons ?? []) codes.add(code);
+  }
+  // The desktop client's recorded terminal upload reports its trailer context too.
+  codes.add("trailer-context-unproven");
+  expect(codes.size).toBeGreaterThan(5);
+  for (const code of codes)
+    for (const locale of ["en", "ru"] as const)
+      expect(tripTranslations[locale], `${locale}:${code}`).toHaveProperty([
+        `clientReason_${code}`,
+      ]);
 });

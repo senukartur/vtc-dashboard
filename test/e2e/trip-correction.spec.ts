@@ -249,6 +249,30 @@ test(
       cargoMassKg: "19500",
     });
 
+    // A declined correction reads in the history with the reviewer's comment, in EN and RU.
+    state.proposals = [
+      {
+        ...correctionProposal(cargoId),
+        state: "rejected",
+        review: {
+          decision: "reject",
+          reason: "Fictional screenshot shows another cargo",
+          decidedAt: "2026-11-12T12:00:00.000Z",
+          reviewedRevisionId: "41500000-0000-4000-8000-000000000382",
+          reviewerId: "41500000-0000-4000-8000-000000000003",
+        },
+      },
+    ];
+    await page.reload();
+    const declined = page.locator('.trip-detail-history li[data-kind="correction_declined"]');
+    await expect(declined).toContainText("Correction declined");
+    await expect(declined.locator(".trip-detail-quote")).toHaveText(
+      '"Fictional screenshot shows another cargo"',
+    );
+    await catalogLanguage(page, "ru");
+    await expect(declined).toContainText("Исправление отклонено");
+    await catalogLanguage(page);
+
     // A rejection without a return is final: no banner action and no correction page.
     state.view = returnedTrip();
     await page.reload();

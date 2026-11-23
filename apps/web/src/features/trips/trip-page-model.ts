@@ -363,7 +363,15 @@ export function recordedValueKey(
 
 export type HistoryEntry = {
   id: string;
-  kind: "telemetry" | "submitted" | "proposed" | "accepted" | "returned" | "rejected";
+  kind:
+    | "telemetry"
+    | "submitted"
+    | "proposed"
+    | "correction_approved"
+    | "correction_declined"
+    | "accepted"
+    | "returned"
+    | "rejected";
   titleKey: TripKey;
   /** Revision number for a later submission. */
   number: number | null;
@@ -380,15 +388,18 @@ const rank: Record<HistoryEntry["kind"], number> = {
   telemetry: 0,
   submitted: 1,
   proposed: 1,
-  accepted: 2,
-  returned: 2,
-  rejected: 2,
+  correction_approved: 2,
+  correction_declined: 2,
+  accepted: 3,
+  returned: 3,
+  rejected: 3,
 };
 
 /**
  * Author-safe trip history, oldest first; at the same instant a submission precedes a decision. A
  * rejection reads as returned for fixes when the driver may fix it; the driver's own corrections
- * (proposals with values) read as proposed corrections.
+ * (proposals with values) read as proposed corrections, and a reviewed one also as accepted or
+ * declined with the reviewer's comment.
  */
 export function tripHistory(
   view: Private,
@@ -423,20 +434,38 @@ export function tripHistory(
       reasonKeys: [],
       overLimits: false,
     });
-  for (const proposal of proposals)
-    if (proposal.changes && proposal.authorId === view.summary.owner.id)
+  for (const proposal of proposals) {
+    if (!proposal.changes || proposal.authorId !== view.summary.owner.id) continue;
+    entries.push({
+      id: proposal.id,
+      kind: "proposed",
+      titleKey: "history_proposed",
+      number: null,
+      at: proposal.createdAt,
+      actor: view.summary.owner.nickname,
+      system: false,
+      quote: proposal.reason,
+      reasonKeys: [],
+      overLimits: false,
+    });
+    const review = proposal.state === "pending" ? null : proposal.review;
+    if (review) {
+      const kind = review.decision === "approve" ? "correction_approved" : "correction_declined";
       entries.push({
-        id: proposal.id,
-        kind: "proposed",
-        titleKey: "history_proposed",
+        id: `${proposal.id}-review`,
+        kind,
+        titleKey: `history_${kind}`,
         number: null,
-        at: proposal.createdAt,
-        actor: view.summary.owner.nickname,
+        at: review.decidedAt,
+        // The proposal read names no reviewer; the decision entry beside it does.
+        actor: null,
         system: false,
-        quote: proposal.reason,
+        quote: review.reason,
         reasonKeys: [],
         overLimits: false,
       });
+    }
+  }
   for (const decision of view.decisions) {
     const kind =
       decision.outcome === "accepted"

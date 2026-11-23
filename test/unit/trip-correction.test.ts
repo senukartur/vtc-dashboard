@@ -21,6 +21,7 @@ import {
 } from "../../apps/web/src/features/trips/trip-page-model.ts";
 import {
   acceptedManualCorrectable,
+  correctionDriverReason,
   correctionProposal,
   needsFixManual,
   needsFixTelemetry,
@@ -222,4 +223,41 @@ test("history lists the return and the driver's proposed correction in time orde
       { ...proposal, authorId: "41500000-0000-4000-8000-000000000003" },
     ]).map((entry) => entry.kind),
   ).not.toContain("proposed");
+});
+
+test("history shows the decline or acceptance of the driver's correction with the comment", () => {
+  const view = tripPrivate(acceptedManualCorrectable());
+  const review = {
+    decision: "reject" as const,
+    reason: "Fictional screenshot shows another cargo",
+    decidedAt: "2026-11-12T12:00:00.000Z",
+    reviewedRevisionId: "41500000-0000-4000-8000-000000000382",
+    reviewerId: "41500000-0000-4000-8000-000000000003",
+  };
+  const declined = { ...correctionProposal(cargo), state: "rejected" as const, review };
+  const entries = tripHistory(view, [declined]);
+  expect(entries.slice(-2)).toMatchObject([
+    { kind: "proposed", quote: correctionDriverReason },
+    {
+      kind: "correction_declined",
+      titleKey: "history_correction_declined",
+      at: review.decidedAt,
+      quote: review.reason,
+      actor: null,
+    },
+  ]);
+  const approved = {
+    ...declined,
+    state: "approved" as const,
+    review: { ...review, decision: "approve" as const, reason: "Fictional confirmed cargo" },
+  };
+  expect(tripHistory(view, [approved]).at(-1)).toMatchObject({
+    kind: "correction_approved",
+    titleKey: "history_correction_approved",
+    quote: "Fictional confirmed cargo",
+  });
+  // A pending proposal has no review entry yet.
+  expect(tripHistory(view, [correctionProposal(cargo)]).map((entry) => entry.kind)).not.toContain(
+    "correction_declined",
+  );
 });
