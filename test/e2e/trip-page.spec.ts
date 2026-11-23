@@ -93,7 +93,8 @@ const tile = (page: Page, label: string) =>
     .filter({ has: page.locator(`.trip-detail-tile-label:text-is(${JSON.stringify(label)})`) });
 const status = (page: Page) => page.locator(".trip-detail-status");
 const logoRequests = (requests: string[]) => requests.filter((path) => path.endsWith("/logo"));
-const privatePaths = /\/review|\/reconciliations|\/proposals|\/manual-revisions|\/manual-reports/;
+// Staff-only reads. The author reads their own trip's proposals for its history (VTC-169).
+const privatePaths = /\/review|\/reconciliations|\/manual-revisions|\/manual-reports/;
 test(
   "trip details localize final telemetry damage and distinguish zero from unavailable",
   browserCase(["@functional"]),
@@ -561,6 +562,7 @@ test(
       "No screenshots are attached.",
     );
 
+    const ownReads = requests.length;
     state.view = otherSummary();
     await page.reload();
     await loaded(page);
@@ -576,6 +578,8 @@ test(
     expect(
       requests.filter((path) => privatePaths.test(path) || path.includes("/evidence")),
     ).toEqual([]);
+    // Another member's summary reads no proposals.
+    expect(requests.slice(ownReads).filter((path) => path.includes("/proposals"))).toEqual([]);
 
     state.view = withoutSources();
     await page.reload();
@@ -721,7 +725,7 @@ const labels = {
     rows: [
       ["Accepted", "Nothing to do", "Yes"],
       ["Pending review", "Nothing to do", "Not yet"],
-      ["Needs fixes", "Fix the report", "Not yet"],
+      ["Needs fixes", "Fix the trip", "Not yet"],
       ["Rejected", "Not counted", "No"],
       ["In progress", "Finish the delivery", "Not yet"],
       ["Not checked yet", "Not checked yet", "Not yet"],
@@ -737,7 +741,7 @@ const labels = {
     rows: [
       ["Принят", "Ничего не нужно", "Да"],
       ["На проверке", "Ничего не нужно", "Пока нет"],
-      ["Нужно исправить", "Исправьте отчёт", "Пока нет"],
+      ["Нужно исправить", "Исправьте рейс", "Пока нет"],
       ["Отклонён", "Не засчитан", "Нет"],
       ["Выполняется", "Завершите доставку", "Пока нет"],
       ["Ещё не проверен", "Ещё не проверен", "Пока нет"],

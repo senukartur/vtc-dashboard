@@ -329,7 +329,7 @@ async function workspaceSummary(request: APIRequestContext) {
   return ((await response.json()) as Schemas["EnvelopeWorkspaceSummary"]).data;
 }
 
-async function rejectWorkspaceTrip(staff: APIRequestContext, tripId: string, reason: string) {
+async function returnWorkspaceTrip(staff: APIRequestContext, tripId: string, reason: string) {
   const response = await staff.get(`/api/v1/trips/${tripId}/review`);
   expect(response.status()).toBe(200);
   const { data } = (await response.json()) as Schemas["EnvelopeReview"];
@@ -346,6 +346,7 @@ async function rejectWorkspaceTrip(staff: APIRequestContext, tripId: string, rea
           factRevisionId: data.factRevisionId,
           proposalId: null,
           reason,
+          returnForFixes: true,
         },
         response.headers().etag,
       )
@@ -397,13 +398,13 @@ test(
       const returned = await manual.submitReport(fixture.author, randomUUID(), { fields });
       const earlierReason = "Fictional earlier return reason";
       const latestReason = "Fictional latest return reason";
-      await rejectWorkspaceTrip(staff, returned.tripId, earlierReason);
+      await returnWorkspaceTrip(staff, returned.tripId, earlierReason);
       const report = await manual.getReport(fixture.author, returned.id);
       await manual.reviseReport(fixture.author, report.id, randomUUID(), report.version, {
         fields: { ...fields, comment: "Fictional revised report" },
         expectedTripVersion: report.tripVersion,
       });
-      await rejectWorkspaceTrip(staff, returned.tripId, latestReason);
+      await returnWorkspaceTrip(staff, returned.tripId, latestReason);
       const startsAt = Date.now() + 20 * 60_000;
       const {
         data: { event },

@@ -272,7 +272,7 @@ test(
       proposalAcceptance: { mode: "ordinary", blockedReasonCodes: [] },
     };
     const proposal = {
-      ...correctionProposal(entities.transformer, reviewIds.telemetry),
+      ...correctionProposal(entities.lumber, reviewIds.telemetry),
       authorId: trip.summary.owner.id,
     };
     const decisions: Request[] = [];
@@ -309,7 +309,7 @@ test(
     await expect(distance.getByRole("cell").last()).toContainText("312 km");
     const cargo = comparison.locator("tr[data-field=cargoId]");
     await expect(cargo.getByRole("cell").first()).toContainText(unlistedCargoCode);
-    await expect(cargo.getByRole("cell").last()).toContainText("Fictional transformer");
+    await expect(cargo.getByRole("cell").last()).toContainText("Fictional lumber");
     await expect(comparison).toContainText(`Driver's reason: ${correctionDriverReason}`);
     const reasons = page.locator(".review-client-reasons");
     await expect(reasons.locator("li[data-code=trailer-context-unproven]")).toContainText(
