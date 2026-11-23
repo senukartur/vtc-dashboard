@@ -5262,7 +5262,8 @@ test("a held damage revision keeps the driver-corrected attribution and refuses 
     }
 
     // Staff no longer propose values and an accepted telemetry trip takes no driver correction,
-    // so the held revision keeps the accepted result and its credit (open with VTC-171).
+    // so the held revision keeps the accepted result and its credit. Known limitation tracked by
+    // a follow-up card.
     const held = await service.review(dispatcher, r.tripId);
     await expect(
       service.propose(dispatcher, r.tripId, newId(), held.version, {
