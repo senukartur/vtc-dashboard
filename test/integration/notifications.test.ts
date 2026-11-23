@@ -2373,11 +2373,16 @@ test("a driver correction notifies its reviewers while the proposal is unreviewe
   p.snapshot.hardModeResult = "qualified";
   p.snapshot.evidence.ruleContextComplete = false;
   p.snapshot.evidence.reasons = ["accounting-unavailable"];
-  const saved = await receive(p),
-    [[row]] = await control.query<RowDataPacket[]>(
-      "SELECT version,decision FROM trips WHERE id=?",
-      [Buffer.from(saved.tripId)],
-    );
+  const saved = await receive(p);
+  // This harness stores sources without the review hook; assess the trip as production does.
+  await retryTransaction(unit, async (tx) => {
+    await qualifications.prepareInTransaction(tx, [{ ownerId: owner.userId, game: p.source.game }]);
+    await decisions.assessInTransaction(tx, saved.tripId);
+  });
+  const [[row]] = await control.query<RowDataPacket[]>(
+    "SELECT version,decision FROM trips WHERE id=?",
+    [Buffer.from(saved.tripId)],
+  );
   expect(row?.decision).toBe("pending_review");
   const proposed = await decisions.propose(owner, saved.tripId, newId(), row?.version, {
     reason: "Fictional private correction reason",

@@ -488,9 +488,13 @@ async function legacyRequest(tripId: string, reason: string) {
       status: "pending",
       requestedAt: at,
     });
-    await db
-      .insert(manualCorrectionHistory)
-      .values({ id: newId(), requestId, status: "pending", recordedAt: at });
+    // One millisecond earlier, so a decline at the same test instant sorts after it.
+    await db.insert(manualCorrectionHistory).values({
+      id: newId(),
+      requestId,
+      status: "pending",
+      recordedAt: new Date(instant - 1).toISOString(),
+    });
     await db
       .insert(manualReviewGates)
       .values({ tripId, underReview: true })
