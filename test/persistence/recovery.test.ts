@@ -39,7 +39,7 @@ import {
   tripNumberPriorFolder,
 } from "./support.ts";
 
-const currentMigrationCount = 40;
+const currentMigrationCount = 41;
 let recoveryRunning = false;
 
 async function reconciliationPhase<T>(
@@ -2896,7 +2896,7 @@ await recoveryTest(
       const prefix = await history();
       // 0032, the data-only 0033 catch-up, which repeats the same joined_at derivation, and the
       // data-only 0034 toggle re-copy, which repeats the 0032 toggle copy, then the 0035
-      // qualification simplification, 0036 trailer grouping, 0037 semantic types, 0038 companion and 0039 cargo damage.
+      // qualification simplification, 0036 trailer grouping, 0037 semantic types, 0038 companion, 0039 cargo damage and 0040 correction evidence.
       assert.equal(await runMigrations(settings), currentMigrationCount - prefix.length);
       assert.equal(await runMigrations(settings), 0);
       const applied = await history();
@@ -3146,7 +3146,7 @@ await recoveryTest(
       );
       const prefix = await read("SELECT version,hash,state FROM _vtc_migrations ORDER BY version");
 
-      // 0033 through 0039 leave memberships alone.
+      // 0033 through 0040 leave memberships alone.
       assert.equal(await runMigrations(settings), currentMigrationCount - prefix.length);
       assert.equal(await runMigrations(settings), 0);
       const applied = await read("SELECT version,hash,state FROM _vtc_migrations ORDER BY version");
@@ -3325,7 +3325,7 @@ await recoveryTest(
       ]);
       const prefix = await history(),
         shape = await definition();
-      // 0034 through 0039 follow the 0033 prefix.
+      // 0034 through 0040 follow the 0033 prefix.
       assert.equal(await runMigrations(settings), currentMigrationCount - prefix.length);
       assert.equal(await runMigrations(settings), 0);
       const applied = await history();

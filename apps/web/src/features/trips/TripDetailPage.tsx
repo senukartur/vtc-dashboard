@@ -6,15 +6,16 @@ import { useSession } from "../../app/Session.js";
 import { useWorkspaceSummary } from "../../app/workspace-summary.js";
 import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Pager } from "../../shared/ui/pager.js";
-import { Button, Card, Label } from "../../shared/ui/primitives.js";
+import { Button, Card } from "../../shared/ui/primitives.js";
 import { DecisionPanel } from "../review/DecisionPanel.js";
 import { dispatchSearch } from "../review/dispatch-model.js";
 import { ReviewAccessState } from "../review/ReviewAccessState.js";
 import { ProposalList } from "../review/ReviewPanel.js";
 import { ReconciliationHistory } from "../review/reconciliation-parts.js";
 import { queueSearch } from "../review/review-model.js";
-import { Confirm, Failure, Fields, Revision, State } from "./components.js";
-import { useTripCommand, useTripQuery } from "./queries.js";
+import { Fields, Revision, State } from "./components.js";
+import { correctableFacts, proposedChanges, unconfirmedFields } from "./correction-model.js";
+import { useTripQuery } from "./queries.js";
 import { TripActionsMenu } from "./TripActionsMenu.js";
 import { TripEventDialog } from "./TripEventDialog.js";
 import { TripHeader, TripHistory, TripStatusBanner } from "./TripPageOverview.js";
@@ -32,6 +33,7 @@ import { type DTO, validId } from "./transport.js";
 import {
   acceptedLine,
   awaitingFix,
+  canCorrect,
   privateOf,
   revisableReportId,
   tripBanner,
@@ -74,6 +76,20 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
     banner = tripBanner(view, { owner, staff }),
     counted = acceptedLine(view),
     canLink = !!own && submitOwn && !!summary && "event" in summary,
+    // VTC-169: the driver's own corrections feed the history; the pending one marks its values.
+    correctable = canCorrect(view, selfId),
+    proposals = useTripQuery(
+      `/trips/${tripId}/proposals?limit=25`,
+      "EnvelopeListTripProposal",
+      validId(tripId) && !review && !!own && (owner || staff),
+    ),
+    proposalItems = proposals.data?.data.data.items ?? [],
+    pending = proposalItems.find((p) => p.id === own?.pendingProposalId) ?? null,
+    marks = own
+      ? { unconfirmed: unconfirmedFields(own), proposed: proposedChanges(pending) }
+      : undefined,
+    correctPath =
+      summary && correctable && !reportId ? `/account/trips/${summary.id}/correct` : null,
     openDialog = (from: HTMLElement | null) => {
       opener.current = from;
       setNotice(null);
@@ -128,11 +144,16 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
             <TripStatusBanner
               banner={banner}
               fixPath={reportId ? `/account/reports/${reportId}/edit` : null}
+              correctPath={correctPath}
+              fields={
+                own && !reportId ? correctableFacts(own.correction).map((fact) => fact.field) : []
+              }
+              correctionPending={!!own?.pendingProposalId}
             />
           )}
-          <TripRoute summary={summary} view={own} />
+          <TripRoute summary={summary} view={own} marks={marks} />
           <div className="trip-detail-grid">
-            <TripCargo summary={summary} view={own} />
+            <TripCargo summary={summary} view={own} marks={marks} />
             {own && (
               <TripConditions
                 summary={summary}
@@ -147,12 +168,10 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
           {own && (
             <div className="trip-detail-grid">
               <TripQualificationCheck check={own.qualificationCheck} />
-              <TripHistory view={own} />
+              <TripHistory view={own} proposals={proposalItems} />
             </div>
           )}
-          {own && submitOwn && summary.decision === "accepted" && (
-            <OwnerCorrection view={own} etag={etag} />
-          )}
+          {own && correctPath && status === "accepted" && <OwnerCorrection path={correctPath} />}
           {own && staff && <StaffBlock view={own} />}
           {own && <TripDataNote view={own} />}
           {canLink && (
@@ -208,44 +227,21 @@ function StaffBlock({ view }: { view: DTO["TripPrivate"] }) {
     </details>
   );
 }
-/** The owner's correction request for an accepted trip; the accepted result stays effective. */
-function OwnerCorrection({ view, etag }: { view: DTO["TripPrivate"]; etag: string | null }) {
-  const { t } = useTranslation("trips"),
-    [reason, setReason] = useState(""),
-    command = useTripCommand();
+/**
+ * An accepted manual report changes only through the driver's correction that another reviewer
+ * approves (VTC-169); the accepted result stays effective until then.
+ */
+function OwnerCorrection({ path }: { path: string }) {
+  const { t } = useTranslation("trips");
   return (
     <Card className="stack">
       <h2>{t("correction")}</h2>
       <p>{t("correctionHelp")}</p>
-      <Label htmlFor="correction-reason">{t("reason")}</Label>
-      <textarea
-        className="input"
-        id="correction-reason"
-        maxLength={4000}
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-      />
-      <Failure error={command.failure} seconds={command.seconds} />
-      <Confirm
-        label={t("correction")}
-        guard={JSON.stringify([etag, reason])}
-        disabled={!reason.trim() || command.seconds > 0}
-        pending={command.pending}
-        failure={command.failure}
-        onConfirm={async () => {
-          const r = await command.run(
-            `/trips/${view.summary.id}/correction-requests`,
-            { reason: reason.trim() },
-            "EnvelopeCommandResult",
-            etag,
-          );
-          if (r) setReason("");
-          return r;
-        }}
-      >
-        <p>{t("correctionConfirmText")}</p>
-        <p className="trip-detail-quote">{reason}</p>
-      </Confirm>
+      <div className="trip-actions">
+        <Button asChild variant="outline">
+          <Link to={path}>{t("proposeCorrection")}</Link>
+        </Button>
+      </div>
     </Card>
   );
 }
@@ -339,7 +335,7 @@ function PrivateHistory({ tripId }: { tripId: string }) {
         ))}
       </div>
       {tab === "proposals" ? (
-        <ProposalList tripId={tripId} etag={null} self />
+        <ProposalList tripId={tripId} />
       ) : (
         <State query={query} rateLimitNotice />
       )}

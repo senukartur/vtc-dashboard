@@ -465,12 +465,12 @@ test("desktop terminal upload retains exact damage through HTTP, staff adjudicat
   expect(response.statusCode).toBe(202);
   const requested = sourceRequest(payload);
   const first = (await results([requested])).items[0]!;
-  // The real fixture has unverified times. Supply reviewed historical start support.
+  // The real fixture has unverified times: the driver supplies the start (VTC-169).
   expect(first).toMatchObject({ receipt: "received", companyDecision: "pending_review" });
   const id = first.canonicalTripId!;
   const service = modules.tripDecisions!;
   const current = await service.review(director, id);
-  const proposal = await service.propose(director, id, newId(), current.version, {
+  const proposal = await service.propose(driver, id, newId(), current.version, {
     actualStartAt: new Date(payload.snapshot.start.utcMs!).toISOString(),
     evidenceIds: [],
     reason: "Fictional historical start support",
@@ -1686,14 +1686,14 @@ test("typed manual and derived facts retain identity kind, labels and saved comp
   });
   await configure({ trailers: { basis: "type", mode: "selected", typeIds: [type.id] } });
   const p = await upload();
-  p.snapshot.trailers.items[0]!.bodyType = { available: true, value: variant.code };
+  // An unlisted body leaves the trailer unconfirmed, so the driver corrects it (VTC-169).
+  p.snapshot.trailers.items[0]!.bodyType = { available: true, value: "fixture_unlisted_body" };
   await modules.telemetry!.receive(authorization, ip, p);
   const original = (await results([sourceRequest(p)])).items[0]!;
-  const dispatcher = await member([], ["dispatcher"]),
-    row = await modules.trips!.detail(driver, original.canonicalTripId!);
+  const row = await modules.trips!.detail(driver, original.canonicalTripId!);
   if (row.view !== "private") throw new Error("SYNTHETIC_PRIVATE_TRIP_REQUIRED");
   const proposed = await modules.tripDecisions!.propose(
-    dispatcher,
+    driver,
     original.canonicalTripId!,
     newId(),
     row.summary.version,
@@ -1717,7 +1717,9 @@ test("typed manual and derived facts retain identity kind, labels and saved comp
     },
   );
   const derived = (await results([sourceRequest(p)])).items[0]!;
-  expect(derived.assessment!.materialIdentity).not.toBe(original.assessment!.materialIdentity);
+  // The unconfirmed source waited for review without an assessment; the correction assesses it.
+  expect(original).toMatchObject({ companyDecision: "pending_review", assessment: null });
+  expect(derived.assessment!.materialIdentity).toBeTruthy();
   expect(derived.assessment!.trailerDisplay).toEqual([
     expect.objectContaining({
       id: type.id,
@@ -1831,20 +1833,28 @@ test("typed manual and derived facts retain identity kind, labels and saved comp
 
 test("real owning UInt32 promotion conditions and a widened exact distance SUM serialize without losing precision", async () => {
   await configure({}, { requiredTrips: 4294967295, requiredDistanceM: null });
-  const dispatcher = await member([], ["dispatcher"]),
-    maximum = "99999999999999999999.999999999999999999";
+  const maximum = "99999999999999999999.999999999999999999";
   for (let i = 0; i < 2; i++) {
     const p = await upload();
+    // An unobserved start leaves the start and the whole-trip distance to the driver (VTC-169).
+    const startedAt = new Date(p.snapshot.start.utcMs!).toISOString();
+    p.snapshot.start = { utcMs: null, basis: "unknown", eventSeq: null };
+    p.snapshot.evidence.startObserved = false;
     await modules.telemetry!.receive(authorization, ip, p);
     const result = (await results([sourceRequest(p)])).items[0]!,
       row = await modules.trips!.detail(driver, result.canonicalTripId!);
     if (row.view !== "private") throw new Error("SYNTHETIC_PRIVATE_TRIP_REQUIRED");
     const proposed = await modules.tripDecisions!.propose(
-      dispatcher,
+      driver,
       result.canonicalTripId!,
       newId(),
       row.summary.version,
-      { reason: "Fictional exact-distance correction", evidenceIds: [], actualDistanceM: maximum },
+      {
+        reason: "Fictional exact-distance correction",
+        evidenceIds: [],
+        actualStartAt: startedAt,
+        actualDistanceM: maximum,
+      },
     );
     const proposal = await modules.tripDecisions!.getProposal(
       director,

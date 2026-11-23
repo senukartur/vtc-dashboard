@@ -30,6 +30,58 @@ function check(
     ? checkTrip(history.limits, e, history.trailerGroups, damage)
     : null;
 }
+/** Facts a trip author can correct (VTC-169); every other fact is locked. */
+export const CORRECTION_FIELDS = [
+  "actualDistanceM",
+  "actualStartAt",
+  "actualCompletedAt",
+  "originCityId",
+  "destinationCityId",
+  "cargoId",
+  "cargoMassKg",
+  "trailerTypeId",
+] as const;
+export type CorrectionField = (typeof CORRECTION_FIELDS)[number];
+/**
+ * Correctable facts of one fact revision, decided by fact state rather than reason codes. A manual
+ * report can correct every reported fact except times (manual reports carry no trip date); a
+ * telemetry fact only what the source left unconfirmed.
+ */
+export function editableFields(e: NormalizedTripEvidence): CorrectionField[] {
+  if (e.provider === "manual")
+    return CORRECTION_FIELDS.filter((f) => f !== "actualStartAt" && f !== "actualCompletedAt");
+  const fields: CorrectionField[] = [];
+  if (!e.wholeTripDistanceSupported) fields.push("actualDistanceM");
+  if (!e.start.verifiedActual || !e.start.utc) fields.push("actualStartAt");
+  if (!e.end.verifiedActual || !e.end.utc) fields.push("actualCompletedAt");
+  if (e.origin.status !== "known") fields.push("originCityId");
+  if (e.destination.status !== "known") fields.push("destinationCityId");
+  if (e.cargo.status !== "known") fields.push("cargoId");
+  if (e.cargoMassKg.status !== "known") fields.push("cargoMassKg");
+  if (
+    !e.trailers.complete ||
+    !e.trailers.items.length ||
+    e.trailers.items.some((t) => t.status !== "known")
+  )
+    fields.push("trailerTypeId");
+  return fields;
+}
+/**
+ * A partial recording no longer blocks acceptance once a reviewed author correction supplied the
+ * whole-trip distance and both actual times are verified. Only derived facts carry resolution
+ * provenance, and they become current only after a different reviewer approved them.
+ */
+function correctedRecording(e: NormalizedTripEvidence) {
+  return (
+    e.actualDistanceM.status === "known" &&
+    e.actualDistanceM.sourceField.startsWith("resolution/") &&
+    e.wholeTripDistanceSupported &&
+    e.start.verifiedActual &&
+    !!e.start.utc &&
+    e.end.verifiedActual &&
+    !!e.end.utc
+  );
+}
 // Knowledge and qualification gates of a non-open trip; callers handle open trips first.
 function examine(
   e: NormalizedTripEvidence,
@@ -43,7 +95,8 @@ function examine(
   if (e.outcome === "cancelled") violations.push("terminal_outcome_not_delivered");
   if (e.outcome === "none") missing.push("terminal_outcome_unknown");
   if (e.provider === "ets2telemetry") {
-    if (e.recording !== "complete") missing.push("recording_not_supported");
+    if (e.recording !== "complete" && !correctedRecording(e))
+      missing.push("recording_not_supported");
     if (!e.wholeTripDistanceSupported) missing.push("whole_trip_distance_unknown");
     if (!e.start.verifiedActual || !e.start.utc) missing.push("actual_start_unknown");
     if (!e.end.verifiedActual || !e.end.utc) missing.push("actual_completion_unknown");

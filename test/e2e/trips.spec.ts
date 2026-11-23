@@ -375,8 +375,8 @@ test(
     );
     await expect(page.getByLabel("Comment (optional)", { exact: true })).toBeDisabled();
     await expect(
-      page.getByRole("link", { name: "Request correction", exact: true }),
-    ).toHaveAttribute("href", `/account/trips/${id}`);
+      page.getByRole("link", { name: "Propose a correction", exact: true }),
+    ).toHaveAttribute("href", `/account/trips/${id}/correct`);
   },
 );
 

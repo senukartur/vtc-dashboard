@@ -94,7 +94,8 @@ const counted = (page: Page) => page.locator(".trip-detail-counted");
 const menuButton = (page: Page, name = "More actions") =>
   page.getByRole("main").getByRole("button", { name, exact: true });
 const logoRequests = (requests: string[]) => requests.filter((path) => path.endsWith("/logo"));
-const privatePaths = /\/review|\/reconciliations|\/proposals|\/manual-revisions|\/manual-reports/;
+// Staff-only reads. The author reads their own trip's proposals for its history (VTC-169).
+const privatePaths = /\/review|\/reconciliations|\/manual-revisions|\/manual-reports/;
 
 /** Opens the actions menu by keyboard and returns it. */
 async function openMenu(page: Page, name = "More actions") {
@@ -402,7 +403,7 @@ const banners = {
       [
         "Rejected",
         "not counted",
-        "The trip was rejected and does not count.",
+        "The rejection is final; the trip does not count.",
         "Fictional Stage Four Dispatcher, 11 Nov, 10:00",
       ],
       ["In progress", "not counted yet", "The trip is still in progress in the game.", ""],
@@ -434,7 +435,7 @@ const banners = {
       [
         "Отклонён",
         "не засчитан",
-        "Рейс отклонён и не учитывается.",
+        "Отклонение окончательное; рейс не учитывается.",
         "Fictional Stage Four Dispatcher, 11 нояб., 10:00",
       ],
       ["Выполняется", "пока не засчитан", "Рейс ещё идёт в игре.", ""],
@@ -582,6 +583,7 @@ test(
     await expect(fact(region(page, "Route"), "Damage")).toHaveCount(0);
 
     // Another member's accepted summary: route, distance and the counted line only.
+    const ownReads = requests.length;
     state.view = otherSummary();
     await refresh(page);
     await expect(page.getByText("Accepted company summary", { exact: true })).toBeVisible();
@@ -598,6 +600,8 @@ test(
     expect(
       requests.filter((path) => privatePaths.test(path) || path.includes("/evidence")),
     ).toEqual([]);
+    // Another member's summary reads no proposals.
+    expect(requests.slice(ownReads).filter((path) => path.includes("/proposals"))).toEqual([]);
     expect(logoRequests(requests)).toEqual([]);
 
     // Older private views without Stage 4 data still read as a trip page.
@@ -636,7 +640,7 @@ test(
     await expect(status(page)).toHaveText("Needs fixes");
     await expect(page.locator(".trip-detail-meta")).toContainText("Driver: Fictional Other Driver");
     await expect(banner(page).locator(".trip-banner-text")).toHaveText(
-      "The report was returned to the driver for fixes.",
+      "The trip was returned to the driver for fixes.",
     );
     const block = page.locator("details.trip-staff");
     await expect(block.locator("summary")).toHaveText(
@@ -671,7 +675,7 @@ test(
 );
 
 test(
-  "staff read reconciled sources in the dispatcher block; a failed logo, selected limits and the correction request stay as before",
+  "staff read reconciled sources in the dispatcher block; a failed logo, selected limits stay as before and accepted telemetry offers no correction",
   browserCase(["@functional"]),
   async ({ page }) => {
     // A null saved zone follows the device; staff own this trip so every block renders.
@@ -696,10 +700,11 @@ test(
     await expect(page.locator(".trip-data-note")).toContainText(
       `Times in your time zone (${deviceZone})`,
     );
-    // An accepted own trip offers the correction request.
+    // An accepted telemetry trip is final: the driver is offered no correction (VTC-169).
     await expect(
-      page.getByRole("heading", { name: "Request correction", exact: true }),
-    ).toBeVisible();
+      page.getByRole("heading", { name: "Propose a correction", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Correct the trip", exact: true })).toHaveCount(0);
 
     await page.locator("details.trip-staff > summary").click();
     const sources = region(page, "Sources");
@@ -716,12 +721,12 @@ test(
     await expect(sources).toContainText(`Times in ${deviceZone}`);
     await expect(fact(items.nth(0), "Received")).toHaveText(/11 Nov 2026.*03:00/);
 
-    // A rejected own trip: no correction request; selected limits are named, never blank.
+    // A rejected own trip: no correction; selected limits are named, never blank.
     state.view = returnedTrip();
     await refresh(page);
     await expect(status(page)).toHaveText("Rejected");
     await expect(
-      page.getByRole("heading", { name: "Request correction", exact: true }),
+      page.getByRole("heading", { name: "Propose a correction", exact: true }),
     ).toHaveCount(0);
     const check = region(page, "Qualification");
     await check.getByRole("button", { name: "Show rules", exact: true }).click();

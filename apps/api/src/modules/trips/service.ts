@@ -94,13 +94,8 @@ export interface TripsPorts {
   adjudicationChanged?: (tx: TxContext, before: TripState, after: TripState) => Promise<void>;
   prepare?: (tx: TxContext, ownerId: string, game: "ets2" | "ats") => Promise<void>;
   decisionProjection?: (tx: TxContext, id: string, actor: Actor) => Promise<S["TripPrivate"]>;
-  correctionRequested?: (
-    tx: TxContext,
-    tripId: string,
-    requestId: string,
-    actor: Actor,
-    reason: string,
-  ) => Promise<void>;
+  // VTC-169: whether the author may still fix a rejected trip (a final rejection refuses it).
+  fixAllowed?: (tx: TxContext, tripId: string) => Promise<boolean>;
   sourceStored?: (tx: TxContext, tripId: string, sourceRecordId: string) => Promise<void>;
   identity: Pick<
     Identity,
@@ -1175,14 +1170,9 @@ export function createTrips(
     manualStoredInTransaction: async (tx: TxContext, id: string, sourceRecordId: string) => {
       await ports.sourceStored?.(tx, id, sourceRecordId);
     },
-    async correctionRequestedInTransaction(
-      tx: TxContext,
-      id: string,
-      requestId: string,
-      actor: Actor,
-      reason: string,
-    ) {
-      await ports.correctionRequested?.(tx, id, requestId, actor, reason);
+    /** False once a reviewer rejected the trip finally; true without trip decisions. */
+    async fixAllowedInTransaction(tx: TxContext, id: string) {
+      return (await ports.fixAllowed?.(tx, id)) ?? true;
     },
     async summaryInTransaction(tx: TxContext, tripId: string, locale: "en" | "ru") {
       const row = await groups.resolve(tx, tripId, "share");

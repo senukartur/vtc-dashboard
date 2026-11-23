@@ -1971,39 +1971,173 @@
       }
     },
     {
-      "id": "requestTripCorrection:success",
-      "operationId": "requestTripCorrection",
+      "id": "proposeTripCorrection:success",
+      "operationId": "proposeTripCorrection",
       "status": 201,
       "response": {
         "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "version": 1
+          "id": "41000000-0000-4000-8000-000000000002",
+          "version": 4
         },
         "meta": {
           "requestId": "synthetic-request-001"
         }
       },
       "request": {
-        "reason": "synthetic-example"
+        "reason": "Fictional client connected mid-route; the planned route is longer.",
+        "evidenceIds": [],
+        "actualDistanceM": "312000",
+        "actualStartAt": "2026-10-17T10:30:00.000Z"
       }
     },
     {
-      "id": "proposeTripResolution:success",
-      "operationId": "proposeTripResolution",
+      "id": "proposeTripCorrection:with-screenshot",
+      "operationId": "proposeTripCorrection",
       "status": 201,
       "response": {
         "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "version": 1
+          "id": "41000000-0000-4000-8000-000000000003",
+          "version": 5
         },
         "meta": {
           "requestId": "synthetic-request-001"
         }
       },
       "request": {
+        "reason": "Fictional cargo is missing from the catalog.",
+        "evidenceIds": [
+          "41000000-0000-4000-8000-000000000004"
+        ],
+        "cargoId": "41000000-0000-4000-8000-000000000005",
+        "cargoMassKg": "24900"
+      }
+    },
+    {
+      "id": "decideTrip:return-for-fixes",
+      "operationId": "decideTrip",
+      "status": 200,
+      "request": {
+        "decision": "reject",
+        "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+        "factRevisionId": "41000000-0000-4000-8000-000000000001",
+        "proposalId": null,
         "reason": "synthetic-example",
-        "evidenceIds": [],
-        "actualDistanceM": "12500.5"
+        "returnForFixes": true
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "outcome": "rejected",
+          "reasonCodes": [
+            "returned_for_fixes",
+            "whole_trip_distance_unknown"
+          ],
+          "reason": "Fictional distance is incomplete; add the whole route.",
+          "decidedAt": "2026-10-17T12:00:00.000Z",
+          "reviewerId": null,
+          "reviewer": null,
+          "acceptedOverLimits": false,
+          "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+          "basis": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "decideTrip:stage-3-return-for-fixes",
+      "operationId": "decideTrip",
+      "operationExtension": "x-stage-3-operation",
+      "status": 200,
+      "query": {
+        "view": "stage3"
+      },
+      "request": {
+        "decision": "reject",
+        "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+        "factRevisionId": "41000000-0000-4000-8000-000000000001",
+        "proposalId": null,
+        "reason": "Fictional route needs correction.",
+        "returnForFixes": true
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "outcome": "rejected",
+          "reasonCodes": [
+            "returned_for_fixes",
+            "whole_trip_distance_unknown"
+          ],
+          "reason": "Fictional distance is incomplete; add the whole route.",
+          "decidedAt": "2026-10-17T12:00:00.000Z",
+          "reviewerId": null,
+          "reviewer": null,
+          "acceptedOverLimits": false,
+          "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+          "basis": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-3"
+        }
+      }
+    },
+    {
+      "id": "decideTripProposal:return-for-fixes",
+      "operationId": "decideTripProposal",
+      "status": 200,
+      "request": {
+        "decision": "reject",
+        "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+        "reason": "Fictional distance still differs from the route.",
+        "tripDecision": "returned_for_fixes"
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "outcome": "rejected",
+          "reasonCodes": [
+            "returned_for_fixes",
+            "whole_trip_distance_unknown"
+          ],
+          "reason": "Fictional distance is incomplete; add the whole route.",
+          "decidedAt": "2026-10-17T12:00:00.000Z",
+          "reviewerId": null,
+          "reviewer": null,
+          "acceptedOverLimits": false,
+          "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+          "basis": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
       }
     },
     {

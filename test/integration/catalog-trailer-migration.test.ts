@@ -34,7 +34,7 @@ test("type migration preserves exact body identities and legacy allowances witho
       "INSERT INTO qualification_level_trailers(level_id,game,trailer_id) VALUES ('02800000-0000-4000-8000-000000000001','ets2',?)",
       [id],
     );
-    expect(await runMigrations(settings)).toBe(3);
+    expect(await runMigrations(settings)).toBe(4);
     expect(await runMigrations(settings)).toBe(0);
     const [rows] = await control.query<RowDataPacket[]>(
       "SELECT CAST(t.id AS CHAR) id,HEX(t.code) code,CAST(t.common_trailer AS CHAR) model,t.trailer_type_id,l.trailer_basis FROM catalog_trailers t JOIN qualification_level_trailers q ON q.trailer_id=t.id JOIN qualification_levels l ON l.id=q.level_id",
@@ -99,7 +99,7 @@ test("interrupted trailer grouping DDL preserves body rows and requires recovery
     );
     // Only this disposable allocation is reset to its known empty baseline.
     await reset(control);
-    expect(await runMigrations(settings)).toBe(40);
+    expect(await runMigrations(settings)).toBe(41);
     expect(await runMigrations(settings)).toBe(0);
   } finally {
     await control.end();
@@ -243,7 +243,7 @@ test("exact 38-migration base upgrades through companion and cargo damage withou
         "SELECT version,hash,state FROM _vtc_migrations ORDER BY version",
       );
     expect(prefix).toHaveLength(38);
-    expect(await runMigrations(settings)).toBe(2);
+    expect(await runMigrations(settings)).toBe(3);
     expect(await runMigrations(settings)).toBe(0);
     expect(await preserved()).toEqual(before);
     const [after] = await control.query<RowDataPacket[]>(

@@ -1,7 +1,16 @@
 import type { components } from "@vtc/contracts";
 import type { TxContext, UnitOfWork } from "@vtc/db";
-import { and, desc, eq, gt, sql, tripDecisions } from "@vtc/db/trip-decisions-schema";
-import { isNotNull, notExists, type SQLWrapper, type Subquery } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  sql,
+  tripDecisions,
+  tripProposalReviews,
+  tripProposals,
+} from "@vtc/db/trip-decisions-schema";
+import { isNotNull, isNull, notExists, or, type SQLWrapper, type Subquery } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 
 type ReturnedTrips = NonNullable<components["schemas"]["WorkspaceSummary"]["tripsNeedingFixes"]>;
@@ -38,7 +47,7 @@ export function createTripDecisionWorkspace(unit: UnitOfWork, sources: ReturnedT
         })
         .from(group)
         .innerJoin(tripDecisions, eq(tripDecisions.tripId, group.canonicalTripId))
-        .innerJoin(
+        .leftJoin(
           revisions,
           and(
             eq(group.groupMemberTripId, revisions.reportTripId),
@@ -47,6 +56,15 @@ export function createTripDecisionWorkspace(unit: UnitOfWork, sources: ReturnedT
         )
         .where(
           and(
+            // A returned manual revision the author can resubmit, or a returned telemetry trip the
+            // author can correct: its decision reviewed the root's own fact (VTC-169).
+            or(
+              isNotNull(revisions.revisionId),
+              and(
+                eq(group.groupMemberTripId, group.canonicalTripId),
+                eq(tripDecisions.reviewedRevisionId, tripDecisions.factId),
+              ),
+            ),
             // A newer row of any outcome, author or revision supersedes this root decision.
             notExists(
               client
@@ -59,8 +77,24 @@ export function createTripDecisionWorkspace(unit: UnitOfWork, sources: ReturnedT
                   ),
                 ),
             ),
+            // The driver's correction under review already answers the return (VTC-169).
+            notExists(
+              client
+                .select({ id: tripProposals.id })
+                .from(tripProposals)
+                .leftJoin(tripProposalReviews, eq(tripProposalReviews.proposalId, tripProposals.id))
+                .where(
+                  and(
+                    eq(tripProposals.tripId, tripDecisions.tripId),
+                    eq(tripProposals.authorId, viewerId),
+                    isNull(tripProposalReviews.proposalId),
+                  ),
+                ),
+            ),
             eq(tripDecisions.outcome, "rejected"),
             isNotNull(tripDecisions.actorId),
+            // Only a return for fixes; a plain rejection is final (VTC-169).
+            sql`JSON_CONTAINS(${tripDecisions.reasonCodes}, '"returned_for_fixes"')`,
           ),
         )
         .as("workspace_returned_trips");

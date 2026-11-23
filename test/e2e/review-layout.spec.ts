@@ -196,6 +196,13 @@ test(
   browserCase(["@functional"]),
   async ({ page }) => {
     const mock = await mockReview(page, { staged: true });
+    // A manual report can always be returned for fixes (VTC-169).
+    mock.states.resubmission.review.correctionReview = {
+      blockedOnlyByEditable: false,
+      canReturn: true,
+      clientReasonCodes: [],
+      proposalAcceptance: null,
+    };
     await page.goto(`/account/review/${reviewIds.resubmission}`);
     const conditions = panel(page).getByRole("heading", { name: "Game conditions" }).locator("..");
     await expect(conditions.locator("dd")).toHaveText(["Unknown", "Unknown", "Unknown"]);
@@ -203,16 +210,28 @@ test(
       panel(page).getByText("No telemetry is available.", { exact: true }),
     ).toBeVisible();
     const decision = form(page);
-    await decision.locator("#review-choice-reject").click();
+    await expect(decision.locator(".review-choice-item")).toHaveText([
+      "Accept",
+      "Return for fixes",
+      "Reject",
+    ]);
+    await decision.locator("#review-choice-return").click();
+    await expect(decision.locator("[data-help=return]")).toHaveText(
+      "The driver can correct the trip and send it back.",
+    );
     const reason = decision.getByRole("textbox", { name: "Reason for return" });
     await reason.fill("  \n  ");
     await expect(reason).toHaveAttribute("aria-invalid", "true");
     await expect(decision.getByRole("alert")).toHaveText(
       "Enter a reason before returning the trip.",
     );
-    await expect(
-      decision.getByRole("button", { name: "Return for fixes", exact: true }).last(),
-    ).toBeDisabled();
+    await expect(decision.getByRole("button", { name: "Return trip", exact: true })).toBeDisabled();
+    // Rejecting is final and needs a reason as well.
+    await decision.locator("#review-choice-reject").click();
+    await expect(decision.locator("[data-help=reject]")).toHaveText(
+      "The rejection is final: the driver cannot correct the trip.",
+    );
+    await expect(decision.getByRole("button", { name: "Reject trip", exact: true })).toBeDisabled();
     await decision.locator("#review-choice-accept").click();
     await expect(decision.getByRole("textbox", { name: "Note (optional)" })).toBeVisible();
     await expect(

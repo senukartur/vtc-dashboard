@@ -200,6 +200,7 @@ try {
         "trips",
         "manual_review_gates",
         "manual_evidence_refs",
+        "manual_correction_evidence",
         "manual_draft_evidence",
       ]) {
         await assert.rejects(c.query(`SELECT * FROM ${table} LIMIT 1 FOR UPDATE`), (error) =>
@@ -238,6 +239,7 @@ try {
         "trips",
         "manual_review_gates",
         "manual_evidence_refs",
+        "manual_correction_evidence",
         "manual_draft_evidence",
       ])
         await c.query(`SELECT * FROM ${table} LIMIT 1 FOR SHARE`);
@@ -249,6 +251,10 @@ try {
         ? [
             "UPDATE manual_revisions SET number=number",
             "DELETE FROM manual_evidence_refs",
+            "UPDATE manual_correction_submissions SET created_at=created_at",
+            "DELETE FROM manual_correction_submissions",
+            "UPDATE manual_correction_evidence SET trip_id=trip_id",
+            "DELETE FROM manual_correction_evidence",
             "UPDATE trip_facts SET id=id",
             "DELETE FROM source_messages",
             "UPDATE source_messages SET id=id",
@@ -258,6 +264,9 @@ try {
         : [
             "UPDATE manual_revisions SET number=number",
             "DELETE FROM manual_evidence_refs",
+            "UPDATE manual_correction_evidence SET trip_id=trip_id",
+            "DELETE FROM manual_correction_evidence",
+            "DELETE FROM manual_correction_submissions",
             "UPDATE trips SET version=version",
             "UPDATE audit_entries SET reason=reason",
           ];

@@ -270,6 +270,7 @@ const decision = (
   reason: string | null,
   decidedAt: string,
   overLimits = false,
+  returned = false,
 ): S["Decision"] => {
   const base = example("decideTrip:accepted-over-limits").data as S["Decision"];
   return {
@@ -281,7 +282,12 @@ const decision = (
     reviewerId: reviewer.id,
     reviewer: { ...reviewer, roles: ["dispatcher"] },
     acceptedOverLimits: overLimits,
-    reasonCodes: overLimits ? ["qualification_cargo_mass", "accepted_over_limits"] : [],
+    // A return for fixes is a rejection with its code; a plain rejection is final (VTC-169).
+    reasonCodes: overLimits
+      ? ["qualification_cargo_mass", "accepted_over_limits"]
+      : returned
+        ? ["returned_for_fixes"]
+        : [],
   };
 };
 
@@ -417,7 +423,7 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
         key === "telemetry" ? [] : key === "over" ? evidenceItems : evidenceItems.slice(0, 1),
       decisions:
         key === "resubmission"
-          ? [decision(1, "rejected", rejection, "2026-10-30T21:40:00.000Z")]
+          ? [decision(1, "rejected", rejection, "2026-10-30T21:40:00.000Z", false, true)]
           : key === "late"
             ? [decision(2, "accepted", "Fictional waiver", "2026-10-21T10:00:00.000Z", true)]
             : [],
@@ -840,6 +846,7 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
             typeof body.reason === "string" ? body.reason : null,
             "2026-11-01T12:00:00.000Z",
             body.confirmOverLimits === true,
+            body.returnForFixes === true,
           );
         state.version++;
         state.review.trip.decisions = [made, ...state.review.trip.decisions];

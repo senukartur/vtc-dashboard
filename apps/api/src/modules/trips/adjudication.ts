@@ -32,6 +32,12 @@ import { queueClock, syncReviewReasons } from "./review-queue.js";
 import { ingestionConflictCodes } from "./service.js";
 
 type S = components["schemas"];
+/** A supported fact correction: the changed facts, its reason and cited evidence. */
+export type ResolutionValue = S["ResolutionChanges"] & {
+  reason: string;
+  evidenceIds: string[];
+};
+
 export const damageRevisionReasons: ReadonlySet<string> = new Set([
   "damage_out_of_range",
   "quality_supported_conflict",
@@ -281,10 +287,10 @@ export function createTripAdjudication(
       base: NormalizedTripEvidence,
       revisionId: string,
       authorId: string,
-      input: S["ResolutionInput"],
+      input: ResolutionValue,
       createdAt: string,
     ) {
-      const { reason, evidenceIds, correctionRequestId: _request, ...changes } = input;
+      const { reason, evidenceIds, ...changes } = input;
       if (base.provider === "manual" && (changes.actualStartAt || changes.actualCompletedAt))
         throw identityError(422);
       const evidence = structuredClone(base);

@@ -22,14 +22,14 @@ test("decision events contain only registered references and monotonic contribut
   expect(() => tripDecisionEvent({ ...e, data: { ...e.data, reason: "private" } })).toThrow();
   expect(() => tripDecisionEvent({ ...e, data: { ...e.data, contributionVersion: 0 } })).toThrow();
 });
-test("existing resolution and proposal contracts reject manual dates and incomplete reviewed revisions", () => {
-  const resolution = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/ResolutionInput" }),
+test("driver correction and proposal contracts reject manual dates and incomplete reviewed revisions", () => {
+  const correction = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/TripCorrectionInput" }),
     review = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/ProposalDecisionInput" });
   expect(
-    resolution({ reason: "Fictional correction", evidenceIds: [], actualDistanceM: "100" }),
+    correction({ reason: "Fictional correction", evidenceIds: [], actualDistanceM: "100" }),
   ).toBe(true);
   expect(
-    resolution({ reason: "Fictional correction", evidenceIds: [], tripDate: "2026-10-22" }),
+    correction({ reason: "Fictional correction", evidenceIds: [], tripDate: "2026-10-22" }),
   ).toBe(false);
   expect(review({ decision: "approve", reason: "Reviewed" })).toBe(false);
 });
@@ -91,17 +91,79 @@ test("optional immutable event-association proposal refs retain old valid fixtur
   ).toBe(false);
 });
 
-test("optional correction request association requires actual changes and preserves omitted and null inputs", () => {
-  const resolution = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/ResolutionInput" });
-  const basic = { reason: "Fictional linked correction", evidenceIds: [] };
-  for (const correctionRequestId of [undefined, null, newId()]) {
-    const association = correctionRequestId === undefined ? {} : { correctionRequestId };
-    expect(resolution({ ...basic, ...association })).toBe(false);
-    expect(resolution({ ...basic, ...association, actualDistanceM: "100" })).toBe(true);
+test("driver corrections require a correctable fact and carry no staff-only links (VTC-169)", async () => {
+  const { readFileSync } = await import("node:fs"),
+    read = (name: string) =>
+      JSON.parse(
+        readFileSync(new URL(`../../docs/contracts/dashboard/${name}`, import.meta.url), "utf8"),
+      ),
+    spec = read("openapi.json"),
+    examples = read("examples.json"),
+    example = (id: string) => examples.cases.find((c: { id: string }) => c.id === id);
+  const correction = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/TripCorrectionInput" });
+  const basic = { reason: "Fictional driver correction", evidenceIds: [] };
+  expect(correction(basic)).toBe(false);
+  expect(correction({ ...basic, actualDistanceM: "100" })).toBe(true);
+  expect(correction({ ...basic, evidenceIds: [newId()], cargoMassKg: "18000" })).toBe(true);
+  for (const extra of [{ correctionRequestId: newId() }, { qualificationAssignmentId: newId() }])
+    expect(correction({ ...basic, actualDistanceM: "100", ...extra })).toBe(false);
+  expect(correction({ ...basic, actualDistanceM: "100", reason: "" })).toBe(false);
+  // Staff resolutions and the text-only request command are removed; their reads stay.
+  const paths = spec.paths as Record<string, Record<string, unknown>>;
+  expect(paths["/api/v1/trips/{tripId}/resolution-proposals"]).toBeUndefined();
+  expect(Object.keys(paths["/api/v1/trips/{tripId}/correction-requests"] ?? {})).toEqual(["get"]);
+  expect(spec.components.schemas.ResolutionInput).toBeUndefined();
+  const route = paths["/api/v1/trips/{tripId}/corrections"]?.post as Record<string, unknown>;
+  expect(route).toMatchObject({
+    operationId: "proposeTripCorrection",
+    "x-capability": "trips.submit_own",
+  });
+  const result = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/EnvelopeCommandResult" });
+  for (const id of ["proposeTripCorrection:success", "proposeTripCorrection:with-screenshot"]) {
+    expect(correction(example(id).request), id).toBe(true);
+    expect(result(example(id).response), id).toBe(true);
   }
-  expect(resolution({ ...basic, correctionRequestId: "not-an-id", actualDistanceM: "100" })).toBe(
-    false,
-  );
+  expect(example("proposeTripCorrection:with-screenshot").request.evidenceIds).toHaveLength(1);
+});
+
+test("return for fixes is an optional reject-only flag and proposal declines can decide the trip", async () => {
+  const { readFileSync } = await import("node:fs"),
+    examples = JSON.parse(
+      readFileSync(
+        new URL("../../docs/contracts/dashboard/examples.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+    example = (id: string) => examples.cases.find((c: { id: string }) => c.id === id),
+    compile = (name: string) => validate.compile({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
+  const direct = compile("DecisionInput"),
+    staged = compile("TripStage3DecisionInput"),
+    proposal = compile("ProposalDecisionInput"),
+    decision = compile("EnvelopeDecision");
+  const body = {
+    decision: "reject",
+    reviewedRevisionId: newId(),
+    factRevisionId: newId(),
+    proposalId: null,
+    reason: "Fictional return",
+  };
+  for (const returnForFixes of [true, false])
+    expect(direct({ ...body, returnForFixes })).toBe(true);
+  for (const returnForFixes of ["true", 1, null])
+    expect(direct({ ...body, returnForFixes })).toBe(false);
+  const returned = example("decideTrip:return-for-fixes");
+  expect(direct(returned.request)).toBe(true);
+  expect(returned.request.returnForFixes).toBe(true);
+  expect(decision(returned.response)).toBe(true);
+  expect(returned.response.data.reasonCodes).toContain("returned_for_fixes");
+  const stage3 = example("decideTrip:stage-3-return-for-fixes");
+  expect(staged(stage3.request)).toBe(true);
+  expect(stage3.request.returnForFixes).toBe(true);
+  const review = { decision: "reject", reviewedRevisionId: newId(), reason: "Fictional" };
+  for (const tripDecision of ["returned_for_fixes", "rejected"])
+    expect(proposal({ ...review, tripDecision })).toBe(true);
+  expect(proposal({ ...review, tripDecision: "accepted" })).toBe(false);
+  expect(proposal(example("decideTripProposal:return-for-fixes").request)).toBe(true);
 });
 
 test("over-limit acceptance input, decision marker, review details and queue filters are strict", async () => {

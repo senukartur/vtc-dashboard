@@ -16,6 +16,7 @@ import { Badge, Button, Card } from "../../shared/ui/primitives.js";
 import { HardModeBadge, SourceBadge, StatusBadge } from "./badges.js";
 import { PlaceName, useWhen } from "./TripPageSections.js";
 import { GameChip } from "./TripTable.js";
+import type { CorrectionField } from "./correction-model.js";
 import type { DTO } from "./transport.js";
 import {
   type AcceptedLine,
@@ -141,10 +142,19 @@ const bannerIcons: Record<TripBanner["status"], LucideIcon> = {
 export function TripStatusBanner({
   banner,
   fixPath,
+  correctPath = null,
+  fields = [],
+  correctionPending = false,
 }: {
   banner: TripBanner;
   /** The report editor of the owner's returned report. */
   fixPath: string | null;
+  /** VTC-169: the correction page of the owner's returned telemetry trip. */
+  correctPath?: string | null;
+  /** The facts the owner can correct, named after the note. */
+  fields?: readonly CorrectionField[];
+  /** A pending driver correction titles the banner (variant A, VTC-169). */
+  correctionPending?: boolean;
 }) {
   const { t } = useTranslation("trips"),
     when = useWhen(),
@@ -167,7 +177,9 @@ export function TripStatusBanner({
       </span>
       <div className="trip-banner-body">
         <div className="trip-banner-title">
-          <strong>{t(`status_${banner.status}`)}</strong>
+          <strong>
+            {correctionPending ? t("correctionPendingTitle") : t(`status_${banner.status}`)}
+          </strong>
           <span className="trip-banner-counted" data-counted={banner.counted}>
             {t(banner.counted === "no" ? "bannerNo" : "bannerNotYet")}
           </span>
@@ -184,6 +196,13 @@ export function TripStatusBanner({
             </InfoTip>
           )}
         </span>
+        {banner.action === "fix" && !fixPath && fields.length > 0 && (
+          <span className="trip-banner-text">
+            {t("fixBannerFields", {
+              fields: fields.map((field) => t(`correctField_${field}`)).join(", "),
+            })}
+          </span>
+        )}
         {(banner.quote || reasons) && (
           <span className="trip-detail-quote">
             {banner.quote && t("quoted", { text: banner.quote })}
@@ -193,21 +212,34 @@ export function TripStatusBanner({
         )}
         {by && <span className="trip-muted">{by}</span>}
       </div>
-      {banner.action === "fix" && fixPath && (
+      {banner.action === "fix" && (fixPath || correctPath) && (
         <Button asChild className="trip-banner-action">
-          <Link to={fixPath}>{t("fixReport")}</Link>
+          {fixPath ? (
+            <Link to={fixPath}>{t("fixReport")}</Link>
+          ) : (
+            <Link to={correctPath as string}>{t("fixTrip")}</Link>
+          )}
         </Button>
       )}
     </section>
   );
 }
 
-/** Receipts, submissions and decisions, oldest first, with reviewer comments and reasons. */
-export function TripHistory({ view }: { view: DTO["TripPrivate"] }) {
+/**
+ * Receipts, submissions, the driver's corrections and decisions, oldest first, with reviewer
+ * comments and reasons.
+ */
+export function TripHistory({
+  view,
+  proposals,
+}: {
+  view: DTO["TripPrivate"];
+  proposals?: readonly DTO["TripProposal"][];
+}) {
   const { t } = useTranslation("trips"),
     when = useWhen(),
     id = useId(),
-    entries = tripHistory(view);
+    entries = tripHistory(view, proposals);
   return (
     <Card className="stack trip-detail-card" aria-labelledby={id}>
       <h2 id={id}>{t("reviewHistory")}</h2>

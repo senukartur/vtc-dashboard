@@ -416,7 +416,7 @@ def core():
         # behavior is inferred from this native DDL/grant-ordering proof.
         packaged = ops.activation.packaged_history(ops, image_id)
         prefix_migration_count = 38
-        assert len(packaged) == 40
+        assert len(packaged) == 41
         prefix_revision = hashlib.sha256((revision + ':prefix').encode()).hexdigest()[:40]
         prefix_context = base / 'state/prefix-build'
         prefix_context.mkdir(mode=0o700)

@@ -690,13 +690,15 @@
 .trip-detail-history li[data-kind="telemetry"] .trip-detail-history-dot {
   background: var(--focus);
 }
-.trip-detail-history li[data-kind="accepted"] .trip-detail-history-dot {
+.trip-detail-history li[data-kind="accepted"] .trip-detail-history-dot,
+.trip-detail-history li[data-kind="correction_approved"] .trip-detail-history-dot {
   background: var(--accepted);
 }
 .trip-detail-history li[data-kind="returned"] .trip-detail-history-dot {
   background: var(--pending);
 }
-.trip-detail-history li[data-kind="rejected"] .trip-detail-history-dot {
+.trip-detail-history li[data-kind="rejected"] .trip-detail-history-dot,
+.trip-detail-history li[data-kind="correction_declined"] .trip-detail-history-dot {
   background: var(--destructive);
 }
 .trip-detail-history-body {

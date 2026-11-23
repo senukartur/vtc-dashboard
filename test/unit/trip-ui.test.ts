@@ -292,26 +292,24 @@ test("legacy and extended manual revisions preserve canonical pins and proposal 
   expect(Object.keys(tripTranslations.en).sort()).toEqual(Object.keys(tripTranslations.ru).sort());
 });
 
-test("conditional runtime adapter preserves resolution links and proposal changes constraints", () => {
+test("driver corrections need a fact and closed fields; proposals keep their changes constraint", () => {
   const reason = "Synthetic supported correction",
     id = crypto.randomUUID();
+  const input = schema("TripCorrectionInput");
+  // A reason and evidence without a correctable fact is not a correction (VTC-169).
+  expect(input.safeParse({ reason, evidenceIds: [] }).success).toBe(false);
+  expect(input.safeParse({ reason, evidenceIds: [], actualDistanceM: "312000" }).success).toBe(
+    true,
+  );
+  expect(input.safeParse({ reason, evidenceIds: [id], cargoId: id }).success).toBe(true);
+  // The staff-only link and assignment fields are gone from the author command.
   expect(
-    schema("ResolutionInput").safeParse({ reason, evidenceIds: [], correctionRequestId: id })
-      .success,
+    input.safeParse({ reason, evidenceIds: [], cargoId: id, correctionRequestId: id }).success,
   ).toBe(false);
   expect(
-    schema("ResolutionInput").safeParse({ reason, evidenceIds: [], correctionRequestId: null })
+    input.safeParse({ reason, evidenceIds: [], cargoId: id, qualificationAssignmentId: id })
       .success,
   ).toBe(false);
-  for (const correctionRequestId of [undefined, null, id]) {
-    const body = {
-      reason,
-      evidenceIds: [],
-      actualDistanceM: "0",
-      ...(correctionRequestId === undefined ? {} : { correctionRequestId }),
-    };
-    expect(schema("ResolutionInput").safeParse(body).success).toBe(true);
-  }
   const proposal = cases.find((f: { id: string }) => f.id === "getTripProposal:success").response
     .data;
   expect(
@@ -326,25 +324,25 @@ test("conditional runtime adapter preserves resolution links and proposal change
   ).toBe(true);
 });
 
-test("conditional importer matches authoritative generated AJV semantics on positive and negative revisions", async () => {
+test("the web reader matches authoritative generated AJV semantics for corrections and proposals", async () => {
   const { createSchemaValidator } = await import("../../apps/api/src/platform/http/schemas.ts"),
     ajv = createSchemaValidator(),
     id = crypto.randomUUID(),
     base = { reason: "Fictional supported correction", evidenceIds: [] };
   const inputs = [
     base,
-    { ...base, correctionRequestId: id },
-    { ...base, correctionRequestId: null },
     { ...base, actualDistanceM: "0" },
-    { ...base, actualDistanceM: "0", correctionRequestId: id },
-    { ...base, actualDistanceM: "0", correctionRequestId: null },
+    { ...base, actualDistanceM: "312000", actualStartAt: "2026-11-22T10:00:00.000Z" },
+    { ...base, actualStartAt: "2026-11-22T10:00:00Z" },
     { ...base, actualDistanceM: 0 },
-    { ...base, actualDistanceM: "1", correctionRequestId: 12 },
+    { ...base, cargoId: id, correctionRequestId: id },
     { ...base, actualDistanceM: "1", extra: "forbidden" },
+    { reason: "", evidenceIds: [], actualDistanceM: "1" },
+    { ...base, evidenceIds: [id, id], actualDistanceM: "1" },
   ];
-  const validate = ajv.compile({ $ref: "urn:vtc:browser:v1#/$defs/ResolutionInput" });
+  const validate = ajv.compile({ $ref: "urn:vtc:browser:v1#/$defs/TripCorrectionInput" });
   for (const value of inputs)
-    expect(schema("ResolutionInput").safeParse(value).success).toBe(!!validate(value));
+    expect(schema("TripCorrectionInput").safeParse(value).success).toBe(!!validate(value));
   const proposal = cases.find((f: { id: string }) => f.id === "getTripProposal:success").response
       .data,
     check = ajv.compile({ $ref: "urn:vtc:browser:v1#/$defs/TripProposal" });

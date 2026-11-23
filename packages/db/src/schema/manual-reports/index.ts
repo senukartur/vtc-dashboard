@@ -283,3 +283,49 @@ export const manualReviewGates = mysqlTable(
   },
   (t) => [index("manual_review_retention").on(t.underReview, t.latestDecisionAt, t.tripId)],
 );
+// One immutable row per driver trip correction (VTC-169). The ID equals the Acceptance
+// proposal ID; no reverse foreign key because Acceptance depends on Manual Reports.
+export const manualCorrectionSubmissions = mysqlTable(
+  "manual_correction_submissions",
+  {
+    id: idColumn("id").primaryKey(),
+    ownerId: idColumn("owner_id").notNull(),
+    tripId: idColumn("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "restrict" }),
+    createdAt: utcColumn("created_at").notNull(),
+  },
+  (t) => [
+    // Named explicitly: the generated name exceeds the 64-character MySQL identifier limit.
+    foreignKey({
+      name: "manual_correction_submission_owner_fk",
+      columns: [t.ownerId],
+      foreignColumns: [membership.userId],
+    }).onDelete("restrict"),
+    uniqueIndex("manual_correction_submission_trip").on(t.id, t.tripId),
+    index("manual_correction_submission_page").on(t.tripId, t.createdAt, t.id),
+  ],
+);
+// Screenshots a driver correction cites beyond the report's own (insert-only, VTC-169).
+export const manualCorrectionEvidence = mysqlTable(
+  "manual_correction_evidence",
+  {
+    evidenceId: idColumn("evidence_id")
+      .notNull()
+      .references(() => manualEvidence.id, { onDelete: "restrict" }),
+    correctionId: idColumn("correction_id").notNull(),
+    tripId: idColumn("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "restrict" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.evidenceId, t.correctionId] }),
+    index("manual_correction_evidence_trip").on(t.tripId, t.evidenceId),
+    index("manual_correction_evidence_correction").on(t.correctionId, t.evidenceId),
+    foreignKey({
+      name: "manual_correction_evidence_submission_fk",
+      columns: [t.correctionId, t.tripId],
+      foreignColumns: [manualCorrectionSubmissions.id, manualCorrectionSubmissions.tripId],
+    }).onDelete("restrict"),
+  ],
+);

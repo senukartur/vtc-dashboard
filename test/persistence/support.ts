@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 105 tables including the ledger and 40 migrations.
+// Fresh full-schema preparation now covers 107 tables including the ledger and 41 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -113,6 +113,8 @@ export async function reset(connection: Connection) {
     "manual_draft_history",
     "manual_draft_evidence",
     "manual_drafts",
+    "manual_correction_evidence",
+    "manual_correction_submissions",
     "manual_correction_history",
     "manual_correction_requests",
     "manual_evidence_refs",

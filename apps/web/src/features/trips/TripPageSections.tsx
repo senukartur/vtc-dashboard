@@ -21,6 +21,7 @@ import {
   OutcomeBadge,
   SourceBadge,
 } from "./badges.js";
+import type { Changes, CorrectionField } from "./correction-model.js";
 import { formatTripRevenue } from "./list-model.js";
 import { type DTO, revisionFields } from "./transport.js";
 import {
@@ -117,6 +118,79 @@ export function TrailerName({ id, game }: { id: string; game: DTO["TripSummary"]
 type Facts = DTO["EffectiveTripFacts"];
 type Fields = DTO["ManualReportReadFields"];
 
+/** Correction marks of the trip facts (VTC-169): unconfirmed facts and pending proposed values. */
+export type CorrectionMarks = {
+  unconfirmed: ReadonlySet<CorrectionField>;
+  proposed: Changes;
+};
+const entityList = {
+  originCityId: "cities",
+  destinationCityId: "cities",
+  cargoId: "cargoes",
+  trailerTypeId: "trailers",
+} as const satisfies Partial<Record<CorrectionField, CatalogList>>;
+
+/** One corrected or reported value of a correctable fact in display units. */
+export function CorrectionValue({
+  field,
+  value,
+  game,
+}: {
+  field: CorrectionField;
+  value: string;
+  game: DTO["TripSummary"]["game"];
+}) {
+  const { locale, timezone } = useTripDisplay();
+  switch (field) {
+    case "actualDistanceM":
+      return <>{formatQuantity(value, "km", locale)}</>;
+    case "cargoMassKg":
+      return <>{formatQuantity(value, "t", locale)}</>;
+    case "actualStartAt":
+    case "actualCompletedAt":
+      return <time dateTime={value}>{formatUtc(value, locale, timezone)}</time>;
+    default:
+      return <CatalogEntryName list={entityList[field]} id={value} game={game} />;
+  }
+}
+
+/**
+ * The mark after a correctable fact: the pending proposed value ("251 → 312 km · correction under
+ * review"), else "not confirmed" for an unconfirmed telemetry fact, else nothing.
+ */
+function CorrectionMark({
+  field,
+  marks,
+  game,
+}: {
+  field: CorrectionField;
+  marks: CorrectionMarks | undefined;
+  game: DTO["TripSummary"]["game"];
+}) {
+  const { t } = useTranslation("trips"),
+    proposed = marks?.proposed[field];
+  if (proposed)
+    return (
+      <span className="trip-correction-proposed" data-field={field}>
+        <span aria-hidden="true">→ </span>
+        <span className="visually-hidden">{t("correctionProposed")}: </span>
+        <CorrectionValue field={field} value={proposed} game={game} />
+        <span className="trip-muted"> · {t("correctionPendingInline")}</span>
+      </span>
+    );
+  if (!marks?.unconfirmed.has(field)) return null;
+  return (
+    <span className="trip-correction-unconfirmed" data-field={field}>
+      <Badge tone="warn" className="trip-unconfirmed">
+        {t("unconfirmed")}
+      </Badge>
+      <InfoTip label={t("unconfirmed")}>
+        <p>{t("unconfirmedHelp")}</p>
+      </InfoTip>
+    </span>
+  );
+}
+
 /**
  * The company of one route end: the effective fact's resolved company with its logo plate, else,
  * when the fact carries no company field, the company the manual report selected (name only). An
@@ -148,11 +222,16 @@ function RouteEnd({
   city,
   company,
   at,
+  cityMark,
+  timeMark,
 }: {
   side: "origin" | "destination";
   city: DTO["CatalogLabel"] | null;
   company: { logo: ReactNode; name: ReactNode } | null;
   at: string | null | undefined;
+  /** VTC-169 correction marks of the city and the time. */
+  cityMark?: ReactNode;
+  timeMark?: ReactNode;
 }) {
   const { locale, timezone } = useTripDisplay(),
     when = useWhen();
@@ -160,9 +239,10 @@ function RouteEnd({
     <div className="trip-route-end" data-side={side}>
       {company?.logo && <span className="trip-route-logo">{company.logo}</span>}
       <div className="trip-route-text">
-        {city && (
+        {(city || cityMark) && (
           <span className="trip-route-city">
-            <PlaceName value={city} />
+            {city ? <PlaceName value={city} /> : <UnknownValue />}
+            {cityMark}
           </span>
         )}
         {company && (
@@ -178,6 +258,7 @@ function RouteEnd({
             {when(at)}
           </time>
         )}
+        {timeMark}
       </div>
     </div>
   );
@@ -209,10 +290,15 @@ function outcomeKey(outcome: DTO["TripSummary"]["outcome"]) {
 export function TripRoute({
   summary,
   view,
+  marks,
 }: {
   summary: DTO["TripSummary"];
   view: DTO["TripPrivate"] | null;
+  marks?: CorrectionMarks | undefined;
 }) {
+  const mark = (field: CorrectionField) => (
+    <CorrectionMark field={field} marks={marks} game={summary.game} />
+  );
   const { t } = useTranslation("trips"),
     { locale } = useTripDisplay(),
     duration = useDuration(),
@@ -234,6 +320,8 @@ export function TripRoute({
           city={summary.origin}
           company={view && routeCompany(facts, fields, "origin")}
           at={times?.startedAt}
+          cityMark={mark("originCityId")}
+          timeMark={mark("actualStartAt")}
         />
         <div className="trip-route-middle">
           {middle && <span className="trip-route-measure">{middle}</span>}
@@ -251,12 +339,17 @@ export function TripRoute({
           city={summary.destination}
           company={view && routeCompany(facts, fields, "destination")}
           at={times?.completedAt}
+          cityMark={mark("destinationCityId")}
+          timeMark={mark("actualCompletedAt")}
         />
       </div>
       <dl className="trip-route-strip">
         <div>
           <dt>{t("tileDistance")}</dt>
-          <dd>{distance ?? <UnknownValue hint="distanceUnknownHelp" />}</dd>
+          <dd>
+            {distance ?? <UnknownValue hint="distanceUnknownHelp" />}
+            {mark("actualDistanceM")}
+          </dd>
         </div>
         {summary.revenue && (
           <div>
@@ -271,10 +364,15 @@ export function TripRoute({
             </dd>
           </div>
         )}
-        {mass !== null && (
+        {(mass !== null ||
+          marks?.proposed.cargoMassKg ||
+          marks?.unconfirmed.has("cargoMassKg")) && (
           <div>
             <dt>{t("stripMass")}</dt>
-            <dd>{formatRounded(mass, "t", locale)}</dd>
+            <dd>
+              {mass === null ? <UnknownValue /> : formatRounded(mass, "t", locale)}
+              {mark("cargoMassKg")}
+            </dd>
           </div>
         )}
         {damage && (
@@ -349,17 +447,33 @@ function trailers(
 export function TripCargo({
   summary,
   view,
+  marks,
 }: {
   summary: DTO["TripSummary"];
   view: DTO["TripPrivate"] | null;
+  marks?: CorrectionMarks | undefined;
 }) {
+  const flagged = (field: CorrectionField) =>
+    !!marks?.proposed[field] || !!marks?.unconfirmed.has(field);
+  const mark = (field: CorrectionField) => (
+    <CorrectionMark field={field} marks={marks} game={summary.game} />
+  );
   const { t } = useTranslation("trips"),
     facts = view?.effectiveFacts ?? null,
     revision = view?.manualRevision ?? null,
     fields = revision ? revisionFields(revision) : null,
     rows: { key: string; term: ReactNode; value: ReactNode }[] = [];
-  if (summary.cargo)
-    rows.push({ key: "cargo", term: t("cargo"), value: <PlaceName value={summary.cargo} /> });
+  if (summary.cargo || flagged("cargoId"))
+    rows.push({
+      key: "cargo",
+      term: t("cargo"),
+      value: (
+        <span className="trip-detail-inline trip-correction-row">
+          {summary.cargo ? <PlaceName value={summary.cargo} /> : <UnknownValue />}
+          {mark("cargoId")}
+        </span>
+      ),
+    });
   if (cargoLabels(facts?.cargoClassification).length)
     rows.push({
       key: "properties",
@@ -367,7 +481,17 @@ export function TripCargo({
       value: <CargoLabelBadges classification={facts?.cargoClassification} tip={false} />,
     });
   const trailer = view ? trailers(facts, fields, summary.game) : null;
-  if (trailer) rows.push({ key: "trailer", term: t("factTrailer"), value: trailer });
+  if (trailer || flagged("trailerTypeId"))
+    rows.push({
+      key: "trailer",
+      term: t("factTrailer"),
+      value: (
+        <span className="trip-detail-inline trip-correction-row">
+          {trailer ?? <UnknownValue />}
+          {mark("trailerTypeId")}
+        </span>
+      ),
+    });
   return <DetailCard title={t("cargoTrailerTitle")} rows={rows} className="trip-cargo-card" />;
 }
 

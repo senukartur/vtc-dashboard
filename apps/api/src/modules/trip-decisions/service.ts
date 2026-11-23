@@ -41,11 +41,21 @@ import { canonicalJson, contentHash, numberDecimal } from "../sources/contracts/
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import { damageRevisionReasons } from "../trips/adjudication.js";
 import type { TripState } from "../trips/groups.js";
+import type { ResolutionValue } from "../trips/adjudication.js";
 import { ingestionConflictCodes, type Trips } from "../trips/service.js";
+import {
+  blockedOnlyByEditable,
+  clientReasonCodes,
+  correctionFacts,
+  finalRejection,
+  RETURNED_FOR_FIXES,
+  returnedForFixes,
+} from "./corrections.js";
 import {
   ACCEPTED_OVER_LIMITS,
   acceptance,
   classify,
+  editableFields,
   evaluationSnapshot,
   type Historical,
   qualificationSnapshot,
@@ -489,7 +499,11 @@ export function createTripDecisions(
       .values({ tripId: row.id, supportHash: hash, reasons, pending, assessedAt: at() })
       .onDuplicateKeyUpdate({ set: { supportHash: hash, reasons, pending, assessedAt: at() } });
   }
-  async function hasPendingProposal(tx: TxContext, members: TripState[]) {
+  async function hasPendingProposal(
+    tx: TxContext,
+    members: TripState[],
+    lock: true | "share" = true,
+  ) {
     const [pending] = await c(tx)
       .select({ id: tripProposals.id })
       .from(tripProposals)
@@ -507,7 +521,7 @@ export function createTripDecisions(
       .for("share");
     return (
       !!pending ||
-      (await ports.manual.hasPendingCorrectionsInTransaction(tx, members[0]?.id as string))
+      (await ports.manual.hasPendingCorrectionsInTransaction(tx, members[0]?.id as string, lock))
     );
   }
   async function commitDecision(
@@ -521,6 +535,7 @@ export function createTripDecisions(
     reviewedRevisionId: string | null,
     confirmOverLimits = false,
     proposalBaseFactId?: string,
+    extraReasonCodes: readonly string[] = [],
   ) {
     const { row } = prepared,
       decidedAt = at(),
@@ -619,7 +634,9 @@ export function createTripDecisions(
         reasonCodes:
           allowed?.mode === "over_limits"
             ? [...allowed.exceeded, ACCEPTED_OVER_LIMITS]
-            : evaluation.reasons,
+            : extraReasonCodes.length
+              ? [...new Set([...evaluation.reasons, ...extraReasonCodes])].sort()
+              : evaluation.reasons,
         assignmentId: basis.qualificationAssignmentId,
         levelId: basis.levelId,
         // Later ladder edits never rewrite the check this decision was made on.
@@ -890,6 +907,7 @@ export function createTripDecisions(
       owner.ownerId,
       p.evidenceIds,
       false,
+      p.id,
     );
     return {
       id: p.id,
@@ -930,7 +948,11 @@ export function createTripDecisions(
     id: string,
     stage3: true,
   ): Promise<{ data: S["TripStage3Review"]; version: number }>;
-  async function review(actor: Actor, id: string, stage3 = false) {
+  async function review(
+    actor: Actor,
+    id: string,
+    stage3 = false,
+  ): Promise<{ data: S["Review"] | S["TripStage3Review"]; version: number }> {
     return run(async (tx) => {
       if (stage3) await ports.identity.authorizeInTransaction(tx, actor, "trips.review");
       // Legacy reviewer authors can inspect their own trip review workspace.
@@ -1034,6 +1056,7 @@ export function createTripDecisions(
           : blocked,
       };
       const trip = await privateProjection(tx, row, actor);
+      const correctionReview = await reviewCorrection(tx, prepared, row, s, shared.acceptance);
       if (stage3) {
         const damage = telemetry?.cargoDamageFraction;
         const fraction = damage?.status === "known" ? Number(damage.value) : NaN;
@@ -1046,6 +1069,8 @@ export function createTripDecisions(
           decisions: trip.decisions,
           pendingProposalId: trip.pendingProposalId,
           reviewReasonCodes: trip.reviewReasonCodes,
+          correction: trip.correction ?? null,
+          correctionReview,
           sources: {
             manual: trip.manualRevision
               ? { manualRevision: trip.manualRevision, evidence: trip.evidence }
@@ -1067,7 +1092,12 @@ export function createTripDecisions(
         return { data, version: row.version };
       }
       return {
-        data: { ...shared, trip, facts: safeSourceFacts(e) } satisfies S["Review"],
+        data: {
+          ...shared,
+          trip,
+          facts: safeSourceFacts(e),
+          correctionReview,
+        } satisfies S["Review"],
         version: row.version,
       };
     });
@@ -1078,7 +1108,8 @@ export function createTripDecisions(
     row: TripState,
     actor: Actor,
   ): Promise<S["TripPrivate"]> {
-    const memberIds = (await ports.trips.groups.members(tx, [row.id], "share")).map((t) => t.id);
+    const groupMembers = await ports.trips.groups.members(tx, [row.id], "share"),
+      memberIds = groupMembers.map((t) => t.id);
     const projection = (await ports.manual.projectionInTransaction(tx, [row.id])).get(row.id),
       decisions = await c(tx)
         .select()
@@ -1102,9 +1133,21 @@ export function createTripDecisions(
       .for("share");
     // One bounded batch (at most 100 decisions) for every reviewer in the history.
     const people = await reviewers(tx, decisions);
+    const summary = await ports.trips.privateSummaryInTransaction(tx, row.id, actor, projection);
+    const context = await correctionContext(
+      tx,
+      row,
+      groupMembers,
+      {
+        manual: !!projection?.manualRevision,
+        telemetry: summary.sourceKinds.includes("ets2telemetry"),
+      },
+      actor,
+      "share",
+    );
     return {
       view: "private",
-      summary: await ports.trips.privateSummaryInTransaction(tx, row.id, actor, projection),
+      summary,
       ...(await ports.trips.privateFactsInTransaction(
         tx,
         row.id,
@@ -1147,21 +1190,136 @@ export function createTripDecisions(
       decisions: await Promise.all(decisions.map((d) => decisionDto(tx, d, people))),
       pendingProposalId: pending[0]?.id ?? null,
       reviewReasonCodes: row.reviewReasons,
+      correction: context
+        ? {
+            baseFactRevisionId: context.base.factRevisionId,
+            fields: correctionFacts(context.base),
+            canPropose: context.canPropose,
+          }
+        : null,
+    };
+  }
+  /**
+   * Correction state of a canonical trip (VTC-169). Telemetry trips without a manual report can be
+   * corrected while waiting for review or after a return for fixes, accepted manual-only reports
+   * after acceptance; mixed groups use the manual revise flow and accepted telemetry is final.
+   * Editability follows the current fact, never reason codes.
+   */
+  async function correctionContext(
+    tx: TxContext,
+    row: TripState,
+    members: TripState[],
+    group: { manual: boolean; telemetry: boolean },
+    actor?: Actor,
+    lock: true | "share" = true,
+  ) {
+    if (!row.currentFactId) return null;
+    const base = (await ports.trips.adjudication.facts(tx, [row.currentFactId], true)).get(
+      row.currentFactId,
+    )?.evidence;
+    if (!base) return null;
+    const fields = editableFields(base);
+    const decision = await latest(tx, row.id);
+    const author =
+      !!actor &&
+      row.ownerId === actor.userId &&
+      actor.capabilities.includes("trips.submit_own") &&
+      row.outcome !== "open";
+    const telemetryOnly = !group.manual && base.provider === "ets2telemetry";
+    const manualOnly = group.manual && !group.telemetry && base.provider === "manual";
+    const state = telemetryOnly
+      ? fields.length > 0 &&
+        (row.decision === "pending_review" ||
+          (row.decision === "rejected" && returnedForFixes(decision)))
+      : manualOnly && row.decision === "accepted";
+    const canPropose = author && state && !(await hasPendingProposal(tx, members, lock));
+    return {
+      base,
+      fields,
+      canPropose,
+      canReturn: group.manual || fields.length > 0,
+      final: row.decision === "rejected" && finalRejection(decision),
+    };
+  }
+  /** Reviewer-only correction context of a review read (VTC-169). */
+  async function reviewCorrection(
+    tx: TxContext,
+    prepared: Awaited<ReturnType<typeof prepare>>,
+    row: TripState,
+    s: Awaited<ReturnType<typeof support>>,
+    shown: { mode: S["ReviewAcceptance"]["mode"]; blockedReasonCodes: string[] },
+  ): Promise<S["TripCorrectionReview"]> {
+    const group = {
+      manual: prepared.manual.reports.length > 0,
+      telemetry: s.evidence.some((f) => f.provider === "ets2telemetry"),
+    };
+    const context = await correctionContext(tx, row, prepared.members, group);
+    const [pending] = await c(tx)
+      .select({ derivedFactId: tripProposals.derivedFactId })
+      .from(tripProposals)
+      .leftJoin(tripProposalReviews, eq(tripProposalReviews.proposalId, tripProposals.id))
+      .where(
+        and(
+          inArray(
+            tripProposals.tripId,
+            prepared.members.map((t) => t.id),
+          ),
+          sql`${tripProposalReviews.proposalId} IS NULL`,
+        ),
+      )
+      .orderBy(desc(tripProposals.createdAt), desc(tripProposals.id))
+      .limit(1)
+      .for("share");
+    const derived = pending?.derivedFactId
+      ? (await ports.trips.adjudication.facts(tx, [pending.derivedFactId], true)).get(
+          pending.derivedFactId,
+        )?.evidence
+      : undefined;
+    let proposalAcceptance: S["ReviewAcceptance"] | null = null;
+    if (derived) {
+      const h = await ports.qualifications.lookupInTransaction(
+        tx,
+        derived,
+        await confirmation(tx, row, derived, at()),
+      );
+      const result = acceptance(derived, h, s.event?.confirmedEvent ?? null, {
+        hasTelemetrySource: group.telemetry,
+        eventInvalid: s.eventInvalid,
+        eventReviewRequired: !!s.event?.reviewRequired,
+      });
+      proposalAcceptance = { mode: result.mode, blockedReasonCodes: result.blockedReasonCodes };
+    }
+    return {
+      canReturn: context?.canReturn ?? group.manual,
+      blockedOnlyByEditable:
+        !group.manual &&
+        shown.mode === "unavailable" &&
+        blockedOnlyByEditable(shown.blockedReasonCodes, context?.fields ?? []),
+      proposalAcceptance,
+      clientReasonCodes: clientReasonCodes(selectTelemetry(s.evidence, row.currentFactId)),
+    };
+  }
+  async function groupSources(tx: TxContext, members: TripState[], manualReports: number) {
+    const evidence = await ports.trips.reconciliation.evidence(
+      tx,
+      members.map((t) => t.id),
+    );
+    return {
+      manual: manualReports > 0,
+      telemetry: evidence.some((e) => e.provider === "ets2telemetry"),
     };
   }
   async function proposal(
     tx: TxContext,
     prepared: Awaited<ReturnType<typeof prepare>>,
     actor: Actor,
-    raw: S["ResolutionInput"] | null,
+    raw: ResolutionValue | null,
     eventId: string | null,
   ) {
     const { row, members } = prepared;
     if (!row.currentFactId) throw identityError(409);
-    const correctionRequestId = raw?.correctionRequestId ?? null;
-    if (correctionRequestId)
-      await ports.manual.correctionRequestInTransaction(tx, actor, row.id, correctionRequestId);
     const s = await support(tx, row, members, eventId ?? undefined);
+    // A held damage change (VTC-171) bases the correction on the latest same-source revision.
     const correction = await heldDamageCorrection(tx, row, members, s);
     const base =
       correction && correction.mode !== "blocked"
@@ -1171,9 +1329,8 @@ export function createTripDecisions(
     const id = newId(),
       revisionId = newId(),
       createdAt = at();
+    // An author correction's evidence was validated by Manual Reports in this transaction.
     const evidenceIds = raw?.evidenceIds ?? [];
-    await ports.manual.resolutionEvidenceInTransaction(tx, row.id, row.ownerId, evidenceIds);
-    if (raw && !evidenceIds.length && base.provider === "manual") throw identityError(422);
     const derived = raw
       ? await ports.trips.adjudication.derive(
           tx,
@@ -1191,26 +1348,22 @@ export function createTripDecisions(
         !ports.trips.adjudication.preservesDamageResolution(correction.retained, derived))
     )
       throw identityError(409, "RESOLUTION_REQUIRED");
-    if (raw?.qualificationAssignmentId) {
-      const h = await ports.qualifications.lookupInTransaction(
-        tx,
-        derived ?? base,
-        await confirmation(tx, row, derived ?? base, createdAt),
-      );
-      if (h.status !== "resolved" || h.assignmentId !== raw.qualificationAssignmentId)
-        throw identityError(422);
-    }
     const changed = await ports.trips.adjudication.write(
       tx,
       row,
-      { reviewHold: true, correctionPending: row.decision === "accepted" || row.correctionPending },
+      {
+        reviewHold: true,
+        correctionPending: row.decision === "accepted" || row.correctionPending,
+        ...(raw
+          ? { reviewReasons: [...new Set([...row.reviewReasons, "proposal_pending"])].sort() }
+          : {}),
+      },
       undefined,
     );
     await ports.manual.groupDecisionInTransaction(tx, row.id, null);
     const {
       reason: explanation,
       evidenceIds: _ids,
-      correctionRequestId: _request,
       ...changes
     } = raw ?? { reason: "Event association requires review", evidenceIds: [] };
     await c(tx)
@@ -1220,7 +1373,7 @@ export function createTripDecisions(
         revisionId,
         tripId: row.id,
         kind: raw ? "resolution" : "correction_request",
-        correctionRequestId,
+        correctionRequestId: null,
         authorId: actor.userId,
         baseTripVersion: changed.version,
         baseFactId: base.factRevisionId,
@@ -1235,22 +1388,19 @@ export function createTripDecisions(
         attendanceRevisionId: eventId ? (s.event?.attendanceRevisionId ?? null) : null,
         createdAt,
       });
-    await work(
-      tx,
-      changed,
-      s.hash,
-      [correctionRequestId ? "author_correction_requested" : "proposal_pending"],
-      true,
-    );
-    await audit.append(tx, {
-      actorKind: "user",
-      actorId: actor.userId,
-      operation: "report.reviewed",
-      subjectKind: "trip",
-      subjectId: row.id,
-      occurredAt: createdAt,
-      reason: "staff_review",
-    });
+    await work(tx, changed, s.hash, ["proposal_pending"], true);
+    // An event association is recorded as before; an author correction is audited by Manual
+    // Reports as the author's request (no staff review happened).
+    if (!raw)
+      await audit.append(tx, {
+        actorKind: "user",
+        actorId: actor.userId,
+        operation: "report.reviewed",
+        subjectKind: "trip",
+        subjectId: row.id,
+        occurredAt: createdAt,
+        reason: "staff_review",
+      });
     return { id, version: changed.version };
   }
   async function reviewProposal(
@@ -1261,6 +1411,35 @@ export function createTripDecisions(
     value: S["ProposalDecisionInput"],
   ) {
     const { row, members } = prepared;
+    // Nobody reviews their own trip or proposal, in either review mode (VTC-169).
+    if (
+      members.some((member) => member.id === p.tripId) &&
+      [p.authorId, row.ownerId].includes(actor.userId)
+    )
+      throw identityError(403, "SELF_REVIEW_FORBIDDEN");
+    // A text-only author request without changes (released before VTC-169) can only be declined.
+    if (
+      value.decision === "approve" &&
+      p.kind === "correction_request" &&
+      p.correctionRequestId !== null &&
+      p.derivedFactId === null &&
+      p.eventId === null
+    )
+      throw identityError(409);
+    if (value.tripDecision) {
+      // The trip decision replaces the effective result: never an accepted one, and a return
+      // needs something the author can correct.
+      if (row.decision === "accepted") throw identityError(409);
+      if (value.tripDecision === RETURNED_FOR_FIXES) {
+        const context = await correctionContext(
+          tx,
+          row,
+          members,
+          await groupSources(tx, members, prepared.manual.reports.length),
+        );
+        if (!context?.canReturn) throw identityError(409);
+      }
+    }
     if (
       !members.some((member) => member.id === p.tripId) ||
       p.revisionId !== value.reviewedRevisionId ||
@@ -1372,7 +1551,14 @@ export function createTripDecisions(
           p.derivedFactId ?? p.baseFactId,
         )?.evidence;
       if (!e) throw identityError(409);
-      await ports.manual.resolutionEvidenceInTransaction(tx, row.id, row.ownerId, p.evidenceIds);
+      await ports.manual.resolutionEvidenceInTransaction(
+        tx,
+        row.id,
+        row.ownerId,
+        p.evidenceIds,
+        true,
+        p.id,
+      );
       const h = await ports.qualifications.lookupInTransaction(
           tx,
           e,
@@ -1393,6 +1579,26 @@ export function createTripDecisions(
         p.revisionId,
         false,
         p.baseFactId,
+      );
+    } else if (value.tripDecision) {
+      // Return or reject the trip itself on its current revision, in the same transaction.
+      const current = await support(tx, row, members);
+      const e =
+        selectQuality(current.evidence, row.currentFactId, undefined, current.trailerTypes)
+          .selected ?? current.evidence.find((f) => f.factRevisionId === row.currentFactId);
+      if (!e) throw identityError(409);
+      result = await commitDecision(
+        tx,
+        prepared,
+        current,
+        e,
+        "rejected",
+        reason(value.reason),
+        actor,
+        prepared.manual.reports.find((r) => r.revisionId)?.revisionId ?? e.factRevisionId,
+        false,
+        undefined,
+        value.tripDecision === RETURNED_FOR_FIXES ? [RETURNED_FOR_FIXES] : [],
       );
     } else {
       const effective =
@@ -1574,34 +1780,25 @@ export function createTripDecisions(
       }
       return result;
     },
-    async correctionRequestedInTransaction(
-      tx: TxContext,
-      id: string,
-      requestId: string,
-      actor: Actor,
-      explanation: string,
-    ) {
-      const prepared = await prepare(tx, id),
-        { row, members } = prepared;
-      if (!row.currentFactId) throw identityError(409);
-      const s = await support(tx, row, members);
-      await c(tx)
-        .insert(tripProposals)
-        .values({
-          id: newId(),
-          revisionId: newId(),
-          tripId: row.id,
-          kind: "correction_request",
-          correctionRequestId: requestId,
-          authorId: actor.userId,
-          baseTripVersion: row.version,
-          baseFactId: row.currentFactId,
-          supportHash: s.hash,
-          reason: reason(explanation),
-          evidenceIds: [],
-          createdAt: at(),
-        });
-      await work(tx, row, s.hash, ["author_correction_requested"], true);
+    // Whether the author may still fix a rejected trip: a final human rejection refuses it.
+    async fixAllowedInTransaction(tx: TxContext, id: string) {
+      const root = await ports.trips.groups.resolve(tx, id, true);
+      return root.decision !== "rejected" || !finalRejection(await latest(tx, root.id));
+    },
+    // A driver correction notifies reviewers only while its proposal is unreviewed.
+    async notificationProposalInTransaction(tx: TxContext, proposalId: string, tripId: string) {
+      const [p] = await c(tx)
+        .select({ tripId: tripProposals.tripId })
+        .from(tripProposals)
+        .where(eq(tripProposals.id, applicationId(proposalId)))
+        .for("share");
+      if (!p || p.tripId !== tripId) throw new Error("NOTIFICATION_PROPOSAL_REFERENCE_CONFLICT");
+      const [review] = await c(tx)
+        .select({ id: tripProposalReviews.proposalId })
+        .from(tripProposalReviews)
+        .where(eq(tripProposalReviews.proposalId, applicationId(proposalId)))
+        .for("share");
+      return !review;
     },
     async eventChangedInTransaction(tx: TxContext, eventId: string, generation: number) {
       await enqueue(tx, { eventId, generation, cursor: null });
@@ -1758,14 +1955,22 @@ export function createTripDecisions(
         stage3 && value.decision === "accept" && value.proposalId === null
           ? value.reason?.trim() || null
           : reason(value.reason as string);
-      const { confirmOverLimits, ...body } = value,
-        confirmed = confirmOverLimits === true;
-      // Over-limit confirmation applies only to a direct acceptance (owner decisions 5 and 6).
+      const { confirmOverLimits, returnForFixes, ...body } = value,
+        confirmed = confirmOverLimits === true,
+        returned = returnForFixes === true;
+      // Over-limit confirmation applies only to a direct acceptance (owner decisions 5 and 6),
+      // a return for fixes only to a direct rejection (VTC-169).
       if (confirmed && (value.decision !== "accept" || value.proposalId !== null))
+        throw identityError(422);
+      if (returned && (value.decision !== "reject" || value.proposalId !== null))
         throw identityError(422);
       // An absent or false flag keeps the pre-existing receipt fingerprint for identical retries.
       const normalized = stage3 ? { ...body, reason: explanation } : body;
-      const fingerprint = confirmed ? { ...normalized, confirmOverLimits: true } : normalized;
+      const fingerprint = {
+        ...normalized,
+        ...(confirmed && { confirmOverLimits: true }),
+        ...(returned && { returnForFixes: true }),
+      };
       return run(async (tx) => {
         const prepared = await prepareReviewerCommand(tx, id, actor);
         return once(
@@ -1826,6 +2031,16 @@ export function createTripDecisions(
                 : value.reviewedRevisionId !== e.factRevisionId
             )
               throw identityError(409, "VERSION_CONFLICT");
+            // A return needs something the author can correct; otherwise only a final rejection.
+            if (returned) {
+              const context = await correctionContext(
+                tx,
+                prepared.row,
+                prepared.members,
+                await groupSources(tx, prepared.members, prepared.manual.reports.length),
+              );
+              if (!context?.canReturn) throw identityError(409);
+            }
             return commitDecision(
               tx,
               prepared,
@@ -1836,30 +2051,70 @@ export function createTripDecisions(
               actor,
               value.reviewedRevisionId,
               confirmed,
+              undefined,
+              returned ? [RETURNED_FOR_FIXES] : [],
             );
           },
         );
       });
     },
+    /**
+     * The trip author proposes values for unconfirmed facts (VTC-169). The proposal derives a
+     * fact revision for a different reviewer; the previous result stays effective until then.
+     */
     async propose(
       actor: Actor,
       id: string,
       key: string,
       version: number,
-      raw: S["ResolutionInput"],
+      raw: S["TripCorrectionInput"],
     ) {
-      const value = input("ResolutionInput", {
-        ...raw,
-        correctionRequestId: raw.correctionRequestId ?? null,
-      });
+      const value = input("TripCorrectionInput", raw);
       reason(value.reason);
+      const { reason: _reason, evidenceIds, ...changes } = value;
+      if (!Object.keys(changes).length) throw identityError(422);
       return run(async (tx) => {
-        const prepared = await prepareReviewerCommand(tx, id, actor);
-        return once(tx, actor, "propose", key, { id, version, value }, async () => {
-          expected(prepared.row, version);
-          const result = await proposal(tx, prepared, actor, value, null);
-          return { data: result, version: result.version };
-        });
+        const prepared = await prepare(tx, id, actor, false),
+          { row, members } = prepared;
+        await ports.identity.authorizeInTransaction(tx, actor, "trips.submit_own");
+        if (row.ownerId !== actor.userId) throw identityError(404);
+        return once(
+          tx,
+          actor,
+          "propose",
+          key,
+          { kind: "author_correction", id, version, value },
+          async () => {
+            expected(row, version);
+            const context = await correctionContext(
+              tx,
+              row,
+              members,
+              await groupSources(tx, members, prepared.manual.reports.length),
+              actor,
+            );
+            if (!context?.canPropose) throw identityError(409);
+            if (Object.keys(changes).some((field) => !context.fields.includes(field as never)))
+              throw identityError(422);
+            const uploads = await ports.manual.correctionEvidenceInTransaction(
+              tx,
+              actor,
+              row.id,
+              evidenceIds,
+              context.base.provider === "manual",
+            );
+            const result = await proposal(tx, prepared, actor, value, null);
+            await ports.manual.correctionSubmittedInTransaction(
+              tx,
+              actor,
+              row.id,
+              result.id,
+              result.version,
+              uploads,
+            );
+            return { data: result, version: result.version };
+          },
+        );
       });
     },
     async proposalDecision(
@@ -1872,6 +2127,7 @@ export function createTripDecisions(
     ) {
       const value = input("ProposalDecisionInput", raw);
       reason(value.reason);
+      if (value.tripDecision && value.decision !== "reject") throw identityError(422);
       return run(async (tx) => {
         const prepared = await prepareReviewerCommand(tx, id, actor);
         return once(tx, actor, "review", key, { id, proposalId, version, value }, async () => {

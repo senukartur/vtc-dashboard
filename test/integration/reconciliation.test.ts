@@ -225,6 +225,8 @@ beforeEach(async () => {
     "reconciliation_candidates",
     "reconciliation_rules",
     "manual_commands",
+    "manual_correction_evidence",
+    "manual_correction_submissions",
     "manual_correction_history",
     "manual_correction_requests",
     "manual_evidence_refs",
@@ -2603,15 +2605,20 @@ test("an unassessed or rejected primary cannot erase an accepted secondary; diff
   expect((await state(b.tripId))?.decision).toBe("accepted");
 });
 
-test("a later manual correction request fences reversal instead of restoring obsolete review flags", async () => {
+test("a later pending correction request fences reversal instead of restoring obsolete review flags", async () => {
   const r = await report(),
     t = await receive();
   await accepted(r.tripId, r);
   const one = await merge(r.tripId, t.tripId);
-  const current = await state(r.tripId);
-  await manual.requestCorrection(owner, t.tripId, newId(), current?.version as number, {
-    reason: "Fictional new correction request",
-  });
+  // The text-only request command is removed (VTC-169); a request it left pending still
+  // advanced the group primary and raised its hold exactly like this.
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(trips)
+      .set({ version: sql`${trips.version}+1`, reviewHold: true, correctionPending: true })
+      .where(eq(trips.id, r.tripId)),
+  );
   await expect(reverse(one.data.id)).rejects.toMatchObject({ statusCode: 409 });
   expect((await state(r.tripId))?.correctionPending).toBe(true);
   expect((await state(t.tripId))?.aliasOf).toBe(r.tripId);

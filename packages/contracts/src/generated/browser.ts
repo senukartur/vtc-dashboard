@@ -2527,11 +2527,7 @@ export interface paths {
          */
         get: operations["listTripCorrectionRequests"];
         put?: never;
-        /**
-         * requestTripCorrection
-         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
-         */
-        post: operations["requestTripCorrection"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2552,6 +2548,26 @@ export interface paths {
         get: operations["getTripCorrectionRequest"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trips/{tripId}/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * proposeTripCorrection
+         * @description The trip author proposes values for correctable facts (TripCorrectionState.fields): a telemetry trip waiting for review or returned for fixes, or an accepted manual-only report. Every other fact is locked (422). Another member gets 404; a trip in any other state, a pending proposal or correction request, a stale If-Match or evidence that is not ready is 409; EVIDENCE_TRANSITION (503) while a cited screenshot is being deleted. A telemetry correction can cite no screenshot; a manual one cites at least one screenshot of its report. CommandResult.id identifies the created proposal; the previous result stays effective until a different reviewer decides.
+         */
+        post: operations["proposeTripCorrection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2718,23 +2734,6 @@ export interface paths {
         get: operations["listTripReconciliations"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/trips/{tripId}/resolution-proposals": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** proposeTripResolution */
-        post: operations["proposeTripResolution"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3805,6 +3804,8 @@ export interface components {
             factRevisionId: string;
             proposalId: string | null;
             reason: string;
+            /** @description Optional, false when omitted. Only with decision reject and a null proposalId (422 otherwise). Stores the extra reason code returned_for_fixes: the author may correct the trip. 409 when nothing is correctable. A plain rejection is final. */
+            returnForFixes?: boolean;
             /** Format: uuid */
             reviewedRevisionId: string;
         };
@@ -5424,6 +5425,11 @@ export interface components {
             reason: string;
             /** Format: uuid */
             reviewedRevisionId: string;
+            /**
+             * @description Optional, only with decision reject (422 otherwise). Declines the proposal and records a trip rejection on the current revision in the same transaction: returned_for_fixes lets the author correct again, rejected is final. 409 on an accepted trip, or for returned_for_fixes when nothing is correctable. Omitted declines the proposal only, keeping the effective result.
+             * @enum {string}
+             */
+            tripDecision?: "returned_for_fixes" | "rejected";
         };
         ProposalReview: {
             /** Format: date-time */
@@ -5721,35 +5727,11 @@ export interface components {
             /** Format: uuid */
             trailerTypeId?: string;
         };
-        ResolutionInput: {
-            /** Format: date-time */
-            actualCompletedAt?: string;
-            actualDistanceM?: string;
-            /** Format: date-time */
-            actualStartAt?: string;
-            /** Format: uuid */
-            cargoId?: string;
-            cargoMassKg?: string;
-            /**
-             * Format: uuid
-             * @description Optional exact pending author correction request; omitted and null are equivalent. Requires an actual supported correction field.
-             */
-            correctionRequestId?: string | null;
-            /** Format: uuid */
-            destinationCityId?: string;
-            evidenceIds: string[];
-            /** Format: uuid */
-            originCityId?: string;
-            /** Format: uuid */
-            qualificationAssignmentId?: string;
-            reason: string;
-            /** Format: uuid */
-            trailerTypeId?: string;
-        };
         Review: {
             acceptance: components["schemas"]["ReviewAcceptance"];
             blockedReasonCodes: string[];
             canDecide: boolean;
+            correctionReview?: components["schemas"]["TripCorrectionReview"];
             evaluation: components["schemas"]["EvaluationSnapshot"];
             /** Format: uuid */
             factRevisionId: string;
@@ -5932,7 +5914,61 @@ export interface components {
             overweight: boolean;
             valuable: boolean;
         };
+        TripCorrectionFact: {
+            field: components["schemas"]["TripCorrectionField"];
+            /** @description Why the fact is unconfirmed, when known. */
+            reasonCode: string | null;
+            /** @description The value the source reported, even when unconfirmed: decimal metres or kilograms, a UTC instant or a catalog entity ID. Null when nothing was reported. */
+            reported: string | null;
+            /** @description Raw catalog code the telemetry client reported for an unrecognized entity. */
+            sourceCode: string | null;
+        };
+        /**
+         * @description A fact a trip author can correct. Editability follows the fact state, never reason codes.
+         * @enum {string}
+         */
+        TripCorrectionField: "actualDistanceM" | "actualStartAt" | "actualCompletedAt" | "originCityId" | "destinationCityId" | "cargoId" | "cargoMassKg" | "trailerTypeId";
+        /** @description At least one correctable fact. Times are UTC and only correct telemetry trips. evidenceIds cite ready screenshots of the author: uploads or the report's own; duplicates and more than the configured per-report maximum are 422. */
+        TripCorrectionInput: {
+            /** Format: date-time */
+            actualCompletedAt?: string;
+            actualDistanceM?: string;
+            /** Format: date-time */
+            actualStartAt?: string;
+            /** Format: uuid */
+            cargoId?: string;
+            cargoMassKg?: string;
+            /** Format: uuid */
+            destinationCityId?: string;
+            evidenceIds: string[];
+            /** Format: uuid */
+            originCityId?: string;
+            reason: string;
+            /** Format: uuid */
+            trailerTypeId?: string;
+        };
+        /** @description Reviewer-only correction context; omitted by older responses. */
+        TripCorrectionReview: {
+            /** @description Acceptance is blocked only by facts the author can correct. */
+            blockedOnlyByEditable: boolean;
+            /** @description A return for fixes is possible: the group has a manual report or the current fact has a correctable fact. */
+            canReturn: boolean;
+            /** @description Raw quality reasons the telemetry client reported (snapshot.evidence.reasons). */
+            clientReasonCodes: string[];
+            /** @description How the pending correction could be accepted; null without one. */
+            proposalAcceptance: components["schemas"]["ReviewAcceptance"] | null;
+        };
+        /** @description VTC-169 correction state of a private trip; omitted by older responses. */
+        TripCorrectionState: {
+            /** Format: uuid */
+            baseFactRevisionId: string;
+            /** @description The viewer is the author with trips.submit_own and the trip accepts a correction now. */
+            canPropose: boolean;
+            /** @description Correctable facts of the current fact; every other fact is locked. */
+            fields: components["schemas"]["TripCorrectionFact"][];
+        };
         TripPrivate: {
+            correction?: components["schemas"]["TripCorrectionState"] | null;
             decisions: components["schemas"]["Decision"][];
             effectiveFacts?: components["schemas"]["EffectiveTripFacts"] | null;
             evidence: components["schemas"]["Evidence"][];
@@ -6094,6 +6130,8 @@ export interface components {
             factRevisionId: string;
             proposalId: null;
             reason: string;
+            /** @description Optional, false when omitted. Only with decision reject and a null proposalId (422 otherwise). Stores the extra reason code returned_for_fixes: the author may correct the trip. 409 when nothing is correctable. A plain rejection is final. */
+            returnForFixes?: boolean;
             /** Format: uuid */
             reviewedRevisionId: string;
         };
@@ -6101,6 +6139,8 @@ export interface components {
             acceptance: components["schemas"]["ReviewAcceptance"];
             blockedReasonCodes: string[];
             canDecide: boolean;
+            correction?: components["schemas"]["TripCorrectionState"] | null;
+            correctionReview?: components["schemas"]["TripCorrectionReview"];
             decisions: components["schemas"]["Decision"][];
             effectiveFacts: components["schemas"]["EffectiveTripFacts"] | null;
             evaluation: components["schemas"]["EvaluationSnapshot"];
@@ -10873,50 +10913,6 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    requestTripCorrection: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                tripId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReasonInput"];
-            };
-        };
-        responses: {
-            /** @description Committed correction request. CommandResult.id identifies this request, never a proposal; version and ETag identify the updated trip. Discover/read through correction-request GETs. Accepted result is preserved. */
-            201: {
-                headers: {
-                    /** @description Private response; never cache. */
-                    "Cache-Control"?: "no-store";
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeCommandResult"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            415: components["responses"]["Error"];
-            422: components["responses"]["Error"];
-            428: components["responses"]["Error"];
-            429: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-            default: components["responses"]["Error"];
-        };
-    };
     getTripCorrectionRequest: {
         parameters: {
             query?: never;
@@ -10946,6 +10942,38 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    proposeTripCorrection: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                tripId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TripCorrectionInput"];
+            };
+        };
+        responses: {
+            /** @description Committed proposal. CommandResult.id is the TripProposal ID; version and ETag identify the updated trip. */
+            201: {
+                headers: {
+                    /** @description Strong authoritative aggregate version, for the next command. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCommandResult"];
+                };
+            };
             default: components["responses"]["Error"];
         };
     };
@@ -11257,38 +11285,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeListReconciliation"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    proposeTripResolution: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                tripId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ResolutionInput"];
-            };
-        };
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            201: {
-                headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeCommandResult"];
                 };
             };
             default: components["responses"]["Error"];

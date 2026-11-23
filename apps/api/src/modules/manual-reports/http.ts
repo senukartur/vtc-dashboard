@@ -286,21 +286,6 @@ export async function registerManualRoutes(
     "ManualResolvedInput",
   );
   route(
-    "POST",
-    "/api/v1/trips/:tripId/correction-requests",
-    "EnvelopeCommandResult",
-    (a, r) =>
-      manual.requestCorrection(
-        a,
-        r.params.tripId as string,
-        key(r),
-        expected(r),
-        r.body as S["ReasonInput"],
-      ),
-    "ReasonInput",
-    201,
-  );
-  route(
     "GET",
     "/api/v1/trips/:tripId/correction-requests",
     "EnvelopeListManualCorrectionRequest",

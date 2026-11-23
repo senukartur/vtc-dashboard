@@ -15,10 +15,15 @@ import {
   catalogCompanyCities,
   catalogCompanyLogos,
 } from "@vtc/db/catalogs-schema";
-import { manualEvidence } from "@vtc/db/manual-reports-schema";
+import {
+  manualCorrectionHistory,
+  manualCorrectionRequests,
+  manualEvidence,
+  manualReviewGates,
+} from "@vtc/db/manual-reports-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
 import { reconciliationCandidates, reconciliationSearches } from "@vtc/db/reconciliation-schema";
-import { tripDecisions, tripEventAssociations } from "@vtc/db/trip-decisions-schema";
+import { tripDecisions, tripEventAssociations, tripProposals } from "@vtc/db/trip-decisions-schema";
 import { eq, inArray, tripContributions, tripFacts, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { expect, test, afterAll as vAfter, beforeAll as vBefore } from "vitest";
@@ -170,8 +175,7 @@ beforeAll(async () => {
       decisionProjection: (tx, id, actor) => service.privateProjectionInTransaction(tx, id, actor),
       eventTitles: (tx, ids, actor) => events.tripTitlesInTransaction(tx, ids, actor),
       eventAssociations: (tx, ids) => service.eventAssociationsInTransaction(tx, ids),
-      correctionRequested: (tx, id, requestId, actor, reason) =>
-        service.correctionRequestedInTransaction(tx, id, requestId, actor, reason),
+      fixAllowed: (tx, id) => service.fixAllowedInTransaction(tx, id),
     },
     now,
   );
@@ -341,19 +345,21 @@ async function report(
     },
   });
 }
+/** A direct decision; "return" is a rejection the driver may fix (VTC-169). */
 async function decide(
   id: string,
-  decision: "accept" | "reject" = "accept",
+  decision: "accept" | "reject" | "return" = "accept",
   actor = dispatcher,
   commandKey = newId(),
 ) {
   const review = await service.review(actor, id);
   return service.decide(actor, id, commandKey, review.version, {
-    decision,
+    decision: decision === "accept" ? "accept" : "reject",
     reviewedRevisionId: review.data.trip.manualRevision?.id ?? review.data.factRevisionId,
     factRevisionId: review.data.factRevisionId,
     proposalId: null,
     reason: "Fictional evidence review",
+    ...(decision === "return" ? { returnForFixes: true } : {}),
   });
 }
 async function overLimitDecide(
@@ -385,28 +391,143 @@ async function decideProposal(...args: Parameters<TripDecisions["proposalDecisio
   if (!("outcome" in result.data)) throw new Error("SYNTHETIC_TERMINAL_DECISION_EXPECTED");
   return { data: result.data, version: result.version };
 }
-async function resolveDistance(
+/** A complete v1.1 telemetry trip held only because its whole-trip distance is unsupported. */
+function heldPayload() {
+  const p = payload();
+  p.contract.minor = 1;
+  p.snapshot.hardModeResult = "qualified";
+  p.snapshot.evidence.ruleContextComplete = false;
+  p.snapshot.evidence.reasons = ["accounting-unavailable"];
+  return p;
+}
+/** The trip author's own correction (VTC-169) on the current trip version. */
+async function correct(
   id: string,
-  distance: string,
-  extra: Partial<S["ResolutionInput"]> = {},
+  changes: Partial<S["TripCorrectionInput"]>,
+  who = owner,
+  evidenceIds: string[] = [],
+  reason = "Fictional driver correction",
 ) {
   const row = await state(id);
-  const proposed = await service.propose(dispatcher, id, newId(), row?.version as number, {
-      reason: "Fictional supported correction",
-      evidenceIds: [],
-      actualDistanceM: distance,
-      ...extra,
-    }),
-    p = await service.getProposal(dispatcher, id, proposed.data.id);
+  return service.propose(who, id, newId(), row?.version as number, {
+    reason,
+    evidenceIds,
+    ...changes,
+  });
+}
+async function approve(id: string, proposalId: string, reviewer = deputy) {
+  const p = await service.getProposal(reviewer, id, proposalId);
   return {
     p,
-    result: await decideProposal(deputy, id, p.data.id, newId(), p.version, {
+    result: await decideProposal(reviewer, id, p.data.id, newId(), p.version, {
       decision: "approve",
       reviewedRevisionId: p.data.revisionId,
       reason: "Fictional verified correction",
     }),
   };
 }
+/** The author corrects the distance and a different reviewer approves it. */
+async function resolveDistance(
+  id: string,
+  distance: string,
+  extra: Partial<S["TripCorrectionInput"]> = {},
+) {
+  const proposed = await correct(
+    id,
+    { actualDistanceM: distance, ...extra },
+    owner,
+    extra.evidenceIds,
+  );
+  return approve(id, proposed.data.id);
+}
+/** An immutable screenshot row of a member, ready unless stated. */
+async function screenshot(
+  who = owner,
+  evidenceState: "ready" | "processing" | "deleting" = "ready",
+) {
+  const id = newId();
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .insert(manualEvidence)
+      .values({
+        id,
+        ownerId: who.userId,
+        state: evidenceState,
+        generation: newId(),
+        originalName: "fictional-correction.png",
+        contentType: "image/png",
+        byteLength: 1,
+        sha256: randomBytes(32),
+        fingerprint: randomBytes(32),
+        createdAt: iso(),
+        updatedAt: iso(),
+        nextCheckAt: iso(),
+      }),
+  );
+  return id;
+}
+/**
+ * A text-only author request as released before VTC-169 wrote it: the pending request, its
+ * history, the review gate and hold, and the origin proposal without values.
+ */
+async function legacyRequest(tripId: string, reason: string) {
+  const row = (await state(tripId))!,
+    requestId = newId(),
+    proposalId = newId(),
+    revisionId = newId(),
+    at = iso();
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db.insert(manualCorrectionRequests).values({
+      id: requestId,
+      ownerId: row.ownerId,
+      tripId,
+      baseTripVersion: row.version,
+      baseRevisionId: null,
+      reason,
+      status: "pending",
+      requestedAt: at,
+    });
+    // One millisecond earlier, so a decline at the same test instant sorts after it.
+    await db.insert(manualCorrectionHistory).values({
+      id: newId(),
+      requestId,
+      status: "pending",
+      recordedAt: new Date(instant - 1).toISOString(),
+    });
+    await db
+      .insert(manualReviewGates)
+      .values({ tripId, underReview: true })
+      .onDuplicateKeyUpdate({ set: { underReview: true } });
+    await db
+      .update(trips)
+      .set({ reviewHold: true, correctionPending: true })
+      .where(eq(trips.id, tripId));
+    await db.insert(tripProposals).values({
+      id: proposalId,
+      revisionId,
+      tripId,
+      kind: "correction_request",
+      correctionRequestId: requestId,
+      authorId: row.ownerId,
+      baseTripVersion: row.version,
+      baseFactId: row.currentFactId as string,
+      supportHash: randomBytes(32),
+      reason,
+      evidenceIds: [],
+      createdAt: at,
+    });
+  });
+  return { requestId, proposalId, revisionId };
+}
+async function privateTrip(who: Actor, id: string) {
+  const view = await tripsService.detail(who, id);
+  if (view.view !== "private") throw Error("EXPECTED_PRIVATE_TRIP");
+  return view;
+}
+const refusedFor = (codes: number[]) => (error: { statusCode?: number }) =>
+  codes.includes(error.statusCode ?? 0);
 
 test("a coherent terminal revision supplies damage even when the opening observed a different value", async () => {
   await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "2.5" });
@@ -703,8 +824,8 @@ test("two dispatchers decide at most once and permanent receipts reject conflict
     service.decide(deputy, r.tripId, newId(), review.version, value),
   ).rejects.toMatchObject({ statusCode: 409 });
 });
-test("two successive derived corrections change real FK-backed credit and reconstruct after raw expiry", async () => {
-  const p = payload();
+test("an approved driver correction changes real FK-backed credit and reconstructs after raw expiry", async () => {
+  const p = heldPayload();
   p.snapshot.gameMode = {
     mode: "single-player",
     method: "process-scan",
@@ -713,19 +834,19 @@ test("two successive derived corrections change real FK-backed credit and recons
   };
   p.snapshot.job.market = { available: true, value: "quick_job" };
   const r = await receive(p),
-    original = await state(r.tripId),
-    before = await credit(r.tripId);
+    original = await state(r.tripId);
+  expect(original?.decision).toBe("pending_review");
+  expect(await credit(r.tripId)).toBeUndefined();
   // Legacy rows have their mode provenance but no normalized market. Derived rows inherit that shape.
   await control.execute(
     "UPDATE trip_facts SET evidence=JSON_REMOVE(evidence,'$.recordedTelemetry') WHERE message_id=?",
     [r.sourceRecordId],
   );
-  const a = await resolveDistance(r.tripId, "200000"),
-    b = await resolveDistance(r.tripId, "300000");
-  expect(a.result.data.basis.factRevisionId).not.toBe(original?.currentFactId);
-  expect(b.result.data.basis.factRevisionId).not.toBe(a.result.data.basis.factRevisionId);
+  const b = await resolveDistance(r.tripId, "300000");
+  expect(b.result.data.outcome).toBe("accepted");
+  expect(b.result.data.basis.factRevisionId).not.toBe(original?.currentFactId);
   expect((await credit(r.tripId))?.actualDistanceM).toBe("300000.000000000000000000");
-  expect((await credit(r.tripId))?.version).toBe((before?.version ?? 0) + 2);
+  expect((await credit(r.tripId))?.factId).toBe(b.result.data.basis.factRevisionId);
   const legacy = (jobType: string) => ({
     factRevisionId: b.result.data.basis.factRevisionId,
     recordedTelemetry: { jobType, gameMode: "single-player", hardModeResult: "unknown" },
@@ -789,55 +910,79 @@ test("two successive derived corrections change real FK-backed credit and recons
     ]);
   }
 });
-test("derived corrections reject foreign evidence and invalid catalog kinds without changing confirmed credit", async () => {
-  const a = await receive(),
+
+test("driver corrections reject foreign evidence, invalid catalog kinds and locked facts without effects", async () => {
+  const p = heldPayload();
+  p.snapshot.job.cargoId = { available: true, value: "fixture_unlisted_cargo" };
+  const a = await receive(p),
     other = await report(await member()),
     before = await credit(a.tripId),
     row = await state(a.tripId);
+  expect(row?.decision).toBe("pending_review");
   await expect(
-    service.propose(dispatcher, a.tripId, newId(), row?.version as number, {
-      reason: "Fictional foreign evidence refusal",
-      evidenceIds: other.currentRevision.fields.evidenceIds,
-      actualDistanceM: "250000",
-    }),
+    correct(
+      a.tripId,
+      { actualDistanceM: "250000" },
+      owner,
+      other.currentRevision.fields.evidenceIds,
+    ),
+  ).rejects.toMatchObject({ statusCode: 404 });
+  await expect(
+    correct(a.tripId, { cargoId: ids.get("fixture_north") as string }),
   ).rejects.toMatchObject({ statusCode: 422 });
+  // A confirmed fact is locked.
   await expect(
-    service.propose(dispatcher, a.tripId, newId(), row?.version as number, {
-      reason: "Fictional catalog kind refusal",
-      evidenceIds: [],
-      cargoId: ids.get("fixture_north") as string,
-    }),
+    correct(a.tripId, { originCityId: ids.get("fixture_south") as string }),
   ).rejects.toMatchObject({ statusCode: 422 });
   expect(await credit(a.tripId)).toEqual(before);
   expect(await state(a.tripId)).toEqual(row);
 });
 
-test("a proposal freezes confirmed credit, rejects stale support and proposal rejection returns effective decision", async () => {
-  const p = payload(),
+test("a return lets the driver correct again, stale support blocks approval and a final rejection refuses", async () => {
+  const p = heldPayload(),
     r = await receive(p),
-    before = await credit(r.tripId),
-    row = await state(r.tripId),
-    proposal = await service.propose(dispatcher, r.tripId, newId(), row?.version as number, {
-      reason: "Fictional correction",
-      evidenceIds: [],
-      actualDistanceM: "200000",
+    first = await correct(r.tripId, { actualDistanceM: "200000" }),
+    detail = await service.getProposal(dispatcher, r.tripId, first.data.id);
+  expect(detail.data).toMatchObject({
+    kind: "resolution",
+    authorId: owner.userId,
+    state: "pending",
+  });
+  expect(await credit(r.tripId)).toBeUndefined();
+  await expect(
+    service.proposalDecision(deputy, r.tripId, detail.data.id, newId(), detail.version, {
+      decision: "approve",
+      reviewedRevisionId: detail.data.revisionId,
+      reason: "Fictional decision on an approval",
+      tripDecision: "rejected",
     }),
-    detail = await service.getProposal(dispatcher, r.tripId, proposal.data.id);
-  expect(await credit(r.tripId)).toEqual(before);
-  const rejected = await decideProposal(deputy, r.tripId, detail.data.id, newId(), detail.version, {
+  ).rejects.toMatchObject({ statusCode: 422 });
+  const returned = await decideProposal(deputy, r.tripId, detail.data.id, newId(), detail.version, {
     decision: "reject",
     reviewedRevisionId: detail.data.revisionId,
-    reason: "Fictional evidence insufficient",
+    reason: "Fictional distance still unproven",
+    tripDecision: "returned_for_fixes",
   });
-  expect(rejected.data.outcome).toBe("accepted");
-  expect(await credit(r.tripId)).toEqual(before);
+  expect(returned.data.outcome).toBe("rejected");
+  expect(returned.data.reasonCodes).toContain("returned_for_fixes");
   expect(
     (await service.getProposal(dispatcher, r.tripId, detail.data.id)).data.review?.decision,
   ).toBe("reject");
-  const pending = await service.propose(dispatcher, r.tripId, newId(), rejected.version, {
-    reason: "Fictional next correction",
-    evidenceIds: [],
-    actualDistanceM: "400000",
+  expect((await credit(r.tripId))?.credited ?? false).toBe(false);
+  const view = await privateTrip(owner, r.tripId);
+  expect(view.correction).toMatchObject({
+    canPropose: true,
+    fields: [
+      expect.objectContaining({
+        field: "actualDistanceM",
+        reported: "123400",
+        reasonCode: "whole_trip_distance_unknown",
+      }),
+    ],
+  });
+  const pending = await correct(r.tripId, { actualDistanceM: "400000" });
+  await expect(correct(r.tripId, { actualDistanceM: "410000" })).rejects.toMatchObject({
+    statusCode: 409,
   });
   const revision = { ...structuredClone(p), eventId: newId(), revision: p.revision + 1 };
   await receive(revision);
@@ -850,30 +995,255 @@ test("a proposal freezes confirmed credit, rejects stale support and proposal re
       reason: "Fictional obsolete review",
     }),
   ).rejects.toMatchObject({ statusCode: 409 });
+  // A final rejection leaves the driver nothing to correct.
+  await service.proposalDecision(deputy, r.tripId, current.data.id, newId(), current.version, {
+    decision: "reject",
+    reviewedRevisionId: current.data.revisionId,
+    reason: "Fictional final rejection",
+    tripDecision: "rejected",
+  });
+  expect((await state(r.tripId))?.decision).toBe("rejected");
+  expect((await privateTrip(owner, r.tripId)).correction?.canPropose ?? false).toBe(false);
+  await expect(correct(r.tripId, { actualDistanceM: "420000" })).rejects.toMatchObject({
+    statusCode: 409,
+  });
 });
-test("manual dates and an assignment ID without supported historical start cannot fabricate qualification", async () => {
-  const r = await report(),
-    row = await state(r.tripId);
-  await expect(
-    service.propose(dispatcher, r.tripId, newId(), row?.version as number, {
-      reason: "Fictional invalid date",
-      evidenceIds: r.currentRevision.fields.evidenceIds,
-      actualStartAt: iso(),
+
+/** Rows a correction or its review may write for a trip, to prove a rollback left none. */
+async function correctionRows(tripId: string) {
+  const [rows] = await control.execute<RowDataPacket[]>(
+    "SELECT (SELECT COUNT(*) FROM trip_proposals WHERE trip_id=?) proposals, (SELECT COUNT(*) FROM trip_proposal_reviews r JOIN trip_proposals p ON p.id=r.proposal_id WHERE p.trip_id=?) reviews, (SELECT COUNT(*) FROM trip_resolutions WHERE trip_id=?) resolutions, (SELECT COUNT(*) FROM manual_correction_submissions WHERE trip_id=?) submissions, (SELECT COUNT(*) FROM trip_decisions WHERE trip_id=?) decisions, (SELECT COUNT(*) FROM trip_facts WHERE canonical_trip_id=?) facts",
+    [tripId, tripId, tripId, tripId, tripId, tripId],
+  );
+  return Object.fromEntries(
+    Object.entries(rows[0] ?? {}).map(([key, value]) => [key, Number(value)]),
+  );
+}
+
+test("an author correction racing a reviewer decision, or another correction, commits at most once", async () => {
+  // The driver's correction and a final rejection race on the same trip version.
+  const raced = await receive(heldPayload()),
+    review = await service.review(dispatcher, raced.tripId);
+  const results = await Promise.allSettled([
+    correct(raced.tripId, { actualDistanceM: "200000" }),
+    service.decide(dispatcher, raced.tripId, newId(), review.version, {
+      decision: "reject",
+      reviewedRevisionId: review.data.factRevisionId,
+      factRevisionId: review.data.factRevisionId,
+      proposalId: null,
+      reason: "Fictional concurrent final rejection",
     }),
+  ]);
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  for (const result of results)
+    if (result.status === "rejected") expect(result.reason).toMatchObject({ statusCode: 409 });
+  const rows = await correctionRows(raced.tripId);
+  if (results[0]?.status === "fulfilled") {
+    expect(rows).toMatchObject({ proposals: 1, submissions: 1, decisions: 0 });
+    expect((await state(raced.tripId))?.decision).toBe("pending_review");
+  } else {
+    expect(rows).toMatchObject({ proposals: 0, submissions: 0, decisions: 1 });
+    expect((await state(raced.tripId))?.decision).toBe("rejected");
+  }
+
+  // Two corrections on one version: one wins, the other is a 409 conflict.
+  const twice = await receive(heldPayload()),
+    version = (await state(twice.tripId))?.version as number;
+  const send = (distance: string) =>
+    service.propose(owner, twice.tripId, newId(), version, {
+      reason: "Fictional concurrent driver correction",
+      evidenceIds: [],
+      actualDistanceM: distance,
+    });
+  const pair = await Promise.allSettled([send("200000"), send("210000")]);
+  expect(pair.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  expect(pair.find((result) => result.status === "rejected")).toMatchObject({
+    reason: { statusCode: 409 },
+  });
+  expect(await correctionRows(twice.tripId)).toMatchObject({ proposals: 1, submissions: 1 });
+});
+
+test("a failing correction step or trip decision inside a proposal review rolls back every row", async () => {
+  const faulty = (overrides: {
+    manual?: Partial<ManualReports>;
+    qualifications?: Partial<typeof qualifications>;
+  }) =>
+    createTripDecisions(
+      unit,
+      service.config,
+      {
+        identity,
+        trips: tripsService,
+        qualifications: { ...qualifications, ...overrides.qualifications },
+        manual: { ...manual, ...overrides.manual },
+        events,
+      },
+      now,
+    );
+  // The submission record fails after the proposal, resolution and derived fact were written.
+  const r = await receive(heldPayload()),
+    before = { rows: await correctionRows(r.tripId), state: await state(r.tripId) };
+  await expect(
+    faulty({
+      manual: {
+        correctionSubmittedInTransaction: async () => {
+          throw new Error("SYNTHETIC_SUBMISSION_FAILURE");
+        },
+      },
+    }).propose(owner, r.tripId, newId(), before.state?.version as number, {
+      reason: "Fictional rolled back correction",
+      evidenceIds: [await screenshot()],
+      actualDistanceM: "200000",
+    }),
+  ).rejects.toThrow("SYNTHETIC_SUBMISSION_FAILURE");
+  expect(await correctionRows(r.tripId)).toEqual(before.rows);
+  expect(await state(r.tripId)).toEqual(before.state);
+
+  // A return through the proposal review fails while crediting: no review or decision remains.
+  const proposed = await correct(r.tripId, { actualDistanceM: "200000" }),
+    detail = await service.getProposal(dispatcher, r.tripId, proposed.data.id),
+    pending = { rows: await correctionRows(r.tripId), state: await state(r.tripId) };
+  await expect(
+    faulty({
+      qualifications: {
+        replaceContributionsInTransaction: async () => {
+          throw new Error("SYNTHETIC_CREDIT_FAILURE");
+        },
+      },
+    }).proposalDecision(deputy, r.tripId, proposed.data.id, newId(), detail.version, {
+      decision: "reject",
+      reviewedRevisionId: detail.data.revisionId,
+      reason: "Fictional rolled back return",
+      tripDecision: "returned_for_fixes",
+    }),
+  ).rejects.toThrow("SYNTHETIC_CREDIT_FAILURE");
+  expect(await correctionRows(r.tripId)).toEqual(pending.rows);
+  expect(await state(r.tripId)).toEqual(pending.state);
+  expect((await service.getProposal(dispatcher, r.tripId, proposed.data.id)).data.state).toBe(
+    "pending",
+  );
+});
+
+test("a declined or approved correction protects its screenshot until a year after the decision", async () => {
+  const time = instant;
+  try {
+    for (const outcome of ["reject", "approve"] as const) {
+      const r = await receive(heldPayload()),
+        shot = await screenshot(),
+        proposed = await correct(r.tripId, { actualDistanceM: "200000" }, owner, [shot]),
+        detail = await service.getProposal(dispatcher, r.tripId, proposed.data.id),
+        decidedAt = instant;
+      await decideProposal(deputy, r.tripId, proposed.data.id, newId(), detail.version, {
+        decision: outcome,
+        reviewedRevisionId: detail.data.revisionId,
+        reason: `Fictional ${outcome} of a cited screenshot`,
+        ...(outcome === "reject" ? { tripDecision: "returned_for_fixes" as const } : {}),
+      });
+      const boundary = new Date(decidedAt);
+      boundary.setUTCFullYear(boundary.getUTCFullYear() + 1);
+      instant = decidedAt + 200 * 86400000;
+      expect(await manual.reserveExpiry(shot)).toBe(false);
+      instant = boundary.getTime() - 1;
+      expect(await manual.reserveExpiry(shot)).toBe(false);
+      instant = boundary.getTime();
+      expect(await manual.reserveExpiry(shot)).toBe(true);
+      instant = time;
+    }
+  } finally {
+    instant = time;
+  }
+});
+
+test("a final rejection refuses a manual revision and a report attached to the rejected trip (D2)", async () => {
+  const submitted = await report();
+  await decide(submitted.tripId, "reject");
+  const fields = submitted.currentRevision.fields;
+  if (!("origin" in fields)) throw new Error("SYNTHETIC_MANUAL_V2_REQUIRED");
+  const rejected = await state(submitted.tripId);
+  await expect(
+    manual.reviseReport(owner, submitted.id, newId(), submitted.version, {
+      fields: { ...fields, ...manualReferenceDates, actualDistanceM: "124000" },
+      expectedTripVersion: rejected?.version as number,
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  // A telemetry trip rejected for good takes no new report either.
+  const telemetry = await receive(heldPayload());
+  await decide(telemetry.tripId, "reject");
+  const final = await state(telemetry.tripId);
+  await expect(
+    manual.submitReport(owner, newId(), {
+      fields: { ...fields, ...manualReferenceDates },
+      targetTrip: { tripId: telemetry.tripId, expectedVersion: final?.version as number },
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  expect(await state(telemetry.tripId)).toEqual(final);
+  expect(await state(submitted.tripId)).toEqual(rejected);
+});
+
+test("a pending staff-authored resolution from before VTC-169 can still be approved or declined", async () => {
+  for (const outcome of ["approve", "reject"] as const) {
+    const r = await receive(heldPayload()),
+      proposed = await correct(r.tripId, { actualDistanceM: "200000" });
+    // Rewrite the driver's correction into the shape a released staff resolution left behind.
+    await control.execute("UPDATE trip_proposals SET author_id=? WHERE id=?", [
+      dispatcher.userId,
+      proposed.data.id,
+    ]);
+    await control.execute(
+      "UPDATE trip_resolutions SET author_id=? WHERE id=(SELECT resolution_id FROM trip_proposals WHERE id=?)",
+      [dispatcher.userId, proposed.data.id],
+    );
+    await control.execute("DELETE FROM manual_correction_submissions WHERE id=?", [
+      proposed.data.id,
+    ]);
+    const detail = await service.getProposal(deputy, r.tripId, proposed.data.id);
+    expect(detail.data).toMatchObject({ authorId: dispatcher.userId, state: "pending" });
+    // Its author never reviews it.
+    await expect(
+      service.proposalDecision(dispatcher, r.tripId, proposed.data.id, newId(), detail.version, {
+        decision: outcome,
+        reviewedRevisionId: detail.data.revisionId,
+        reason: "Fictional self review",
+      }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    const result = await service.proposalDecision(
+      deputy,
+      r.tripId,
+      proposed.data.id,
+      newId(),
+      detail.version,
+      {
+        decision: outcome,
+        reviewedRevisionId: detail.data.revisionId,
+        reason: `Fictional ${outcome} of a released resolution`,
+      },
+    );
+    expect((await service.getProposal(deputy, r.tripId, proposed.data.id)).data.state).toBe(
+      outcome === "approve" ? "approved" : "rejected",
+    );
+    if (outcome === "approve") {
+      expect(result.data).toMatchObject({ outcome: "accepted" });
+      expect((await credit(r.tripId))?.credited).toBe(true);
+    } else expect((await state(r.tripId))?.decision).toBe("pending_review");
+  }
+});
+
+test("manual times and staff-only assignment IDs cannot fabricate qualification", async () => {
+  const r = await report();
+  await decide(r.tripId);
+  // A manual report's times are reference values; only telemetry times can be corrected.
+  await expect(
+    correct(r.tripId, { actualStartAt: iso() }, owner, r.currentRevision.fields.evidenceIds),
   ).rejects.toMatchObject({ statusCode: 422 });
   const p = payload();
   p.snapshot.start = { utcMs: null, basis: "unknown", eventSeq: null };
   p.snapshot.evidence.startObserved = false;
-  const t = await receive(p),
-    stateT = await state(t.tripId);
+  const t = await receive(p);
   await expect(
-    service.propose(dispatcher, t.tripId, newId(), stateT?.version as number, {
-      reason: "Fictional invented history",
-      evidenceIds: [],
-      qualificationAssignmentId: newId(),
-    }),
+    correct(t.tripId, { qualificationAssignmentId: newId() } as Partial<S["TripCorrectionInput"]>),
   ).rejects.toMatchObject({ statusCode: 422 });
 });
+
 test("late telemetry and manual approval in both serialized orders preserve one canonical confirmed result", async () => {
   for (const telemetryFirst of [false, true]) {
     const r = await report(),
@@ -1069,13 +1439,10 @@ test("every manual author in canonical aliases is forbidden from review or corre
       statusCode: 403,
       publicCode: "SELF_REVIEW_FORBIDDEN",
     });
+    // A group with a manual report is corrected through the report, never by a proposal.
     await expect(
-      service.propose(author, primary.tripId, newId(), review.version, {
-        reason: "Fictional forbidden self correction",
-        evidenceIds: [],
-        actualDistanceM: "250000",
-      }),
-    ).rejects.toMatchObject({ statusCode: 403, publicCode: "SELF_REVIEW_FORBIDDEN" });
+      correct(primary.tripId, { actualDistanceM: "250000" }, author),
+    ).rejects.toMatchObject({ statusCode: 409 });
   }
 });
 
@@ -2259,7 +2626,7 @@ test("current production merge and immediate reverse preserve coherent final ver
   }
 });
 
-test("calendar-year renewed decisions and pending group review retain screenshots; committed deletion reservation rejects reopening", async () => {
+test("calendar-year renewed decisions and a pending driver correction retain screenshots; committed deletion reservation rejects reopening", async () => {
   const r = await report(),
     id = r.currentRevision.fields.evidenceIds[0] as string,
     time = instant;
@@ -2277,33 +2644,36 @@ test("calendar-year renewed decisions and pending group review retain screenshot
   const effectiveId = primary.tripId;
   await decide(effectiveId);
   expect((await state(r.tripId))?.aliasOf).toBe(effectiveId);
+  const corrected = await report(),
+    cited = corrected.currentRevision.fields.evidenceIds[0] as string;
+  await decide(corrected.tripId);
   try {
     instant += 364 * 86400000;
     expect(await manual.reserveExpiry(id)).toBe(false);
     instant += 2 * 86400000;
     await decide(effectiveId);
     expect(await manual.reserveExpiry(id)).toBe(false);
-    const proposed = await service.propose(
-      dispatcher,
-      effectiveId,
-      newId(),
-      (await state(effectiveId))?.version as number,
-      { reason: "Fictional renewed review", evidenceIds: [id], actualDistanceM: "200000" },
+    const proposed = await correct(
+      corrected.tripId,
+      { actualDistanceM: "200000" },
+      owner,
+      [cited],
+      "Fictional renewed review",
     );
     instant += 400 * 86400000;
-    expect(await manual.reserveExpiry(id)).toBe(false);
+    expect(await manual.reserveExpiry(cited)).toBe(false);
     await unit.run((tx) =>
       unit
         .client(tx)
         .update(manualEvidence)
         .set({ state: "deleting" })
-        .where(eq(manualEvidence.id, id)),
+        .where(eq(manualEvidence.id, cited)),
     );
     const detail = await service
-      .getProposal(dispatcher, effectiveId, proposed.data.id)
+      .getProposal(dispatcher, corrected.tripId, proposed.data.id)
       .catch((e) => e);
     expect(detail).toMatchObject({ statusCode: 503, publicCode: "EVIDENCE_TRANSITION" });
-    await expect(decide(effectiveId)).rejects.toMatchObject({
+    await expect(decide(corrected.tripId)).rejects.toMatchObject({
       statusCode: 503,
       publicCode: "EVIDENCE_TRANSITION",
     });
@@ -2312,128 +2682,120 @@ test("calendar-year renewed decisions and pending group review retain screenshot
   }
 });
 
-test.each(["manual", "open"] as const)(
-  "HTTP rejection of a %s proposal before a first terminal decision preserves state and replays the actual ProposalReview",
-  async (kind) => {
-    const r = kind === "manual" ? await report() : await receive(payload("started")),
-      id = r.tripId,
-      before = await state(id);
-    const evidenceIds =
-      kind === "manual" ? (r as S["ManualReport"]).currentRevision.fields.evidenceIds : [];
-    const proposalKey = newId(),
-      proposalInput = {
-        reason: "Fictional pre-decision correction",
-        evidenceIds,
-        actualDistanceM: "200000",
-      };
-    const p = await service.propose(
-        dispatcher,
-        id,
-        proposalKey,
-        before?.version as number,
-        proposalInput,
-      ),
-      detail = await service.getProposal(dispatcher, id, p.data.id),
-      token = csrfProtection(identity.config).issue({ cookie: directorCookie }, director).token,
-      commandKey = newId(),
-      body = {
+test("HTTP rejection of a driver correction before a first terminal decision preserves state and replays the actual ProposalReview", async () => {
+  const r = await receive(heldPayload()),
+    id = r.tripId,
+    before = await state(id);
+  const proposalKey = newId(),
+    proposalInput = {
+      reason: "Fictional pre-decision correction",
+      evidenceIds: [],
+      actualDistanceM: "200000",
+    };
+  const p = await service.propose(owner, id, proposalKey, before?.version as number, proposalInput),
+    detail = await service.getProposal(dispatcher, id, p.data.id),
+    token = csrfProtection(identity.config).issue({ cookie: directorCookie }, director).token,
+    commandKey = newId(),
+    body = {
+      decision: "reject",
+      reviewedRevisionId: detail.data.revisionId,
+      reason: "Fictional insufficient correction evidence",
+    };
+  const app = await createApp({
+    identity,
+    trips: tripsService,
+    tripDecisions: service,
+    checkReadiness: async () => true,
+  });
+  try {
+    const request = {
+      method: "POST" as const,
+      url: `/api/v1/trips/${id}/proposals/${p.data.id}/decisions`,
+      headers: {
+        cookie: directorCookie,
+        origin,
+        "content-type": "application/json",
+        "x-csrf-token": token,
+        "idempotency-key": commandKey,
+        "if-match": `"v${detail.version}"`,
+      },
+      payload: body,
+    };
+    const response = await app.inject(request);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({
+      id: p.data.id,
+      kind: "resolution",
+      state: "rejected",
+      review: {
         decision: "reject",
         reviewedRevisionId: detail.data.revisionId,
-        reason: "Fictional insufficient correction evidence",
-      };
-    const app = await createApp({
-      identity,
-      trips: tripsService,
-      tripDecisions: service,
-      checkReadiness: async () => true,
+        reviewerId: director.userId,
+      },
     });
-    try {
-      const request = {
-        method: "POST" as const,
-        url: `/api/v1/trips/${id}/proposals/${p.data.id}/decisions`,
-        headers: {
-          cookie: directorCookie,
-          origin,
-          "content-type": "application/json",
-          "x-csrf-token": token,
-          "idempotency-key": commandKey,
-          "if-match": `"v${detail.version}"`,
-        },
-        payload: body,
-      };
-      const response = await app.inject(request);
-      expect(response.statusCode).toBe(200);
-      expect(response.json().data).toMatchObject({
-        id: p.data.id,
-        kind: "resolution",
-        state: "rejected",
-        review: {
-          decision: "reject",
-          reviewedRevisionId: detail.data.revisionId,
-          reviewerId: director.userId,
-        },
-      });
-      expect(response.json().data).not.toHaveProperty("outcome");
-      const replay = await app.inject(request);
-      expect(replay.statusCode).toBe(200);
-      expect(replay.json().data).toEqual(response.json().data);
-      expect(replay.headers.etag).toBe(response.headers.etag);
-      expect((await state(id))?.decision).toBe(before?.decision);
-      expect((await state(id))?.currentFactId).toBe(before?.currentFactId);
-      expect(await credit(id)).toBeUndefined();
-      expect((await service.getProposal(dispatcher, id, p.data.id)).data.state).toBe("rejected");
-      expect(
-        await service.propose(
-          dispatcher,
-          id,
-          proposalKey,
-          before?.version as number,
-          proposalInput,
-        ),
-      ).toEqual(p);
-      const [receipts] = await control.execute<RowDataPacket[]>(
-        "SELECT result FROM trip_decision_commands WHERE actor_id=? AND `key`=?",
-        [dispatcher.userId, proposalKey],
-      );
-      const stored =
-        typeof receipts[0]?.result === "string"
-          ? JSON.parse(receipts[0].result)
-          : receipts[0]?.result;
-      expect(stored).toEqual({
-        kind: "command",
-        id: p.data.id,
-        version: p.version,
-        reviewed: false,
-      });
-      const [decisions] = await control.execute<RowDataPacket[]>(
-        "SELECT COUNT(*) n FROM trip_decisions WHERE trip_id=?",
-        [id],
-      );
-      expect(Number(decisions[0]?.n)).toBe(0);
-      const [events] = await control.execute<RowDataPacket[]>(
-        "SELECT COUNT(*) n FROM outbox_events WHERE type='trip.proposal_reviewed' AND aggregate_id=?",
-        [id],
-      );
-      expect(Number(events[0]?.n)).toBe(1);
-    } finally {
-      await app.close();
-    }
-  },
-);
+    expect(response.json().data).not.toHaveProperty("outcome");
+    const replay = await app.inject(request);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().data).toEqual(response.json().data);
+    expect(replay.headers.etag).toBe(response.headers.etag);
+    expect((await state(id))?.decision).toBe(before?.decision);
+    expect((await state(id))?.currentFactId).toBe(before?.currentFactId);
+    expect(await credit(id)).toBeUndefined();
+    expect((await service.getProposal(dispatcher, id, p.data.id)).data.state).toBe("rejected");
+    expect(
+      await service.propose(owner, id, proposalKey, before?.version as number, proposalInput),
+    ).toEqual(p);
+    const [receipts] = await control.execute<RowDataPacket[]>(
+      "SELECT result FROM trip_decision_commands WHERE actor_id=? AND `key`=?",
+      [owner.userId, proposalKey],
+    );
+    const stored =
+      typeof receipts[0]?.result === "string"
+        ? JSON.parse(receipts[0].result)
+        : receipts[0]?.result;
+    expect(stored).toEqual({
+      kind: "command",
+      id: p.data.id,
+      version: p.version,
+      reviewed: false,
+    });
+    const [decisions] = await control.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM trip_decisions WHERE trip_id=?",
+      [id],
+    );
+    expect(Number(decisions[0]?.n)).toBe(0);
+    const [events] = await control.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM outbox_events WHERE type='trip.proposal_reviewed' AND aggregate_id=?",
+      [id],
+    );
+    expect(Number(events[0]?.n)).toBe(1);
+  } finally {
+    await app.close();
+  }
+});
 
-test("staff-supported telemetry time records explicit provenance and real historical credit without changing source time", async () => {
+test("a driver-corrected telemetry start approved by staff records explicit provenance and real historical credit without changing source time", async () => {
   const p = payload();
   p.snapshot.start = { utcMs: null, basis: "unknown", eventSeq: null };
   p.snapshot.evidence.startObserved = false;
   const r = await receive(p),
-    row = await state(r.tripId);
-  const proposed = await service.propose(dispatcher, r.tripId, newId(), row?.version as number, {
-      reason: "Fictional reviewed structured time evidence",
-      evidenceIds: [],
-      actualDistanceM: "123400",
-      actualStartAt: new Date(instant - 60000).toISOString(),
-      actualCompletedAt: iso(),
-    }),
+    fields = ((await privateTrip(owner, r.tripId)).correction?.fields ?? []).map((f) => f.field);
+  expect(fields).toContain("actualStartAt");
+  // The observed completion is confirmed, so it is locked.
+  expect(fields).not.toContain("actualCompletedAt");
+  await expect(correct(r.tripId, { actualCompletedAt: iso() })).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  const proposed = await correct(
+      r.tripId,
+      {
+        actualStartAt: new Date(instant - 60000).toISOString(),
+        ...(fields.includes("actualDistanceM") ? { actualDistanceM: "123400" } : {}),
+      },
+      owner,
+      [],
+      "Fictional reviewed structured time evidence",
+    ),
     detail = await service.getProposal(dispatcher, r.tripId, proposed.data.id),
     approved = await decideProposal(deputy, r.tripId, detail.data.id, newId(), detail.version, {
       decision: "approve",
@@ -2453,7 +2815,11 @@ test("staff-supported telemetry time records explicit provenance and real histor
 });
 
 test("current reviewer GET stays coherent after ownership discovery establishes an old RR snapshot", async () => {
-  const trip = await receive(payload());
+  // An accepted manual report takes successive driver corrections.
+  const reported = await report(),
+    trip = { tripId: reported.tripId },
+    tripEvidence = reported.currentRevision.fields.evidenceIds;
+  await decide(trip.tripId);
   let ready!: () => void,
     resume!: () => void,
     gate = true;
@@ -2513,15 +2879,9 @@ test("current reviewer GET stays coherent after ownership discovery establishes 
       }),
     ]);
     try {
-      await resolveDistance(trip.tripId, "200000");
-      const current = await state(trip.tripId);
-      pendingId = (
-        await service.propose(dispatcher, trip.tripId, newId(), current!.version, {
-          reason: "Fictional current pending request",
-          evidenceIds: [],
-          actualDistanceM: "210000",
-        })
-      ).data.id;
+      await resolveDistance(trip.tripId, "200000", { evidenceIds: tripEvidence });
+      pendingId = (await correct(trip.tripId, { actualDistanceM: "210000" }, owner, tripEvidence))
+        .data.id;
     } finally {
       resume();
     }
@@ -2553,253 +2913,205 @@ test("current reviewer GET stays coherent after ownership discovery establishes 
   }
 });
 
-test("obsolete proposal closure retains current guards and every other pending hold across approval and direct decisions", async () => {
-  for (const order of ["approve-newest", "reject-oldest"]) {
-    const trip = await receive(payload());
-    async function propose(distance: string) {
-      const row = await state(trip.tripId),
-        result = await service.propose(dispatcher, trip.tripId, newId(), row!.version, {
-          reason: "Fictional distinct resolution",
-          evidenceIds: [],
-          actualDistanceM: distance,
-        });
-      return (await service.getProposal(dispatcher, trip.tripId, result.data.id)).data;
-    }
-    const a = await propose("150000"),
-      b = await propose("200000");
-    const commandKey = newId(),
-      reject = {
-        decision: "reject" as const,
-        reviewedRevisionId: a.revisionId,
-        reason: "Fictional obsolete request closure",
-      };
-    let row = (await state(trip.tripId))!;
+test("closing one pending proposal keeps current guards and every other pending hold across approval and declines", async () => {
+  for (const order of ["approve-correction", "decline-legacy-first"] as const) {
+    const r = await report(),
+      evidence = r.currentRevision.fields.evidenceIds;
+    await decide(r.tripId);
+    const proposed = await correct(r.tripId, { actualDistanceM: "200000" }, owner, evidence),
+      a = (await service.getProposal(dispatcher, r.tripId, proposed.data.id)).data,
+      legacy = await legacyRequest(r.tripId, "Fictional old-format request");
+    let row = (await state(r.tripId))!;
+    const approval = {
+      decision: "approve" as const,
+      reviewedRevisionId: a.revisionId,
+      reason: "Fictional current correction",
+    };
     await expect(
-      service.proposalDecision(deputy, trip.tripId, a.id, newId(), row.version, {
-        ...reject,
-        decision: "approve",
-      }),
+      service.proposalDecision(deputy, r.tripId, a.id, newId(), row.version - 1, approval),
     ).rejects.toMatchObject({ statusCode: 409 });
     await expect(
-      service.proposalDecision(deputy, trip.tripId, a.id, newId(), row.version - 1, reject),
-    ).rejects.toMatchObject({ statusCode: 409 });
-    await expect(
-      service.proposalDecision(deputy, trip.tripId, a.id, newId(), row.version, {
-        ...reject,
+      service.proposalDecision(deputy, r.tripId, a.id, newId(), row.version, {
+        ...approval,
         reviewedRevisionId: newId(),
       }),
     ).rejects.toMatchObject({ statusCode: 409 });
-    if (order === "approve-newest") {
-      await decideProposal(deputy, trip.tripId, b.id, newId(), row.version, {
+    // An old-format request has no values to apply: it can only be declined.
+    await expect(
+      service.proposalDecision(deputy, r.tripId, legacy.proposalId, newId(), row.version, {
         decision: "approve",
-        reviewedRevisionId: b.revisionId,
-        reason: "Fictional current correction",
-      });
-      expect((await state(trip.tripId))?.reviewHold).toBe(true);
-      expect((await state(trip.tripId))?.correctionPending).toBe(true);
+        reviewedRevisionId: legacy.revisionId,
+        reason: "Fictional old-format approval",
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    if (order === "approve-correction") {
+      await decideProposal(deputy, r.tripId, a.id, newId(), row.version, approval);
+      expect((await credit(r.tripId))?.actualDistanceM).toBe("200000.000000000000000000");
+      expect((await state(r.tripId))?.reviewHold).toBe(true);
+      expect((await state(r.tripId))?.correctionPending).toBe(true);
     }
-    row = (await state(trip.tripId))!;
-    const beforeCredit = await credit(trip.tripId),
-      closed = await service.proposalDecision(
+    row = (await state(r.tripId))!;
+    const beforeCredit = await credit(r.tripId),
+      commandKey = newId(),
+      decline = {
+        decision: "reject" as const,
+        reviewedRevisionId: legacy.revisionId,
+        reason: "Fictional old-format decline",
+      };
+    const closed = await service.proposalDecision(
+      deputy,
+      r.tripId,
+      legacy.proposalId,
+      commandKey,
+      row.version,
+      decline,
+    );
+    expect((await service.getProposal(dispatcher, r.tripId, legacy.proposalId)).data.state).toBe(
+      "rejected",
+    );
+    expect(await credit(r.tripId)).toEqual(beforeCredit);
+    expect(
+      await service.proposalDecision(
         deputy,
-        trip.tripId,
-        a.id,
+        r.tripId,
+        legacy.proposalId,
         commandKey,
         row.version,
-        reject,
-      );
-    expect((await service.getProposal(dispatcher, trip.tripId, a.id)).data.state).toBe("rejected");
-    expect(await credit(trip.tripId)).toEqual(beforeCredit);
-    expect(
-      await service.proposalDecision(deputy, trip.tripId, a.id, commandKey, row.version, reject),
+        decline,
+      ),
     ).toEqual(closed);
-    if (order === "reject-oldest") {
-      expect((await state(trip.tripId))?.reviewHold).toBe(true);
-      expect((await service.review(dispatcher, trip.tripId)).data.trip.pendingProposalId).toBe(
-        b.id,
-      );
-      await decide(trip.tripId);
-      expect((await state(trip.tripId))?.reviewHold).toBe(true);
-      const current = (await state(trip.tripId))!;
-      await service.proposalDecision(deputy, trip.tripId, b.id, newId(), current.version, {
+    const request = await manual.corrections(owner, r.tripId, {}, legacy.requestId);
+    if (!("data" in request)) throw Error("SYNTHETIC_CORRECTION_DETAIL_REQUIRED");
+    expect(request.data.history.map((h) => h.status)).toEqual(["pending", "declined"]);
+    if (order === "decline-legacy-first") {
+      expect((await state(r.tripId))?.reviewHold).toBe(true);
+      expect((await service.review(dispatcher, r.tripId)).data.trip.pendingProposalId).toBe(a.id);
+      const current = (await state(r.tripId))!;
+      await service.proposalDecision(deputy, r.tripId, a.id, newId(), current.version, {
         decision: "reject",
-        reviewedRevisionId: b.revisionId,
-        reason: "Fictional remaining obsolete request closure",
+        reviewedRevisionId: a.revisionId,
+        reason: "Fictional declined correction",
       });
+      expect(await credit(r.tripId)).toEqual(beforeCredit);
+      expect((await state(r.tripId))?.decision).toBe("accepted");
     }
-    const final = await state(trip.tripId),
-      review = await service.review(dispatcher, trip.tripId);
+    const final = await state(r.tripId),
+      review = await service.review(dispatcher, r.tripId);
     expect(final?.reviewHold).toBe(false);
     expect(final?.correctionPending).toBe(false);
     expect(review.data.trip.pendingProposalId).toBeNull();
     const [work] = await control.execute<RowDataPacket[]>(
       "SELECT pending FROM trip_review_work WHERE trip_id=?",
-      [trip.tripId],
+      [r.tripId],
     );
     expect(Number(work[0]?.pending)).toBe(0);
   }
 });
 
-test("linked staff resolutions terminalize only their originating correction request and preserve immutable history and other holds", async () => {
-  for (const disposition of ["approve", "reject"] as const) {
-    const r = await report();
-    const accepted = await decide(r.tripId),
-      acceptedCredit = await credit(r.tripId);
-    const request = await manual.requestCorrection(owner, r.tripId, newId(), accepted.version, {
-      reason: "Fictional owner correction request",
-    });
-    const initial = await service.review(dispatcher, r.tripId),
-      evidenceId = initial.data.trip.evidence[0]!.id;
-    const origins = await service.proposals(dispatcher, r.tripId),
-      origin = origins.items.find((p) => p.correctionRequestId === request.id)!;
-    expect(origin.id).not.toBe(request.id);
-    expect(origin.kind).toBe("correction_request");
+test("staff cannot create resolutions or text-only requests; legacy requests stay readable and only declinable", async () => {
+  const r = await report(),
+    evidence = r.currentRevision.fields.evidenceIds;
+  await decide(r.tripId);
+  for (const actor of [dispatcher, deputy, director])
     await expect(
-      service.propose(dispatcher, r.tripId, newId(), initial.version, {
-        reason: "Fictional association alone",
-        evidenceIds: [evidenceId],
-        correctionRequestId: request.id,
-      }),
-    ).rejects.toMatchObject({ statusCode: 422 });
-    await expect(
-      service.propose(dispatcher, r.tripId, newId(), initial.version, {
-        reason: "Fictional wrong request",
-        evidenceIds: [evidenceId],
-        actualDistanceM: "200000",
-        correctionRequestId: newId(),
-      }),
-    ).rejects.toMatchObject({ statusCode: 404 });
-    const input = {
-      reason: "Fictional supported linked distance",
-      evidenceIds: [evidenceId],
-      actualDistanceM: "200000",
-      correctionRequestId: request.id,
-    };
-    const a = await service.propose(dispatcher, r.tripId, newId(), initial.version, input);
-    const beforeB = (await state(r.tripId))!;
-    const b = await service.propose(dispatcher, r.tripId, newId(), beforeB.version, input),
-      detail = await service.getProposal(dispatcher, r.tripId, b.data.id);
-    expect(detail.data.correctionRequestId).toBe(request.id);
-    expect(detail.data.changes).not.toHaveProperty("correctionRequestId");
-    const commandKey = newId(),
-      reviewInput = {
-        decision: disposition,
-        reviewedRevisionId: detail.data.revisionId,
-        reason: "Fictional exact linked request disposition",
-      };
-    instant += 1000;
-    const result = await service.proposalDecision(
-      deputy,
-      r.tripId,
-      b.data.id,
-      commandKey,
-      detail.version,
-      reviewInput,
-    );
-    const readback = await manual.corrections(owner, r.tripId, {}, request.id);
-    if (!("data" in readback)) throw Error("SYNTHETIC_CORRECTION_DETAIL_REQUIRED");
-    const terminal = disposition === "approve" ? "resolved" : "declined";
-    expect(readback.data).toMatchObject({
-      id: request.id,
-      status: terminal,
-      history: [{ status: "pending" }, { status: terminal, reason: reviewInput.reason }],
-    });
-    const originReview = (await service.getProposal(dispatcher, r.tripId, origin.id)).data;
-    expect(originReview.state).toBe(disposition === "approve" ? "approved" : "rejected");
-    expect(originReview.review).toMatchObject({
-      decision: disposition,
-      reviewedRevisionId: origin.revisionId,
-      reviewerId: deputy.userId,
-      reason: reviewInput.reason,
-    });
-    expect(originReview.review?.decidedAt).toBe(
-      (await service.getProposal(dispatcher, r.tripId, b.data.id)).data.review?.decidedAt,
-    );
-    expect((await state(r.tripId))?.reviewHold).toBe(true);
-    if (disposition === "approve") {
-      const c = await credit(r.tripId);
-      expect(c?.actualDistanceM).toBe("200000.000000000000000000");
-      expect(c?.factId).not.toBe(acceptedCredit?.factId);
-      const [facts] = await control.execute<RowDataPacket[]>(
-        "SELECT changes FROM trip_resolutions WHERE id=(SELECT resolution_id FROM trip_proposals WHERE id=?)",
-        [b.data.id],
-      );
-      const changes =
-        typeof facts[0]?.changes === "string" ? JSON.parse(facts[0].changes) : facts[0]?.changes;
-      expect(changes).not.toHaveProperty("correctionRequestId");
-    } else expect(await credit(r.tripId)).toEqual(acceptedCredit);
-    expect(
-      await service.proposalDecision(
-        deputy,
-        r.tripId,
-        b.data.id,
-        commandKey,
-        detail.version,
-        reviewInput,
-      ),
-    ).toEqual(result);
-    const older = await service.getProposal(dispatcher, r.tripId, a.data.id),
-      beforeClose = await credit(r.tripId);
-    await expect(
-      service.proposalDecision(deputy, r.tripId, older.data.id, newId(), older.version, {
-        decision: "approve",
-        reviewedRevisionId: older.data.revisionId,
-        reason: "Fictional cannot reopen handled request",
-      }),
-    ).rejects.toMatchObject({ statusCode: 409 });
-    await service.proposalDecision(deputy, r.tripId, older.data.id, newId(), older.version, {
-      decision: "reject",
-      reviewedRevisionId: older.data.revisionId,
-      reason: "Fictional obsolete linked proposal closed",
-    });
-    const finalRequest = await manual.corrections(owner, r.tripId, {}, request.id);
-    if (!("data" in finalRequest)) throw Error("SYNTHETIC_CORRECTION_DETAIL_REQUIRED");
-    expect(finalRequest.data).toEqual(readback.data);
-    expect((await service.getProposal(dispatcher, r.tripId, origin.id)).data).toEqual(originReview);
-    expect(await credit(r.tripId)).toEqual(beforeClose);
-    expect((await state(r.tripId))?.reviewHold).toBe(false);
-    const app = await createApp({
-      identity,
-      trips: tripsService,
-      tripDecisions: service,
-      manualReports: manual,
-      checkReadiness: async () => true,
-    });
-    try {
-      const detailHttp = await app.inject({
-        url: `/api/v1/trips/${r.tripId}/correction-requests/${request.id}`,
-        headers: { cookie: directorCookie },
+      correct(r.tripId, { actualDistanceM: "200000" }, actor, evidence),
+    ).rejects.toSatisfy(refusedFor([403, 404]));
+  // A manual base needs one of the report's own screenshots.
+  await expect(correct(r.tripId, { actualDistanceM: "200000" })).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  const legacy = await legacyRequest(r.tripId, "Fictional owner correction request");
+  const review = await service.review(dispatcher, r.tripId);
+  expect(review.data.trip.pendingProposalId).toBe(legacy.proposalId);
+  expect((await service.getProposal(dispatcher, r.tripId, legacy.proposalId)).data).toMatchObject({
+    kind: "correction_request",
+    correctionRequestId: legacy.requestId,
+    changes: null,
+  });
+  // A pending old-format request blocks a new correction until staff decline it.
+  await expect(
+    correct(r.tripId, { actualDistanceM: "200000" }, owner, evidence),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  const app = await createApp({
+    identity,
+    trips: tripsService,
+    tripDecisions: service,
+    manualReports: manual,
+    checkReadiness: async () => true,
+  });
+  try {
+    const token = csrfProtection(identity.config).issue({ cookie: directorCookie }, director).token;
+    for (const url of [
+      `/api/v1/trips/${r.tripId}/resolution-proposals`,
+      `/api/v1/trips/${r.tripId}/correction-requests`,
+    ]) {
+      const response = await app.inject({
+        method: "POST",
+        url,
+        headers: {
+          cookie: directorCookie,
+          origin,
+          "content-type": "application/json",
+          "x-csrf-token": token,
+          "idempotency-key": newId(),
+          "if-match": `"v${review.version}"`,
+        },
+        payload: { reason: "Fictional removed command", evidenceIds: [], actualDistanceM: "1" },
       });
-      const listHttp = await app.inject({
-        url: `/api/v1/trips/${r.tripId}/correction-requests`,
-        headers: { cookie: directorCookie },
-      });
-      expect(detailHttp.statusCode).toBe(200);
-      expect(listHttp.statusCode).toBe(200);
-      expect(detailHttp.json().data).toEqual(readback.data);
-      expect(
-        listHttp.json().data.items.find((p: S["ManualCorrectionRequest"]) => p.id === request.id),
-      ).toEqual(readback.data);
-    } finally {
-      await app.close();
+      expect(response.statusCode, url).toBe(404);
     }
+    const detailHttp = await app.inject({
+      url: `/api/v1/trips/${r.tripId}/correction-requests/${legacy.requestId}`,
+      headers: { cookie: directorCookie },
+    });
+    const listHttp = await app.inject({
+      url: `/api/v1/trips/${r.tripId}/correction-requests`,
+      headers: { cookie: directorCookie },
+    });
+    expect(detailHttp.statusCode).toBe(200);
+    expect(listHttp.statusCode).toBe(200);
+    expect(detailHttp.json().data).toMatchObject({ id: legacy.requestId, status: "pending" });
+    expect(
+      listHttp
+        .json()
+        .data.items.some((p: S["ManualCorrectionRequest"]) => p.id === legacy.requestId),
+    ).toBe(true);
+  } finally {
+    await app.close();
   }
+  instant += 1000;
+  await service.proposalDecision(
+    deputy,
+    r.tripId,
+    legacy.proposalId,
+    newId(),
+    (await state(r.tripId))!.version,
+    {
+      decision: "reject",
+      reviewedRevisionId: legacy.revisionId,
+      reason: "Fictional direct disposition",
+    },
+  );
+  const declined = await manual.corrections(owner, r.tripId, {}, legacy.requestId);
+  if (!("data" in declined)) throw Error("SYNTHETIC_CORRECTION_DETAIL_REQUIRED");
+  expect(declined.data.status).toBe("declined");
+  expect(declined.data.history.map((h) => h.status)).toEqual(["pending", "declined"]);
+  expect((await state(r.tripId))?.decision).toBe("accepted");
+  // The driver now proposes values instead.
+  const proposed = await correct(r.tripId, { actualDistanceM: "200000" }, owner, evidence);
+  expect((await service.getProposal(dispatcher, r.tripId, proposed.data.id)).data).toMatchObject({
+    kind: "resolution",
+    authorId: owner.userId,
+    correctionRequestId: null,
+  });
 });
 
-test("linked correction history and downstream failure roll back request, origin review, credit, retention and permanent receipt together", async () => {
-  for (const failure of ["history", "outbox"] as const) {
+test("a downstream failure rolls back a correction approval with its review, credit, retention and permanent receipt", async () => {
+  for (const failure of ["review", "outbox"] as const) {
     const r = await report(),
-      accepted = await decide(r.tripId),
-      request = await manual.requestCorrection(owner, r.tripId, newId(), accepted.version, {
-        reason: "Fictional atomic request",
-      });
-    const workspace = await service.review(dispatcher, r.tripId),
-      proposal = await service.propose(dispatcher, r.tripId, newId(), workspace.version, {
-        reason: "Fictional atomic correction",
-        evidenceIds: [workspace.data.trip.evidence[0]!.id],
-        actualDistanceM: "200000",
-        correctionRequestId: request.id,
-      }),
+      evidence = r.currentRevision.fields.evidenceIds;
+    await decide(r.tripId);
+    const proposal = await correct(r.tripId, { actualDistanceM: "200000" }, owner, evidence),
       detail = await service.getProposal(dispatcher, r.tripId, proposal.data.id),
       commandKey = newId(),
       input = {
@@ -2816,19 +3128,13 @@ test("linked correction history and downstream failure roll back request, origin
         "SELECT (SELECT COUNT(*) FROM trip_proposal_reviews WHERE proposal_id IN (SELECT id FROM trip_proposals WHERE trip_id=?)) reviews,(SELECT COUNT(*) FROM trip_decision_commands WHERE actor_id=? AND `key`=?) receipts,(SELECT COUNT(*) FROM audit_entries) audit,(SELECT COUNT(*) FROM outbox_events) outbox",
         [r.tripId, deputy.userId, commandKey],
       );
-      return {
-        trip: await state(r.tripId),
-        credit: await credit(r.tripId),
-        request: await manual.corrections(owner, r.tripId, {}, request.id),
-        gate,
-        counts,
-      };
+      return { trip: await state(r.tripId), credit: await credit(r.tripId), gate, counts };
     }
     const before = await snapshot(),
-      table = failure === "history" ? "manual_correction_history" : "outbox_events",
+      table = failure === "review" ? "trip_proposal_reviews" : "outbox_events",
       predicate =
-        failure === "history"
-          ? `request_id<>${control.escape(request.id)} OR status='pending'`
+        failure === "review"
+          ? `proposal_id<>${control.escape(proposal.data.id)}`
           : `aggregate_id<>${control.escape(r.tripId)} OR type<>'trip.proposal_reviewed'`;
     await control.query(
       `ALTER TABLE ${table} ADD CONSTRAINT synthetic_linked_failure CHECK (${predicate})`,
@@ -2866,49 +3172,15 @@ test("linked correction history and downstream failure roll back request, origin
         input,
       ),
     ).toEqual(committed);
+    expect((await credit(r.tripId))?.actualDistanceM).toBe("200000.000000000000000000");
   }
 });
 
-test("direct author-request disposition, resolved rejected facts and null association replay retain exact lifecycle provenance", async () => {
+test("an approved driver correction can prove a rejection; replay and conflicting key reuse are safe", async () => {
   const r = await report(),
-    accepted = await decide(r.tripId),
-    request = await manual.requestCorrection(owner, r.tripId, newId(), accepted.version, {
-      reason: "Fictional directly declined request",
-    });
-  const origin = (await service.proposals(dispatcher, r.tripId)).items.find(
-    (p) => p.correctionRequestId === request.id,
-  )!;
-  instant += 1000;
-  await service.proposalDecision(
-    deputy,
-    r.tripId,
-    origin.id,
-    newId(),
-    (await state(r.tripId))!.version,
-    {
-      decision: "reject",
-      reviewedRevisionId: origin.revisionId,
-      reason: "Fictional direct disposition",
-    },
-  );
-  const declined = await manual.corrections(owner, r.tripId, {}, request.id);
-  if (!("data" in declined)) throw Error("SYNTHETIC_CORRECTION_DETAIL_REQUIRED");
-  expect(declined.data.status).toBe("declined");
-  expect(declined.data.history.map((h) => h.status)).toEqual(["pending", "declined"]);
-  const next = await manual.requestCorrection(
-    owner,
-    r.tripId,
-    newId(),
-    (await state(r.tripId))!.version,
-    { reason: "Fictional proven mass correction" },
-  );
-  const review = await service.review(dispatcher, r.tripId),
-    proposal = await service.propose(dispatcher, r.tripId, newId(), review.version, {
-      reason: "Fictional supported violation",
-      evidenceIds: [review.data.trip.evidence[0]!.id],
-      cargoMassKg: "21000",
-      correctionRequestId: next.id,
-    }),
+    evidence = r.currentRevision.fields.evidenceIds;
+  await decide(r.tripId);
+  const proposal = await correct(r.tripId, { cargoMassKg: "21000" }, owner, evidence),
     detail = await service.getProposal(dispatcher, r.tripId, proposal.data.id);
   instant += 1000;
   const decision = await decideProposal(
@@ -2924,28 +3196,277 @@ test("direct author-request disposition, resolved rejected facts and null associ
     },
   );
   expect(decision.data.outcome).toBe("rejected");
-  const resolved = await manual.corrections(owner, r.tripId, {}, next.id);
-  if (!("data" in resolved)) throw Error("SYNTHETIC_CORRECTION_DETAIL_REQUIRED");
-  expect(resolved.data.status).toBe("resolved");
   expect((await credit(r.tripId))?.credited).toBe(false);
-  const trip = await receive(payload()),
+  const trip = await receive(heldPayload()),
     key = newId(),
     version = (await state(trip.tripId))!.version,
     value = {
-      reason: "Fictional optional association",
+      reason: "Fictional exact replay",
       evidenceIds: [],
       actualDistanceM: "150000",
     };
-  const original = await service.propose(dispatcher, trip.tripId, key, version, value);
-  expect(
-    await service.propose(dispatcher, trip.tripId, key, version, {
-      ...value,
-      correctionRequestId: null,
-    }),
-  ).toEqual(original);
+  const original = await service.propose(owner, trip.tripId, key, version, value);
+  expect(await service.propose(owner, trip.tripId, key, version, value)).toEqual(original);
+  await expect(
+    service.propose(owner, trip.tripId, key, version, { ...value, actualDistanceM: "160000" }),
+  ).rejects.toMatchObject({ statusCode: 409, publicCode: "IDEMPOTENCY_CONFLICT" });
   expect(
     (await service.getProposal(dispatcher, trip.tripId, original.data.id)).data.correctionRequestId,
   ).toBeNull();
+});
+
+test("the driver corrects only unconfirmed telemetry facts and a different reviewer's approval applies them", async () => {
+  const p = heldPayload();
+  p.snapshot.job.origin.cityId = { available: true, value: "fixture_unlisted_city" };
+  p.snapshot.job.cargoId = { available: true, value: "fixture_unlisted_cargo" };
+  p.snapshot.trailers.items[0]!.bodyType = { available: true, value: "fixture_unlisted_body" };
+  const r = await receive(p),
+    view = await privateTrip(owner, r.tripId);
+  expect(view.summary.decision).toBe("pending_review");
+  const fields = view.correction?.fields ?? [];
+  expect(fields.map((f) => f.field).sort()).toEqual(
+    ["actualDistanceM", "cargoId", "originCityId", "trailerTypeId"].sort(),
+  );
+  expect(fields.find((f) => f.field === "cargoId")).toMatchObject({
+    reported: null,
+    sourceCode: "fixture_unlisted_cargo",
+  });
+  expect(fields.find((f) => f.field === "actualDistanceM")).toMatchObject({
+    reported: "123400",
+    reasonCode: "whole_trip_distance_unknown",
+  });
+  expect(view.correction?.canPropose).toBe(true);
+  // Other members never see a pending trip or its correction state.
+  await expect(tripsService.detail(await member(), r.tripId)).rejects.toSatisfy(
+    refusedFor([403, 404]),
+  );
+  const before = await state(r.tripId);
+  await expect(
+    correct(r.tripId, { destinationCityId: ids.get("fixture_north") as string }),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  await expect(correct(r.tripId, { cargoMassKg: "17000" })).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  expect(await state(r.tripId)).toEqual(before);
+  const changes = {
+    actualDistanceM: "125000",
+    originCityId: ids.get("fixture_north") as string,
+    cargoId: ids.get("fixture_crates") as string,
+    trailerTypeId: ids.get("fixture_box") as string,
+  };
+  const proposed = await correct(r.tripId, changes);
+  // The previous result stays effective until a different reviewer decides.
+  expect(await credit(r.tripId)).toBeUndefined();
+  expect((await state(r.tripId))?.decision).toBe("pending_review");
+  const pending = await privateTrip(owner, r.tripId);
+  expect(pending.pendingProposalId).toBe(proposed.data.id);
+  expect(pending.correction?.canPropose).toBe(false);
+  const review = await service.review(dispatcher, r.tripId);
+  expect(review.data.correctionReview?.proposalAcceptance?.mode).toBe("ordinary");
+  const [events] = await control.execute<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM outbox_events WHERE type='manual.correction_requested' AND aggregate_id=?",
+    [r.tripId],
+  );
+  expect(Number(events[0]?.n)).toBe(1);
+  const { result } = await approve(r.tripId, proposed.data.id);
+  expect(result.data.outcome).toBe("accepted");
+  expect(await credit(r.tripId)).toMatchObject({
+    credited: true,
+    factId: result.data.basis.factRevisionId,
+    actualDistanceM: "125000.000000000000000000",
+  });
+  const accepted = await privateTrip(owner, r.tripId);
+  expect(accepted.effectiveFacts).toMatchObject({
+    actualDistanceM: "125000",
+    cargo: { entityId: changes.cargoId },
+  });
+  // Accepted telemetry is final for the driver.
+  expect(accepted.correction?.canPropose ?? false).toBe(false);
+  await expect(correct(r.tripId, { actualDistanceM: "126000" })).rejects.toMatchObject({
+    statusCode: 409,
+  });
+});
+
+test("an approved correction with distance and times lifts the incomplete-recording blocker; direct acceptance stays blocked", async () => {
+  const p = payload();
+  p.contract.minor = 2;
+  p.snapshot.recordingCompleteness = "partial";
+  p.snapshot.evidence.reasons = ["game-restart"];
+  p.snapshot.evidence.ruleContextComplete = false;
+  p.snapshot.hardModeResult = "qualified";
+  p.snapshot.accounting = { distance: "partial", fuel: "partial" };
+  const r = await receive(p),
+    row = await state(r.tripId);
+  expect(row).toMatchObject({ decision: "pending_review", recording: "partial" });
+  expect(row?.reviewReasons).toContain("recording_not_supported");
+  const review = await service.review(dispatcher, r.tripId);
+  expect(review.data.acceptance.mode).toBe("unavailable");
+  expect(review.data.correctionReview).toMatchObject({
+    canReturn: true,
+    clientReasonCodes: ["game-restart"],
+  });
+  await expect(decide(r.tripId)).rejects.toMatchObject({ statusCode: 409 });
+  const fields = ((await privateTrip(owner, r.tripId)).correction?.fields ?? []).map(
+    (f) => f.field,
+  );
+  expect(fields).toContain("actualDistanceM");
+  const proposed = await correct(r.tripId, {
+    actualDistanceM: "130000",
+    ...(fields.includes("actualStartAt")
+      ? { actualStartAt: new Date(instant - 60000).toISOString() }
+      : {}),
+    ...(fields.includes("actualCompletedAt") ? { actualCompletedAt: iso() } : {}),
+  });
+  const { result } = await approve(r.tripId, proposed.data.id);
+  expect(result.data.outcome).toBe("accepted");
+  expect((await state(r.tripId))?.recording).toBe("partial");
+  expect((await credit(r.tripId))?.actualDistanceM).toBe("130000.000000000000000000");
+});
+
+test("a return needs something correctable while a manual report can always be returned", async () => {
+  const fail = payload();
+  if (fail.snapshot.job.cargoMass.available) fail.snapshot.job.cargoMass.value = 21000;
+  const t = await receive(fail);
+  expect((await state(t.tripId))?.decision).toBe("rejected");
+  expect((await service.review(dispatcher, t.tripId)).data.correctionReview?.canReturn).toBe(false);
+  await expect(decide(t.tripId, "return")).rejects.toMatchObject({ statusCode: 409 });
+  expect((await decide(t.tripId, "reject")).data.reasonCodes).not.toContain("returned_for_fixes");
+  const r = await report();
+  const review = await service.review(dispatcher, r.tripId);
+  expect(review.data.correctionReview?.canReturn).toBe(true);
+  // A return is only a direct rejection.
+  await expect(
+    service.decide(dispatcher, r.tripId, newId(), review.version, {
+      decision: "accept",
+      reviewedRevisionId: review.data.trip.manualRevision?.id as string,
+      factRevisionId: review.data.factRevisionId,
+      proposalId: null,
+      reason: "Fictional accept with a return",
+      returnForFixes: true,
+    }),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  const returned = await decide(r.tripId, "return");
+  expect(returned.data).toMatchObject({ outcome: "rejected", reviewerId: dispatcher.userId });
+  expect(returned.data.reasonCodes).toContain("returned_for_fixes");
+  // A returned report is revised through the manual flow, not a proposal.
+  expect((await privateTrip(owner, r.tripId)).correction?.canPropose ?? false).toBe(false);
+});
+
+test("an accepted manual report keeps its result until a different reviewer approves the driver's values", async () => {
+  const r = await report(),
+    evidence = r.currentRevision.fields.evidenceIds;
+  await decide(r.tripId);
+  const before = await credit(r.tripId),
+    view = await privateTrip(owner, r.tripId);
+  expect(view.correction?.canPropose).toBe(true);
+  expect(view.correction?.fields.map((f) => f.field)).not.toContain("actualStartAt");
+  const proposed = await correct(r.tripId, { actualDistanceM: "150000" }, owner, evidence),
+    d = await service.getProposal(dispatcher, r.tripId, proposed.data.id);
+  expect(await credit(r.tripId)).toEqual(before);
+  expect((await state(r.tripId))?.decision).toBe("accepted");
+  // An accepted trip can only decline the proposal; no trip decision replaces it.
+  await expect(
+    service.proposalDecision(deputy, r.tripId, d.data.id, newId(), d.version, {
+      decision: "reject",
+      reviewedRevisionId: d.data.revisionId,
+      reason: "Fictional rejection of an accepted trip",
+      tripDecision: "rejected",
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  const declined = await decideProposal(deputy, r.tripId, d.data.id, newId(), d.version, {
+    decision: "reject",
+    reviewedRevisionId: d.data.revisionId,
+    reason: "Fictional declined values",
+  });
+  expect(declined.data.outcome).toBe("accepted");
+  expect(await credit(r.tripId)).toEqual(before);
+  const second = await resolveDistance(r.tripId, "160000", { evidenceIds: evidence }),
+    third = await resolveDistance(r.tripId, "170000", { evidenceIds: evidence });
+  expect(third.result.data.basis.factRevisionId).not.toBe(second.result.data.basis.factRevisionId);
+  expect((await credit(r.tripId))?.actualDistanceM).toBe("170000.000000000000000000");
+  expect((await credit(r.tripId))?.version).toBe((before?.version ?? 0) + 2);
+});
+
+test("nobody reviews their own correction or trip in either decision path", async () => {
+  const author = await member(["driver", "dispatcher"]),
+    r = await receive(heldPayload(), author),
+    proposed = await correct(r.tripId, { actualDistanceM: "200000" }, author),
+    d = await service.getProposal(dispatcher, r.tripId, proposed.data.id),
+    review = await service.review(dispatcher, r.tripId);
+  const input = {
+    decision: "approve" as const,
+    reviewedRevisionId: d.data.revisionId,
+    reason: "Fictional self review",
+  };
+  await expect(
+    service.proposalDecision(author, r.tripId, d.data.id, newId(), d.version, input),
+  ).rejects.toMatchObject({ statusCode: 403, publicCode: "SELF_REVIEW_FORBIDDEN" });
+  await expect(
+    service.decide(author, r.tripId, newId(), review.version, {
+      decision: "accept",
+      reviewedRevisionId: d.data.revisionId,
+      factRevisionId: review.data.factRevisionId,
+      proposalId: d.data.id,
+      reason: "Fictional self review",
+    }),
+  ).rejects.toMatchObject({ statusCode: 403, publicCode: "SELF_REVIEW_FORBIDDEN" });
+  expect((await approve(r.tripId, d.data.id)).result.data.outcome).toBe("accepted");
+});
+
+test("a human rejection released before VTC-169 is final for the driver", async () => {
+  const r = await report(),
+    evidence = r.currentRevision.fields.evidenceIds;
+  const rejected = await decide(r.tripId, "reject");
+  expect(rejected.data.reasonCodes).not.toContain("returned_for_fixes");
+  expect((await privateTrip(owner, r.tripId)).correction?.canPropose ?? false).toBe(false);
+  await expect(
+    correct(r.tripId, { actualDistanceM: "1000" }, owner, evidence),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  expect(await unit.run((tx) => service.fixAllowedInTransaction(tx, r.tripId))).toBe(false);
+  const returned = await report();
+  await decide(returned.tripId, "return");
+  expect(await unit.run((tx) => service.fixAllowedInTransaction(tx, returned.tripId))).toBe(true);
+});
+
+test("correction screenshots are cited once, refused unless ready and owned, readable by staff and retained", async () => {
+  const r = await receive(heldPayload()),
+    ready = await screenshot(),
+    processing = await screenshot(owner, "processing"),
+    deleting = await screenshot(owner, "deleting"),
+    foreign = await screenshot(await member()),
+    distance = { actualDistanceM: "200000" },
+    time = instant;
+  await expect(correct(r.tripId, distance, owner, [processing])).rejects.toMatchObject({
+    statusCode: 409,
+  });
+  await expect(correct(r.tripId, distance, owner, [foreign])).rejects.toMatchObject({
+    statusCode: 404,
+  });
+  await expect(correct(r.tripId, distance, owner, [ready, ready])).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  await expect(correct(r.tripId, distance, owner, [deleting])).rejects.toMatchObject({
+    statusCode: 503,
+    publicCode: "EVIDENCE_TRANSITION",
+  });
+  const proposed = await correct(r.tripId, distance, owner, [ready]);
+  const [rows] = await control.execute<RowDataPacket[]>(
+    "SELECT (SELECT COUNT(*) FROM manual_correction_submissions WHERE trip_id=?) s, (SELECT COUNT(*) FROM manual_correction_evidence WHERE trip_id=?) e",
+    [r.tripId, r.tripId],
+  );
+  expect([Number(rows[0]?.s), Number(rows[0]?.e)]).toEqual([1, 1]);
+  const detail = await service.getProposal(dispatcher, r.tripId, proposed.data.id);
+  expect(detail.data.evidence.map((e) => e.id)).toEqual([ready]);
+  expect((await manual.metadata(dispatcher, ready)).id).toBe(ready);
+  expect((await manual.metadata(owner, ready)).id).toBe(ready);
+  await expect(manual.metadata(await member(), ready)).rejects.toMatchObject({ statusCode: 404 });
+  try {
+    instant += 400 * 86400000;
+    // A pending correction protects the screenshot it cites.
+    expect(await manual.reserveExpiry(ready)).toBe(false);
+  } finally {
+    instant = time;
+  }
 });
 
 test("safe effective facts retain derived manual confirmation, exact zero and planned separation without company disclosure", async () => {
@@ -2958,7 +3479,7 @@ test("safe effective facts retain derived manual confirmation, exact zero and pl
   expect(company).not.toHaveProperty("evidence");
   expect(company).not.toHaveProperty("decisions");
   const proposed = await service.propose(
-    dispatcher,
+    owner,
     r.tripId,
     newId(),
     (await state(r.tripId))!.version,
@@ -4033,7 +4554,10 @@ test("workspace returns a rejected author revision until resubmission and follow
   const workspace = returnedTripFixture();
   const read = (tx: TxContext) => workspace.workspaceReturnedTripsInTransaction(tx, author.userId);
   const submitted = await report(author);
-  const rejected = await decide(submitted.tripId, "reject");
+  // A final rejection leaves the driver nothing to fix (VTC-169).
+  await decide((await report(author)).tripId, "reject");
+  expect(await unit.run(read)).toEqual({ count: 0, items: [] });
+  const rejected = await decide(submitted.tripId, "return");
   expect(await unit.run(read)).toEqual({
     count: 1,
     items: [{ tripId: submitted.tripId, latestReturnReason: rejected.data.reason }],
@@ -4055,11 +4579,43 @@ test("workspace returns a rejected author revision until resubmission and follow
     factRevisionId: review.data.factRevisionId,
     proposalId: null,
     reason: "Fictional updated author feedback",
+    returnForFixes: true,
   });
   expect(await unit.run(read)).toEqual({
     count: 1,
     items: [{ tripId: submitted.tripId, latestReturnReason: "Fictional updated author feedback" }],
   });
+});
+
+test("workspace stops asking to fix a returned trip while its driver's correction is under review", async () => {
+  const workspace = returnedTripFixture();
+  const read = (tx: TxContext) => workspace.workspaceReturnedTripsInTransaction(tx, owner.userId);
+  const before = (await unit.run(read)).count;
+  const r = await receive(heldPayload());
+  const returnWith = async (proposalId: string, reason: string) => {
+    const detail = await service.getProposal(dispatcher, r.tripId, proposalId);
+    await decideProposal(deputy, r.tripId, proposalId, newId(), detail.version, {
+      decision: "reject",
+      reviewedRevisionId: detail.data.revisionId,
+      reason,
+      tripDecision: "returned_for_fixes",
+    });
+  };
+  const first = await correct(r.tripId, { actualDistanceM: "200000" });
+  await returnWith(first.data.id, "Fictional distance still unproven");
+  const returned = await unit.run(read);
+  expect(returned.count).toBe(before + 1);
+  expect(returned.items).toContainEqual({
+    tripId: r.tripId,
+    latestReturnReason: "Fictional distance still unproven",
+  });
+  // The pending correction answers the return; a decline with another return asks again.
+  const second = await correct(r.tripId, { actualDistanceM: "210000" });
+  const pending = await unit.run(read);
+  expect(pending.count).toBe(before);
+  expect(pending.items.map((item) => item.tripId)).not.toContain(r.tripId);
+  await returnWith(second.data.id, "Fictional odometer still unreadable");
+  expect((await unit.run(read)).count).toBe(before + 1);
 });
 
 test("workspace ignores alias and proposal decisions but accepts an explicit root review of an alias-held revision", async () => {
@@ -4070,7 +4626,7 @@ test("workspace ignores alias and proposal decisions but accepts an explicit roo
   const telemetryOnly = await receive(overweight(), author);
   await decide(telemetryOnly.tripId, "reject");
   const attached = await report(author);
-  const rejected = await decide(attached.tripId, "reject");
+  const rejected = await decide(attached.tripId, "return");
   const sourceFact = (await state(primary.tripId))?.currentFactId;
   const manualFact = (await state(attached.tripId))?.currentFactId;
   if (!sourceFact || !manualFact) throw new Error("SYNTHETIC_TRIP_FACT_REQUIRED");
@@ -4100,19 +4656,10 @@ test("workspace ignores alias and proposal decisions but accepts an explicit roo
   expect((await state(primary.tripId))?.decision).toBe("rejected");
   expect(await unit.run(read)).toEqual({ count: 0, items: [] });
 
-  const proposal = await service.propose(
-    dispatcher,
-    primary.tripId,
-    newId(),
-    await tripVersion(primary.tripId),
-    {
-      reason: "Fictional proposed amendment",
-      evidenceIds: attached.currentRevision.fields.evidenceIds,
-      actualDistanceM: "125000",
-    },
-  );
-  const detail = await service.getProposal(dispatcher, primary.tripId, proposal.data.id);
-  await decideProposal(deputy, primary.tripId, proposal.data.id, newId(), detail.version, {
+  // A group with a manual report is corrected through the report; an old request is declined.
+  const proposal = await legacyRequest(primary.tripId, "Fictional proposed amendment");
+  const detail = await service.getProposal(dispatcher, primary.tripId, proposal.proposalId);
+  await decideProposal(deputy, primary.tripId, proposal.proposalId, newId(), detail.version, {
     decision: "reject",
     reviewedRevisionId: detail.data.revisionId,
     reason: "Fictional private proposal feedback",
@@ -4126,6 +4673,7 @@ test("workspace ignores alias and proposal decisions but accepts an explicit roo
     factRevisionId: manualFact,
     proposalId: null,
     reason: "Fictional canonical author feedback",
+    returnForFixes: true,
   });
   // A reconciliation can project another fact and hold review without superseding the rejection.
   await unit.run((tx) =>
@@ -4155,7 +4703,7 @@ test("workspace uses the latest root sequence before filtering and counts before
     for (let index = 0; index < 6; index++) {
       if (index === 5) instant += 1000;
       const r = await report(author);
-      const { data } = await decide(r.tripId, "reject");
+      const { data } = await decide(r.tripId, "return");
       decided.push({
         decisionId: data.id,
         decidedAt: data.decidedAt,
@@ -4264,6 +4812,7 @@ test("production workspace HTTP composes real sources with current role, ownersh
       factRevisionId: review.data.factRevisionId,
       proposalId: null,
       reason: latestReturnReason,
+      returnForFixes: true,
     });
     expect((await state(pending.tripId))?.reviewHold).toBe(true);
 
@@ -4591,16 +5140,17 @@ test.each(["above cap", "missing", "unrelated change"] as const)(
       const before = await credit(tripId);
       if (!originalId || !before) throw new Error("SYNTHETIC_CREDIT_REQUIRED");
       expect(before).toMatchObject({ credited: true, factId: originalId });
-      const staleProposal =
-        scenario === "missing"
-          ? await tripDecisions.propose(
-              actor,
-              tripId,
-              newId(),
-              (await tripDecisions.review(actor, tripId)).version,
-              { actualDistanceM: "123400", evidenceIds: [], reason: "Fictional prior resolution" },
-            )
-          : null;
+      // VTC-169: staff never propose values, so no earlier staff proposal can be pending here.
+      if (scenario === "missing")
+        await expect(
+          tripDecisions.propose(
+            actor,
+            tripId,
+            newId(),
+            (await tripDecisions.review(actor, tripId)).version,
+            { actualDistanceM: "123400", evidenceIds: [], reason: "Fictional prior resolution" },
+          ),
+        ).rejects.toSatisfy(refusedFor([403, 404]));
 
       const revision = structuredClone(original);
       revision.eventId = newId();
@@ -4682,18 +5232,6 @@ test.each(["above cap", "missing", "unrelated change"] as const)(
         expect(attempted.statusCode).toBe(409);
       }
       expect(await credit(tripId)).toEqual(before);
-      if (staleProposal) {
-        const oldPath = `${path}/proposals/${staleProposal.data.id}`;
-        const oldDetail = await get(oldPath);
-        expect(oldDetail.statusCode).toBe(200);
-        expect(oldDetail.json().data).toMatchObject({ baseFactRevisionId: originalId });
-        const stale = await post(`${oldPath}/decisions`, String(oldDetail.headers.etag), {
-          decision: "approve",
-          reviewedRevisionId: oldDetail.json().data.revisionId,
-          reason: "Fictional stale approval attempt",
-        });
-        expect(stale.statusCode).toBe(409);
-      }
       const staged = await get(`${path}/review?view=stage3`);
       if (scenario === "above cap") {
         const key = newId();
@@ -4777,26 +5315,21 @@ test.each(["above cap", "missing", "unrelated change"] as const)(
         expect(acceptReplay.json().data).toEqual(accepted.json().data);
         expect(await credit(tripId)).toEqual(restored);
       } else {
+        // VTC-169: the staff route is gone and an accepted telemetry trip takes no driver
+        // correction, so neither can replace the held damage.
         const proposed = await post(`${path}/resolution-proposals`, String(staged.headers.etag), {
           actualDistanceM: "123400",
           evidenceIds: [],
           reason: "Fictional distance evidence",
         });
-        if (scenario === "missing") {
-          expect(proposed.statusCode).toBe(201);
-          const proposalPath = `${path}/proposals/${proposed.json().data.id}`;
-          const detail = await get(proposalPath);
-          expect(detail.statusCode).toBe(200);
-          expect(detail.json().data).toMatchObject({ baseFactRevisionId: revisedId });
-          const approval = await post(`${proposalPath}/decisions`, String(detail.headers.etag), {
-            decision: "approve",
-            reviewedRevisionId: detail.json().data.revisionId,
-            reason: "Fictional attempted approval",
-          });
-          expect(approval.statusCode).toBe(409);
-        } else {
-          expect(proposed.statusCode).toBe(409);
-        }
+        expect(proposed.statusCode).toBe(404);
+        await expect(
+          tripDecisions.propose(author, tripId, newId(), (await state(tripId))?.version as number, {
+            actualDistanceM: "123400",
+            evidenceIds: [],
+            reason: "Fictional driver distance",
+          }),
+        ).rejects.toMatchObject({ statusCode: 409 });
         expect(await state(tripId)).toMatchObject({
           decision: "accepted",
           reviewHold: true,
@@ -4898,7 +5431,7 @@ test("verified proposed event attendance exempts a held damage correction throug
   }
 });
 
-test("a corrected damage review preserves the approved source attribution through reapproval", async () => {
+test("a held damage revision keeps the driver-corrected attribution and refuses a direct decision", async () => {
   await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "2.5" });
   try {
     const p = payload();
@@ -4907,26 +5440,16 @@ test("a corrected damage review preserves the approved source attribution throug
     const initialDamage = { available: true, value: 0.025, unit: "fraction" } as const;
     p.snapshot.cargoDamage = initialDamage;
     const r = await receive(p);
-    const resolution = {
-      actualDistanceM: "123400",
-      actualStartAt: new Date(instant - 60000).toISOString(),
-      actualCompletedAt: iso(),
-      evidenceIds: [],
-      reason: "Fictional supported timing and distance",
-    };
-    const first = await service.review(dispatcher, r.tripId);
-    const propose = (version: number, value: S["ResolutionInput"]) =>
-      service.propose(dispatcher, r.tripId, newId(), version, value);
-    const approve = async (id: string) => {
-      const detail = await service.getProposal(deputy, r.tripId, id);
-      return decideProposal(deputy, r.tripId, id, newId(), detail.version, {
-        decision: "approve",
-        reviewedRevisionId: detail.data.revisionId,
-        reason: "Fictional reapproval of supported evidence",
-      });
-    };
-    const initial = await propose(first.version, resolution);
-    const accepted = await approve(initial.data.id);
+    // VTC-169: the driver corrects the unobserved start and another reviewer approves it.
+    const resolution = { actualStartAt: new Date(instant - 60000).toISOString() };
+    const editable = ((await privateTrip(owner, r.tripId)).correction?.fields ?? []).map(
+      (f) => f.field,
+    );
+    const initial = await correct(r.tripId, {
+      ...resolution,
+      ...(editable.includes("actualDistanceM") ? { actualDistanceM: "123400" } : {}),
+    });
+    const accepted = (await approve(r.tripId, initial.data.id)).result;
     const retainedFactId = accepted.data.basis.factRevisionId;
     expect(accepted.data).toMatchObject({
       outcome: "accepted",
@@ -4988,44 +5511,26 @@ test("a corrected damage review preserves the approved source attribution throug
       ).rejects.toMatchObject({ statusCode: 409 });
     }
 
-    const review = await service.review(dispatcher, r.tripId);
+    // Staff no longer propose values and an accepted telemetry trip takes no driver correction,
+    // so the held revision keeps the accepted result and its credit. Known limitation (VTC-172).
+    const held = await service.review(dispatcher, r.tripId);
     await expect(
-      propose(review.version, {
-        actualDistanceM: resolution.actualDistanceM,
+      service.propose(dispatcher, r.tripId, newId(), held.version, {
+        actualStartAt: resolution.actualStartAt,
         evidenceIds: [],
-        reason: resolution.reason,
+        reason: "Fictional staff reapproval",
       }),
+    ).rejects.toSatisfy(refusedFor([403, 404]));
+    await expect(
+      correct(r.tripId, { actualStartAt: resolution.actualStartAt }),
     ).rejects.toMatchObject({ statusCode: 409 });
-    const proposed = await propose(review.version, resolution);
-    const detail = await service.getProposal(deputy, r.tripId, proposed.data.id);
-    expect(detail.data.baseFactRevisionId).toBe(revisedFactId);
+    expect(await state(r.tripId)).toMatchObject({
+      decision: "accepted",
+      reviewHold: true,
+      currentFactId: retainedFactId,
+    });
     expect(await credit(r.tripId)).toEqual(retainedCredit);
-
-    const rejected = await approve(proposed.data.id);
-    const decidedFactId = rejected.data.basis.factRevisionId;
-    expect(rejected.data).toMatchObject({
-      outcome: "rejected",
-      reasonCodes: ["qualification_cargo_damage"],
-      basis: {
-        attributionAt: resolution.actualStartAt,
-        attributionBasis: "staff_resolution",
-        reportingAt: resolution.actualCompletedAt,
-      },
-    });
-    const normalized = await unit.run(
-      async (tx) =>
-        (await tripsService.adjudication.facts(tx, [decidedFactId], true)).get(decidedFactId)
-          ?.evidence,
-    );
-    expect(normalized).toMatchObject({
-      sourceRecordId: revised.sourceRecordId,
-      start: { utc: resolution.actualStartAt, basis: "staff-resolution", verifiedActual: true },
-      cargoDamageFraction: { status: "known", value: "0.4" },
-    });
-    expect(await credit(r.tripId)).toMatchObject({ credited: false });
-    expect(await tripsService.detail(owner, r.tripId)).toMatchObject({
-      qualificationCheck: { basis: "decision", rules: expect.arrayContaining([damageRule]) },
-    });
+    expect(revisedFactId).not.toBe(retainedFactId);
   } finally {
     await configureFirstLevel({ massMaxKg: "20000" });
   }
@@ -5119,6 +5624,18 @@ test("Stage 3 review keeps both independent sources and gates retained manual re
     true,
   );
   expect(accepted.data.reason).toBeNull();
+  // The driver proposes a correction while the trip is still manual-only.
+  const proposal = await on.tripDecisions.propose(
+    author,
+    submitted.tripId,
+    newId(),
+    accepted.version,
+    {
+      reason: "Fictional supported manual distance change",
+      evidenceIds: submitted.currentRevision.fields.evidenceIds,
+      actualDistanceM: "125000",
+    },
+  );
   const telemetry = overweight();
   const damage = { available: true, value: 0.25, unit: "fraction" } as const;
   telemetry.snapshot.cargoDamage = damage;
@@ -5128,7 +5645,7 @@ test("Stage 3 review keeps both independent sources and gates retained manual re
       on.trips?.storeInTransaction(tx, "ets2telemetry", telemetry, {
         ownerUserId: author.userId,
         connection: { state: "unknown", referenceId: null },
-        canonical: { tripId: submitted.tripId, expectedVersion: accepted.version },
+        canonical: { tripId: submitted.tripId, expectedVersion: proposal.version },
       }) ?? Promise.reject(new Error("SYNTHETIC_TRIPS_MISSING")),
   );
   expect(incoming.tripId).toBe(submitted.tripId);
@@ -5157,11 +5674,6 @@ test("Stage 3 review keeps both independent sources and gates retained manual re
   expect(retainedCredit?.factId).toBe(accepted.data.basis.factRevisionId);
 
   const id = submitted.tripId;
-  const proposal = await on.tripDecisions.propose(dispatcher, id, newId(), detail.version, {
-    reason: "Fictional supported manual distance change",
-    evidenceIds: submitted.currentRevision.fields.evidenceIds,
-    actualDistanceM: "125000",
-  });
   const saved = await on.tripDecisions.getProposal(dispatcher, id, proposal.data.id);
   const [before, auditBefore] = await Promise.all([state(id), audits(id)]);
   const login = await on.identity.login(`${dispatcher.userId}@example.invalid`, password);
@@ -5212,7 +5724,8 @@ test("Stage 3 review keeps both independent sources and gates retained manual re
           reviewedRevisionId: saved.data.revisionId,
           reason: "Fictional staff review",
         },
-        "STATE_CONFLICT",
+        // The correction predates the late telemetry, so its support is obsolete.
+        "VERSION_CONFLICT",
         headers["if-match"],
       ],
     ] as const) {
@@ -5242,7 +5755,7 @@ test("Disabled queue tracks exact transitions and paged repair restores proven h
   const submitted = await report(author);
   const firstClock = (await state(submitted.tripId))?.queuedAt;
   expect(firstClock).toBe(submitted.currentRevision.submittedAt);
-  const returned = await decide(submitted.tripId, "reject");
+  const returned = await decide(submitted.tripId, "return");
   expect((await state(submitted.tripId))?.queuedAt).toBeNull();
   instant += 2000;
   const fields = submitted.currentRevision.fields;
@@ -5799,6 +6312,7 @@ async function privateRead(actor: Actor, tripId: string, target: Trips = tripsSe
   return view;
 }
 const authorKeys = [
+  "correction",
   "decisions",
   "effectiveFacts",
   "evidence",
@@ -6099,21 +6613,23 @@ test("author and reviewer share the author-safe sources of a two-source trip; re
   expect(company).not.toHaveProperty("effectiveFacts");
 });
 
-test("a derived current fact keeps its telemetry source effective and drops a depot outside a changed city", async () => {
+test("a derived current fact keeps its report source effective and drops a depot outside a changed city", async () => {
   const alpha = await seedCompany("fixture_vtc141_epsilon", [{ city: "fixture_north" }]);
-  const r = await receive(located("fixture_vtc141_epsilon", null, null));
-  const a = await resolveDistance(r.tripId, "200000");
+  const r = await report(owner, manual, { originCompanyId: alpha.companyId }),
+    evidence = r.currentRevision.fields.evidenceIds;
+  await decide(r.tripId);
+  const a = await resolveDistance(r.tripId, "200000", { evidenceIds: evidence });
   const view = await privateRead(owner, r.tripId);
   expectAuthorSafe(view);
   expect(view.effectiveFacts).toMatchObject({
     factRevisionId: a.result.data.basis.factRevisionId,
     actualDistanceM: "200000",
   });
-  // The source entry shows what telemetry reported, not the staff correction.
+  // The source entry shows what the report said, not the driver's correction.
   expect(view.sources).toEqual([
     {
-      kind: "ets2telemetry",
-      receivedAt: r.firstReceivedAt,
+      kind: "manual",
+      receivedAt: r.currentRevision.submittedAt,
       actualDistanceM: "123400",
       state: "delivered",
       effective: true,
@@ -6124,6 +6640,7 @@ test("a derived current fact keeps its telemetry source effective and drops a de
     depotId: alpha.depot("fixture_north"),
   });
   const moved = await resolveDistance(r.tripId, "210000", {
+    evidenceIds: evidence,
     originCityId: ids.get("fixture_south") as string,
   });
   const after = await privateRead(owner, r.tripId);
@@ -6134,7 +6651,7 @@ test("a derived current fact keeps its telemetry source effective and drops a de
   });
   expect(after.effectiveFacts?.actualDistanceM).toBe("210000");
   expect(after.sources?.[0]).toMatchObject({
-    kind: "ets2telemetry",
+    kind: "manual",
     actualDistanceM: "123400",
     effective: true,
   });
@@ -6292,30 +6809,20 @@ test("typed allowances accept original body variants and typed manual facts, pre
     });
     expect((await state(r.tripId))?.decision).toBe("accepted");
     expect((await credit(r.tripId))?.credited).toBe(true);
-    const proposal = await service.propose(
-      dispatcher,
-      accepted[0]!.tripId,
-      newId(),
-      (await state(accepted[0]!.tripId))!.version,
-      { reason: "Fictional semantic correction", evidenceIds: [], trailerTypeId: box.id },
+    // Accepted telemetry is final; the accepted typed report takes a driver correction.
+    const proposal = await correct(
+      r.tripId,
+      { trailerTypeId: box.id },
+      owner,
+      r.currentRevision.fields.evidenceIds,
+      "Fictional semantic correction",
     );
-    const proposalView = await service.getProposal(
-      dispatcher,
-      accepted[0]!.tripId,
-      proposal.data.id,
-    );
-    await decideProposal(
-      deputy,
-      accepted[0]!.tripId,
-      proposal.data.id,
-      newId(),
-      proposalView.version,
-      {
-        decision: "approve",
-        reviewedRevisionId: proposalView.data.revisionId,
-        reason: "Fictional typed correction approval",
-      },
-    );
+    const proposalView = await service.getProposal(dispatcher, r.tripId, proposal.data.id);
+    await decideProposal(deputy, r.tripId, proposal.data.id, newId(), proposalView.version, {
+      decision: "approve",
+      reviewedRevisionId: proposalView.data.revisionId,
+      reason: "Fictional typed correction approval",
+    });
     ids.set("unclassified_semantic_body", variants[2]!.id);
     const held = await report(owner, manual, { trailerType: "unclassified_semantic_body" });
     const before = await service.review(dispatcher, held.tripId);
@@ -6446,19 +6953,16 @@ test("regrouping uses current RR reads and fences old reviews and derived-traile
     const manualTrip = await report(owner, manual, { trailerType: b.code });
     const before = await service.review(dispatcher, manualTrip.tripId);
     expect(before.data.acceptance.mode).toBe("ordinary");
-    const allowedSource = payload();
-    allowedSource.snapshot.trailers.items[0]!.bodyType = { available: true, value: a.code };
-    const allowedTrip = await receive(allowedSource);
-    const allowedProposal = await service.propose(
-      dispatcher,
+    // Accepted reports observing A take driver corrections to the grouped B (VTC-169).
+    ids.set(a.code, a.id);
+    const allowedTrip = await report(owner, manual, { trailerType: a.code });
+    await decide(allowedTrip.tripId);
+    const allowedProposal = await correct(
       allowedTrip.tripId,
-      newId(),
-      (await state(allowedTrip.tripId))!.version,
-      {
-        reason: "Fictional unchanged grouped correction",
-        evidenceIds: [],
-        trailerTypeId: b.id,
-      },
+      { trailerTypeId: b.id },
+      owner,
+      allowedTrip.currentRevision.fields.evidenceIds,
+      "Fictional unchanged grouped correction",
     );
     const allowedView = await service.getProposal(
       dispatcher,
@@ -6481,20 +6985,15 @@ test("regrouping uses current RR reads and fences old reviews and derived-traile
         )
       ).data,
     ).toMatchObject({ outcome: "accepted" });
-    const source = payload();
-    source.snapshot.trailers.items[0]!.bodyType = { available: true, value: a.code };
-    const accepted = await receive(source),
-      credited = await credit(accepted.tripId);
-    const proposed = await service.propose(
-      dispatcher,
+    const accepted = await report(owner, manual, { trailerType: a.code });
+    await decide(accepted.tripId);
+    const credited = await credit(accepted.tripId);
+    const proposed = await correct(
       accepted.tripId,
-      newId(),
-      (await state(accepted.tripId))!.version,
-      {
-        reason: "Fictional proposed body variant",
-        evidenceIds: [],
-        trailerTypeId: b.id,
-      },
+      { trailerTypeId: b.id },
+      owner,
+      accepted.currentRevision.fields.evidenceIds,
+      "Fictional proposed body variant",
     );
     const proposalView = await service.getProposal(dispatcher, accepted.tripId, proposed.data.id);
     let ready!: () => void,
@@ -6558,7 +7057,7 @@ test("regrouping uses current RR reads and fences old reviews and derived-traile
         reason: "Fictional stale approval",
       }),
     ).rejects.toMatchObject({ statusCode: 409 });
-    // The original telemetry still observes A, so only the proposed derived B changed grouping.
+    // The accepted report still observes A, so only the proposed derived B changed grouping.
     await expect(
       decideProposal(deputy, accepted.tripId, proposalView.data.id, newId(), proposalView.version, {
         decision: "approve",
