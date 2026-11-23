@@ -56,6 +56,7 @@ export const qualificationLevels = mysqlTable(
     massMaxKg: decimalColumn("mass_max_kg"),
     distanceMinM: decimalColumn("distance_min_m"),
     distanceMaxM: decimalColumn("distance_max_m"),
+    cargoDamageMaxPercent: decimalColumn("cargo_damage_max_percent"),
     trailerMode: mysqlEnum("trailer_mode", ["any", "selected"]).notNull().default("any"),
     trailerBasis: mysqlEnum("trailer_basis", ["variant", "type"]).notNull().default("variant"),
     adrMode: mysqlEnum("adr_mode", ["forbidden", "selected", "any"]).notNull().default("any"),
@@ -81,6 +82,10 @@ export const qualificationLevels = mysqlTable(
     check(
       "qual_level_distance_range",
       sql`${t.distanceMinM} IS NULL OR ${t.distanceMaxM} IS NULL OR ${t.distanceMinM} <= ${t.distanceMaxM}`,
+    ),
+    check(
+      "qual_level_cargo_damage_range",
+      sql`${t.cargoDamageMaxPercent} IS NULL OR ${t.cargoDamageMaxPercent} BETWEEN 0 AND 100`,
     ),
     check(
       "qual_level_adr_classes",

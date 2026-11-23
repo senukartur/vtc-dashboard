@@ -3,10 +3,8 @@ import type { companionComponents } from "@vtc/contracts";
 import { utcDateTime, type TxContext } from "@vtc/db";
 import type { Catalogs } from "../modules/catalogs/service.js";
 import type { Events } from "../modules/events/service.js";
-import {
-  QUALIFICATION_REASONS,
-  type QualificationSnapshot,
-} from "../modules/qualifications/check.js";
+import type { QualificationSnapshot } from "../modules/qualifications/check.js";
+import { companionLimits, companionRules } from "../modules/qualifications/companion.js";
 import {
   checkPreview,
   previewDistanceEnvelope,
@@ -72,7 +70,11 @@ export function createTelemetryCompanion(
     const snapshot = row.qualificationSnapshot as unknown as QualificationSnapshot | null;
     const material = await ports.trips.companion.material(tx, row.factId);
     const allowed = new Set<string>([
-      ...Object.values(QUALIFICATION_REASONS),
+      "qualification_cargo_mass",
+      "qualification_distance",
+      "qualification_trailer",
+      "qualification_adr",
+      "qualification_hard_mode",
       "qualification_unknown",
       "qualification_level_unknown",
       "qualification_attribution_time_unknown",
@@ -117,18 +119,9 @@ export function createTelemetryCompanion(
         snapshot?.levelId && snapshot.levelName && snapshot.editVersion
           ? { id: snapshot.levelId, name: snapshot.levelName, editVersion: snapshot.editVersion }
           : null,
-      limits: snapshot?.limits
-        ? {
-            ...snapshot.limits,
-            trailers: {
-              ...snapshot.limits.trailers,
-              typeIds: [...snapshot.limits.trailers.typeIds],
-            },
-            adr: { mode: snapshot.limits.adr.mode, classes: [...snapshot.limits.adr.classes] },
-          }
-        : null,
+      limits: snapshot?.limits ? companionLimits(snapshot.limits) : null,
       outcome: snapshot?.outcome ?? null,
-      rules: (snapshot?.exemptionRules ?? snapshot?.rules ?? []).map((rule) => ({
+      rules: companionRules(snapshot?.exemptionRules ?? snapshot?.rules ?? []).map((rule) => ({
         ...rule,
         reasons: [
           snapshot?.eventExempt
@@ -212,13 +205,14 @@ export function createTelemetryCompanion(
         ip,
         async (tx, token, scope) => {
           const historical = input.start?.basis === "actual" ? input.start.utc : undefined;
-          const assignment =
+          const configured =
             (await ports.qualifications?.companion.assignment(
               tx,
               token.ownerId,
               input.game,
               historical,
             )) ?? null;
+          const assignment = configured?.assignment ?? null;
           const facts = await previewFacts(tx, token.ownerId, input, ports.catalogs),
             groups =
               assignment && ports.catalogs
@@ -251,8 +245,17 @@ export function createTelemetryCompanion(
               else throw error;
             }
           }
-          const checked = assignment
-            ? checkPreview(assignment.limits, facts, input, groups, eventExempt)
+          const checked = configured
+            ? checkPreview(
+                {
+                  ...configured.assignment.limits,
+                  cargoDamageMaxPercent: configured.cargoDamageMaxPercent,
+                },
+                facts,
+                input,
+                groups,
+                eventExempt,
+              )
             : {
                 outcome: "unknown" as const,
                 rules: [],

@@ -171,6 +171,7 @@ export function createQualifications(
       massMaxKg: limits.massMaxKg,
       distanceMinM: limits.distanceMinM,
       distanceMaxM: limits.distanceMaxM,
+      cargoDamageMaxPercent: limits.cargoDamageMaxPercent ?? null,
       trailers: {
         ...(limits.trailers.basis ? { basis: limits.trailers.basis } : {}),
         mode: limits.trailers.mode,
@@ -435,12 +436,14 @@ export function createQualifications(
     tx: TxContext,
     selected: Game,
     input: S["QualificationLimitsInput"],
+    previousDamageMaxPercent: string | null = null,
   ): Promise<QualificationLimits> {
     const limits = closed(input, [
       "massMinKg",
       "massMaxKg",
       "distanceMinM",
       "distanceMaxM",
+      ...(Object.hasOwn(input, "cargoDamageMaxPercent") ? ["cargoDamageMaxPercent"] : []),
       "trailers",
       "adr",
       "hardModeRequired",
@@ -454,6 +457,12 @@ export function createQualifications(
       [distanceMinM, distanceMaxM],
     ] as const)
       if (min !== null && max !== null && compareDecimal(min, max) > 0) throw identityError(422);
+    const cargoDamageMaxPercent =
+      limits.cargoDamageMaxPercent === undefined
+        ? previousDamageMaxPercent
+        : amount(limits.cargoDamageMaxPercent, false);
+    if (cargoDamageMaxPercent !== null && compareDecimal(cargoDamageMaxPercent, "100") > 0)
+      throw identityError(422);
     const basis = limits.trailers.basis ?? "variant";
     if (basis !== "variant" && basis !== "type") throw identityError(422);
     const typeIds = [...new Set(limits.trailers.typeIds.map(id))].sort();
@@ -497,6 +506,7 @@ export function createQualifications(
       massMaxKg,
       distanceMinM,
       distanceMaxM,
+      cargoDamageMaxPercent,
       trailers: { ...(basis === "type" ? { basis } : {}), mode: limits.trailers.mode, typeIds },
       adr: { mode: limits.adr.mode, classes },
       hardModeRequired: limits.hardModeRequired,
@@ -547,6 +557,7 @@ export function createQualifications(
     massMaxKg: limits.massMaxKg,
     distanceMinM: limits.distanceMinM,
     distanceMaxM: limits.distanceMaxM,
+    cargoDamageMaxPercent: limits.cargoDamageMaxPercent ?? null,
     trailerMode: limits.trailers.mode,
     trailerBasis: limits.trailers.basis ?? "variant",
     adrMode: limits.adr.mode,
@@ -595,6 +606,7 @@ export function createQualifications(
       massMaxKg: limits.massMaxKg,
       distanceMinM: limits.distanceMinM,
       distanceMaxM: limits.distanceMaxM,
+      cargoDamageMaxPercent: limits.cargoDamageMaxPercent ?? null,
       trailers: {
         ...(limits.trailers.basis ? { basis: limits.trailers.basis } : {}),
         mode: limits.trailers.mode,
@@ -760,7 +772,10 @@ export function createQualifications(
   function ruleDto(
     rule: CheckedRule,
     labels: Map<string, S["CatalogLabel"]>,
+    damageLevelName: string | undefined,
   ): S["QualificationRuleCheck"] {
+    if (rule.rule === "cargo_damage" && damageLevelName)
+      return { ...rule, basisLevelName: damageLevelName };
     if (rule.rule !== "trailer_types") return rule;
     return {
       rule: rule.rule,
@@ -869,7 +884,12 @@ export function createQualifications(
       return ports.identity.transaction(async (tx) => {
         const { companyId } = await writeContext(tx, actor);
         const { ladder, level } = await lockedLadder(tx, levelId, input.expectedVersion);
-        const limits = await validLimits(tx, level.game, input.limits);
+        const limits = await validLimits(
+          tx,
+          level.game,
+          input.limits,
+          level.cargoDamageMaxPercent === null ? null : decimal(level.cargoDamageMaxPercent),
+        );
         const conditions = validConditions(input.conditions, level.position === ladder.length);
         const previous = await currentValues(tx, level);
         const after = values(name, level.position, limits, conditions);
@@ -1146,6 +1166,9 @@ export function createQualifications(
         rule.rule === "trailer_types" ? [...rule.allowedIds, ...rule.observedIds] : [],
       );
       const labels = await trailerLabels(tx, trailerIds.slice(0, 300), await locale(tx, actor));
+      const damageLevel = snapshot.cargoDamageBasis;
+      const damageLevelName =
+        damageLevel?.levelId !== snapshot.levelId ? damageLevel?.levelName : undefined;
       return {
         status: snapshot.eventExempt ? "event_exempt" : snapshot.levelId ? "checked" : "no_level",
         basis,
@@ -1155,7 +1178,7 @@ export function createQualifications(
             : null,
         outcome: snapshot.outcome,
         reasonCode: snapshot.reasonCode,
-        rules: snapshot.rules.map((rule) => ruleDto(rule, labels)),
+        rules: snapshot.rules.map((rule) => ruleDto(rule, labels, damageLevelName)),
       };
     },
   };

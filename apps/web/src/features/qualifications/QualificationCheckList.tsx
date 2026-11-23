@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import { Check, CircleHelp, Flame, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { formatQuantity, type Locale } from "../../shared/formatting.js";
-import { rangeText, useLocale } from "./limits.js";
+import { damageCapText, damagePercentText, rangeText, useLocale } from "./limits.js";
 import type { DTO } from "./transport.js";
 import "./qualifications.css";
 
@@ -12,6 +12,7 @@ const icons = { pass: Check, fail: X, unknown: CircleHelp } as const;
 const resultKey = { pass: "resultPass", fail: "resultFail", unknown: "resultUnknown" } as const;
 const labels = {
   cargo_mass: "massLabel",
+  cargo_damage: "damageLabel",
   distance: "distanceLabel",
   trailer_types: "trailersLabel",
   adr: "adrLabel",
@@ -28,6 +29,17 @@ export function ruleTexts(t: T, rule: Rule, locale: Locale) {
         observed: rule.observedKg === null ? unknown : formatQuantity(rule.observedKg, "t", locale),
         limit: rangeText(t, rule.minKg, rule.maxKg, "t", locale),
       };
+    case "cargo_damage": {
+      const limit = damageCapText(t, rule.maxPercent, locale);
+      return {
+        label: t(labels.cargo_damage),
+        observed:
+          rule.observedPercent === null ? unknown : damagePercentText(rule.observedPercent, locale),
+        limit: rule.basisLevelName
+          ? t("damageLimitLevel", { limit, level: rule.basisLevelName })
+          : limit,
+      };
+    }
     case "distance":
       return {
         label: t(labels.distance),
@@ -72,7 +84,7 @@ export function ruleTexts(t: T, rule: Rule, locale: Locale) {
       };
   }
 }
-/** The five level limits applied to a trip, each with its result, the trip value and the limit. */
+/** The level limits applied to a trip, each with its result, the trip value and the limit. */
 export function QualificationCheckList({
   check,
   headingLevel = 2,

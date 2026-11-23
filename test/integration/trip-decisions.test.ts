@@ -229,6 +229,7 @@ const openLimits: S["QualificationLimitsInput"] = {
   massMaxKg: null,
   distanceMinM: null,
   distanceMaxM: null,
+  cargoDamageMaxPercent: null,
   trailers: { mode: "any", typeIds: [] },
   adr: { mode: "any", classes: [] },
   hardModeRequired: false,
@@ -527,6 +528,144 @@ async function privateTrip(who: Actor, id: string) {
 }
 const refusedFor = (codes: number[]) => (error: { statusCode?: number }) =>
   codes.includes(error.statusCode ?? 0);
+
+test("a coherent terminal revision supplies damage even when the opening observed a different value", async () => {
+  await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "2.5" });
+  try {
+    for (const [damage, verdict] of [
+      [{ available: true, value: 0.025, unit: "fraction" }, "accepted"],
+      [{ available: true, value: 0.02500000000000001, unit: "fraction" }, "rejected"],
+      [{ available: false, reason: "not-observed", unit: "fraction" }, "pending_review"],
+    ] as const) {
+      const opened = payload("started");
+      const openingDamage = { available: true, value: 0.4, unit: "fraction" } as const;
+      opened.snapshot.cargoDamage = openingDamage;
+      const initial = await receive(opened);
+      const delivery = payload();
+      delivery.source = structuredClone(opened.source);
+      delivery.snapshot.start = structuredClone(opened.snapshot.start);
+      delivery.revision = 2;
+      delivery.snapshot.cargoDamage = { ...damage };
+      const completed = await receive(delivery);
+      expect(completed.tripId).toBe(initial.tripId);
+      expect(await state(initial.tripId)).toMatchObject({
+        currentFactId: await factOf(completed),
+        outcome: "delivered",
+        decision: verdict,
+      });
+      const view = await tripsService.detail(owner, initial.tripId);
+      expect(view).toMatchObject({
+        qualificationCheck: {
+          rules: expect.arrayContaining([
+            {
+              rule: "cargo_damage",
+              maxPercent: "2.5",
+              observedPercent: damage.available
+                ? verdict === "accepted"
+                  ? "2.5"
+                  : "2.500000000000001"
+                : null,
+              result: damage.available ? (verdict === "accepted" ? "pass" : "fail") : "unknown",
+            },
+          ]),
+        },
+      });
+      const before = await state(initial.tripId);
+      expect((await receive(delivery)).duplicate).toBe(true);
+      expect(await state(initial.tripId)).toEqual(before);
+      if (verdict === "accepted") {
+        const contribution = await credit(initial.tripId);
+        const correction = structuredClone(delivery);
+        correction.eventId = newId();
+        correction.revision = 3;
+        correction.type = "trip.corrected";
+        correction.snapshot.cargoDamage = { ...openingDamage };
+        await receive(correction);
+        expect(await state(initial.tripId)).toMatchObject({
+          currentFactId: await factOf(completed),
+          decision: "accepted",
+          correctionPending: true,
+        });
+        expect(await credit(initial.tripId)).toEqual(contribution);
+        expect(await tripsService.detail(owner, initial.tripId)).toMatchObject({
+          qualificationCheck: {
+            basis: "decision",
+            rules: expect.arrayContaining([
+              { rule: "cargo_damage", maxPercent: "2.5", observedPercent: "2.5", result: "pass" },
+            ]),
+          },
+        });
+      }
+    }
+    await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "0" });
+    const tiny = payload();
+    const tinyDamage = { available: true, value: 1e-20, unit: "fraction" } as const;
+    tiny.snapshot.cargoDamage = tinyDamage;
+    const receipt = await receive(tiny);
+    expect(await state(receipt.tripId)).toMatchObject({ decision: "rejected" });
+    expect(await tripsService.detail(owner, receipt.tripId)).toMatchObject({
+      qualificationCheck: {
+        basis: "decision",
+        rules: expect.arrayContaining([
+          {
+            rule: "cargo_damage",
+            maxPercent: "0",
+            observedPercent: "0.000000000000000001",
+            result: "fail",
+          },
+        ]),
+      },
+    });
+  } finally {
+    await configureFirstLevel({ massMaxKg: "20000" });
+  }
+});
+
+test("immutable manual damage drives review, over-limit confirmation and retained snapshots", async () => {
+  // These pending revisions predate the level configuration.
+  const zero = await report(owner, manual, { cargoDamagePercent: 0 });
+  const tiny = await report(owner, manual, { cargoDamagePercent: 1e-20 });
+  const missing = await report(owner, manual, { cargoMassKg: "21000" });
+  await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "0" });
+  try {
+    expect((await decide(zero.tripId)).data.outcome).toBe("accepted");
+    const review = await service.review(dispatcher, tiny.tripId);
+    expect(review.data.acceptance.mode).toBe("over_limits");
+    const failure = {
+      rule: "cargo_damage",
+      maxPercent: "0",
+      observedPercent: "0.00000000000000000001",
+      result: "fail",
+    };
+    expect(review.data.qualificationCheck.rules).toContainEqual(failure);
+    await expect(overLimitDecide(tiny.tripId, false)).rejects.toMatchObject({ statusCode: 409 });
+    const accepted = await overLimitDecide(tiny.tripId, true);
+    expect(accepted.data).toMatchObject({
+      outcome: "accepted",
+      acceptedOverLimits: true,
+      reasonCodes: ["qualification_cargo_damage", "accepted_over_limits"],
+    });
+    const unknown = await service.review(dispatcher, missing.tripId);
+    expect(unknown.data.acceptance).toMatchObject({
+      mode: "unavailable",
+      blockedReasonCodes: ["qualification_unknown"],
+    });
+    expect(unknown.data.qualificationCheck.rules).toContainEqual({
+      rule: "cargo_damage",
+      maxPercent: "0",
+      observedPercent: null,
+      result: "unknown",
+    });
+    await expect(overLimitDecide(missing.tripId, true)).rejects.toMatchObject({ statusCode: 409 });
+
+    await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "100" });
+    expect(await tripsService.detail(owner, tiny.tripId)).toMatchObject({
+      qualificationCheck: { basis: "decision", rules: expect.arrayContaining([failure]) },
+    });
+  } finally {
+    await configureFirstLevel({ massMaxKg: "20000" });
+  }
+});
 
 test("sufficient HaulMP telemetry accepts once regardless of its recorded audit; exact replay has no second effect", async () => {
   const p = payload();
@@ -4720,6 +4859,490 @@ test("Stage 3 Dispatch selectors share authorized counts, exact filters, ordered
   } finally {
     await app.close();
     await offApp.close();
+  }
+});
+
+test.each(["above cap", "missing", "unrelated change"] as const)(
+  "a held same-source delivered revision with %s cannot be accepted on the old damage",
+  async (scenario) => {
+    const on = composedModules(undefined, true);
+    const { trips, tripDecisions } = on;
+    if (!trips || !tripDecisions) throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+    const author = await member();
+    const login = await on.identity.login(`${dispatcher.userId}@example.invalid`, password);
+    const viewer = { cookie: login.cookies.map((value) => value.split(";", 1)[0]).join("; ") };
+    const actor = await on.identity.authenticate(new Headers(viewer));
+    const app = await createApp({ ...on, checkReadiness: async () => true });
+    await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "2.5" });
+    try {
+      const store = (telemetry: Telemetry) =>
+        retryTransaction(unit, (tx) =>
+          trips.storeInTransaction(tx, "ets2telemetry", telemetry, {
+            ownerUserId: author.userId,
+            connection: { state: "unknown", referenceId: null },
+          }),
+        );
+      const original = payload();
+      const equal = { available: true, value: 0.025, unit: "fraction" } as const;
+      original.snapshot.cargoDamage = equal;
+      const { tripId, sourceRecordId } = await store(original);
+      const originalId = await factOf({ sourceRecordId });
+      const before = await credit(tripId);
+      if (!originalId || !before) throw new Error("SYNTHETIC_CREDIT_REQUIRED");
+      expect(before).toMatchObject({ credited: true, factId: originalId });
+      // VTC-169: staff never propose values, so no earlier staff proposal can be pending here.
+      if (scenario === "missing")
+        await expect(
+          tripDecisions.propose(
+            actor,
+            tripId,
+            newId(),
+            (await tripDecisions.review(actor, tripId)).version,
+            { actualDistanceM: "123400", evidenceIds: [], reason: "Fictional prior resolution" },
+          ),
+        ).rejects.toSatisfy(refusedFor([403, 404]));
+
+      const revision = structuredClone(original);
+      revision.eventId = newId();
+      revision.revision = original.revision + 1;
+      revision.type = "trip.corrected";
+      const damage =
+        scenario === "missing"
+          ? ({ available: false, reason: "not-observed", unit: "fraction" } as const)
+          : ({ available: true, value: 0.4, unit: "fraction" } as const);
+      revision.snapshot.cargoDamage = { ...damage };
+      if (scenario === "unrelated change")
+        for (const field of ["observedDistance", "deliveredDistance"] as const) {
+          const distance = revision.snapshot[field];
+          if (distance.available) distance.value = 130000;
+        }
+      const revised = await store(revision);
+      const revisedId = await factOf(revised);
+      if (!revisedId) throw new Error("SYNTHETIC_CORRECTED_FACT_REQUIRED");
+      expect(revised.tripId).toBe(tripId);
+      const retained = await state(tripId);
+      expect(retained).toMatchObject({
+        decision: "accepted",
+        reviewHold: true,
+        correctionPending: true,
+        currentFactId: originalId,
+      });
+      expect(await credit(tripId)).toEqual(before);
+
+      const path = `/api/v1/trips/${tripId}`;
+      const get = (url: string) => app.inject({ url, headers: viewer });
+      const post = (url: string, etag: string, body: object, key = newId()) =>
+        app.inject({
+          method: "POST",
+          url,
+          headers: {
+            ...viewer,
+            origin,
+            "if-match": etag,
+            "idempotency-key": key,
+            "content-type": "application/json",
+            "x-csrf-token": csrfProtection(on.identity.config).issue(viewer, actor).token,
+          },
+          payload: body,
+        });
+      const direct = (factId: string, decision: "accept" | "reject") => ({
+        factRevisionId: factId,
+        reviewedRevisionId: factId,
+        proposalId: null,
+        decision,
+        reason: "Fictional final telemetry review",
+      });
+      const selectNew = scenario !== "unrelated change";
+      const rule = {
+        rule: "cargo_damage",
+        maxPercent: "2.5",
+        observedPercent: scenario === "missing" ? null : selectNew ? "40" : "2.5",
+        result: scenario === "missing" ? "unknown" : selectNew ? "fail" : "pass",
+      };
+
+      for (const query of ["", "?view=stage3"]) {
+        const checked = await get(`${path}/review${query}`);
+        expect(checked.statusCode).toBe(200);
+        expect(checked.json().data).toMatchObject({
+          factRevisionId: selectNew ? revisedId : originalId,
+          qualificationCheck: { basis: "current", rules: expect.arrayContaining([rule]) },
+          acceptance: { mode: "unavailable" },
+        });
+        const stale = await post(
+          `${path}/decisions${query}`,
+          String(checked.headers.etag),
+          direct(originalId, "accept"),
+        );
+        expect(stale.statusCode).toBe(409);
+        const attempted = await post(
+          `${path}/decisions${query}`,
+          String(checked.headers.etag),
+          direct(revisedId, "accept"),
+        );
+        expect(attempted.statusCode).toBe(409);
+      }
+      expect(await credit(tripId)).toEqual(before);
+      const staged = await get(`${path}/review?view=stage3`);
+      if (scenario === "above cap") {
+        const key = newId();
+        const reject = () =>
+          post(
+            `${path}/decisions?view=stage3`,
+            String(staged.headers.etag),
+            direct(revisedId, "reject"),
+            key,
+          );
+        const reply = await reject();
+        expect(reply.statusCode).toBe(200);
+        expect(reply.json().data).toMatchObject({
+          outcome: "rejected",
+          reasonCodes: ["qualification_cargo_damage"],
+          basis: { factRevisionId: revisedId },
+        });
+        const revoked = await credit(tripId);
+        expect(revoked).toMatchObject({ credited: false, version: before.version + 1 });
+        const replay = await reject();
+        expect(replay.statusCode).toBe(200);
+        expect(replay.json().data).toEqual(reply.json().data);
+        expect(await credit(tripId)).toEqual(revoked);
+        expect(await state(tripId)).toMatchObject({
+          currentFactId: revisedId,
+          decision: "rejected",
+          reviewHold: false,
+        });
+        expect(await trips.detail(author, tripId)).toMatchObject({
+          qualificationCheck: { basis: "decision", rules: expect.arrayContaining([rule]) },
+        });
+
+        const later = structuredClone(revision);
+        later.eventId = newId();
+        later.revision = revision.revision + 1;
+        const passing = { available: true, value: 0.01, unit: "fraction" } as const;
+        later.snapshot.cargoDamage = passing;
+        const latestFactId = await factOf(await store(later));
+        if (!latestFactId) throw new Error("SYNTHETIC_CORRECTED_FACT_REQUIRED");
+        expect(await state(tripId)).toMatchObject({
+          currentFactId: revisedId,
+          decision: "rejected",
+          reviewHold: true,
+          correctionPending: true,
+        });
+        expect(await credit(tripId)).toEqual(revoked);
+        const checked = await get(`${path}/review?view=stage3`);
+        expect(checked.statusCode).toBe(200);
+        expect(checked.json().data).toMatchObject({
+          factRevisionId: latestFactId,
+          qualificationCheck: {
+            basis: "current",
+            rules: expect.arrayContaining([
+              { rule: "cargo_damage", maxPercent: "2.5", observedPercent: "1", result: "pass" },
+            ]),
+          },
+          acceptance: { mode: "ordinary" },
+        });
+        const acceptKey = newId();
+        const accept = () =>
+          post(
+            `${path}/decisions?view=stage3`,
+            String(checked.headers.etag),
+            direct(latestFactId, "accept"),
+            acceptKey,
+          );
+        const accepted = await accept();
+        expect(accepted.statusCode).toBe(200);
+        expect(accepted.json().data).toMatchObject({
+          outcome: "accepted",
+          basis: { factRevisionId: latestFactId },
+        });
+        const restored = await credit(tripId);
+        expect(restored).toMatchObject({
+          credited: true,
+          factId: latestFactId,
+          version: before.version + 2,
+        });
+        const acceptReplay = await accept();
+        expect(acceptReplay.statusCode).toBe(200);
+        expect(acceptReplay.json().data).toEqual(accepted.json().data);
+        expect(await credit(tripId)).toEqual(restored);
+      } else {
+        // VTC-169: the staff route is gone and an accepted telemetry trip takes no driver
+        // correction, so neither can replace the held damage.
+        const proposed = await post(`${path}/resolution-proposals`, String(staged.headers.etag), {
+          actualDistanceM: "123400",
+          evidenceIds: [],
+          reason: "Fictional distance evidence",
+        });
+        expect(proposed.statusCode).toBe(404);
+        await expect(
+          tripDecisions.propose(author, tripId, newId(), (await state(tripId))?.version as number, {
+            actualDistanceM: "123400",
+            evidenceIds: [],
+            reason: "Fictional driver distance",
+          }),
+        ).rejects.toMatchObject({ statusCode: 409 });
+        expect(await state(tripId)).toMatchObject({
+          decision: "accepted",
+          reviewHold: true,
+          correctionPending: true,
+          currentFactId: originalId,
+        });
+        expect(await credit(tripId)).toEqual(before);
+      }
+    } finally {
+      await app.close();
+      await configureFirstLevel({ massMaxKg: "20000" });
+    }
+  },
+);
+
+test("verified proposed event attendance exempts a held damage correction through ordinary acceptance", async () => {
+  const author = await member();
+  const recordedAt = instant;
+  await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "2.5" });
+  try {
+    const event = await events.create(director, newId(), {
+      title: "Fictional attended delivery",
+      description: "Fictional confirmed attendance",
+      game: "ets2",
+      server: "Synthetic",
+      organizer: "Fictional company",
+      route: "Synthetic route",
+      meetingLocation: "Synthetic place",
+      meetingAt: new Date(instant + 1800000).toISOString(),
+      startsAt: new Date(instant + 3600000).toISOString(),
+      endsAt: null,
+      visibility: "members",
+      originCityId: null,
+      destinationCityId: null,
+      prescribedCargoId: null,
+      prescribedMassKg: null,
+      prescribedTrailerTypeId: null,
+    });
+    const eventId = event.data.event.id;
+    await events.respond(author, eventId, newId(), 1, { response: "participating" });
+    const p = payload();
+    const initialDamage = { available: true, value: 0.025, unit: "fraction" } as const;
+    p.snapshot.cargoDamage = initialDamage;
+    const { tripId } = await receive(p, author);
+    const credited = await credit(tripId);
+    expect(credited?.credited).toBe(true);
+    const revision = structuredClone(p);
+    revision.eventId = newId();
+    revision.revision = p.revision + 1;
+    revision.type = "trip.corrected";
+    const overCap = { available: true, value: 0.4, unit: "fraction" } as const;
+    revision.snapshot.cargoDamage = overCap;
+    await receive(revision, author);
+    const held = await state(tripId);
+    if (!held) throw new Error("SYNTHETIC_TRIP_REQUIRED");
+    expect(held).toMatchObject({ decision: "accepted", reviewHold: true, correctionPending: true });
+    expect(await credit(tripId)).toEqual(credited);
+
+    const associate = (version: number) =>
+      service.associate(author, tripId, newId(), version, { eventId });
+    await expect(associate(held.version)).rejects.toMatchObject({ statusCode: 409 });
+    instant += 3600000;
+    await events.setAttendance(director, eventId, newId(), 1, {
+      members: [{ memberId: author.userId, attendance: "attended", note: null }],
+    });
+    const current = await state(tripId);
+    if (!current) throw new Error("SYNTHETIC_TRIP_REQUIRED");
+    const proposal = await associate(current.version);
+    const detail = await service.getProposal(dispatcher, tripId, proposal.data.id);
+    expect(detail.data.eventAssociation).toMatchObject({
+      eventId,
+      attendanceRevisionId: expect.any(String),
+    });
+    const accepted = await decideProposal(
+      dispatcher,
+      tripId,
+      detail.data.id,
+      newId(),
+      detail.version,
+      {
+        decision: "approve",
+        reviewedRevisionId: detail.data.revisionId,
+        reason: "Fictional confirmed attendance review",
+      },
+    );
+    expect(accepted.data).toMatchObject({
+      outcome: "accepted",
+      acceptedOverLimits: false,
+      basis: { eventId },
+    });
+    expect(await credit(tripId)).toMatchObject({ credited: true });
+    expect(await state(tripId)).toMatchObject({ reviewHold: false, correctionPending: false });
+    expect(await tripsService.detail(author, tripId)).toMatchObject({
+      qualificationCheck: { status: "event_exempt", basis: "decision", rules: [] },
+    });
+  } finally {
+    instant = recordedAt;
+    await configureFirstLevel({ massMaxKg: "20000" });
+  }
+});
+
+test("a held damage revision keeps the driver-corrected attribution and refuses a direct decision", async () => {
+  await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "2.5" });
+  try {
+    const p = payload();
+    p.snapshot.start = { utcMs: null, basis: "unknown", eventSeq: null };
+    p.snapshot.evidence.startObserved = false;
+    const initialDamage = { available: true, value: 0.025, unit: "fraction" } as const;
+    p.snapshot.cargoDamage = initialDamage;
+    const r = await receive(p);
+    // VTC-169: the driver corrects the unobserved start and another reviewer approves it.
+    const resolution = { actualStartAt: new Date(instant - 60000).toISOString() };
+    const initial = await correct(r.tripId, resolution);
+    const accepted = (await approve(r.tripId, initial.data.id)).result;
+    const retainedFactId = accepted.data.basis.factRevisionId;
+    expect(accepted.data).toMatchObject({
+      outcome: "accepted",
+      basis: { attributionAt: resolution.actualStartAt, attributionBasis: "staff_resolution" },
+    });
+    const retainedCredit = await credit(r.tripId);
+    expect(retainedCredit).toMatchObject({ credited: true, factId: retainedFactId });
+
+    const later = structuredClone(p);
+    later.eventId = newId();
+    later.revision = p.revision + 1;
+    later.type = "trip.corrected";
+    const overCap = { available: true, value: 0.4, unit: "fraction" } as const;
+    later.snapshot.cargoDamage = overCap;
+    const revised = await receive(later);
+    const revisedFactId = await factOf(revised);
+    expect(await state(r.tripId)).toMatchObject({
+      decision: "accepted",
+      reviewHold: true,
+      currentFactId: retainedFactId,
+    });
+    expect(await credit(r.tripId)).toEqual(retainedCredit);
+
+    const damageRule = {
+      rule: "cargo_damage",
+      maxPercent: "2.5",
+      observedPercent: "40",
+      result: "fail",
+    };
+    for (const stage3 of [false, true]) {
+      const review = stage3
+        ? await service.reviewStage3(dispatcher, r.tripId)
+        : await service.review(dispatcher, r.tripId);
+      expect(review.data).toMatchObject({
+        factRevisionId: retainedFactId,
+        evaluation: {
+          attributionAt: resolution.actualStartAt,
+          attributionBasis: "staff_resolution",
+        },
+        qualificationCheck: { basis: "current", rules: expect.arrayContaining([damageRule]) },
+        acceptance: { mode: "unavailable" },
+        canDecide: false,
+      });
+      await expect(
+        service.decide(
+          dispatcher,
+          r.tripId,
+          newId(),
+          review.version,
+          {
+            decision: "reject",
+            factRevisionId: retainedFactId,
+            reviewedRevisionId: retainedFactId,
+            proposalId: null,
+            reason: "Fictional incomplete correction",
+          },
+          stage3,
+        ),
+      ).rejects.toMatchObject({ statusCode: 409 });
+    }
+
+    // Staff no longer propose values and an accepted telemetry trip takes no driver correction,
+    // so the held revision keeps the accepted result and its credit (open with VTC-171).
+    const held = await service.review(dispatcher, r.tripId);
+    await expect(
+      service.propose(dispatcher, r.tripId, newId(), held.version, {
+        actualStartAt: resolution.actualStartAt,
+        evidenceIds: [],
+        reason: "Fictional staff reapproval",
+      }),
+    ).rejects.toSatisfy(refusedFor([403, 404]));
+    await expect(
+      correct(r.tripId, { actualStartAt: resolution.actualStartAt }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(await state(r.tripId)).toMatchObject({
+      decision: "accepted",
+      reviewHold: true,
+      currentFactId: retainedFactId,
+    });
+    expect(await credit(r.tripId)).toEqual(retainedCredit);
+    expect(revisedFactId).not.toBe(retainedFactId);
+  } finally {
+    await configureFirstLevel({ massMaxKg: "20000" });
+  }
+});
+
+test("both review APIs apply the governing telemetry damage on its historical level", async () => {
+  const on = composedModules(undefined, true);
+  const { trips, manualReports, tripDecisions } = on;
+  if (!trips || !manualReports || !tripDecisions) throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+  const author = await member();
+  const first = await configureFirstLevel({ massMaxKg: "20000", cargoDamageMaxPercent: "0" });
+  try {
+    const telemetry = payload();
+    const damage = { available: true, value: 0.025, unit: "fraction" } as const;
+    telemetry.snapshot.cargoDamage = damage;
+    const alternativeMass = { available: true, value: 19000, unit: "kg" } as const;
+    telemetry.snapshot.job.cargoMass = alternativeMass;
+    await qualifications.changeMember(director, author.userId, "ets2", {
+      levelId: structuralLevels.ets2[1],
+      reason: "Fictional later qualification assignment",
+    });
+    const submitted = await report(author, manualReports, { cargoDamagePercent: 0 });
+    const before = await state(submitted.tripId);
+    if (!before) throw new Error("SYNTHETIC_TRIP_REQUIRED");
+    await retryTransaction(unit, (tx) =>
+      trips.storeInTransaction(tx, "ets2telemetry", telemetry, {
+        ownerUserId: author.userId,
+        connection: { state: "unknown", referenceId: null },
+        canonical: { tripId: submitted.tripId, expectedVersion: before.version },
+      }),
+    );
+
+    for (const stage3 of [false, true]) {
+      const review = stage3
+        ? await tripDecisions.reviewStage3(dispatcher, submitted.tripId)
+        : await tripDecisions.review(dispatcher, submitted.tripId);
+      expect(review.data.acceptance).toMatchObject({
+        mode: "unavailable",
+        blockedReasonCodes: ["telemetry_source_present"],
+      });
+      expect(review.data.qualificationCheck.level?.id).toBe(structuralLevels.ets2[stage3 ? 0 : 1]);
+      expect(review.data.qualificationCheck.rules).toContainEqual({
+        rule: "cargo_damage",
+        ...(stage3 ? {} : { basisLevelName: first.level.name }),
+        maxPercent: "0",
+        observedPercent: "2.5",
+        result: "fail",
+      });
+      await expect(
+        tripDecisions.decide(
+          dispatcher,
+          submitted.tripId,
+          newId(),
+          review.version,
+          {
+            decision: "accept",
+            factRevisionId: review.data.factRevisionId,
+            reviewedRevisionId: submitted.currentRevision.id,
+            proposalId: null,
+            reason: "Fictional attempted acceptance",
+          },
+          stage3,
+        ),
+      ).rejects.toMatchObject({ statusCode: 409 });
+    }
+    expect(await credit(submitted.tripId)).toBeUndefined();
+  } finally {
+    await configureFirstLevel({ massMaxKg: "20000" });
   }
 });
 

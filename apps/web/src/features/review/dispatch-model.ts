@@ -73,6 +73,7 @@ export const reviewReasons = [
   "qualification_level_unknown",
   "qualification_attribution_time_unknown",
   "qualification_cargo_mass",
+  "qualification_cargo_damage",
   "qualification_distance",
   "qualification_trailer",
   "qualification_adr",

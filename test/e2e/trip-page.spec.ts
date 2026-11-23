@@ -208,7 +208,7 @@ async function expectHumanText(page: Page, forbidden: (string | RegExp)[] = []) 
 }
 
 test(
-  "F1 telemetry trip shows its status, tiles, companies, damage, event link and five limits",
+  "F1 telemetry trip shows its status, damage and checked qualification limits",
   browserCase(["@functional"]),
   async ({ page }) => {
     const { state, requests } = await author(page, withTrailer());
@@ -288,8 +288,8 @@ test(
     const check = region(page, "Qualification check");
     await expect(check).toContainText("Checked against “Fictional Trainee” · As at the decision");
     const rules = check.getByRole("listitem");
-    await expect(rules).toHaveCount(5);
-    for (const [index, result] of ["pass", "pass", "fail", "pass", "pass"].entries())
+    await expect(rules).toHaveCount(6);
+    for (const [index, result] of ["pass", "pass", "fail", "pass", "pass", "pass"].entries())
       await expect(rules.nth(index)).toHaveAttribute("data-result", result);
     await expect(rules.nth(0).locator(".qualification-check-symbol")).toHaveAttribute(
       "aria-hidden",
@@ -306,6 +306,8 @@ test(
     await expect(rules.nth(4)).toContainText("Hard Mode · Passes");
     await expect(rules.nth(4).locator("svg.lucide-flame")).toBeVisible();
     await expect(rules.nth(4)).toContainText("Trip: unknown · Limit: Not required");
+    const damageRule = rules.filter({ hasText: "Cargo damage · Passes" });
+    await expect(damageRule).toContainText("Trip: 37.5% · Limit: up to 100%");
 
     // The author sees no reviewer-only workspace, technical details or reconciliation data.
     await expect(page.getByRole("link", { name: "Review workspace", exact: true })).toHaveCount(0);
@@ -480,7 +482,7 @@ test(
 );
 
 test(
-  "F4 a rejected trip shows the reason in History; a revisable report needs fixes instead",
+  "F4 a rejected trip shows its historical five-rule check and reason; a revisable report needs fixes",
   browserCase(["@functional"]),
   async ({ page }) => {
     const { state } = await author(page, returnedTrip());
@@ -825,7 +827,8 @@ test(
         const sources = region(page, labels.sources);
         const check = region(page, labels.check);
         if (name === "long") {
-          await expect(check.getByRole("listitem")).toHaveCount(5);
+          await expect(check.getByRole("listitem")).toHaveCount(6);
+          await expect(check).toContainText(locale === "en" ? "37.5%" : "37,5%");
           const sender = fact(card, labels.from);
           await expect(sender).toContainText(longCompanyName);
           await expect(card).toContainText(longEventTitle);

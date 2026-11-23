@@ -17,6 +17,7 @@ import {
   tripFactTrailers,
 } from "@vtc/db/trips-schema";
 import { decimal } from "../sources/contracts/canonical.js";
+import { compareDecimal, isValidNonNegativeDecimal } from "../sources/contracts/decimal.js";
 import type {
   Fact,
   NormalizedTripEvidence,
@@ -24,6 +25,20 @@ import type {
   TripEntity,
 } from "../sources/contracts/evidence.js";
 import { telemetryJobType } from "../sources/contracts/telemetry.js";
+
+// Precise damage beyond the relational DECIMAL scale stays in retained normalized evidence.
+function preciseDamage(
+  fact: Fact<string> | undefined,
+): fact is Extract<Fact<string>, { status: "known" }> {
+  return (
+    fact?.status === "known" &&
+    fact.sourceField === "snapshot.cargoDamage" &&
+    isValidNonNegativeDecimal(fact.value) &&
+    fact.value.length > 20 &&
+    fact.value.length <= 326 &&
+    compareDecimal(fact.value, "1") <= 0
+  );
+}
 
 function legacyGameMode(provenance: unknown): RecordedTelemetry["gameMode"] {
   const mode = (provenance as { mode?: { mode?: unknown } } | null)?.mode?.mode;
@@ -232,7 +247,9 @@ export function createFactRepository(unit: UnitOfWork) {
           plannedDistanceM: quantity(f.plannedDistanceM),
           deliveredDistanceM: quantity(f.deliveredDistanceM),
           fuelUsedL: quantity(f.fuelUsedL),
-          cargoDamageFraction: quantity(f.cargoDamageFraction),
+          cargoDamageFraction: preciseDamage(f.cargoDamageFraction)
+            ? null
+            : quantity(f.cargoDamageFraction),
           wholeTripDistanceSupported: f.wholeTripDistanceSupported,
           trailersComplete: f.trailers.complete,
           trailerCount: f.trailers.items.length,
@@ -331,6 +348,14 @@ export function createFactRepository(unit: UnitOfWork) {
             previous = await groups.resolve(tx, base.canonicalTripId, "share");
           if (own.id !== previous.id || own.ownerId !== row.ownerUserId || own.game !== row.game)
             throw new Error("DERIVED_PROVENANCE_SCOPE_INVALID");
+          const baseDamage = (base.evidence as NormalizedTripEvidence).cargoDamageFraction;
+          if (
+            (preciseDamage(baseDamage) || preciseDamage(metadata?.cargoDamageFraction)) &&
+            (!preciseDamage(baseDamage) ||
+              !preciseDamage(metadata?.cargoDamageFraction) ||
+              baseDamage.value !== metadata.cargoDamageFraction.value)
+          )
+            throw new Error("DERIVED_PROVENANCE_VALUE_MISMATCH");
           const changes = resolution.changes as Record<string, string>;
           for (const [key, column] of [
             ["actualDistanceM", "actualDistanceM"],
@@ -466,7 +491,12 @@ export function createFactRepository(unit: UnitOfWork) {
           plannedDistanceM: quantity(stored.plannedDistanceM, metadata.plannedDistanceM),
           deliveredDistanceM: quantity(stored.deliveredDistanceM, metadata.deliveredDistanceM),
           fuelUsedL: quantity(stored.fuelUsedL, metadata.fuelUsedL),
-          cargoDamageFraction: quantity(stored.cargoDamageFraction, metadata.cargoDamageFraction),
+          cargoDamageFraction:
+            row.provider === "ets2telemetry" &&
+            stored.cargoDamageFraction === null &&
+            preciseDamage(metadata.cargoDamageFraction)
+              ? known(metadata.cargoDamageFraction.value, metadata.cargoDamageFraction)
+              : quantity(stored.cargoDamageFraction, metadata.cargoDamageFraction),
           trailers: { complete: stored.trailersComplete, items },
           wholeTripDistanceSupported: stored.wholeTripDistanceSupported,
           ruleContextComplete: stored.ruleContextComplete,

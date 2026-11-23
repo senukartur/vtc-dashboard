@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "334506c1-02dd-42f4-a72e-13aabd34f8c4",
+  "id": "7c23a145-3791-4d9b-878e-c59e00ccfdfc",
   "prevId": "fd2f1a55-8d23-4a27-bf11-aca99b15adce",
   "tables": {
     "audit_entries": {
@@ -2563,6 +2563,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "cargo_damage_max_percent": {
+          "name": "cargo_damage_max_percent",
+          "type": "decimal(38,18)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "trailer_mode": {
           "name": "trailer_mode",
           "type": "enum('any','selected')",
@@ -2664,6 +2671,10 @@
         "qual_level_distance_range": {
           "name": "qual_level_distance_range",
           "value": "`qualification_levels`.`distance_min_m` IS NULL OR `qualification_levels`.`distance_max_m` IS NULL OR `qualification_levels`.`distance_min_m` <= `qualification_levels`.`distance_max_m`"
+        },
+        "qual_level_cargo_damage_range": {
+          "name": "qual_level_cargo_damage_range",
+          "value": "`qualification_levels`.`cargo_damage_max_percent` IS NULL OR `qualification_levels`.`cargo_damage_max_percent` BETWEEN 0 AND 100"
         },
         "qual_level_adr_classes": {
           "name": "qual_level_adr_classes",
@@ -6159,81 +6170,6 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "manual_correction_evidence": {
-      "name": "manual_correction_evidence",
-      "columns": {
-        "evidence_id": {
-          "name": "evidence_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "correction_id": {
-          "name": "correction_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "trip_id": {
-          "name": "trip_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "manual_correction_evidence_trip": {
-          "name": "manual_correction_evidence_trip",
-          "columns": ["trip_id", "evidence_id"],
-          "isUnique": false
-        },
-        "manual_correction_evidence_correction": {
-          "name": "manual_correction_evidence_correction",
-          "columns": ["correction_id", "evidence_id"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "manual_correction_evidence_evidence_id_manual_evidence_id_fk": {
-          "name": "manual_correction_evidence_evidence_id_manual_evidence_id_fk",
-          "tableFrom": "manual_correction_evidence",
-          "tableTo": "manual_evidence",
-          "columnsFrom": ["evidence_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_correction_evidence_trip_id_trips_id_fk": {
-          "name": "manual_correction_evidence_trip_id_trips_id_fk",
-          "tableFrom": "manual_correction_evidence",
-          "tableTo": "trips",
-          "columnsFrom": ["trip_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_correction_evidence_submission_fk": {
-          "name": "manual_correction_evidence_submission_fk",
-          "tableFrom": "manual_correction_evidence",
-          "tableTo": "manual_correction_submissions",
-          "columnsFrom": ["correction_id", "trip_id"],
-          "columnsTo": ["id", "trip_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "manual_correction_evidence_evidence_id_correction_id_pk": {
-          "name": "manual_correction_evidence_evidence_id_correction_id_pk",
-          "columns": ["evidence_id", "correction_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
     "manual_correction_history": {
       "name": "manual_correction_history",
       "columns": {
@@ -6399,79 +6335,6 @@
       "compositePrimaryKeys": {
         "manual_correction_requests_id": {
           "name": "manual_correction_requests_id",
-          "columns": ["id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "manual_correction_submissions": {
-      "name": "manual_correction_submissions",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "trip_id": {
-          "name": "trip_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "manual_correction_submission_trip": {
-          "name": "manual_correction_submission_trip",
-          "columns": ["id", "trip_id"],
-          "isUnique": true
-        },
-        "manual_correction_submission_page": {
-          "name": "manual_correction_submission_page",
-          "columns": ["trip_id", "created_at", "id"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "manual_correction_submissions_trip_id_trips_id_fk": {
-          "name": "manual_correction_submissions_trip_id_trips_id_fk",
-          "tableFrom": "manual_correction_submissions",
-          "tableTo": "trips",
-          "columnsFrom": ["trip_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_correction_submission_owner_fk": {
-          "name": "manual_correction_submission_owner_fk",
-          "tableFrom": "manual_correction_submissions",
-          "tableTo": "identity_memberships",
-          "columnsFrom": ["owner_id"],
-          "columnsTo": ["user_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "manual_correction_submissions_id": {
-          "name": "manual_correction_submissions_id",
           "columns": ["id"]
         }
       },

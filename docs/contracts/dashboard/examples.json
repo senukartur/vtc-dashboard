@@ -10610,6 +10610,12 @@
                 "result": "pass",
                 "required": false,
                 "observed": null
+              },
+              {
+                "rule": "cargo_damage",
+                "result": "pass",
+                "maxPercent": "100",
+                "observedPercent": "37.5"
               }
             ]
           }
@@ -11805,7 +11811,8 @@
                   "mode": "forbidden",
                   "classes": []
                 },
-                "hardModeRequired": false
+                "hardModeRequired": false,
+                "cargoDamageMaxPercent": "5"
               },
               "conditions": {
                 "requiredTrips": 10,
@@ -11839,7 +11846,8 @@
                     "3"
                   ]
                 },
-                "hardModeRequired": true
+                "hardModeRequired": true,
+                "cargoDamageMaxPercent": null
               },
               "conditions": {
                 "requiredTrips": null,
@@ -11935,7 +11943,8 @@
               "mode": "forbidden",
               "classes": []
             },
-            "hardModeRequired": false
+            "hardModeRequired": false,
+            "cargoDamageMaxPercent": "5"
           },
           "conditions": {
             "requiredTrips": 10,
@@ -12011,7 +12020,8 @@
                       "mode": "forbidden",
                       "classes": []
                     },
-                    "hardModeRequired": false
+                    "hardModeRequired": false,
+                    "cargoDamageMaxPercent": "5"
                   },
                   "conditions": {
                     "requiredTrips": 8,
@@ -12043,7 +12053,8 @@
                       "mode": "forbidden",
                       "classes": []
                     },
-                    "hardModeRequired": false
+                    "hardModeRequired": false,
+                    "cargoDamageMaxPercent": "5"
                   },
                   "conditions": {
                     "requiredTrips": 10,
@@ -12086,7 +12097,8 @@
                 "3"
               ]
             },
-            "hardModeRequired": true
+            "hardModeRequired": true,
+            "cargoDamageMaxPercent": null
           },
           "conditions": {
             "requiredTrips": null,
@@ -12218,7 +12230,8 @@
             "mode": "forbidden",
             "classes": []
           },
-          "hardModeRequired": false
+          "hardModeRequired": false,
+          "cargoDamageMaxPercent": "5"
         },
         "conditions": {
           "requiredTrips": 10,
@@ -12255,7 +12268,8 @@
                 "mode": "forbidden",
                 "classes": []
               },
-              "hardModeRequired": false
+              "hardModeRequired": false,
+              "cargoDamageMaxPercent": "5"
             },
             "conditions": {
               "requiredTrips": 10,
@@ -12331,7 +12345,8 @@
                         "mode": "forbidden",
                         "classes": []
                       },
-                      "hardModeRequired": false
+                      "hardModeRequired": false,
+                      "cargoDamageMaxPercent": "5"
                     },
                     "conditions": {
                       "requiredTrips": 8,
@@ -12363,7 +12378,8 @@
                         "mode": "forbidden",
                         "classes": []
                       },
-                      "hardModeRequired": false
+                      "hardModeRequired": false,
+                      "cargoDamageMaxPercent": "5"
                     },
                     "conditions": {
                       "requiredTrips": 10,
@@ -12403,7 +12419,8 @@
             "mode": "forbidden",
             "classes": []
           },
-          "hardModeRequired": false
+          "hardModeRequired": false,
+          "cargoDamageMaxPercent": "5"
         },
         "conditions": {
           "requiredTrips": 10,
@@ -12440,7 +12457,8 @@
                 "mode": "forbidden",
                 "classes": []
               },
-              "hardModeRequired": false
+              "hardModeRequired": false,
+              "cargoDamageMaxPercent": "5"
             },
             "conditions": {
               "requiredTrips": 10,
@@ -12516,7 +12534,8 @@
                         "mode": "forbidden",
                         "classes": []
                       },
-                      "hardModeRequired": false
+                      "hardModeRequired": false,
+                      "cargoDamageMaxPercent": "5"
                     },
                     "conditions": {
                       "requiredTrips": 8,
@@ -12548,7 +12567,8 @@
                         "mode": "forbidden",
                         "classes": []
                       },
-                      "hardModeRequired": false
+                      "hardModeRequired": false,
+                      "cargoDamageMaxPercent": "5"
                     },
                     "conditions": {
                       "requiredTrips": 10,
@@ -12604,7 +12624,8 @@
                 "mode": "forbidden",
                 "classes": []
               },
-              "hardModeRequired": false
+              "hardModeRequired": false,
+              "cargoDamageMaxPercent": "5"
             },
             "conditions": {
               "requiredTrips": 10,
@@ -12680,7 +12701,8 @@
                         "mode": "forbidden",
                         "classes": []
                       },
-                      "hardModeRequired": false
+                      "hardModeRequired": false,
+                      "cargoDamageMaxPercent": "5"
                     },
                     "conditions": {
                       "requiredTrips": 8,
@@ -12712,7 +12734,8 @@
                         "mode": "forbidden",
                         "classes": []
                       },
-                      "hardModeRequired": false
+                      "hardModeRequired": false,
+                      "cargoDamageMaxPercent": "5"
                     },
                     "conditions": {
                       "requiredTrips": 10,
@@ -12768,7 +12791,8 @@
                 "mode": "forbidden",
                 "classes": []
               },
-              "hardModeRequired": false
+              "hardModeRequired": false,
+              "cargoDamageMaxPercent": "5"
             },
             "conditions": {
               "requiredTrips": 10,
@@ -12844,7 +12868,8 @@
                         "mode": "forbidden",
                         "classes": []
                       },
-                      "hardModeRequired": false
+                      "hardModeRequired": false,
+                      "cargoDamageMaxPercent": "5"
                     },
                     "conditions": {
                       "requiredTrips": 8,
@@ -12876,7 +12901,8 @@
                         "mode": "forbidden",
                         "classes": []
                       },
-                      "hardModeRequired": false
+                      "hardModeRequired": false,
+                      "cargoDamageMaxPercent": "5"
                     },
                     "conditions": {
                       "requiredTrips": 10,

@@ -29660,6 +29660,15 @@
           },
           "hardModeRequired": {
             "type": "boolean"
+          },
+          "cargoDamageMaxPercent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 21,
+            "pattern": "^(100|(?:0|[1-9][0-9]?)(\\.[0-9]{0,17}[1-9])?)$",
+            "description": "Inclusive maximum cargo damage as a canonical percentage. Null means the limit is disabled."
           }
         },
         "required": [
@@ -29786,6 +29795,15 @@
           },
           "hardModeRequired": {
             "type": "boolean"
+          },
+          "cargoDamageMaxPercent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 21,
+            "pattern": "^(100|(?:0|[1-9][0-9]?)(\\.[0-9]{0,17}[1-9])?)$",
+            "description": "Inclusive maximum cargo damage as a canonical percentage. Null disables the limit. An omitted field preserves the saved cap on update and disables it on creation."
           }
         },
         "required": [
@@ -30871,9 +30889,51 @@
               "observed"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rule": {
+                "const": "cargo_damage"
+              },
+              "result": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "maxPercent": {
+                "type": "string",
+                "maxLength": 21,
+                "pattern": "^(100|(?:0|[1-9][0-9]?)(\\.[0-9]{0,17}[1-9])?)$"
+              },
+              "observedPercent": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 326,
+                "pattern": "^(100|(?:0|[1-9][0-9]?)(\\.[0-9]*[1-9])?)$"
+              },
+              "basisLevelName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "description": "Historical level used for cargo damage if it differs from the check's level."
+              }
+            },
+            "required": [
+              "rule",
+              "result",
+              "maxPercent",
+              "observedPercent"
+            ]
           }
         ],
-        "description": "One of the five level limits applied to the trip with its configured value. An unset limit passes with null bounds or the any mode. Unknown observed values are null, never zero."
+        "description": "A level rule applied to the trip with its result, configured value and observation. Configured cargo damage adds a rule. Unknown observations are null."
       },
       "QualificationCheck": {
         "type": "object",
@@ -30935,7 +30995,7 @@
             "items": {
               "$ref": "#/components/schemas/QualificationRuleCheck"
             },
-            "maxItems": 5
+            "maxItems": 6
           }
         },
         "required": [
@@ -30947,7 +31007,7 @@
           "rules"
         ],
         "additionalProperties": false,
-        "description": "The driver's level limits checked against the trip. decision reads the snapshot stored with the company decision; current checks a pending trip against the level at its attribution time. checked always lists the five rules; event_exempt (company event trip) and no_level list none."
+        "description": "The driver's level limits checked against the trip. Decision basis reads the stored snapshot. Current basis evaluates pending trips or held results under active staff review. Checked includes the base rules and cargo damage when a cap applies. Event-exempt and no-level results have no rules."
       },
       "TripRevenue": {
         "type": "object",

@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   baseUnits,
   compareDecimal,
+  damageCap,
   displayUnits,
   driverName,
   failureText,
@@ -39,6 +40,14 @@ describe("form units", () => {
     expect(displayUnits("12500", "ru")).toBe("12,5");
     expect(displayUnits("12500", "en")).toBe("12.5");
     expect(displayUnits(null, "en")).toBe("");
+  });
+  test("cargo damage caps support blank, exact localized decimals, zero and 100", () => {
+    expect(damageCap("")).toBeNull();
+    expect(damageCap("0")).toBe("0");
+    expect(damageCap("2,50")).toBe("2.5");
+    expect(damageCap("100.0")).toBe("100");
+    for (const invalid of ["-1", "100.001", "5%", "1e-6", "0.0000000000000000001"])
+      expect(damageCap(invalid)).toBeUndefined();
   });
   test("trip counts are positive whole numbers", () => {
     expect(tripCount("3")).toBe(3);
@@ -112,6 +121,7 @@ describe("limits and messages", () => {
     expect(setLimits(limits)).toEqual({
       mass: true,
       distance: false,
+      cargoDamage: false,
       trailers: false,
       adr: true,
       hardMode: true,

@@ -36,6 +36,15 @@ export function baseUnits(value: string): string | null | undefined {
   const rest = fraction.slice(3).replace(/0+$/, "");
   return rest ? `${integer}.${rest}` : integer;
 }
+/** Parse an optional percentage without rounding or accepting unsupported precision. */
+export function damageCap(value: string): string | null | undefined {
+  const clean = value.trim().replace(",", ".");
+  if (clean === "") return null;
+  if (!/^(0|[1-9][0-9]{0,2})(\.[0-9]{1,18})?$/.test(clean)) return undefined;
+  const { whole, fraction } = normalized(clean);
+  const exact = fraction ? `${whole}.${fraction}` : whole;
+  return compareDecimal(exact, "100") <= 0 ? exact : undefined;
+}
 /** A base-unit amount (kg or m) for a form field in display units, in the viewer's notation. */
 export function displayUnits(value: string | null, locale: "ru" | "en"): string {
   if (value === null) return "";
@@ -114,6 +123,7 @@ export function setLimits(limits: Limits) {
   return {
     mass: limits.massMinKg !== null || limits.massMaxKg !== null,
     distance: limits.distanceMinM !== null || limits.distanceMaxM !== null,
+    cargoDamage: limits.cargoDamageMaxPercent != null,
     trailers: limits.trailers.mode === "selected",
     adr: limits.adr.mode !== "any",
     hardMode: limits.hardModeRequired,

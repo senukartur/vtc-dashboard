@@ -49,7 +49,7 @@ test("every trip page browser stub keeps the full contract shape", () => {
   }
 });
 
-test("stub checks cover the checked, event-exempt, unknown-level and missing states", () => {
+test("stub checks cover configured, historical, event-exempt, unknown-level and missing states", () => {
   const checked = privateView(telemetryWithEvent()).qualificationCheck;
   expect(checked?.status).toBe("checked");
   expect(checked?.basis).toBe("decision");
@@ -59,7 +59,14 @@ test("stub checks cover the checked, event-exempt, unknown-level and missing sta
     "trailer_types:fail",
     "adr:pass",
     "hard_mode:pass",
+    "cargo_damage:pass",
   ]);
+  expect(checked?.rules.find((rule) => rule.rule === "cargo_damage")).toEqual({
+    rule: "cargo_damage",
+    result: "pass",
+    maxPercent: "100",
+    observedPercent: "37.5",
+  });
   expect(privateView(manualUnknown()).qualificationCheck).toMatchObject({
     status: "no_level",
     level: null,
@@ -71,6 +78,13 @@ test("stub checks cover the checked, event-exempt, unknown-level and missing sta
   });
   expect(privateView(manualUnknown("no-check")).qualificationCheck).toBeNull();
   const returned = privateView(returnedTrip()).qualificationCheck?.rules ?? [];
+  expect(returned.map((rule) => rule.rule)).toEqual([
+    "cargo_mass",
+    "distance",
+    "trailer_types",
+    "adr",
+    "hard_mode",
+  ]);
   expect(returned.flatMap((rule) => (rule.rule === "trailer_types" ? rule.allowed : []))).toEqual(
     [],
   );

@@ -101,9 +101,18 @@ export function selectQuality(
       continue;
     }
     if (evolving) {
-      // Within one source's lineage the newer revision may lose completeness context, never facts.
-      const [older, newer] = selected.factRevisionId === progression.fromFactId ? [a, b] : [b, a];
-      if ([...older].every((key) => newer.has(key) || degradable.includes(key))) {
+      const fromSelected = selected.factRevisionId === progression.fromFactId;
+      const [older, newer] = fromSelected ? [a, b] : [b, a];
+      // An open observation cannot fill a missing final cargo damage value.
+      const finalDelivery = (fromSelected ? next : selected).outcome === "delivered";
+      if (
+        [...older].every(
+          (key) =>
+            newer.has(key) ||
+            degradable.includes(key) ||
+            (finalDelivery && key === "cargoDamageFraction"),
+        )
+      ) {
         if (next.factRevisionId === progression.toFactId) selected = next;
         continue;
       }

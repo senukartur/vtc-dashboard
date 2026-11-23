@@ -80,7 +80,7 @@ import {
   withPrefixMembershipJoinedAt,
 } from "./support.ts";
 
-const currentMigrationCount = 40;
+const currentMigrationCount = 41;
 
 const values = mysqlTable("synthetic_values", {
   id: idColumn("id").primaryKey(),
@@ -208,7 +208,7 @@ async function serializedFreshMigrations(
     })),
   );
   const expectedTables = Object.keys(
-    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0039_snapshot.json"), "utf8"))
+    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0040_snapshot.json"), "utf8"))
       .tables,
   ).sort();
   assert.equal(expectedTables.length, 106);
