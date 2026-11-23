@@ -5192,7 +5192,13 @@ test("a held damage revision keeps the driver-corrected attribution and refuses 
     const r = await receive(p);
     // VTC-169: the driver corrects the unobserved start and another reviewer approves it.
     const resolution = { actualStartAt: new Date(instant - 60000).toISOString() };
-    const initial = await correct(r.tripId, resolution);
+    const editable = ((await privateTrip(owner, r.tripId)).correction?.fields ?? []).map(
+      (f) => f.field,
+    );
+    const initial = await correct(r.tripId, {
+      ...resolution,
+      ...(editable.includes("actualDistanceM") ? { actualDistanceM: "123400" } : {}),
+    });
     const accepted = (await approve(r.tripId, initial.data.id)).result;
     const retainedFactId = accepted.data.basis.factRevisionId;
     expect(accepted.data).toMatchObject({
