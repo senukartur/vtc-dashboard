@@ -284,7 +284,7 @@ beforeEach(async () => {
   for (const game of ["ets2", "ats"] as const)
     for (const [index, id] of structuralLevels[game].entries())
       await control.query(
-        "UPDATE qualification_levels SET position=?, deleted_at=NULL, name=?, mass_min_kg=NULL, mass_max_kg=NULL, distance_min_m=NULL, distance_max_m=NULL, trailer_mode='any', adr_mode='any', adr_classes=NULL, hard_mode_required=0, required_trips=NULL, required_distance_m=NULL WHERE id=?",
+        "UPDATE qualification_levels SET position=?, deleted_at=NULL, name=?, mass_min_kg=NULL, mass_max_kg=NULL, distance_min_m=NULL, distance_max_m=NULL, cargo_damage_max_percent=NULL, trailer_mode='any', adr_mode='any', adr_classes=NULL, hard_mode_required=0, required_trips=NULL, required_distance_m=NULL WHERE id=?",
         [index + 1, names[index], id],
       );
   instant = Date.parse("2026-11-01T12:00:00.000Z");
@@ -489,6 +489,33 @@ test("a level below the top needs a condition; the top may have none", async () 
   );
 });
 
+test("cargo damage configurations are game-specific, exact, editable, and compatible with old writes", async () => {
+  const settings = { requiredTrips: 100, requiredDistanceM: null };
+  const edited = await configure(0, settings, { ...openLimits, cargoDamageMaxPercent: "0" });
+  expect(edited.level.limits.cargoDamageMaxPercent).toBe("0");
+  expect(
+    (await service.detail(director, levelId(0, "ats"))).limits.cargoDamageMaxPercent,
+  ).toBeNull();
+
+  tick();
+  const oldClient = await configure(0, settings, openLimits);
+  expect(oldClient.level.limits.cargoDamageMaxPercent).toBe("0");
+  tick();
+  const maximum = await configure(0, settings, { ...openLimits, cargoDamageMaxPercent: "100" });
+  expect(maximum.level.limits.cargoDamageMaxPercent).toBe("100");
+  for (const cargoDamageMaxPercent of ["100.000000000000000001", "-1", "0.0000000000000000001"])
+    await rejects(configure(0, settings, { ...openLimits, cargoDamageMaxPercent }), 422);
+  tick();
+  const cleared = await configure(0, settings, { ...openLimits, cargoDamageMaxPercent: null });
+  expect(cleared.level.limits.cargoDamageMaxPercent).toBeNull();
+  expect(cleared.level.history?.[0]).toMatchObject({
+    changes: ["limits"],
+    values: {
+      before: { limits: { cargoDamageMaxPercent: "100" } },
+      after: { limits: { cargoDamageMaxPercent: null } },
+    },
+  });
+});
 test("a stale expectedVersion is a conflict and changes nothing", async () => {
   const level = await service.detail(director, levelId(1));
   const input = {

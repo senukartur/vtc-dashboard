@@ -2106,6 +2106,26 @@ export function createManualReports(
         .for("share");
       return first?.at ?? null;
     },
+    // Query only the immutable revision represented by the assessed source fact.
+    async assessedDamageInTransaction(
+      tx: TxContext,
+      scope: { sourceRecordId: string; reportId: string; revisionId: string; ownerId: string },
+    ) {
+      const [revision] = await c(tx)
+        .select({ damage: manualRevisions.cargoDamagePercent })
+        .from(manualRevisions)
+        .innerJoin(manualReports, eq(manualReports.id, manualRevisions.reportId))
+        .where(
+          and(
+            eq(manualRevisions.id, applicationId(scope.revisionId)),
+            eq(manualRevisions.sourceRecordId, applicationId(scope.sourceRecordId)),
+            eq(manualReports.id, applicationId(scope.reportId)),
+            eq(manualReports.ownerId, applicationId(scope.ownerId)),
+          ),
+        )
+        .for("share");
+      return revision?.damage ?? null;
+    },
     async reviewContextInTransaction(tx: TxContext, tripId: string) {
       const members = await ports.trips.groups.members(tx, [tripId], true),
         ids = members.map((t) => t.id);

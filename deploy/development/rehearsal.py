@@ -412,17 +412,19 @@ def core():
         ops.atomic_json(base / 'state/notification-proof-database.json', rehearsal_database_identity(ops, revision, image_id))
     with rehearsal_phase('core-controls-prefix-artifact'):
         # Synthetic previous artifact: current binaries are never started against the
-        # prefix. Only the packaged migration journal/SQL differs; no historical image
+        # prefix. Only the packaged migrations and their metadata differ. No historical image
         # behavior is inferred from this native DDL/grant-ordering proof.
         packaged = ops.activation.packaged_history(ops, image_id)
-        assert len(packaged) == 39
+        prefix_migration_count = 38
+        assert len(packaged) == 40
         prefix_revision = hashlib.sha256((revision + ':prefix').encode()).hexdigest()[:40]
         prefix_context = base / 'state/prefix-build'
         prefix_context.mkdir(mode=0o700)
         trim = ("import {migrationFolder} from '@vtc/db';import fs from 'node:fs';"
                 "const p=migrationFolder+'/meta/_journal.json';const j=JSON.parse(fs.readFileSync(p));"
-                "const last=j.entries.pop();fs.unlinkSync(migrationFolder+'/'+last.tag+'.sql');"
-                "fs.rmSync(migrationFolder+'/meta/'+String(last.idx).padStart(4,'0')+'_snapshot.json',{force:true});"
+                f"for(const entry of j.entries.splice({prefix_migration_count})){{"
+                "fs.unlinkSync(migrationFolder+'/'+entry.tag+'.sql');"
+                "fs.rmSync(migrationFolder+'/meta/'+String(entry.idx).padStart(4,'0')+'_snapshot.json',{force:true});}"
                 "fs.writeFileSync(p,JSON.stringify(j));")
         # BuildKit parses an image config ID as a registry reference. Bind its local
         # tag before/after the build and prove the resulting filesystem's base layers.
@@ -436,11 +438,11 @@ def core():
         prefix_image = prefix_info['Id']
         assert json.loads(ops.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]['Id'] == image_id
         assert prefix_info['RootFS']['Layers'][:len(base_image['RootFS']['Layers'])] == base_image['RootFS']['Layers']
-        assert ops.activation.packaged_history(ops, prefix_image) == packaged[:38]
+        assert ops.activation.packaged_history(ops, prefix_image) == packaged[:prefix_migration_count]
     with rehearsal_phase('initial-migration'):
         compose(['run', '--rm', '--no-deps', 'migrate'], revision=prefix_revision, image_id=prefix_image)
     with rehearsal_phase('core-controls-release-handoff'):
-        assert ops.handoff_history(prefix_revision, prefix_image) == packaged[:38]
+        assert ops.handoff_history(prefix_revision, prefix_image) == packaged[:prefix_migration_count]
         import update_controls
         update_controls.o = ops
         os.umask(0o077)
@@ -512,7 +514,7 @@ def core():
         assert json.loads((base / 'state/release-handoff.json').read_text())['schemaAdvanced'] is True
         assert not (base / 'state/recovery-required').exists()
         assert not ops.activation.controls_pending(ops, prefix_revision, prefix_image)
-        print('Owned controls handoff: exact native 38-to-39 history, verified export, unchanged configuration, complete grants before first producer and trusted readiness passed', flush=True)
+        print(f'Owned controls handoff: exact native {prefix_migration_count}-to-{len(packaged)} history, verified export, unchanged configuration, complete grants before first producer and trusted readiness passed', flush=True)
     with rehearsal_phase('core-production-codec-grants'):
         notification_account_cleanup_proof(ops, revision, image_id)
         assert not ops.activation.has_published_route_history(ops, revision, image_id, fenced=True)

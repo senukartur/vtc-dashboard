@@ -76,6 +76,7 @@ export function limitsOf(row: LevelRow, trailerIds: readonly string[]): Qualific
     massMaxKg: exact(row.massMaxKg),
     distanceMinM: exact(row.distanceMinM),
     distanceMaxM: exact(row.distanceMaxM),
+    cargoDamageMaxPercent: exact(row.cargoDamageMaxPercent),
     trailers: {
       ...(row.trailerBasis === "type" ? { basis: "type" as const } : {}),
       mode: row.trailerMode,

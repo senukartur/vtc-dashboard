@@ -46,7 +46,7 @@ function adrRule(view: TripPrivate) {
   return rule;
 }
 
-/** F1: a telemetry trip linked to an event, with one source and the five checked limits. */
+/** F1: a telemetry trip with an event link, one source and a checked cargo damage cap. */
 export function telemetryWithEvent() {
   const { envelope, view } = stage4("telemetry");
   view.summary.sourceKinds = ["ets2telemetry"];
@@ -85,11 +85,13 @@ export function reconciledAccepted() {
 
 export const returnedReason = "Fictional screenshot does not show the delivered cargo";
 
-/** F4: the same trip returned to the driver with one rejected decision. */
+/** F4: a rejected trip with a historical qualification snapshot from before cargo damage checks. */
 export function returnedTrip() {
   const { envelope, view } = stage4("telemetry");
   view.summary.decision = "rejected";
   view.summary.event = null;
+  const snapshot = check(view);
+  snapshot.rules = snapshot.rules.filter((rule) => rule.rule !== "cargo_damage");
   // Selected limits without entries: no trailer type and no ADR class is allowed.
   trailerRule(view).allowed = [];
   const adr = adrRule(view);
@@ -158,7 +160,7 @@ export const longEventTitle =
   "Fictional Northern Lights Winter Convoy across the Scandinavian ferries and mountain passes with a very long title";
 export const longTrailerLabel = "Fictional Extra Long Refrigerated Double Deck Curtainsider";
 
-/** L1: the reconciled trip with long names, a long event title and long trailer labels. */
+/** L1: the reconciled trip with long names, long trailer labels and a configured damage cap. */
 export function longValues() {
   const { envelope, view, facts } = stage4("telemetry");
   view.summary.event = { id: tripEventId, title: longEventTitle };

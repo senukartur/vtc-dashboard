@@ -34,7 +34,7 @@ test("type migration preserves exact body identities and legacy allowances witho
       "INSERT INTO qualification_level_trailers(level_id,game,trailer_id) VALUES ('02800000-0000-4000-8000-000000000001','ets2',?)",
       [id],
     );
-    expect(await runMigrations(settings)).toBe(2);
+    expect(await runMigrations(settings)).toBe(3);
     expect(await runMigrations(settings)).toBe(0);
     const [rows] = await control.query<RowDataPacket[]>(
       "SELECT CAST(t.id AS CHAR) id,HEX(t.code) code,CAST(t.common_trailer AS CHAR) model,t.trailer_type_id,l.trailer_basis FROM catalog_trailers t JOIN qualification_level_trailers q ON q.trailer_id=t.id JOIN qualification_levels l ON l.id=q.level_id",
@@ -99,7 +99,7 @@ test("interrupted trailer grouping DDL preserves body rows and requires recovery
     );
     // Only this disposable allocation is reset to its known empty baseline.
     await reset(control);
-    expect(await runMigrations(settings)).toBe(39);
+    expect(await runMigrations(settings)).toBe(40);
     expect(await runMigrations(settings)).toBe(0);
   } finally {
     await control.end();
@@ -107,7 +107,7 @@ test("interrupted trailer grouping DDL preserves body rows and requires recovery
   }
 }, 180000);
 
-test("exact 38-migration base upgrades once to companion without changing taxonomy, legacy selections, assignments or retained decisions", async () => {
+test("exact 38-migration base upgrades through companion and cargo damage without changing taxonomy, legacy selections, assignments or retained decisions", async () => {
   const control = await testConnection(),
     settings = guardedSettings(),
     folder = await companionPriorFolder(),
@@ -243,13 +243,23 @@ test("exact 38-migration base upgrades once to companion without changing taxono
         "SELECT version,hash,state FROM _vtc_migrations ORDER BY version",
       );
     expect(prefix).toHaveLength(38);
-    expect(await runMigrations(settings)).toBe(1);
+    expect(await runMigrations(settings)).toBe(2);
     expect(await runMigrations(settings)).toBe(0);
     expect(await preserved()).toEqual(before);
     const [after] = await control.query<RowDataPacket[]>(
       "SELECT version,hash,state FROM _vtc_migrations ORDER BY version LIMIT 38",
     );
     expect(after).toEqual(prefix);
+    const [caps] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM qualification_levels WHERE cargo_damage_max_percent IS NOT NULL",
+    );
+    expect(Number(caps[0]!.n)).toBe(0);
+    await expect(
+      control.query("UPDATE qualification_levels SET cargo_damage_max_percent = -0.01"),
+    ).rejects.toMatchObject({ code: "ER_CHECK_CONSTRAINT_VIOLATED" });
+    await expect(
+      control.query("UPDATE qualification_levels SET cargo_damage_max_percent = 100.01"),
+    ).rejects.toMatchObject({ code: "ER_CHECK_CONSTRAINT_VIOLATED" });
     const [grant] = await control.execute<RowDataPacket[]>(
       "SELECT companion FROM telemetry_tokens WHERE id=?",
       [token],

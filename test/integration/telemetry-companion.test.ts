@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { type IncomingHttpHeaders, request as httpRequest } from "node:http";
 import type { companionComponents, components } from "@vtc/contracts";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
@@ -52,6 +53,7 @@ const openLimits: S["QualificationLimitsInput"] = {
   massMaxKg: null,
   distanceMinM: null,
   distanceMaxM: null,
+  cargoDamageMaxPercent: null,
   trailers: { mode: "any", typeIds: [] },
   adr: { mode: "any", classes: [] },
   hardModeRequired: false,
@@ -140,17 +142,21 @@ const batch = (items: C["SourceRequest"][]): C["ResultBatchInput"] => ({
 async function results(items: C["SourceRequest"][], auth = authorization) {
   return modules.telemetryCompanion!.results(auth, ip, batch(items));
 }
-async function httpResults(items: C["SourceRequest"][]) {
+async function loopbackPort() {
   if (!app.server.listening) await app.listen({ host: "127.0.0.1", port: 0 });
   const address = app.server.address();
   if (!address || typeof address === "string") throw new Error("SYNTHETIC_HTTP_ADDRESS_REQUIRED");
+  return address.port;
+}
+async function httpResults(items: C["SourceRequest"][]) {
+  const port = await loopbackPort();
   const payload = JSON.stringify(batch(items));
   return new Promise<{ status: number | undefined; headers: IncomingHttpHeaders; body: string }>(
     (resolve, reject) => {
       const request = httpRequest(
         {
           host: "127.0.0.1",
-          port: address.port,
+          port,
           path: prefix + "/results",
           method: "POST",
           headers: {
@@ -435,6 +441,96 @@ test("strict HTTP bearer capability, no cookie fallback, payload/media bounds an
     payload: '{"items":[],"items":[]}',
   });
   expect(duplicateKeys.statusCode).toBe(400);
+});
+
+test("desktop terminal upload retains exact damage through HTTP, staff adjudication and closed companion results", async () => {
+  await configure({ cargoDamageMaxPercent: "2" });
+  const registration = await upload();
+  const payload = JSON.parse(
+    readFileSync(
+      new URL("../fixtures/desktop-terminal-cargo-damage.json", import.meta.url),
+      "utf8",
+    ),
+  ) as Telemetry;
+  payload.installationId = registration.installationId;
+  payload.bindingId = registration.bindingId;
+  payload.eventId = registration.eventId;
+  payload.source.tripId = registration.source.tripId;
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/telemetry/v1/events",
+    headers: { authorization },
+    payload,
+  });
+  expect(response.statusCode).toBe(202);
+  const requested = sourceRequest(payload);
+  const first = (await results([requested])).items[0]!;
+  // The real fixture has unverified times. Supply reviewed historical start support.
+  expect(first).toMatchObject({ receipt: "received", companyDecision: "pending_review" });
+  const id = first.canonicalTripId!;
+  const service = modules.tripDecisions!;
+  const current = await service.review(director, id);
+  const proposal = await service.propose(director, id, newId(), current.version, {
+    actualStartAt: new Date(payload.snapshot.start.utcMs!).toISOString(),
+    evidenceIds: [],
+    reason: "Fictional historical start support",
+  });
+  const reviewer = await member(["ets2"], ["dispatcher"]);
+  const detail = await service.getProposal(reviewer, id, proposal.data.id);
+  const reviewed = await service.proposalDecision(
+    reviewer,
+    id,
+    proposal.data.id,
+    newId(),
+    proposal.version,
+    {
+      decision: "approve",
+      reviewedRevisionId: detail.data.revisionId,
+      reason: "Fictional verified historical start",
+    },
+  );
+  expect(reviewed.data).toMatchObject({
+    outcome: "rejected",
+    reasonCodes: expect.arrayContaining(["qualification_cargo_damage"]),
+  });
+  const trip = await modules.trips!.detail(driver, id);
+  expect(trip).toMatchObject({
+    qualificationCheck: {
+      basis: "decision",
+      rules: expect.arrayContaining([
+        { rule: "cargo_damage", maxPercent: "2", observedPercent: "2.5", result: "fail" },
+      ]),
+    },
+  });
+  const wire = await httpResults([requested]);
+  expect(wire.status).toBe(200);
+  const result = (JSON.parse(wire.body) as C["ResultBatch"]).items[0]!;
+  expect(result).toMatchObject({
+    receipt: "received",
+    companyDecision: "rejected",
+    assessment: { outcome: "fail" },
+  });
+  expect(result.assessment!.rules).toHaveLength(5);
+  expect(result.assessment!.limits).not.toHaveProperty("cargoDamageMaxPercent");
+  expect(result.assessment!.rules.map((rule) => rule.rule)).not.toContain("cargo_damage");
+});
+
+test("companion v1 preview projects a configured cap as provisional missing evidence", async () => {
+  await configure({ cargoDamageMaxPercent: "0" });
+  const result = await app.inject({
+    method: "POST",
+    url: `${prefix}/preview`,
+    headers: { authorization },
+    payload: preview(),
+  });
+  expect(result.statusCode).toBe(200);
+  expect(result.json()).toMatchObject({
+    outcome: "unknown",
+    reasons: ["fact_unavailable"],
+    provisional: true,
+  });
+  expect(result.json().assignment.limits).not.toHaveProperty("cargoDamageMaxPercent");
+  expect(result.json().rules).toHaveLength(5);
 });
 
 test("exact result receipt, replay, foreign lookup, retained immutable assessment and conditional request fencing", async () => {
@@ -841,15 +937,13 @@ test("conditional requests reauthorize epochs/revocation; rate budget survives a
 });
 
 test("real loopback HTTP returns the authenticated companion snapshot", async () => {
-  await app.listen({ host: "127.0.0.1", port: 0 });
-  const address = app.server.address();
-  if (!address || typeof address === "string") throw new Error("SYNTHETIC_HTTP_ADDRESS_REQUIRED");
+  const port = await loopbackPort();
   const response = await new Promise<{ status: number | undefined; body: string }>(
     (resolve, reject) => {
       const req = httpRequest(
         {
           host: "127.0.0.1",
-          port: address.port,
+          port,
           path: `${prefix}/qualification/ets2`,
           headers: { authorization },
         },

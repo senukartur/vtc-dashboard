@@ -41,6 +41,19 @@ async function evaluate(value: S["PreviewInput"], custom = limits, exempt = fals
   const facts = await previewFacts({} as TxContext, id, value);
   return { live: checkPreview(custom, facts, value, {}, exempt), final: checkTrip(custom, facts) };
 }
+test("a configured damage cap makes the frozen v1 preview provisional without adding a rule", async () => {
+  const value = input();
+  value.actualDistance.metres = "100000";
+  value.actualDistance.final = true;
+  value.hardMode.final = true;
+  const capped = { ...limits, cargoDamageMaxPercent: "0" };
+  expect((await evaluate(value, capped)).live).toMatchObject({
+    outcome: "unknown",
+    reasons: ["fact_unavailable"],
+  });
+  expect((await evaluate(value, capped)).live.rules).toHaveLength(5);
+  expect((await evaluate(value, capped, true)).live.outcome).toBe("pass");
+});
 test("growing below-minimum and nonfinal Hard Mode stay unknown, exact maxima still fail", async () => {
   const value = input(),
     growing = await evaluate(value);
