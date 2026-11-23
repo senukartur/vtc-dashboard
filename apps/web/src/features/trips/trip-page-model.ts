@@ -1,4 +1,5 @@
 // Pure view model of the trip page (VTC-146 blocks, VTC-158 layout). Reads contract fields only.
+import { decimalShift, formatDecimal, type Locale } from "../../shared/formatting.js";
 import { tripTranslations } from "./translations.js";
 import type { DTO } from "./transport.js";
 
@@ -465,4 +466,276 @@ export function tripHistory(
         a.index - b.index,
     )
     .map(({ entry }) => entry);
+}
+
+// Summary-first trip page (VTC-170): rounded quantities, the status banner, the accepted line,
+// the collapsed qualification check, route duration and the event-link dialog.
+
+/** A display-only rounded quantity: whole kilometres or tenths of a tonne. */
+export type RoundedQuantity = { value: string; lessThan: boolean };
+
+/** Half-up rounding of a canonical non-negative decimal string to `places` fraction digits. */
+function roundHalfUp(value: string, places: number): string {
+  const [whole = "0", fraction = ""] = value.split(".");
+  const kept = BigInt(`${whole}${fraction.padEnd(places, "0").slice(0, places)}`);
+  const next = fraction[places];
+  const digits = (kept + (next !== undefined && next >= "5" ? 1n : 0n))
+    .toString()
+    .padStart(places + 1, "0");
+  const integer = places ? digits.slice(0, -places) : digits;
+  const decimals = places ? digits.slice(-places).replace(/0+$/, "") : "";
+  return decimals ? `${integer}.${decimals}` : integer;
+}
+
+/**
+ * Metres to whole kilometres or kilograms to tenths of a tonne, half up, without passing through
+ * Number. A positive value that rounds to zero reads as "less than" the smallest step; an exact
+ * zero stays zero and unknown stays null.
+ */
+export function roundedQuantity(value: string | null, unit: "km" | "t"): RoundedQuantity | null {
+  if (value === null) return null;
+  const shifted = decimalShift(value, 3);
+  const rounded = roundHalfUp(shifted, unit === "km" ? 0 : 1);
+  if (rounded === "0" && /[1-9]/.test(shifted))
+    return { value: unit === "km" ? "1" : "0.1", lessThan: true };
+  return { value: rounded, lessThan: false };
+}
+
+/** "251 km", "24,9 т" or "< 1 km" of an already rounded quantity. */
+export function formatRoundedQuantity(rounded: RoundedQuantity, unit: "km" | "t", locale: Locale) {
+  const name = unit === "km" ? (locale === "ru" ? "км" : "km") : locale === "ru" ? "т" : "t";
+  return `${rounded.lessThan ? "< " : ""}${formatDecimal(rounded.value, locale)} ${name}`;
+}
+
+/** Metres or kilograms as "251 km", "24,9 т" or "< 1 km"; null when unknown. */
+export function formatRounded(value: string | null, unit: "km" | "t", locale: Locale) {
+  const rounded = roundedQuantity(value, unit);
+  return rounded ? formatRoundedQuantity(rounded, unit, locale) : null;
+}
+
+export type TripBanner = {
+  status: Exclude<TripStatus, "accepted">;
+  tone: "warn" | "pending" | "error" | "neutral";
+  /** Whether the trip may still count ("not counted yet") or will not ("not counted"). */
+  counted: "notYet" | "no";
+  /** One sentence on what happens next. */
+  noteKey: TripKey;
+  /** The latest decision's reviewer comment. */
+  quote: string | null;
+  /** Translated reason labels of the latest decision. */
+  reasonKeys: TripKey[];
+  /** Why a pending trip is held, shown behind an info button. */
+  heldKeys: TripKey[];
+  /** Reviewer nickname of the latest decision; null for a system decision or none. */
+  actor: string | null;
+  system: boolean;
+  /** The decision time, or the submission time of a pending report. */
+  at: string | null;
+  /** The owner can fix a returned report. */
+  action: "fix" | null;
+};
+
+const bannerNoteKey: Record<TripBanner["status"], TripKey> = {
+  pending_review: "next_pending_note",
+  needs_fix: "next_fix_staff_note",
+  rejected: "next_rejected_note",
+  in_progress: "next_open_note",
+  unassessed: "next_unassessed_note",
+  cancelled: "next_cancelled_note",
+};
+
+/**
+ * The one status banner of a trip that is not accepted; null for an accepted trip, which shows only
+ * its badge and the counted line. Built on `tripStatus`, `awaitingFix` and `nextStep`, so the owner
+ * and staff read the same status while only the owner gets the fix action.
+ */
+export function tripBanner(
+  view: DTO["TripView"] | undefined,
+  { owner, staff }: { owner: boolean; staff: boolean },
+): TripBanner | null {
+  if (!view) return null;
+  const own = privateOf(view),
+    summary = own ? own.summary : (view as Summary),
+    fixPending = awaitingFix(view),
+    status = tripStatus(summary, fixPending);
+  if (status === "accepted") return null;
+  const next = nextStep(view, { owner, staff }),
+    decided = status === "needs_fix" || status === "rejected",
+    latest = own && decided ? latestDecision(own.decisions) : null,
+    credit = creditState(summary, fixPending);
+  return {
+    status,
+    tone:
+      status === "needs_fix"
+        ? "warn"
+        : status === "pending_review"
+          ? "pending"
+          : status === "rejected"
+            ? "error"
+            : "neutral",
+    counted: credit.valueKey === "creditedNo" ? "no" : "notYet",
+    noteKey: next?.noteKey ?? bannerNoteKey[status],
+    quote: next?.reason ?? null,
+    reasonKeys: next && !next.held ? next.reasonKeys : [],
+    heldKeys: next?.held ? next.reasonKeys : [],
+    actor: latest?.reviewer?.nickname ?? null,
+    system: !!latest && !latest.reviewer,
+    at: latest
+      ? latest.decidedAt
+      : status === "pending_review"
+        ? (summary.submittedAt ?? null)
+        : null,
+    action: owner && status === "needs_fix" ? "fix" : null,
+  };
+}
+
+export type AcceptedLine = {
+  /** Rounded distance, or null when unknown. */
+  distance: RoundedQuantity | null;
+  game: Summary["game"];
+  /** Reviewer of the latest acceptance; null for a system decision or a company summary. */
+  actor: string | null;
+  system: boolean;
+  at: string | null;
+};
+
+/**
+ * The single "Counted" line of an accepted trip: distance, game and, in a private view, who
+ * accepted it and when. Null for any other status.
+ */
+export function acceptedLine(view: DTO["TripView"] | undefined): AcceptedLine | null {
+  if (!view) return null;
+  const own = privateOf(view),
+    summary = own ? own.summary : (view as Summary);
+  if (summary.decision !== "accepted") return null;
+  const latest = own
+    ? latestDecision(own.decisions.filter((decision) => decision.outcome === "accepted"))
+    : null;
+  return {
+    distance: roundedQuantity(summary.actualDistanceM, "km"),
+    game: summary.game,
+    actor: latest?.reviewer?.nickname ?? null,
+    system: !!latest && !latest.reviewer,
+    at: latest?.decidedAt ?? null,
+  };
+}
+
+/** Passed and total limits of a check with its tone; null without a check or rules. */
+export function qualificationSummary(check: DTO["QualificationCheck"] | null | undefined) {
+  if (!check?.rules.length) return null;
+  const passed = check.rules.filter((rule) => rule.result === "pass").length,
+    failed = check.rules.some((rule) => rule.result === "fail");
+  const tone: "ok" | "warn" | "error" = failed
+    ? "error"
+    : passed === check.rules.length
+      ? "ok"
+      : "warn";
+  return { passed, total: check.rules.length, tone };
+}
+
+/** Whole minutes between start and completion; null unless both are known and in order. */
+export function tripDuration(times: TripTimes | null | undefined): number | null {
+  if (!times?.startedAt || !times.completedAt) return null;
+  const start = Date.parse(times.startedAt),
+    end = Date.parse(times.completedAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+  return Math.round((end - start) / 60000);
+}
+
+/** The calendar day ("YYYY-MM-DD") of an instant in a time zone; null when unreadable. */
+export function localDay(value: string, timeZone: string): string | null {
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(time);
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    return `${part("year")}-${part("month")}-${part("day")}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The local days the trip covered in the display zone, from its start to its completion (either
+ * alone when the other is unknown), at most 31; null without times.
+ */
+export function tripDays(times: TripTimes | null | undefined, timeZone: string): string[] | null {
+  const ends = [times?.startedAt, times?.completedAt]
+    .filter((value): value is string => !!value)
+    .map((value) => localDay(value, timeZone))
+    .filter((day): day is string => day !== null)
+    .sort();
+  const first = ends[0],
+    last = ends.at(-1);
+  if (!first || !last) return null;
+  const days: string[] = [];
+  // Calendar arithmetic on the date alone, independent of the display zone.
+  for (let day = Date.parse(`${first}T00:00:00Z`); days.length < 31; day += 86400000) {
+    const text = new Date(day).toISOString().slice(0, 10);
+    days.push(text);
+    if (text >= last) break;
+  }
+  return days;
+}
+
+type EventItem = DTO["EventPublic"];
+
+/** Events a trip can link to: the same game and still scheduled, newest first. */
+export function eventCandidates(items: readonly EventItem[], game: Summary["game"]) {
+  return items
+    .filter((event) => event.game === game && event.status === "scheduled")
+    .map((event, index) => ({ event, index }))
+    .sort((a, b) => instant(b.event.startsAt) - instant(a.event.startsAt) || b.index - a.index)
+    .map(({ event }) => event);
+}
+
+/** The event starts on one of the trip's local days. */
+export function onTripDays(event: EventItem, days: readonly string[], timeZone: string) {
+  const day = localDay(event.startsAt, timeZone);
+  return day !== null && days.includes(day);
+}
+
+/** The event's origin and destination are the trip's, compared by canonical ID. */
+export function routeMatches(
+  event: Pick<EventItem, "origin" | "destination">,
+  summary: Pick<Summary, "origin" | "destination">,
+) {
+  return (
+    !!event.origin &&
+    !!event.destination &&
+    !!summary.origin &&
+    !!summary.destination &&
+    event.origin.entityId === summary.origin.entityId &&
+    event.destination.entityId === summary.destination.entityId
+  );
+}
+
+/**
+ * What linking does, following the server: a decided trip gets a proposal for staff while its
+ * result stays; any other trip is linked at once and checked again. Attendance decides only
+ * whether the event's exception to the level limits can apply; a signup is not attendance.
+ */
+export function associationConsequence(
+  decision: Summary["decision"],
+  member: Pick<DTO["EventMember"], "myAttendance" | "myResponse"> | null | undefined,
+): { linkKey: TripKey; attendanceKey: TripKey | null } {
+  const linkKey: TripKey =
+    decision === "accepted" || decision === "rejected" ? "eventLinkReviewed" : "eventLinkImmediate";
+  if (!member) return { linkKey, attendanceKey: null };
+  return {
+    linkKey,
+    attendanceKey:
+      member.myAttendance === "attended"
+        ? "eventAttended"
+        : member.myAttendance === "not_attended"
+          ? "eventNotAttended"
+          : member.myResponse.response === "participating"
+            ? "eventSignedUp"
+            : "eventNotSignedUp",
+  };
 }

@@ -169,13 +169,15 @@ const cargoLook = {
 } as const satisfies Record<CargoLabel, unknown>;
 
 /**
- * The cargo labels the telemetry client reported, with one info tip on where they come from.
- * Nothing renders without a report.
+ * The cargo labels the telemetry client reported, with one info tip on where they come from unless
+ * `tip` is false (the trip page explains them in its data note). Nothing renders without a report.
  */
 export function CargoLabelBadges({
   classification,
+  tip = true,
 }: {
   classification: DTO["TripCargoClassification"] | undefined;
+  tip?: boolean;
 }) {
   const { t } = useTranslation("trips"),
     labels = cargoLabels(classification);
@@ -191,9 +193,11 @@ export function CargoLabelBadges({
           </li>
         ))}
       </ul>
-      <InfoTip label={t("cargoLabelsInfoLabel")}>
-        <p>{t("cargoLabelsHelp")}</p>
-      </InfoTip>
+      {tip && (
+        <InfoTip label={t("cargoLabelsInfoLabel")}>
+          <p>{t("cargoLabelsHelp")}</p>
+        </InfoTip>
+      )}
     </span>
   );
 }

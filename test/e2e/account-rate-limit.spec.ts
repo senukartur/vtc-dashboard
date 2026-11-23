@@ -321,7 +321,7 @@ test(
     expect(trip.requests).toBe(2);
     trip.remaining = 0;
     await refresh.click();
-    await expect(page.locator(".trip-detail-tiles")).toBeVisible();
+    await expect(main.getByRole("region", { name: "Route", exact: true })).toBeVisible();
     await expect(noticeIn(main)).toHaveCount(0);
   },
 );
