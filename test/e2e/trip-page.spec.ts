@@ -1003,6 +1003,17 @@ test(
     await expect(consequence).toHaveText(
       "The trip is already decided, so staff will review the link; the current result stays until then. Your attendance is confirmed, so the level limits do not apply to this trip.",
     );
+    // The preselected linked event is not a change: Link stays disabled until another is picked.
+    const submit = dialog(page).getByRole("button", { name: "Link", exact: true });
+    await expect(submit).toBeDisabled();
+    await dialog(page).getByRole("button", { name: "All past" }).click();
+    await dialog(page).locator(".trip-event-option", { hasText: events.later.title }).click();
+    await expect(submit).toBeEnabled();
+    await current.click();
+    await expect(current.getByRole("radio")).toBeChecked();
+    await expect(submit).toBeDisabled();
+    await submit.click({ force: true });
+    expect(conflicts).toBe(0);
 
     // A rejected (stale) cursor shows a safe failure; Refresh starts over from the first page.
     await dialog(page).getByRole("button", { name: "All past" }).click();

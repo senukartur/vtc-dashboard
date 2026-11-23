@@ -636,25 +636,25 @@ async function pageLocale(page: Page) {
   );
 }
 /**
- * Links the trip to a started event through the trip page dialog: Link (or Change for a linked
- * trip) in Conditions, the event among all past ones, then the command that must succeed and close
- * the dialog. `relink` expects the event to be linked and preselected already.
+ * Links the trip to a started event through the trip page dialog: Link in Conditions, the event
+ * among all past ones (the consequence names the confirmed attendance), then the command that must
+ * succeed and close the dialog. Reopened with Change, the linked event is preselected and Link
+ * stays disabled, so the same association is never sent again.
  */
-async function linkEvent(page: Page, tripId: string, eventId: string, relink = false) {
+async function linkEvent(page: Page, tripId: string, eventId: string) {
   const conditions = page.getByRole("region", { name: "Conditions", exact: true });
-  await conditions.getByRole("button", { name: relink ? "Change" : "Link", exact: true }).click();
+  await conditions.getByRole("button", { name: "Link", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Link to an event" });
   await expect(dialog).toBeVisible();
   const option = dialog.locator(`input[type=radio][value="${eventId}"]`);
-  if (relink) await expect(option).toBeChecked();
   // The synthetic trip day is long past, so the event is under All past (newest first).
   await dialog.getByRole("button", { name: "All past", exact: true }).click();
   await expect(option).toBeVisible();
   await option.check();
-  await expect(dialog.locator(".trip-event-consequence")).toContainText(
-    relink
-      ? "Your attendance is confirmed, so the level limits do not apply to this trip."
-      : "The trip is linked at once and checked again.",
+  const consequence = dialog.locator(".trip-event-consequence");
+  await expect(consequence).toContainText("The trip is linked at once and checked again.");
+  await expect(consequence).toContainText(
+    "Your attendance is confirmed, so the level limits do not apply to this trip.",
   );
   const response = page.waitForResponse(
     (r) =>
@@ -668,6 +668,13 @@ async function linkEvent(page: Page, tripId: string, eventId: string, relink = f
   await expect(
     page.getByRole("status").filter({ hasText: "The trip is linked to the event." }),
   ).toBeVisible();
+  await page.reload();
+  await catalogLanguage(page);
+  await conditions.getByRole("button", { name: "Change", exact: true }).click();
+  await expect(dialog.locator(`input[type=radio][value="${eventId}"]`)).toBeChecked();
+  await expect(dialog.getByRole("button", { name: "Link", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
 }
 async function confirm(page: Page, label: string, commandPath?: string, expectedStatus = 201) {
   const actions = {
@@ -1676,6 +1683,12 @@ test(
       });
       // The link dialog offers past events only, so wait until the synthetic event has started.
       await expect.poll(() => Date.now() >= Date.parse(start), { timeout: 20000 }).toBe(true);
+      phase = "CONFIRMED_ATTENDANCE";
+      // Attendance is confirmed before linking: the association records the attendance revision,
+      // and the dialog never resubmits the event that is already linked.
+      await events.setAttendance(fixture.staff, event.data.event.id, randomUUID(), 1, {
+        members: [{ memberId: fixture.userId, attendance: "attended", note: null }],
+      });
       await page.goto(`/account/trips/${report.tripId}`);
       await catalogLanguage(page);
       await linkEvent(page, report.tripId, event.data.event.id);
@@ -1683,13 +1696,6 @@ test(
       expect(current.summary.decision).not.toBe("accepted");
       expect(current.summary.event?.id).toBe(event.data.event.id);
       await resetAccountLimits();
-      phase = "CONFIRMED_ATTENDANCE";
-      await events.setAttendance(fixture.staff, event.data.event.id, randomUUID(), 1, {
-        members: [{ memberId: fixture.userId, attendance: "attended", note: null }],
-      });
-      await page.reload();
-      await catalogLanguage(page);
-      await linkEvent(page, report.tripId, event.data.event.id, true);
       await staffBrowser.addCookies((await staff.storageState()).cookies);
       const reviewer = await staffBrowser.newPage();
       await reviewer.goto(`/account/review/${report.tripId}`);

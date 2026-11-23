@@ -391,7 +391,8 @@ function EventDialogBody({
         </DialogClose>
         <Button
           type="button"
-          disabled={!selected || command.pending || command.seconds > 0}
+          // The linked event is preselected; linking it again would only resubmit it.
+          disabled={!selected || selected === current?.id || command.pending || command.seconds > 0}
           onClick={async () => {
             if (!selected) return;
             const result = await command.run(
