@@ -529,7 +529,7 @@ export function TripSources({ sources }: { sources: DTO["TripStage4Source"][] | 
 
 /**
  * The author-safe qualification check, collapsed: "Rules: N of M", the checked level or why there
- * is none, and the five limits through the shared list on demand. No check renders nothing.
+ * is none, and the level limits through the shared list on demand. No check renders nothing.
  */
 export function TripQualificationCheck({
   check,

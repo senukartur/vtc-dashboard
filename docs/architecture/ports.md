@@ -77,6 +77,7 @@ interface NormalizedTripEvidence {
   destination: Fact<TripEntity>;
   cargo: Fact<TripEntity>;
   cargoMassKg: Fact<DecimalString>;
+  cargoDamageFraction: Fact<DecimalString>;
   actualDistanceM: Fact<DecimalString>;
   measuredSegmentM: Fact<DecimalString>;
   plannedDistanceM: Fact<DecimalString>;
@@ -89,7 +90,7 @@ interface NormalizedTripEvidence {
 }
 interface EvaluationContext {
   qualificationAssignmentId: Id;
-  levelId: Id; // its current five limits; the decision stores a snapshot of them
+  levelId: Id; // the decision stores the applied limits
   attributionBasis: "actual_start" | "manual_confirmation" | "staff_resolution";
   confirmedEvent: null | { eventId: Id; eventRevisionId: Id; attendanceRevisionId: Id };
 }
@@ -97,11 +98,11 @@ type RuleResult = { outcome: "pass" | "fail" | "unknown";
   reasons: readonly { code: string; field: string }[] };
 ```
 
-A known normalized actual start/end requires supported lifecycle evidence, not a numeric checkpoint or client flag alone. Manual source times are unknown; confirmation time belongs to the **decision**, not the source. Incomplete distance retains its measured segment separately and leaves actual trip distance unknown. Pinned trailer types preserve body/chain classification; an incomplete list cannot satisfy an allowlist check. ADR comes from supported pinned catalog facts, not a translated cargo label. Raw money, fuel, damage, mode/build/locale and source identities remain available in the immutable telemetry snapshot; this minimal rule boundary does not erase or reinterpret them.
+A known normalized actual start/end requires supported lifecycle evidence, not a numeric checkpoint or client flag alone. Manual source times are unknown; confirmation time belongs to the **decision**, not the source. Incomplete distance retains its measured segment separately and leaves actual trip distance unknown. Pinned trailer types preserve body/chain classification; an incomplete list cannot satisfy an allowlist check. ADR comes from supported pinned catalog facts, not a translated cargo label. The immutable telemetry snapshot retains raw money, fuel, damage, mode, build, locale and source identities. The damage rule uses the delivered telemetry fact, or the assessed immutable manual report revision for a manual-only trip.
 
 The coordinator obtains the qualification level held at attribution time and confirmed event attendance through owning facades; a source adapter cannot supply trusted acceptance, qualification or exception flags. If qualification is unknown, create review work rather than inventing an `EvaluationContext`. Staff resolution records supported facts/attribution explicitly; it cannot silently reuse today's qualification for an old trip.
 
-The qualification check is one pure function (`checkTrip` in `apps/api/src/modules/qualifications/check.ts`) over the evidence and the level's five limits: cargo mass, actual distance, trailer types, ADR and Hard Mode. A proven failure returns `fail`, insufficient facts return `unknown`, and every set limit passing returns `pass`. A trip with confirmed event attendance is exempt from the whole check; the exemption never bypasses ownership, lifecycle, completeness or timing checks. No arbitrary JavaScript expression or unknown rule type executes from stored JSON.
+The qualification check is one pure function (`checkTrip` in `apps/api/src/modules/qualifications/check.ts`) over the evidence and the level's limits for cargo mass, actual distance, trailer types, ADR, Hard Mode and optional maximum cargo damage. A proven failure returns `fail`, insufficient facts return `unknown`, and every set limit passing returns `pass`. The coordinator sends a delivered trip with a configured cap and missing final damage to staff review even when another limit failed. A trip with confirmed event attendance is exempt from the whole check; the exemption never bypasses ownership, lifecycle, completeness or timing checks. No arbitrary JavaScript expression or unknown rule type executes from stored JSON.
 
 ## Adapter rules
 

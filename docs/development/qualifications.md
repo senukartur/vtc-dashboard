@@ -6,27 +6,28 @@
 
 Three tables in `packages/db/src/schema/qualifications`:
 
-- `qualification_levels`: one row per level and game, with a 1-based `position`, a name, the five limits, the promotion conditions and an edit `version`. A removed level keeps its row with `position = NULL` and `deleted_at` set, so stored trip snapshots and assignment history still resolve its name. A ladder holds at most 25 active levels.
+- `qualification_levels`: one row per level and game, with a 1-based `position`, a name, the trip limits, the promotion conditions and an edit `version`. A removed level keeps its row with `position = NULL` and `deleted_at` set, so stored trip snapshots and assignment history still resolve its name. A ladder holds at most 25 active levels.
 - `qualification_level_trailers`: the trailer types allowed by a level in `selected` trailer mode, with a foreign key to the game's catalog row.
 - `qualification_assignments`: half-open UTC periods `[assigned_at, ended_at)` per member and game. `kind` is `admission`, `promotion`, `manual`, `level_removed` or `reinstatement`. The generated `open_marker` and the unique `(user_id, game, open_marker)` index keep at most one open period per member and game. The unique `previous_assignment_id` keeps the history a chain.
 
-The five limits are cargo mass (min/max kg), actual distance (min/max m), trailer types (`any` or `selected`), ADR (`forbidden`, `selected` or `any`) and Hard Mode (required or not). Empty bounds mean no limit. A `selected` mode needs at least one item. The conditions are a trip count and an actual distance; every set condition must be met. A non-top level must have at least one condition (`422 QUALIFICATION_CONDITIONS_REQUIRED`); a level without conditions never promotes. A create or move that would push the top level down without conditions fails the same way, and the error detail names that level in `ownResourceId`.
+The limits are cargo mass (min/max kg), actual distance (min/max m), trailer types (`any` or `selected`), ADR (`forbidden`, `selected` or `any`), Hard Mode and maximum cargo damage. Empty bounds mean no limit. The inclusive `cargoDamageMaxPercent` accepts a canonical decimal string from 0 to 100, with up to 18 decimal places. Null clears the cap. Omitting it disables damage on creation and preserves the saved value on edit. A `selected` mode needs at least one item. The conditions are a trip count and an actual distance; every set condition must be met. A non-top level must have at least one condition (`422 QUALIFICATION_CONDITIONS_REQUIRED`); a level without conditions never promotes. A create or move that would push the top level down without conditions fails the same way, and the error detail names that level in `ownResourceId`.
 
 `QUALIFICATIONS_ENABLED=true` requires Identity and Trips and has no other settings. The retired cursor key, ladder-edit and eligibility-tracking settings are ignored.
 
 ## Trip check
 
-`checkTrip` in `apps/api/src/modules/qualifications/check.ts` is pure. It returns the five rules in a fixed order, each `pass`, `fail` or `unknown`, with the configured value and the trip value. A failure outranks an unknown rule. An unknown value is never zero:
+`checkTrip` in `apps/api/src/modules/qualifications/check.ts` is pure. It returns the five base rules and adds `cargo_damage` when a cap applies, each `pass`, `fail` or `unknown`, with the configured value and the trip value. A failure outranks an unknown rule. An unknown value is never zero:
 
 - an incomplete trailer chain is unknown unless a known trailer is already outside the selected set;
 - non-ADR cargo passes every ADR mode;
-- a missing Hard Mode result counts as unknown when Hard Mode is required.
+- a missing Hard Mode result counts as unknown when Hard Mode is required;
+- final telemetry fractions become exact percentages. The manual-only check takes the assessed immutable revision's reported percentage. A configured cap with missing or invalid evidence produces an unknown rule.
 
-The [decision coordinator](trip-decisions.md) selects the member's level at the trip's attribution time, which is the actual start for telemetry and the staff confirmation for manual reports. It applies that level's current limits. A failed limit rejects the trip with `qualification_cargo_mass`, `qualification_distance`, `qualification_trailer`, `qualification_adr` or `qualification_hard_mode`. An unknown rule (`qualification_unknown`), an unknown level (`qualification_level_unknown`) or an unknown attribution time (`qualification_attribution_time_unknown`) sends the trip to staff review. Staff may accept a manual report over any of the five limits with an explicit confirmation.
+The [decision coordinator](trip-decisions.md) selects the member's level at the trip's attribution time, which is the actual start for telemetry and the staff confirmation for manual reports. It applies that level's current limits. A failed limit rejects the trip with `qualification_cargo_mass`, `qualification_distance`, `qualification_trailer`, `qualification_adr`, `qualification_hard_mode` or `qualification_cargo_damage`. An unknown rule (`qualification_unknown`), an unknown level (`qualification_level_unknown`) or an unknown attribution time (`qualification_attribution_time_unknown`) sends the trip to staff review. Missing final damage requires review even if another level limit failed. Staff may accept a manual-only report over a proven limit with explicit confirmation.
 
 A trip with current confirmed event attendance is credited without the level limits (`event_exempt`). Prescribed loads no longer matter for the check.
 
-Each decision stores a snapshot of the level name, edit version, limits and rule results. Reads show `basis: decision` for decided trips, so later edits never rewrite history. Pending trips show `basis: current`.
+Each decision stores a snapshot of the level name, edit version, limits and rule results. Reads show `basis: decision` for decided trips, so later edits never rewrite history. Pending trips and active staff review of a held result show `basis: current`. Stored decisions and audit values written before the cap retain their original shape.
 
 ## Promotion
 
@@ -65,6 +66,8 @@ Edits, moves and removals take `expectedVersion` and return `409` on a stale ver
 
 Ladder limits and conditions are not carried over, because the old rules have no equivalent. Staff configure them again after the upgrade. `test/integration/qualification-simplification-upgrade.test.ts` checks the mapping and that the upgraded schema equals a fresh one.
 
+`0039` adds a nullable range-checked cap to each level. Existing levels start disabled. See the [migration rollback boundary](../../packages/db/migrations/README.md).
+
 ## Companion reads and live checks
 
-The [companion contract](../contracts/telemetry-companion-v1.md) uses a caller-transaction read facade under the authenticated member/company fence. It returns exact current assignment, level edit, five limits, conditions and remaining credited amounts without invoking promotion. Missing assignment/disabled service are explicit states. A supported actual start may select a historical assignment; current mutable limits remain explicitly provisional. The pure final checkTrip is reused with only growing-distance/nonfinal-HardMode adaptations. Confirmed same-game attendance exempts all five limits without prescribed-load matching. RSVP and client references cannot authorize exemption. Lease applicability is supplied by the server; it is not a second client rule evaluator. Selected trailer labels are current_catalog presentation metadata, separate from retained identities/group membership. Qualification edits/assignments/promotions bump the Trips-owned owner revision through its contribution facade in the producer transaction.
+The [companion contract](../contracts/telemetry-companion-v1.md) uses a caller-transaction read facade under the authenticated member/company fence. It returns exact current assignment, level edit, five limits, conditions and remaining credited amounts without invoking promotion. Missing assignment/disabled service are explicit states. A supported actual start may select a historical assignment; current mutable limits remain explicitly provisional. The shared checker applies the same limit policy. Companion v1 cannot send or display a damage rule, so a configured cap adds `fact_unavailable` to provisional preview reasons. Confirmed same-game attendance exempts every level limit without prescribed-load matching. RSVP and client references cannot authorize exemption. Lease applicability is supplied by the server; it is not a second client rule evaluator. Selected trailer labels are current_catalog presentation metadata, separate from retained identities/group membership. Qualification edits/assignments/promotions bump the Trips-owned owner revision through its contribution facade in the producer transaction.

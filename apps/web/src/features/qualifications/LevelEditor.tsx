@@ -11,7 +11,14 @@ import { LabelBadge } from "../../shared/ui/label-badge.js";
 import { Badge, Button, Card, Input, Label, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { failureText, LimitList, needText, useLocale } from "./limits.js";
-import { baseUnits, compareDecimal, displayUnits, promotionPreview, tripCount } from "./model.js";
+import {
+  baseUnits,
+  compareDecimal,
+  damageCap,
+  displayUnits,
+  promotionPreview,
+  tripCount,
+} from "./model.js";
 import { levelPath } from "./QualificationsPage.js";
 import { useQualificationCommand, useQualificationQuery } from "./queries.js";
 import type { Conditions, DTO, Game, Level, LevelDetail, Limits } from "./transport.js";
@@ -26,6 +33,7 @@ interface Draft {
   massMax: string;
   distanceMin: string;
   distanceMax: string;
+  cargoDamageMax: string;
   trailerMode: "any" | "selected";
   trailerBasis: "variant" | "type";
   trailers: Trailer[];
@@ -138,6 +146,10 @@ function initial(detail: LevelDetail | null, ladder: Level[], locale: "ru" | "en
     massMax: displayUnits(limits?.massMaxKg ?? null, locale),
     distanceMin: displayUnits(limits?.distanceMinM ?? null, locale),
     distanceMax: displayUnits(limits?.distanceMaxM ?? null, locale),
+    cargoDamageMax:
+      locale === "ru"
+        ? (limits?.cargoDamageMaxPercent ?? "").replace(".", ",")
+        : (limits?.cargoDamageMaxPercent ?? ""),
     trailerMode: limits?.trailers.mode ?? "any",
     trailerBasis: detail ? (limits?.trailers.basis ?? "variant") : "type",
     trailers:
@@ -159,6 +171,7 @@ function validate(draft: Draft, top: boolean) {
     massMax: baseUnits(draft.massMax),
     distanceMin: baseUnits(draft.distanceMin),
     distanceMax: baseUnits(draft.distanceMax),
+    cargoDamageMax: damageCap(draft.cargoDamageMax),
     requiredDistance: baseUnits(draft.requiredDistance),
   };
   const trips = tripCount(draft.requiredTrips);
@@ -176,6 +189,7 @@ function validate(draft: Draft, top: boolean) {
     errors.distanceMax = "minAboveMax";
   if (amounts.massMax === "0") errors.massMax = "invalidNumber";
   if (amounts.distanceMax === "0") errors.distanceMax = "invalidNumber";
+  if (amounts.cargoDamageMax === undefined) errors.cargoDamageMax = "invalidDamageCap";
   if (draft.trailerMode === "selected" && !draft.trailers.length)
     errors.trailers = "trailersNeedOne";
   if (draft.adrMode === "selected" && !draft.adrClasses.length) errors.adrClasses = "adrNeedOne";
@@ -239,6 +253,7 @@ function Editor({
     massMaxKg: amounts.massMax ?? null,
     distanceMinM: amounts.distanceMin ?? null,
     distanceMaxM: amounts.distanceMax ?? null,
+    cargoDamageMaxPercent: amounts.cargoDamageMax ?? null,
     trailers: {
       basis: draft.trailerBasis,
       mode: draft.trailerMode,
@@ -263,6 +278,7 @@ function Editor({
       massMaxKg: amounts.massMax ?? null,
       distanceMinM: amounts.distanceMin ?? null,
       distanceMaxM: amounts.distanceMax ?? null,
+      cargoDamageMaxPercent: amounts.cargoDamageMax ?? null,
       trailers: {
         basis: draft.trailerBasis,
         mode: draft.trailerMode,
@@ -383,6 +399,25 @@ function Editor({
               onMax={(value) => set("distanceMax", value)}
               error={shown("distanceMin") ?? shown("distanceMax")}
             />
+            <FormField
+              id={field("cargoDamageMax")}
+              label={t("damageCapField")}
+              error={shown("cargoDamageMax")}
+            >
+              <Input
+                id={field("cargoDamageMax")}
+                inputMode="decimal"
+                value={draft.cargoDamageMax}
+                onChange={(event) => set("cargoDamageMax", event.target.value)}
+                aria-invalid={!!shown("cargoDamageMax")}
+                aria-describedby={field(
+                  shown("cargoDamageMax") ? "cargoDamageMax-error" : "cargoDamageMax-hint",
+                )}
+              />
+              <p id={field("cargoDamageMax-hint")} className="qualification-muted">
+                {t("damageCapHint")}
+              </p>
+            </FormField>
             <fieldset className="qualification-fieldset">
               <legend>{t("trailersLabel")}</legend>
               <SegmentedControl
@@ -694,7 +729,11 @@ function FormField({
     <div className="stack qualification-field">
       <Label htmlFor={id}>{text}</Label>
       {children}
-      {error && <p className="field-error">{t(error)}</p>}
+      {error && (
+        <p id={`${id}-error`} className="field-error">
+          {t(error)}
+        </p>
+      )}
     </div>
   );
 }

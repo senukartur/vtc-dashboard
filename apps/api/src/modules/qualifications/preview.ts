@@ -3,7 +3,8 @@ import type { TxContext } from "@vtc/db";
 import type { Catalogs } from "../catalogs/service.js";
 import { compareDecimal } from "../sources/contracts/decimal.js";
 import type { Fact, NormalizedTripEvidence, TripEntity } from "../sources/contracts/evidence.js";
-import { checkTrip, type TripCheck } from "./check.js";
+import { checkTrip, type QualificationLimits, type TripCheck } from "./check.js";
+import { companionRules } from "./companion.js";
 
 type S = companionComponents["schemas"];
 /** Guards describe applicability, not client-side qualification policy. */
@@ -28,7 +29,7 @@ export function previewDistanceEnvelope(
 }
 /** Adapt only live finality; the authoritative final checkTrip semantics remain unchanged. */
 export function checkPreview(
-  limits: S["Limits"],
+  limits: QualificationLimits,
   facts: NormalizedTripEvidence,
   input: S["PreviewInput"],
   groups: Record<string, string>,
@@ -76,7 +77,11 @@ export function checkPreview(
     }
   }
   if (checked.rules.some((rule) => rule.result === "fail")) reasons.push("limit_mismatch");
-  if (checked.rules.some((rule) => rule.result === "unknown") && !reasons.length)
+  if (
+    checked.rules.some(
+      (rule) => rule.result === "unknown" && (rule.rule === "cargo_damage" || !reasons.length),
+    )
+  )
     reasons.push("fact_unavailable");
   const outcome: TripCheck["outcome"] = exempt
     ? "pass"
@@ -87,7 +92,7 @@ export function checkPreview(
         : "pass";
   return {
     outcome,
-    rules: checked.rules.map((rule) => ({
+    rules: companionRules(checked.rules).map((rule) => ({
       ...rule,
       reasons: [
         exempt

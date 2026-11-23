@@ -235,7 +235,7 @@ test(
     );
 
     const check = region(page, "Qualification");
-    await expect(check.locator(".trip-qualification-rules")).toHaveText("Rules: 4 of 5");
+    await expect(check.locator(".trip-qualification-rules")).toHaveText("Rules: 5 of 6");
     await expect(check).toContainText("Checked against “Fictional Trainee” · As at the decision");
     await expect(check.getByRole("listitem")).toHaveCount(0);
     const toggle = check.getByRole("button", { name: "Show rules", exact: true });
@@ -244,11 +244,15 @@ test(
     const hide = check.getByRole("button", { name: "Hide rules", exact: true });
     await expect(hide).toHaveAttribute("aria-expanded", "true");
     const rules = check.getByRole("listitem");
-    await expect(rules).toHaveCount(5);
+    await expect(rules).toHaveCount(6);
     await expect(page.locator(`#${await hide.getAttribute("aria-controls")}`)).toBeVisible();
-    for (const [index, result] of ["pass", "pass", "fail", "pass", "pass"].entries())
+    for (const [index, result] of ["pass", "pass", "fail", "pass", "pass", "pass"].entries())
       await expect(rules.nth(index)).toHaveAttribute("data-result", result);
     await expect(rules.nth(2)).toContainText("Trailer types · Outside the limit");
+    // The cargo damage cap (VTC-171) is one of the counted rules.
+    await expect(rules.filter({ hasText: "Cargo damage · Passes" })).toContainText(
+      "Trip: 37.5% · Limit: up to 100%",
+    );
     // The shared list renders without its own heading inside the card.
     await expect(check.getByRole("heading")).toHaveText(["Qualification"]);
     await hide.click();
@@ -1246,8 +1250,16 @@ test(
           expect(cells[2]).toBe(cells[3]);
           expect(cells[2]).toBeGreaterThan(cells[0] ?? 0);
         }
-        if (name === "long")
+        if (name === "long") {
           await expect(page.locator(".trip-route")).toContainText(longCompanyName);
+          // All six limits, including the cargo damage cap, fit once the rules are shown.
+          const check = page.locator(".trip-qualification");
+          await check
+            .getByRole("button", { name: locale === "en" ? "Show rules" : "Показать правила" })
+            .click();
+          await expect(check.getByRole("listitem")).toHaveCount(6);
+          await expect(check).toContainText(locale === "en" ? "37.5%" : "37,5%");
+        }
         if (name === "needs-fix") {
           const section = await box(page.locator(".trip-banner"));
           const action = await box(page.locator(".trip-banner-action"));

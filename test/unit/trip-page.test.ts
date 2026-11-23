@@ -67,7 +67,7 @@ test("every trip page browser stub keeps the full contract shape", () => {
   }
 });
 
-test("stub checks cover the checked, event-exempt, unknown-level and missing states", () => {
+test("stub checks cover configured, historical, event-exempt, unknown-level and missing states", () => {
   const checked = privateView(telemetryWithEvent()).qualificationCheck;
   expect(checked?.status).toBe("checked");
   expect(checked?.basis).toBe("decision");
@@ -77,7 +77,14 @@ test("stub checks cover the checked, event-exempt, unknown-level and missing sta
     "trailer_types:fail",
     "adr:pass",
     "hard_mode:pass",
+    "cargo_damage:pass",
   ]);
+  expect(checked?.rules.find((rule) => rule.rule === "cargo_damage")).toEqual({
+    rule: "cargo_damage",
+    result: "pass",
+    maxPercent: "100",
+    observedPercent: "37.5",
+  });
   expect(privateView(manualUnknown()).qualificationCheck).toMatchObject({
     status: "no_level",
     level: null,
@@ -89,6 +96,13 @@ test("stub checks cover the checked, event-exempt, unknown-level and missing sta
   });
   expect(privateView(manualUnknown("no-check")).qualificationCheck).toBeNull();
   const returned = privateView(returnedTrip()).qualificationCheck?.rules ?? [];
+  expect(returned.map((rule) => rule.rule)).toEqual([
+    "cargo_mass",
+    "distance",
+    "trailer_types",
+    "adr",
+    "hard_mode",
+  ]);
   expect(returned.flatMap((rule) => (rule.rule === "trailer_types" ? rule.allowed : []))).toEqual(
     [],
   );
@@ -717,8 +731,8 @@ test("an accepted trip has one counted line with the rounded distance and its ac
 
 test("the collapsed check counts passed limits and takes its tone from the worst result", () => {
   expect(qualificationSummary(privateView(telemetryWithEvent()).qualificationCheck)).toEqual({
-    passed: 4,
-    total: 5,
+    passed: 5,
+    total: 6,
     tone: "error",
   });
   const check = privateView(telemetryWithEvent()).qualificationCheck;
@@ -727,14 +741,14 @@ test("the collapsed check counts passed limits and takes its tone from the worst
     ...check,
     rules: check.rules.map((rule) => ({ ...rule, result: "pass" as const })),
   } as DTO["QualificationCheck"];
-  expect(qualificationSummary(passing)).toEqual({ passed: 5, total: 5, tone: "ok" });
+  expect(qualificationSummary(passing)).toEqual({ passed: 6, total: 6, tone: "ok" });
   const unknown = {
     ...passing,
     rules: passing.rules.map((rule, i) =>
       i === 0 ? { ...rule, result: "unknown" as const } : rule,
     ),
   } as DTO["QualificationCheck"];
-  expect(qualificationSummary(unknown)).toEqual({ passed: 4, total: 5, tone: "warn" });
+  expect(qualificationSummary(unknown)).toEqual({ passed: 5, total: 6, tone: "warn" });
   expect(qualificationSummary(privateView(manualUnknown()).qualificationCheck)).toBeNull();
   expect(qualificationSummary(null)).toBeNull();
 });
