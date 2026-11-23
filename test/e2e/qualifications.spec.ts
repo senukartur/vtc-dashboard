@@ -125,7 +125,8 @@ test(
   "a lead edits and clears an exact cargo damage cap in Russian and English",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const mock = await open(page, true, `/account/qualifications/${qid(1)}/edit`);
+    const levelPath = `/account/qualifications/${qid(1)}`;
+    const mock = await open(page, true, `${levelPath}/edit`);
     const field = page.getByLabel("Maximum cargo damage (%)", { exact: true });
     await field.fill("100.01");
     await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -133,10 +134,12 @@ test(
     expect(writes(mock)).toEqual([]);
     await field.fill("2,50");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("up to 2.5%", { exact: true })).toBeVisible();
+    await expect.poll(() => writes(mock).length).toBe(1);
     expect(writes(mock)[0]?.body).toMatchObject({ limits: { cargoDamageMaxPercent: "2.5" } });
+    await expect(page).toHaveURL(levelPath);
+    await expect(page.getByText("up to 2.5%", { exact: true })).toBeVisible();
 
-    await page.goto(`/account/qualifications/${qid(1)}/edit`);
+    await page.goto(`${levelPath}/edit`);
     await switchLanguage(page, "ru");
     const translated = page.getByLabel("Максимальный ущерб грузу (%)", { exact: true });
     await expect(translated).toHaveValue("2,5");
@@ -144,6 +147,8 @@ test(
     await page.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect.poll(() => writes(mock).length).toBe(2);
     expect(writes(mock)[1]?.body).toMatchObject({ limits: { cargoDamageMaxPercent: null } });
+    await expect(page).toHaveURL(levelPath);
+    await expect(page.locator('dt:text-is("Ущерб грузу") + dd')).toHaveText("без ограничений");
   },
 );
 
