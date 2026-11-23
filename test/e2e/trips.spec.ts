@@ -238,7 +238,11 @@ test(
     await page.goto(`/account/trips/${id}`);
     await catalogLanguage(page);
     // Private downloads live in the staff technical details, collapsed until opened.
-    await page.locator("summary").filter({ hasText: "Technical details" }).click();
+    await page.locator("summary").filter({ hasText: "For dispatchers" }).click();
+    await page
+      .locator("summary")
+      .filter({ hasText: /Technical details/ })
+      .click();
     await page.getByRole("button", { name: "Download private image", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("Image expired");
     await page.route(`**/api/v1/trips/${id}`, (r) =>
@@ -285,7 +289,10 @@ test(
     await expect(screenshots).toBeVisible();
     await expect(history).toBeVisible();
     deny = true;
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    // The page refreshes from its actions menu; no separate Refresh button remains in the header.
+    await expect(page.getByRole("button", { name: "Refresh", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Refresh data", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("permissions");
     await expect(screenshots).toHaveCount(0);
     await expect(history).toHaveCount(0);
@@ -572,7 +579,7 @@ for (const locale of ["en", "ru"] as const)
   );
 
 test(
-  "private full trip detail localizes recorded audit and each unknown field",
+  "private full trip detail localizes recorded audit and leaves an unknown job type out",
   browserCase(["@layout"]),
   async ({ page }) => {
     await mockTrips(page);
@@ -586,30 +593,32 @@ test(
       route.fulfill({ json: view, headers: { ETag: '"v1"' } }),
     );
     await page.goto(`/account/trips/${id}`);
-    for (const [locale, rows] of [
+    for (const [locale, rows, missing] of [
       [
         "en",
         [
-          ["Job type", "Job type unknown"],
           ["Game mode", "HaulMP"],
           ["Hard Mode", "Not qualified"],
         ],
+        "Job type",
       ],
       [
         "ru",
         [
-          ["Тип заказа", "Тип заказа неизвестен"],
           ["Режим игры", "HaulMP"],
           // Hard Mode keeps its English name in both languages.
           ["Hard Mode", "Не соответствует"],
         ],
+        "Тип заказа",
       ],
     ] as const) {
       await catalogLanguage(page, locale);
       const card = page.getByRole("region", {
-        name: locale === "en" ? "Trip" : "Рейс",
+        name: locale === "en" ? "Conditions" : "Условия",
         exact: true,
       });
+      // An unknown recorded value is left out instead of shown as a placeholder.
+      await expect(card.locator("dt").filter({ hasText: missing })).toHaveCount(0);
       for (const [label, value] of rows) {
         // Only the audit term of the trip block: the qualification check can name Hard Mode too.
         const term = card.locator("dt").filter({ hasText: new RegExp(`^\\s*${label}$`) });

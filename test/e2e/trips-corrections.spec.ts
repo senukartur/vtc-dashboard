@@ -244,6 +244,7 @@ test(
     );
     await page.goto(`/account/trips/${id}`);
     await catalogLanguage(page);
+    await page.locator("summary").filter({ hasText: "For dispatchers" }).click();
     await page.locator("summary").filter({ hasText: "Private report and review history" }).click();
     const a = page.locator("section.trip-revision").filter({ hasText: a2.id });
     await expect(a).toContainText(reportA);
@@ -523,6 +524,7 @@ for (const { mode, manual } of [
       try {
         await page.goto(`/account/trips/${id}`);
         await catalogLanguage(page);
+        await page.locator("summary").filter({ hasText: "For dispatchers" }).click();
         await page.locator("summary").filter({ hasText: "Reconciliation history" }).click();
         const entry = page
           .locator("details")

@@ -1,5 +1,5 @@
 import { ArrowLeft } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
@@ -7,7 +7,6 @@ import { useWorkspaceSummary } from "../../app/workspace-summary.js";
 import { queryString, useCursorPages } from "../../shared/paging.js";
 import { Pager } from "../../shared/ui/pager.js";
 import { Button, Card, Label } from "../../shared/ui/primitives.js";
-import { EventSelect } from "../manual-reports/fields.js";
 import { DecisionPanel } from "../review/DecisionPanel.js";
 import { dispatchSearch } from "../review/dispatch-model.js";
 import { ReviewAccessState } from "../review/ReviewAccessState.js";
@@ -16,28 +15,36 @@ import { ReconciliationHistory } from "../review/reconciliation-parts.js";
 import { queueSearch } from "../review/review-model.js";
 import { Confirm, Failure, Fields, Revision, State } from "./components.js";
 import { useTripCommand, useTripQuery } from "./queries.js";
-import { TripHeader, TripHistory, TripTiles } from "./TripPageOverview.js";
+import { TripActionsMenu } from "./TripActionsMenu.js";
+import { TripEventDialog } from "./TripEventDialog.js";
+import { TripHeader, TripHistory, TripStatusBanner } from "./TripPageOverview.js";
 import {
+  TripCargo,
+  TripConditions,
+  TripDataNote,
   TripEvidence,
-  TripFacts,
   TripQualificationCheck,
+  TripRoute,
   TripSources,
 } from "./TripPageSections.js";
 import { TripTechnicalDetails } from "./TripTechnicalDetails.js";
 import { type DTO, validId } from "./transport.js";
 import {
+  acceptedLine,
   awaitingFix,
-  nextStep,
   privateOf,
   revisableReportId,
+  tripBanner,
   tripStatus,
+  tripTimes,
 } from "./trip-page-model.js";
 import "./trips.css";
 /**
- * Trip page (VTC-158): header with status and actions, summary tiles, the trip facts, screenshots
- * and sources beside the history and qualification check. Staff also get collapsed technical
- * details, the private report history and reconciliation history. Hiding is presentation only:
- * the server filters every private field.
+ * Trip page (VTC-170, mockup variant A): the route title with its status and an actions menu,
+ * one status banner for a trip that is not accepted (an accepted one gets a counted line instead),
+ * the route card, cargo and conditions, screenshots, the collapsed qualification check beside a
+ * compact history, and for staff one collapsed "For dispatchers" block. Hiding is presentation
+ * only: the server filters every private field.
  */
 export function TripDetailPage({ review = false }: { review?: boolean }) {
   const { t } = useTranslation("trips"),
@@ -49,19 +56,29 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
       // The review page reads the trip through its review read instead.
       validId(tripId) && !review,
     ),
-    [history, setHistory] = useState(false);
+    [dialog, setDialog] = useState(false),
+    [notice, setNotice] = useState<string | null>(null),
+    menuButton = useRef<HTMLButtonElement>(null),
+    opener = useRef<HTMLElement | null>(null);
   const view = query.data?.data.data,
     own = privateOf(view),
     summary = view?.view === "private" ? view.summary : view,
+    etag = query.data?.etag ?? null,
     selfId = session.self?.member.id,
     staff = !!session.self?.capabilities.includes("trips.review"),
     owner = !!summary && summary.owner.id === selfId,
     submitOwn = owner && !!session.self?.capabilities.includes("trips.submit_own"),
-    // Actions stay owner-gated; status, credit and the next step read the trip data alike for all.
+    // Actions stay owner-gated; status and the banner read the trip data alike for all.
     reportId = revisableReportId(view, selfId),
-    fixPending = awaitingFix(view),
-    status = summary ? tripStatus(summary, fixPending) : null,
-    next = nextStep(view, { owner, staff });
+    status = summary ? tripStatus(summary, awaitingFix(view)) : null,
+    banner = tripBanner(view, { owner, staff }),
+    counted = acceptedLine(view),
+    canLink = !!own && submitOwn && !!summary && "event" in summary,
+    openDialog = (from: HTMLElement | null) => {
+      opener.current = from;
+      setNotice(null);
+      setDialog(true);
+    };
   if (review && !staff)
     return (
       <Card>
@@ -75,83 +92,120 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
       </Card>
     );
   if (review) return <ReviewDetail tripId={tripId} />;
-  const actions = (
-    <>
-      {reportId && status === "needs_fix" && (
-        <Button asChild>
-          <Link to={`/account/reports/${reportId}/edit`}>{t("fixReport")}</Link>
-        </Button>
-      )}
-      {reportId && status !== "needs_fix" && (
-        <Button asChild variant="outline">
-          <Link to={`/account/reports/${reportId}/edit`}>{t("revise")}</Link>
-        </Button>
-      )}
-      {staff && summary && (
-        <Button asChild variant="outline">
-          <Link to={`/account/review/${summary.id}`}>{t("review")}</Link>
-        </Button>
-      )}
-      {!query.isError && (
-        <Button variant="outline" onClick={() => void query.refetch()} disabled={query.isFetching}>
-          {t("refresh")}
-        </Button>
-      )}
-    </>
-  );
+  const editPath = reportId && status !== "needs_fix" ? `/account/reports/${reportId}/edit` : null;
   return (
     <div className="stack trip-page trip-detail">
-      <TripHeader summary={summary} view={own} status={status} owner={owner} actions={actions} />
+      <TripHeader
+        summary={summary}
+        view={own}
+        status={status}
+        owner={owner}
+        counted={counted}
+        correctionPending={!!own?.pendingProposalId && status === "accepted"}
+        menu={
+          summary && (
+            <TripActionsMenu
+              triggerRef={menuButton}
+              tripId={summary.id}
+              onLinkEvent={canLink ? () => openDialog(menuButton.current) : null}
+              editPath={editPath}
+              dispatchPath={staff ? `/account/review/${summary.id}` : null}
+              refreshing={query.isFetching}
+              onRefresh={() => void query.refetch()}
+              onCopied={(copied) => setNotice(t(copied ? "linkCopied" : "linkCopyFailed"))}
+            />
+          )
+        }
+      />
+      <p role="status" className="trip-detail-notice">
+        {notice}
+      </p>
       <State query={query} rateLimitNotice />
       {summary && (
         <>
           {!own && <p className="trip-muted">{t("summaryView")}</p>}
-          <TripTiles
-            summary={summary}
-            facts={own?.effectiveFacts}
-            next={next}
-            fixPending={fixPending}
-          />
-          <div className="trip-detail-layout">
-            <div className="trip-detail-main">
-              <TripFacts summary={summary} view={own} />
-              {own && (own.evidence.length > 0 || own.manualRevision) && (
-                <TripEvidence evidence={own.evidence} />
-              )}
-              {own && <TripSources sources={own.sources} />}
-              {own && submitOwn && summary.decision === "accepted" && (
-                <OwnerCorrection view={own} etag={query.data?.etag ?? null} />
-              )}
-              {own && submitOwn && (
-                <OwnerAssociation
-                  tripId={summary.id}
-                  game={summary.game}
-                  etag={query.data?.etag ?? null}
-                />
-              )}
-            </div>
+          {banner && (
+            <TripStatusBanner
+              banner={banner}
+              fixPath={reportId ? `/account/reports/${reportId}/edit` : null}
+            />
+          )}
+          <TripRoute summary={summary} view={own} />
+          <div className="trip-detail-grid">
+            <TripCargo summary={summary} view={own} />
             {own && (
-              <aside className="trip-detail-aside" aria-label={t("asideLabel")}>
-                <TripHistory view={own} />
-                <TripQualificationCheck check={own.qualificationCheck} />
-              </aside>
+              <TripConditions
+                summary={summary}
+                view={own}
+                onLink={canLink ? openDialog : undefined}
+              />
             )}
           </div>
-          {own && staff && (
-            <>
-              <TripTechnicalDetails view={own} />
-              <Card>
-                <details open={history} onToggle={(e) => setHistory(e.currentTarget.open)}>
-                  <summary>{t("privateView")}</summary>
-                  {history && <PrivateHistory tripId={summary.id} />}
-                </details>
-              </Card>
-              <ReconciliationHistory tripId={summary.id} />
-            </>
+          {own && (own.evidence.length > 0 || own.manualRevision) && (
+            <TripEvidence evidence={own.evidence} />
+          )}
+          {own && (
+            <div className="trip-detail-grid">
+              <TripQualificationCheck check={own.qualificationCheck} />
+              <TripHistory view={own} />
+            </div>
+          )}
+          {own && submitOwn && summary.decision === "accepted" && (
+            <OwnerCorrection view={own} etag={etag} />
+          )}
+          {own && staff && <StaffBlock view={own} />}
+          {own && <TripDataNote view={own} />}
+          {canLink && (
+            <TripEventDialog
+              open={dialog}
+              onOpenChange={setDialog}
+              summary={summary}
+              times={tripTimes(own?.effectiveFacts, own?.manualRevision)}
+              etag={etag}
+              onDone={(result) =>
+                setNotice(t(result === "sent" ? "eventSentDone" : "eventLinkedDone"))
+              }
+              restoreFocus={() => (opener.current ?? menuButton.current)?.focus()}
+            />
           )}
         </>
       )}
     </div>
+  );
+}
+/**
+ * Staff-only data, collapsed: sources, technical details, the private report history and the
+ * reconciliation history. Nothing inside renders or loads until it is opened; drivers never get it.
+ */
+function StaffBlock({ view }: { view: DTO["TripPrivate"] }) {
+  const { t } = useTranslation("trips"),
+    [open, setOpen] = useState(false),
+    [history, setHistory] = useState(false),
+    summary = view.summary;
+  return (
+    <details
+      className="card trip-staff"
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
+      <summary>
+        <span className="trip-staff-title">{t("staffTitle")}</span>
+        <span className="trip-muted">{t("staffHint")}</span>
+      </summary>
+      {open && (
+        <div className="stack trip-staff-body">
+          <TripSources sources={view.sources} />
+          <TripTechnicalDetails view={view} />
+          <Card>
+            <details open={history} onToggle={(e) => setHistory(e.currentTarget.open)}>
+              <summary>{t("privateView")}</summary>
+              {history && <PrivateHistory tripId={summary.id} />}
+            </details>
+          </Card>
+          <ReconciliationHistory tripId={summary.id} />
+        </div>
+      )}
+    </details>
   );
 }
 /** The owner's correction request for an accepted trip; the accepted result stays effective. */
@@ -339,52 +393,5 @@ function PrivateHistory({ tripId }: { tripId: string }) {
       {query.data && !query.data.data.data.items.length && <p>{t("empty")}</p>}
       <Pager pages={pages} nextCursor={next} label={t("historyPages")} />
     </div>
-  );
-}
-
-function OwnerAssociation({
-  tripId,
-  game,
-  etag,
-}: {
-  tripId: string;
-  game: "ets2" | "ats";
-  etag: string | null;
-}) {
-  const { t } = useTranslation("trips"),
-    [event, setEvent] = useState<string | null>(null),
-    [success, setSuccess] = useState(false),
-    command = useTripCommand();
-  return (
-    <Card className="stack">
-      <h2>{t("association")}</h2>
-      <p>{t("associationHelp")}</p>
-      <EventSelect value={event} onChange={setEvent} game={game} />
-      <Failure error={command.failure} seconds={command.seconds} />
-      {success && (
-        <p role="status">
-          {t("success")} {t("frozen")}
-        </p>
-      )}
-      <Confirm
-        label={t("association")}
-        guard={JSON.stringify([event, etag])}
-        disabled={!event || command.seconds > 0}
-        pending={command.pending}
-        failure={command.failure}
-        onConfirm={async () => {
-          const r = await command.run(
-            `/trips/${tripId}/event-association`,
-            { eventId: event },
-            "EnvelopeCommandResult",
-            etag,
-          );
-          if (r) setSuccess(true);
-          return r;
-        }}
-      >
-        <p>{t("associateConfirmText")}</p>
-      </Confirm>
-    </Card>
   );
 }

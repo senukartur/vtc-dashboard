@@ -143,6 +143,8 @@ export function otherSummary(): TripEnvelope {
   const summary: S["TripSummary"] = { ...view.summary, owner: { ...view.summary.owner } };
   summary.owner.id = otherOwnerId;
   summary.owner.nickname = "Fictional Other Driver";
+  // The company summary still names the cargo.
+  summary.cargo = city("41500000-0000-4000-8000-000000000363", "Fictional machine parts");
   // Company scope omits the author-only fields entirely.
   delete summary.event;
   delete summary.gameMode;
@@ -339,5 +341,121 @@ export function tripPageStubs(): Record<string, TripEnvelope> {
     openTelemetry: openTelemetry(),
     withTrailer: withTrailer(),
     staffNeedsFix: asOtherMember(needsFixManual()),
+    acceptedTelemetry: acceptedTelemetry(),
+    acceptedNoRevenue: acceptedTelemetry("no-revenue"),
+    acceptedNoLabels: acceptedTelemetry("no-labels"),
+    acceptedNoEvent: acceptedTelemetry("no-event"),
+  };
+}
+
+// VTC-170 summary-first trip page states and event-link fixtures. Every value is fictional.
+export const originCityId = "41500000-0000-4000-8000-000000000361";
+export const destinationCityId = "41500000-0000-4000-8000-000000000362";
+export const acceptReason = "Fictional checked delivery";
+
+/** The trip with a route between two fictional cities. */
+export function withRoute(envelope: TripEnvelope) {
+  const view = envelope.data as TripPrivate;
+  view.summary.origin = city(originCityId, "Fictional Westport");
+  view.summary.destination = city(destinationCityId, "Fictional Eastbrook");
+  return envelope;
+}
+
+/**
+ * A telemetry trip accepted by a dispatcher, with a route, a trailer, revenue, cargo labels and the
+ * recorded conditions; `variant` drops the revenue, the labels or the event.
+ */
+export function acceptedTelemetry(
+  variant: "full" | "no-revenue" | "no-labels" | "no-event" = "full",
+) {
+  const envelope = withRoute(withTrailer());
+  const view = envelope.data as TripPrivate;
+  const facts = view.effectiveFacts as S["EffectiveTripFacts"];
+  view.summary.number = 1170;
+  view.summary.sourceKinds = ["ets2telemetry"];
+  view.summary.revenue = variant === "no-revenue" ? null : { amount: "12480", currency: "EUR" };
+  if (variant === "no-event") view.summary.event = null;
+  facts.actualDistanceM = view.summary.actualDistanceM;
+  facts.cargoMassKg = "24856.900390625";
+  facts.cargoDamagePercent = 0;
+  facts.recordedTelemetry = {
+    gameMode: "single-player",
+    jobType: "freight-market",
+    hardModeResult: "qualified",
+  };
+  if (variant !== "no-labels")
+    facts.cargoClassification = {
+      fragile: false,
+      valuable: false,
+      adr: { state: "none" },
+      overweight: false,
+      oversize: null,
+      groups: ["machinery"],
+    };
+  view.decisions = [
+    {
+      id: "41500000-0000-4000-8000-000000000375",
+      outcome: "accepted",
+      reasonCodes: [],
+      reason: acceptReason,
+      decidedAt: "2026-11-11T08:15:00.000Z",
+      reviewerId: fixtureReviewer.id,
+      reviewer: { ...fixtureReviewer },
+      acceptedOverLimits: false,
+      reviewedRevisionId: null,
+      basis: decisionBasis(facts.factRevisionId),
+    },
+  ];
+  return envelope;
+}
+
+type EventPublic = S["EventPublic"];
+/** The reviewed member event example, cloned. */
+function eventTemplate(): S["EventMember"] {
+  const found = cases.find((c) => c.id === "getEvent:success");
+  if (!found) throw new Error("MISSING_EXAMPLE getEvent:success");
+  return structuredClone((found.response as S["EnvelopeEventMember"]).data);
+}
+
+/** A fictional published event; the route uses the trip's cities only when asked to. */
+export function fictionalEvent(
+  index: number,
+  startsAt: string,
+  extra: Partial<Pick<EventPublic, "game" | "status" | "title">> & { sameRoute?: boolean } = {},
+): EventPublic {
+  const { sameRoute = false, ...fields } = extra;
+  return {
+    ...eventTemplate().event,
+    id: `71000000-0000-4000-8000-${String(170000 + index).padStart(12, "0")}`,
+    title: `Fictional Convoy ${index}`,
+    startsAt,
+    meetingAt: startsAt,
+    route: `Fictional route ${index}`,
+    origin: sameRoute ? city(originCityId, "Fictional Westport") : null,
+    destination: sameRoute ? city(destinationCityId, "Fictional Eastbrook") : null,
+    ...fields,
+  };
+}
+
+/** One page of the past event list. */
+export function eventPage(items: EventPublic[], nextCursor: string | null = null) {
+  return { data: { items, nextCursor }, meta: { requestId: "synthetic-events" } };
+}
+
+/** The signed-in member's view of an event with a response and attendance. */
+export function eventMember(
+  event: EventPublic,
+  attendance: S["EventMember"]["myAttendance"] = "unconfirmed",
+  response: S["Rsvp"]["response"] = "unanswered",
+): S["EnvelopeEventMember"] {
+  const member = eventTemplate();
+  return {
+    data: {
+      ...member,
+      event,
+      myAttendance: attendance,
+      myResponse: { ...member.myResponse, response, declineReason: null },
+    },
+    meta: { requestId: "synthetic-event" },
   };
 }

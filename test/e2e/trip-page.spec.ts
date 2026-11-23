@@ -1,12 +1,16 @@
-import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Locator, Page, Request, TestInfo } from "@playwright/test";
 import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import {
+  acceptedTelemetry,
   asOtherMember,
+  eventMember,
+  eventPage,
+  fictionalEvent,
+  fixtureReviewer,
   longCompanyName,
   longEventTitle,
-  longTrailerLabel,
   longValues,
   manualUnknown,
   needsFixEvidence,
@@ -22,12 +26,11 @@ import {
   returnedTrip,
   senderCompanyId,
   type TripEnvelope,
-  telemetryWithEvent,
   tripEventId,
   tripPageId,
   tripPrivate,
   withoutSources,
-  withTrailer,
+  withRoute,
 } from "./support/trip-page-fixtures.ts";
 import { mockTrips } from "./support/trip-ui.ts";
 
@@ -76,109 +79,40 @@ async function author(
   });
   return { state, requests };
 }
-/** Waits for the trip tiles and asserts that no load failure is announced. */
+const region = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
+/** Waits for the route card and asserts that no load failure is announced. */
 async function loaded(page: Page) {
-  await expect(page.locator(".trip-detail-tiles")).toBeVisible();
+  await expect(page.locator(".trip-route")).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
 }
-const region = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
-const tripCard = (page: Page, name = "Trip") => region(page, name);
 /** The definition next to an exact term inside `scope`. */
 const fact = (scope: Locator, term: string) =>
   scope.locator(`dt:text-is(${JSON.stringify(term)}) + dd`);
-/** One summary tile by its label. */
-const tile = (page: Page, label: string) =>
-  page
-    .locator(".trip-detail-tile")
-    .filter({ has: page.locator(`.trip-detail-tile-label:text-is(${JSON.stringify(label)})`) });
 const status = (page: Page) => page.locator(".trip-detail-status");
+const banner = (page: Page, name = "Trip status") => region(page, name);
+const counted = (page: Page) => page.locator(".trip-detail-counted");
+const menuButton = (page: Page, name = "More actions") =>
+  page.getByRole("main").getByRole("button", { name, exact: true });
 const logoRequests = (requests: string[]) => requests.filter((path) => path.endsWith("/logo"));
 const privatePaths = /\/review|\/reconciliations|\/proposals|\/manual-revisions|\/manual-reports/;
-test(
-  "trip details localize final telemetry damage and distinguish zero from unavailable",
-  browserCase(["@functional"]),
-  async ({ page }) => {
-    const trip = telemetryWithEvent();
-    const facts = trip.data.view === "private" ? trip.data.effectiveFacts : null;
-    if (!facts) throw new Error("EXPECTED_PRIVATE_TELEMETRY_FACTS");
-    facts.cargoDamagePercent = 2.5;
-    await author(page, trip);
-    await page.goto(tripPath);
-    await catalogLanguage(page);
-    await loaded(page);
-    await expect(fact(tripCard(page), "Damage")).toHaveText("2.5 % of cargo");
-    await catalogLanguage(page, "ru");
-    const damage = fact(tripCard(page, "Рейс"), "Повреждения");
-    await expect(damage).toHaveText("2,5 % груза");
 
-    facts.cargoDamagePercent = 0;
-    await page.reload();
-    await catalogLanguage(page, "ru");
-    await expect(damage).toHaveText("0 % груза");
-
-    facts.cargoDamagePercent = null;
-    await page.reload();
-    await catalogLanguage(page, "ru");
-    await expect(damage).toHaveText("Недоступно");
-  },
-);
-
-test(
-  "trip details show the reported cargo labels beside the cargo in both languages",
-  browserCase(["@layout"]),
-  async ({ page }, info) => {
-    const trip = telemetryWithEvent();
-    const facts = trip.data.view === "private" ? trip.data.effectiveFacts : null;
-    if (!facts) throw new Error("EXPECTED_PRIVATE_TELEMETRY_FACTS");
-    facts.cargoClassification = {
-      fragile: true,
-      valuable: true,
-      adr: { state: "class", class: 3 },
-      overweight: true,
-      oversize: null,
-      groups: ["liquid", "refrigerated"],
-    };
-    await author(page, trip);
-    await page.goto(tripPath);
-    for (const [locale, card, term, labels, tipName] of [
-      [
-        "en",
-        "Trip",
-        "Cargo",
-        ["ADR 3", "Fragile", "Valuable", "Heavy", "Liquid", "Refrigerated"],
-        "About cargo labels",
-      ],
-      [
-        "ru",
-        "Рейс",
-        "Груз",
-        ["ADR 3", "Хрупкий", "Ценный", "Тяжёлый", "Наливной", "Рефрижератор"],
-        "О метках груза",
-      ],
-    ] as const) {
-      await catalogLanguage(page, locale);
-      await loaded(page);
-      const cargo = fact(tripCard(page, card), term);
-      const list = cargo.getByRole("list");
-      await expect(list.getByRole("listitem")).toHaveText([...labels]);
-      const tip = await openTip(page, cargo, tipName);
-      await expect(tip).toContainText(locale === "en" ? "company catalog" : "каталога компании");
-      await closeTip(page);
-      await expect
-        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
-        .toBe(true);
-      await tripCard(page, card).screenshot({
-        path: info.outputPath(`trip-cargo-labels-${locale}.png`),
-      });
-    }
-    // Without a report the cargo row carries no labels and no info button.
-    delete facts.cargoClassification;
-    await page.reload();
-    await loaded(page);
-    await expect(fact(tripCard(page, "Рейс"), "Груз").getByRole("list")).toHaveCount(0);
-  },
-);
-
+/** Opens the actions menu by keyboard and returns it. */
+async function openMenu(page: Page, name = "More actions") {
+  await menuButton(page, name).focus();
+  await page.keyboard.press("Enter");
+  const menu = page.getByRole("menu", { name, exact: true });
+  await expect(menu).toBeVisible();
+  return menu;
+}
+/** Refreshes the trip through the actions menu and waits for the read. */
+async function refresh(page: Page, locale: "en" | "ru" = "en") {
+  const menu = await openMenu(page, locale === "en" ? "More actions" : "Ещё действия");
+  const read = page.waitForResponse((r) => r.url().endsWith(`/trips/${tripPageId}`));
+  await menu
+    .getByRole("menuitem", { name: locale === "en" ? "Refresh data" : "Обновить данные" })
+    .click();
+  await read;
+}
 /** Opens an info button inside `scope` and returns its popover. */
 async function openTip(page: Page, scope: Locator, name: string) {
   await scope.getByRole("button", { name, exact: true }).click();
@@ -190,7 +124,7 @@ async function closeTip(page: Page) {
   await page.keyboard.press("Escape");
   await expect(page.locator(".info-tip-content")).toHaveCount(0);
 }
-/** Visible page text without identifiers, raw timestamps, file details or raw codes. */
+/** Visible page text without identifiers, raw timestamps, file details, codes or fallback notes. */
 async function expectHumanText(page: Page, forbidden: (string | RegExp)[] = []) {
   const text = await page.locator("main").innerText();
   for (const pattern of [
@@ -200,6 +134,11 @@ async function expectHumanText(page: Page, forbidden: (string | RegExp)[] = []) 
     "SYNTHETIC_",
     "manual_report",
     "qualification_level_unknown",
+    "fict_logistics",
+    "fict_port",
+    "fict_unknown_depot",
+    "English fallback",
+    "For dispatchers",
     ...forbidden,
   ])
     if (typeof pattern === "string") expect(text).not.toContain(pattern);
@@ -207,116 +146,147 @@ async function expectHumanText(page: Page, forbidden: (string | RegExp)[] = []) 
 }
 
 test(
-  "F1 telemetry trip shows its status, damage and checked qualification limits",
+  "an accepted trip leads with its outcome: title, counted line, route, strip, cards and a collapsed check",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const { state, requests } = await author(page, withTrailer());
+    const { state, requests } = await author(page, acceptedTelemetry());
     await page.goto(tripPath);
     await catalogLanguage(page);
     await loaded(page);
 
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Fictional Westport → Fictional Eastbrook",
+    );
     await expect(status(page)).toHaveText("Accepted");
-    await expect(page.locator(".trip-detail-meta")).toHaveText(
-      "ETS2 · Telemetry · completed 10 Nov, 18:00",
+    // An accepted trip has no banner, only its counted line.
+    await expect(banner(page)).toHaveCount(0);
+    await expect(counted(page)).toHaveText(
+      `Counted: +812 km in statistics and ETS2 qualification · ${fixtureReviewer.nickname}, 11 Nov, 08:15`,
     );
+    await expect(page.locator(".trip-detail-meta > span")).toHaveText([
+      "Trip #1170",
+      "ETS2",
+      "Telemetry",
+      "Hard Mode",
+    ]);
     // The shell breadcrumb is the only one; the page does not repeat it.
-    const crumb = page.getByRole("navigation", { name: "Breadcrumb", exact: true });
     await expect(page.getByRole("main").getByRole("navigation")).toHaveCount(0);
-    await expect(crumb.getByRole("link", { name: "My trips", exact: true })).toHaveAttribute(
-      "href",
-      "/account/trips",
-    );
-    await expect(tile(page, "Distance")).toContainText("812.4005 km");
-    await expect(tile(page, "Distance")).toContainText("by telemetry");
-    await expect(tile(page, "Distance")).not.toContainText("no telemetry");
-    await expect(tile(page, "Credited")).toContainText("Yes");
-    await expect(tile(page, "Credited")).toContainText("counted on 10 Nov, 18:00");
-    await expect(page.getByText("Reporting instant", { exact: true })).toHaveCount(0);
-    const basis = await openTip(page, tile(page, "Credited"), "How the trip is counted");
-    await expect(basis).toContainText("company reporting time zone");
-    await closeTip(page);
-    await expect(tile(page, "What next")).toContainText("Nothing to do");
-    await expect(tile(page, "What next")).toContainText("The trip is counted.");
-    await expect(tile(page, "What next")).not.toHaveAttribute("data-attention");
+    // The menu replaces the separate Refresh and Review buttons.
+    for (const name of ["Refresh", "Review workspace", "Open in dispatch"])
+      for (const role of ["button", "link"] as const)
+        await expect(page.getByRole("main").getByRole(role, { name, exact: true })).toHaveCount(0);
 
-    const sources = region(page, "Sources");
-    const items = sources.getByRole("listitem");
-    await expect(items).toHaveCount(1);
-    await expect(items.locator(".trip-source-head > .badge:first-child")).toHaveText("Telemetry");
-    await expect(fact(items, "Received")).toHaveText(/10 Nov 2026.*18:00/);
-    await expect(fact(items, "Driven distance")).toHaveText("812.4005 km");
-    await expect(fact(items, "Source outcome")).toHaveText("Delivered");
-    await expect(items.getByText("Used for the trip", { exact: true })).toBeVisible();
-    await expect(sources).toContainText("Times in UTC");
-
-    const card = tripCard(page);
-    const sender = fact(card, "From");
-    await expect(sender).toContainText("Fictional Logistics");
-    await expect(sender).toContainText("fict_logistics");
-    await expect(sender.locator(".company-logo")).toHaveAttribute("data-logo", "image");
+    const route = region(page, "Route");
+    const [origin, middle, destination] = [
+      route.locator(".trip-route-end[data-side=origin]"),
+      route.locator(".trip-route-middle"),
+      route.locator(".trip-route-end[data-side=destination]"),
+    ];
+    await expect(origin).toContainText("Fictional Logistics");
+    await expect(origin).toContainText("Fictional Westport");
+    await expect(origin.locator("time")).toHaveText("10 Nov, 10:00");
+    await expect(origin.locator(".company-logo")).toHaveAttribute("data-logo", "image");
     await expect
       .poll(() =>
-        sender.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth),
+        origin.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth),
       )
       .toBeGreaterThan(0);
-    const receiver = fact(card, "To");
-    await expect(receiver).toContainText("Fictional Port Services");
-    await expect(receiver).toContainText("fict_port");
-    await expect(receiver.locator(".company-logo")).toHaveAttribute("data-logo", "placeholder");
-    await expect(receiver.locator("img")).toHaveCount(0);
-    expect(logoRequests(requests)).toEqual([`/api/v1/catalogs/companies/${senderCompanyId}/logo`]);
-    await expect(fact(card, "Cargo")).toContainText("19 t");
-    await expect(fact(card, "Trailer")).toHaveText("Fictional trailer_type");
-    await expect(fact(card, "Started")).toHaveText("10 Nov 2026, 10:00");
-    await expect(fact(card, "Completed").locator("time")).toHaveAttribute(
+    await expect(destination).toContainText("Fictional Port Services");
+    await expect(destination.locator(".company-logo")).toHaveAttribute("data-logo", "placeholder");
+    await expect(destination.locator("time")).toHaveAttribute(
       "datetime",
       "2026-11-10T18:00:00.000Z",
     );
-    await expect(fact(card, "Damage")).toHaveText("37.5 % of cargo");
-    await expect(fact(card, "Event").getByRole("link")).toHaveText("Fictional Winter Convoy");
-    await expect(fact(card, "Event").getByRole("link")).toHaveAttribute(
+    expect(logoRequests(requests)).toEqual([`/api/v1/catalogs/companies/${senderCompanyId}/logo`]);
+    await expect(middle).toContainText("812 km · 8 h");
+    await expect(middle).toContainText("Delivered");
+    await expect(fact(route, "Distance")).toHaveText("812 km");
+    await expect(fact(route, "Revenue")).toHaveText("12,480 EUR");
+    await expect(fact(route, "Cargo mass")).toHaveText("24.9 t");
+    await expect(fact(route, "Damage")).toHaveText("0 %");
+
+    const cargo = region(page, "Cargo and trailer");
+    await expect(cargo.locator("dt")).toHaveText(["Properties", "Trailer"]);
+    await expect(fact(cargo, "Properties").getByRole("listitem")).toHaveText(["Machinery"]);
+    await expect(fact(cargo, "Properties").locator(".lucide")).toHaveCount(1);
+    // The cargo labels are explained once, in the bottom data note.
+    await expect(cargo.getByRole("button")).toHaveCount(0);
+    await expect(fact(cargo, "Trailer")).toHaveText("Fictional trailer_type");
+
+    const conditions = region(page, "Conditions");
+    await expect(conditions.locator("dt")).toHaveText([
+      "Game mode",
+      "Job type",
+      "Hard Mode",
+      "Event",
+    ]);
+    await expect(fact(conditions, "Game mode")).toHaveText("Single-player");
+    await expect(fact(conditions, "Game mode").locator(".lucide")).toHaveCount(1);
+    await expect(fact(conditions, "Job type")).toHaveText("Freight market");
+    await expect(fact(conditions, "Hard Mode")).toHaveText("Qualified");
+    const event = fact(conditions, "Event");
+    await expect(event.getByRole("link", { name: "Fictional Winter Convoy" })).toHaveAttribute(
       "href",
       `/account/events/${tripEventId}`,
     );
-    await expect(card).toContainText("Times in UTC");
+    await expect(event.getByRole("button", { name: "Change", exact: true })).toHaveAttribute(
+      "aria-haspopup",
+      "dialog",
+    );
 
-    const history = region(page, "History");
-    await expect(history.getByRole("listitem")).toHaveCount(1);
-    await expect(history).toContainText("Telemetry received");
-
-    const check = region(page, "Qualification check");
+    const check = region(page, "Qualification");
+    await expect(check.locator(".trip-qualification-rules")).toHaveText("Rules: 5 of 6");
     await expect(check).toContainText("Checked against “Fictional Trainee” · As at the decision");
+    await expect(check.getByRole("listitem")).toHaveCount(0);
+    const toggle = check.getByRole("button", { name: "Show rules", exact: true });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.click();
+    const hide = check.getByRole("button", { name: "Hide rules", exact: true });
+    await expect(hide).toHaveAttribute("aria-expanded", "true");
     const rules = check.getByRole("listitem");
     await expect(rules).toHaveCount(6);
+    await expect(page.locator(`#${await hide.getAttribute("aria-controls")}`)).toBeVisible();
     for (const [index, result] of ["pass", "pass", "fail", "pass", "pass", "pass"].entries())
       await expect(rules.nth(index)).toHaveAttribute("data-result", result);
-    await expect(rules.nth(0).locator(".qualification-check-symbol")).toHaveAttribute(
-      "aria-hidden",
-      "true",
-    );
-    await expect(rules.nth(0)).toContainText("Cargo mass · Passes");
-    await expect(rules.nth(0)).toContainText("Trip: 19 t · Limit: up to 20 t");
-    await expect(rules.nth(1)).toContainText("Trip distance · Passes");
     await expect(rules.nth(2)).toContainText("Trailer types · Outside the limit");
-    await expect(rules.nth(2)).toContainText(
-      "Trip: Fictional Tanker · Limit: Fictional Curtainsider",
+    // The cargo damage cap (VTC-171) is one of the counted rules.
+    await expect(rules.filter({ hasText: "Cargo damage · Passes" })).toContainText(
+      "Trip: 37.5% · Limit: up to 100%",
     );
-    await expect(rules.nth(3)).toContainText("Trip: not ADR · Limit: Forbidden");
-    await expect(rules.nth(4)).toContainText("Hard Mode · Passes");
-    await expect(rules.nth(4).locator("svg.lucide-flame")).toBeVisible();
-    await expect(rules.nth(4)).toContainText("Trip: unknown · Limit: Not required");
-    const damageRule = rules.filter({ hasText: "Cargo damage · Passes" });
-    await expect(damageRule).toContainText("Trip: 37.5% · Limit: up to 100%");
+    // The shared list renders without its own heading inside the card.
+    await expect(check.getByRole("heading")).toHaveText(["Qualification"]);
+    await hide.click();
+    await expect(rules).toHaveCount(0);
 
-    // The author sees no reviewer-only workspace, technical details or reconciliation data.
-    await expect(page.getByRole("link", { name: "Review workspace", exact: true })).toHaveCount(0);
-    await expect(page.getByText("Technical details", { exact: true })).toHaveCount(0);
+    const history = region(page, "History");
+    await expect(history.getByRole("listitem")).toHaveCount(2);
+    await expect(history.getByRole("listitem").nth(0)).toContainText("Telemetry received");
+    await expect(history.getByRole("listitem").nth(1)).toContainText(
+      `Accepted11 Nov, 08:15 · ${fixtureReviewer.nickname}`,
+    );
+
+    const note = page.locator(".trip-data-note");
+    await expect(note).toContainText("Times in your time zone (UTC)");
+    const tip = await openTip(page, note, "About the data");
+    await expect(tip).toContainText("Where the data comes from");
+    await expect(tip).toContainText(
+      "Telemetry recorded the trip on 10 Nov, 18:00, distance 812 km.",
+    );
+    await expect(tip).toContainText("No manual report.");
+    await expect(tip).toContainText("company reporting time zone");
+    await expect(tip).toContainText("company catalog");
+    await closeTip(page);
+
+    // The driver sees no dispatcher block, sources or raw data and causes no private reads.
+    for (const name of ["Sources", "For dispatchers", "Technical details"])
+      await expect(page.getByText(name, { exact: true })).toHaveCount(0);
+    await expectHumanText(page);
     expect(requests.filter((path) => privatePaths.test(path))).toEqual([]);
 
     state.status = 403;
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await refresh(page);
     await expect(page.getByRole("alert")).toContainText("permissions");
-    for (const name of ["Sources", "Qualification check", "Trip", "History", "Summary"])
+    for (const name of ["Route", "Cargo and trailer", "Conditions", "Qualification", "History"])
       await expect(region(page, name)).toHaveCount(0);
     const deniedCalls = state.calls;
     await page.waitForTimeout(250);
@@ -325,7 +295,218 @@ test(
 );
 
 test(
-  "F2 manual trip keeps unknown values muted and explained, apart from zero, and hides a missing check",
+  "the actions menu works by keyboard, offers each viewer only its actions and copies the link",
+  browserCase(["@functional"]),
+  async ({ page, context }) => {
+    const { state } = await author(page, acceptedTelemetry());
+    await page.goto(tripPath);
+    await catalogLanguage(page);
+    await loaded(page);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: new URL(page.url()).origin,
+    });
+
+    let menu = await openMenu(page);
+    await expect(menu.getByRole("menuitem")).toHaveText([
+      "Link to an event…",
+      "Refresh data",
+      "Copy link",
+    ]);
+    await expect(menu.getByRole("menuitem").first()).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.getByRole("menuitem", { name: "Refresh data" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(menuButton(page)).toBeFocused();
+
+    menu = await openMenu(page);
+    await menu.getByRole("menuitem", { name: "Copy link" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Link copied." })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+      `${new URL(page.url()).origin}${tripPath}`,
+    );
+    await page.evaluate(() => {
+      navigator.clipboard.writeText = () => Promise.reject(new Error("denied"));
+    });
+    menu = await openMenu(page);
+    await menu.getByRole("menuitem", { name: "Copy link" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Could not copy the link." }),
+    ).toBeVisible();
+
+    // A revisable pending report adds Edit the report; a returned one gets the banner action.
+    const pending = pendingManual();
+    state.view = pending;
+    await refresh(page);
+    menu = await openMenu(page);
+    await expect(menu.getByRole("menuitem")).toHaveText([
+      "Link to an event…",
+      "Edit the report",
+      "Refresh data",
+      "Copy link",
+    ]);
+    await expect(menu.getByRole("menuitem", { name: "Edit the report" })).toHaveAttribute(
+      "href",
+      `/account/reports/${needsFixReportId}/edit`,
+    );
+    await page.keyboard.press("Escape");
+    state.view = needsFixManual();
+    await refresh(page);
+    menu = await openMenu(page);
+    await expect(menu.getByRole("menuitem", { name: "Edit the report" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(banner(page).getByRole("link", { name: "Fix the report" })).toHaveAttribute(
+      "href",
+      `/account/reports/${needsFixReportId}/edit`,
+    );
+
+    // Staff reading another member's trip open it in dispatch; they cannot link or fix it.
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await author(page, asOtherMember(needsFixManual()), "UTC", true);
+    await page.reload();
+    await catalogLanguage(page);
+    await loaded(page);
+    menu = await openMenu(page);
+    await expect(menu.getByRole("menuitem")).toHaveText([
+      "Refresh data",
+      "Copy link",
+      "Open in dispatch",
+    ]);
+    await expect(menu.getByRole("menuitem", { name: "Open in dispatch" })).toHaveAttribute(
+      "href",
+      `/account/review/${tripPageId}`,
+    );
+    await page.keyboard.press("Escape");
+    await expect(banner(page).getByRole("link")).toHaveCount(0);
+  },
+);
+
+const banners = {
+  en: {
+    region: "Trip status",
+    held: "Why it is held",
+    reason: "Other reason",
+    rows: [
+      [
+        "Pending review",
+        "not counted yet",
+        "Staff will review the trip.",
+        "Submitted 11 Nov, 09:00",
+      ],
+      [
+        "Needs fixes",
+        "not counted yet",
+        "Open the report, correct it and submit it again.",
+        `${fixtureReviewer.nickname}, 12 Nov, 10:31`,
+      ],
+      [
+        "Rejected",
+        "not counted",
+        "The trip was rejected and does not count.",
+        "Fictional Stage Four Dispatcher, 11 Nov, 10:00",
+      ],
+      ["In progress", "not counted yet", "The trip is still in progress in the game.", ""],
+      ["Not checked yet", "not counted yet", "The trip has not been assessed yet.", ""],
+      ["Cancelled", "not counted", "A cancelled delivery does not count.", ""],
+    ],
+    quotes: [
+      "",
+      `"${needsFixReason}" · Other reason, No completion screenshot`,
+      `"${returnedReason}"`,
+      "",
+      "",
+      "",
+    ],
+    action: "Fix the report",
+  },
+  ru: {
+    region: "Статус рейса",
+    held: "Почему на проверке",
+    reason: "Другая причина",
+    rows: [
+      ["На проверке", "пока не засчитан", "Рейс проверит сотрудник.", "Отправлен 11 нояб., 09:00"],
+      [
+        "Нужно исправить",
+        "пока не засчитан",
+        "Откройте отчёт, исправьте его и отправьте снова.",
+        `${fixtureReviewer.nickname}, 12 нояб., 10:31`,
+      ],
+      [
+        "Отклонён",
+        "не засчитан",
+        "Рейс отклонён и не учитывается.",
+        "Fictional Stage Four Dispatcher, 11 нояб., 10:00",
+      ],
+      ["Выполняется", "пока не засчитан", "Рейс ещё идёт в игре.", ""],
+      ["Ещё не проверен", "пока не засчитан", "Рейс ещё не оценён.", ""],
+      ["Отменён", "не засчитан", "Отменённая доставка не учитывается.", ""],
+    ],
+    quotes: [
+      "",
+      `«${needsFixReason}» · Другая причина, Нет скриншота завершения`,
+      `«${returnedReason}»`,
+      "",
+      "",
+      "",
+    ],
+    action: "Исправить отчёт",
+  },
+} as const;
+
+test(
+  "every status that is not accepted reads as one banner with at most one action in EN and RU",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const pending = pendingManual();
+    tripPrivate(pending).summary.submittedAt = "2026-11-11T09:00:00.000Z";
+    const unassessed = openTelemetry();
+    tripPrivate(unassessed).summary.outcome = "delivered";
+    const cancelled = openTelemetry();
+    tripPrivate(cancelled).summary.outcome = "cancelled";
+    const views = () => [
+      structuredClone(pending),
+      needsFixManual(),
+      returnedTrip(),
+      openTelemetry(),
+      structuredClone(unassessed),
+      structuredClone(cancelled),
+    ];
+    const { state } = await author(page, acceptedTelemetry());
+    await page.goto(tripPath);
+    for (const locale of ["en", "ru"] as const) {
+      await catalogLanguage(page, locale);
+      const text = banners[locale];
+      for (const [index, view] of views().entries()) {
+        const [title = "", count = "", sentence = "", by = ""] = text.rows[index] ?? [];
+        state.view = view;
+        await refresh(page, locale);
+        const box = banner(page, text.region);
+        await expect(status(page)).toHaveText(title);
+        await expect(box.locator(".trip-banner-title strong")).toHaveText(title);
+        await expect(box.locator(".trip-banner-counted")).toHaveText(count);
+        await expect(box.locator(".trip-banner-text")).toHaveText(sentence);
+        await expect(counted(page)).toHaveCount(0);
+        const quote = text.quotes[index] ?? "";
+        if (quote) await expect(box.locator(".trip-detail-quote")).toHaveText(quote);
+        else await expect(box.locator(".trip-detail-quote")).toHaveCount(0);
+        if (by) await expect(box.locator(".trip-banner-body > .trip-muted")).toHaveText(by);
+        else await expect(box.locator(".trip-banner-body > .trip-muted")).toHaveCount(0);
+        // At most one action: the owner's fix of a returned report.
+        await expect(box.getByRole("link")).toHaveCount(index === 1 ? 1 : 0);
+        if (index === 1) await expect(box.getByRole("link")).toHaveText(text.action);
+        if (index === 0) {
+          const tip = await openTip(page, box, text.held);
+          await expect(tip).toContainText(text.reason);
+          await expect(tip).not.toContainText("SYNTHETIC_");
+          await closeTip(page);
+        }
+      }
+    }
+  },
+);
+
+test(
+  "missing values are left out, unknown distance is explained and zero damage stays zero",
   browserCase(["@functional"]),
   async ({ page }) => {
     const { state, requests } = await author(page, manualUnknown());
@@ -333,111 +514,168 @@ test(
     await catalogLanguage(page);
     await loaded(page);
 
-    await expect(status(page)).toHaveText("Pending review");
-    await expect(tile(page, "Distance")).toContainText("500 km");
-    await expect(tile(page, "Distance")).toContainText("by the report · no telemetry");
-    await expect(tile(page, "Credited")).toContainText("Not yet");
-    await expect(tile(page, "Credited")).toContainText("counts after acceptance");
-    const item = region(page, "Sources").getByRole("listitem");
-    await expect(item).toHaveCount(1);
-    await expect(item.locator(".trip-source-head > .badge:first-child")).toHaveText(
-      "Manual report",
-    );
-    await expect(fact(item, "Driven distance")).toHaveText("Unavailable");
-    await expect(item).not.toContainText("0 km");
-
-    const card = tripCard(page);
-    const sender = fact(card, "From");
-    await expect(sender).toContainText("Unknown company");
-    await expect(sender).toContainText("fict_unknown_depot");
-    // Without a provider code the company counts as missing: the place reads as the city alone.
-    const receiver = fact(card, "To");
-    await expect(receiver.locator(".trip-company")).toHaveCount(0);
-    await expect(receiver).not.toContainText("Unknown company");
-    await expect(receiver).not.toContainText("Not specified");
-    await expect(receiver).not.toContainText("·");
+    const route = region(page, "Route");
+    // An unresolved company and one without a code are both left out of the route.
+    await expect(route.locator(".trip-route-company")).toHaveCount(0);
+    await expect(route).not.toContainText("Unknown company");
     await expect(page.locator(".company-logo")).toHaveCount(0);
-    await expect(card.locator("img")).toHaveCount(0);
-    const damage = fact(card, "Damage");
-    await expect(damage).toHaveText("Unavailable");
-    await expect(damage).not.toContainText("0 %");
-    await expect(await openTip(page, damage, "Why is this unknown?")).toHaveText(
-      "This value is unavailable. It is not zero.",
-    );
-    await closeTip(page);
-    await expect(fact(card, "Event")).toHaveText("Not linked");
-    for (const term of ["Game mode", "Job type"]) {
-      await expect(fact(card, term)).toHaveText(
-        term === "Game mode" ? "Mode unknown" : "Job type unknown",
-      );
-      await expect(fact(card, term).locator(".trip-detail-unknown")).toBeVisible();
-      await expect(await openTip(page, fact(card, term), "Why is this unknown?")).toHaveText(
-        "Manual report: telemetry did not record this trip.",
-      );
-      await closeTip(page);
-    }
-
-    const check = region(page, "Qualification check");
+    await expect(route.locator("dt")).toHaveText(["Distance"]);
+    await expect(fact(route, "Distance")).toHaveText("500 km");
+    await expect(route).not.toContainText("0 %");
+    // Nothing is known about the cargo, so the card is not rendered at all.
+    await expect(region(page, "Cargo and trailer")).toHaveCount(0);
+    const conditions = region(page, "Conditions");
+    await expect(conditions.locator("dt")).toHaveText(["Event"]);
+    await expect(fact(conditions, "Event")).toHaveText("Not linked·Link");
+    const check = region(page, "Qualification");
     await expect(check).toContainText("The driver's level at trip time is unknown");
-    await expect(check.getByRole("listitem")).toHaveCount(0);
-    await expect(page.getByText("qualification_level_unknown")).toHaveCount(0);
-    const next = tile(page, "What next");
-    await expect(next).toContainText("Nothing to do");
-    // The unknown review code reads as a generic reason, never as the raw code.
-    await expect(await openTip(page, next, "Why it is held")).toContainText("Other reason");
+    await expect(check.locator(".trip-qualification-rules")).toHaveCount(0);
+    await expect(check.getByRole("button")).toHaveCount(0);
+    const tip = await openTip(page, page.locator(".trip-data-note"), "About the data");
+    await expect(tip).toContainText("Manual report: telemetry did not record this trip.");
+    await expect(tip).not.toContainText("company reporting time zone");
     await closeTip(page);
-    await expect(page.getByText("manual_report")).toHaveCount(0);
+    await expectHumanText(page);
 
-    // Unknown distance is unavailable with an explanation, never zero.
     const unknownDistance = manualUnknown();
     tripPrivate(unknownDistance).summary.actualDistanceM = null;
     state.view = unknownDistance;
-    await page.reload();
-    await loaded(page);
-    await expect(tile(page, "Distance")).toContainText("Unavailable");
-    await expect(tile(page, "Distance")).not.toContainText("0 km");
-    await expect(await openTip(page, tile(page, "Distance"), "Why is this unknown?")).toContainText(
-      "not zero",
-    );
+    await refresh(page);
+    const distance = fact(region(page, "Route"), "Distance");
+    await expect(distance).toHaveText("Unavailable");
+    await expect(distance).not.toContainText("0 km");
+    await expect(await openTip(page, distance, "Why is this unknown?")).toContainText("not zero");
     await closeTip(page);
 
-    // Current production sends no check: nothing renders, not even an empty state.
+    state.view = manualUnknown("zero-damage");
+    await refresh(page);
+    await expect(fact(region(page, "Route"), "Damage")).toHaveText("0 %");
+
     state.view = manualUnknown("no-check");
-    await page.reload();
-    await loaded(page);
-    await expect(region(page, "Sources")).toBeVisible();
-    await expect(region(page, "Qualification check")).toHaveCount(0);
-    await expect(page.getByText("Qualification check", { exact: true })).toHaveCount(0);
+    await refresh(page);
+    await expect(region(page, "Qualification")).toHaveCount(0);
 
     state.view = manualUnknown("event-exempt");
-    await page.reload();
-    await loaded(page);
-    await expect(region(page, "Qualification check")).toContainText(
+    await refresh(page);
+    await expect(region(page, "Qualification")).toContainText(
       "A company event trip — credited without the qualification check",
     );
-    await expect(region(page, "Qualification check").getByRole("listitem")).toHaveCount(0);
+    await expect(region(page, "Qualification").getByRole("button")).toHaveCount(0);
 
-    state.view = manualUnknown("zero-damage");
-    await page.reload();
-    await loaded(page);
-    await expect(fact(tripCard(page), "Damage")).toHaveText("0 % of cargo");
+    // A returned manual report: the report's trailer stands in without a per-field mark.
+    state.view = needsFixManual("no-fact");
+    await refresh(page);
+    await expect(fact(region(page, "Cargo and trailer"), "Trailer")).toHaveText(
+      "Fictional trailer_type",
+    );
+    await expect(page.getByText("by the report")).toHaveCount(0);
+    await expect(fact(region(page, "Route"), "Damage")).toHaveText("12.5 %");
+    const shots = region(page, "Completion screenshots");
+    await expect(shots).toContainText(needsFixEvidence.originalName);
+    await expect(shots.getByText(retentionNotice, { exact: true })).toBeVisible();
+    const reported = await openTip(page, page.locator(".trip-data-note"), "About the data");
+    await expect(reported).toContainText("Manual report submitted on 11 Nov, 09:00.");
+    await expect(reported).toContainText("The driver stated this in the manual report.");
+    await closeTip(page);
+    state.view = needsFixManual("unknown-damage");
+    await refresh(page);
+    await expect(fact(region(page, "Route"), "Damage")).toHaveCount(0);
 
-    state.view = manualUnknown("no-company");
-    await page.reload();
-    await loaded(page);
-    const origin = fact(tripCard(page), "From");
-    await expect(origin.locator(".trip-company")).toHaveCount(0);
-    await expect(origin).not.toContainText("Not specified");
-    await expect(origin).not.toContainText("·");
+    // Another member's accepted summary: route, distance and the counted line only.
+    state.view = otherSummary();
+    await refresh(page);
+    await expect(page.getByText("Accepted company summary", { exact: true })).toBeVisible();
+    await expect(counted(page)).toHaveText("Counted: +812 km in statistics and ETS2 qualification");
+    await expect(page.locator(".trip-detail-meta")).toContainText("Driver: Fictional Other Driver");
+    await expect(region(page, "Route").locator("dt")).toHaveText(["Distance"]);
+    // Only the cargo itself: labels and the trailer are private.
+    const summaryCargo = region(page, "Cargo and trailer");
+    await expect(summaryCargo.locator("dt")).toHaveText(["Cargo"]);
+    await expect(fact(summaryCargo, "Cargo")).toHaveText("Fictional machine parts");
+    for (const name of ["Conditions", "Qualification", "History"])
+      await expect(region(page, name)).toHaveCount(0);
+    await expect(page.locator(".trip-data-note")).toHaveCount(0);
+    expect(
+      requests.filter((path) => privatePaths.test(path) || path.includes("/evidence")),
+    ).toEqual([]);
     expect(logoRequests(requests)).toEqual([]);
+
+    // Older private views without Stage 4 data still read as a trip page.
+    state.view = olderPrivate("extended-manual-revision");
+    await refresh(page);
+    await expect(region(page, "History")).toBeVisible();
+    await expect(region(page, "Completion screenshots")).toContainText(
+      "No screenshots are attached.",
+    );
   },
 );
 
 test(
-  "F3 reconciled accepted trip lists both sources in order and falls back from a failed logo",
+  "the dispatcher block stays collapsed and unread until opened and never renders for drivers",
   browserCase(["@functional"]),
   async ({ page }) => {
-    await author(page, reconciledAccepted(), null);
+    const fallback = withRoute(needsFixManual());
+    const origin = tripPrivate(fallback).summary.origin;
+    if (origin) origin.englishFallback = true;
+    const driver = await author(page, fallback);
+    await page.goto(tripPath);
+    await catalogLanguage(page);
+    await loaded(page);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Fictional Westport → Fictional Eastbrook",
+    );
+    await expect(page.locator("summary", { hasText: "For dispatchers" })).toHaveCount(0);
+    await expectHumanText(page, [String(needsFixEvidence.byteLength)]);
+    expect(driver.requests.filter((path) => privatePaths.test(path))).toEqual([]);
+
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    const staff = await author(page, asOtherMember(needsFixManual()), "UTC", true);
+    await page.reload();
+    await catalogLanguage(page);
+    await loaded(page);
+    await expect(status(page)).toHaveText("Needs fixes");
+    await expect(page.locator(".trip-detail-meta")).toContainText("Driver: Fictional Other Driver");
+    await expect(banner(page).locator(".trip-banner-text")).toHaveText(
+      "The report was returned to the driver for fixes.",
+    );
+    const block = page.locator("details.trip-staff");
+    await expect(block.locator("summary")).toHaveText(
+      "For dispatchersSources · technical details · private history · merges",
+    );
+    await expect(block).not.toHaveAttribute("open");
+    // Nothing inside renders or loads while collapsed.
+    for (const name of ["Sources", "Technical details", "Reconciliation history"])
+      await expect(page.getByText(name, { exact: true })).toHaveCount(0);
+    expect(staff.requests.filter((path) => privatePaths.test(path))).toEqual([]);
+
+    await block.locator("summary").first().click();
+    await expect(block).toHaveAttribute("open");
+    await expect(region(page, "Sources").getByRole("listitem")).toHaveCount(1);
+    for (const name of [
+      "Technical details",
+      "Private report and review history",
+      "Reconciliation history",
+    ])
+      await expect(block.locator("summary", { hasText: new RegExp(`^${name}`) })).toBeVisible();
+    const technical = block.locator("details").filter({
+      has: page.locator("summary", { hasText: /^Technical details/ }),
+    });
+    await technical.locator("summary").click();
+    await expect(technical.getByText(tripPageId, { exact: true })).toBeVisible();
+    await expect(technical.getByText("SYNTHETIC_STAFF_REVIEW", { exact: true })).toBeVisible();
+    await expect(technical).toContainText(String(needsFixEvidence.byteLength));
+    expect(
+      staff.requests.filter((path) => /\/manual-revisions|\/manual-reports/.test(path)),
+    ).toEqual([]);
+  },
+);
+
+test(
+  "staff read reconciled sources in the dispatcher block; a failed logo, selected limits and the correction request stay as before",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    // A null saved zone follows the device; staff own this trip so every block renders.
+    const { state } = await author(page, reconciledAccepted(), null, true);
     await page.route(new RegExp(`/api/v1/catalogs/companies/${senderCompanyId}/logo`), (route) =>
       route.fulfill({ status: 500, json: { error: { code: "PRIVATE_SENTINEL" } } }),
     );
@@ -445,6 +683,25 @@ test(
     await catalogLanguage(page);
     await loaded(page);
 
+    // The failed logo falls back to the placeholder plate without leaking the failure.
+    const origin = region(page, "Route").locator(".trip-route-end[data-side=origin]");
+    await expect(origin.locator(".company-logo")).toHaveAttribute("data-logo", "placeholder");
+    await expect(origin).toContainText("Fictional Logistics");
+    await expect(region(page, "Route").locator("img")).toHaveCount(0);
+    await expect(page.getByText("PRIVATE_SENTINEL")).toHaveCount(0);
+    await expect(page.locator(".trip-detail-meta > span")).toContainText([
+      "Telemetry",
+      "Manual report",
+    ]);
+    await expect(page.locator(".trip-data-note")).toContainText(
+      `Times in your time zone (${deviceZone})`,
+    );
+    // An accepted own trip offers the correction request.
+    await expect(
+      page.getByRole("heading", { name: "Request correction", exact: true }),
+    ).toBeVisible();
+
+    await page.locator("details.trip-staff > summary").click();
     const sources = region(page, "Sources");
     const items = sources.getByRole("listitem");
     await expect(items.locator(".trip-source-head > .badge:first-child")).toHaveText([
@@ -456,388 +713,520 @@ test(
     await expect(fact(items.nth(0), "Driven distance")).toHaveText("812.4005 km");
     await expect(fact(items.nth(1), "Driven distance")).toHaveText("810 km");
     await expect(fact(items.nth(1), "Source outcome")).toHaveText("Delivered");
-    // A null saved zone follows the device, exactly like the trip block.
-    await expect(tripCard(page)).toContainText(`Times in ${deviceZone}`);
     await expect(sources).toContainText(`Times in ${deviceZone}`);
     await expect(fact(items.nth(0), "Received")).toHaveText(/11 Nov 2026.*03:00/);
-    await expect(page.locator(".trip-detail-meta .trip-source-badges .badge")).toHaveText([
-      "Telemetry",
-      "Manual report",
-    ]);
 
-    const sender = fact(tripCard(page), "From");
-    await expect(sender.locator(".company-logo")).toHaveAttribute("data-logo", "placeholder");
-    await expect(sender).toContainText("Fictional Logistics");
-    await expect(tripCard(page).locator("img")).toHaveCount(0);
-    await expect(page.getByText("PRIVATE_SENTINEL")).toHaveCount(0);
+    // A rejected own trip: no correction request; selected limits are named, never blank.
+    state.view = returnedTrip();
+    await refresh(page);
+    await expect(status(page)).toHaveText("Rejected");
     await expect(
       page.getByRole("heading", { name: "Request correction", exact: true }),
-    ).toBeVisible();
-  },
-);
-
-test(
-  "F4 a rejected trip shows its historical five-rule check and reason; a revisable report needs fixes",
-  browserCase(["@functional"]),
-  async ({ page }) => {
-    const { state } = await author(page, returnedTrip());
-    await page.goto(tripPath);
-    await catalogLanguage(page);
-    await loaded(page);
-
-    // Without a report to revise the trip is rejected, not returned for fixes.
-    await expect(status(page)).toHaveText("Rejected");
-    await expect(page.getByRole("link", { name: "Fix the report", exact: true })).toHaveCount(0);
-    await expect(tile(page, "Credited")).toContainText("No");
-    await expect(tile(page, "What next")).toContainText("Not counted");
-    await expect(tile(page, "What next")).toContainText(
-      `Fictional Stage Four Dispatcher: "${returnedReason}"`,
-    );
-    const history = region(page, "History");
-    await expect(history.getByRole("listitem")).toHaveCount(2);
-    const rejection = history.getByRole("listitem").nth(1);
-    await expect(rejection).toContainText("Rejected");
-    await expect(rejection).toContainText("11 Nov, 10:00 · Fictional Stage Four Dispatcher");
-    await expect(rejection).toContainText(`"${returnedReason}"`);
-    await expect(region(page, "Sources").getByRole("listitem")).toHaveCount(2);
-    const rules = region(page, "Qualification check").getByRole("listitem");
+    ).toHaveCount(0);
+    const check = region(page, "Qualification");
+    await check.getByRole("button", { name: "Show rules", exact: true }).click();
+    const rules = check.getByRole("listitem");
     await expect(rules).toHaveCount(5);
-    // Selected limits without entries are named, never left blank.
     await expect(rules.nth(2)).toContainText("Trip: Fictional Tanker · Limit: Only selected");
     await expect(rules.nth(3)).toHaveAttribute("data-result", "fail");
     await expect(rules.nth(3)).toContainText(
       "Trip: 3 · Flammable liquids · Limit: Selected classes",
     );
-    await expect(fact(tripCard(page), "From")).toContainText("Fictional Logistics");
-    await expect(
-      page.getByRole("heading", { name: "Request correction", exact: true }),
-    ).toHaveCount(0);
 
-    state.view = needsFixManual();
-    await page.reload();
-    await loaded(page);
-    await expect(status(page)).toHaveText("Needs fixes");
-    const returned = region(page, "History").getByRole("listitem");
-    await expect(returned).toHaveCount(3);
-    await expect(returned.nth(0)).toContainText("Report submitted");
-    await expect(returned.nth(1)).toContainText("Rejected");
-    await expect(returned.nth(1)).toContainText("System");
-    await expect(returned.nth(2)).toContainText("Returned for fixes");
-    await expect(returned.nth(2)).toContainText(`"${needsFixReason}"`);
-    await expect(returned.nth(2)).toContainText("Other reason, No completion screenshot");
-  },
-);
-
-test(
-  "F5 older private views and company summaries show no Stage 4 blocks; no sources is explained",
-  browserCase(["@functional"]),
-  async ({ page }) => {
-    const { state, requests } = await author(page, olderPrivate("private-recorded-telemetry"));
-    await page.goto(tripPath);
-    await catalogLanguage(page);
-    for (const step of ["private-recorded-telemetry", "extended-manual-revision"] as const) {
-      if (step !== "private-recorded-telemetry") {
-        state.view = olderPrivate(step);
-        await page.reload();
-      }
-      await loaded(page);
-      await expect(tripCard(page)).toBeVisible();
-      await expect(region(page, "History")).toBeVisible();
-      await expect(region(page, "Sources")).toHaveCount(0);
-      await expect(region(page, "Qualification check")).toHaveCount(0);
-      await expect(page.locator(".trip-company")).toHaveCount(0);
-      await expect(page.getByText("Accepted company summary", { exact: true })).toHaveCount(0);
-    }
-    // The older manual report can still be revised; its screenshots card explains none is ready.
-    await expect(
-      page.getByRole("link", { name: "Revise and resubmit", exact: true }),
-    ).toHaveAttribute("href", "/account/reports/51000000-0000-4000-8000-000000000009/edit");
-    await expect(region(page, "Completion screenshots")).toContainText(
-      "No screenshots are attached.",
-    );
-
-    state.view = otherSummary();
-    await page.reload();
-    await loaded(page);
-    await expect(page.getByText("Accepted company summary", { exact: true })).toBeVisible();
-    await expect(page.locator(".trip-detail-tile")).toHaveCount(2);
-    await expect(tile(page, "What next")).toHaveCount(0);
-    await expect(page.locator(".trip-detail-aside")).toHaveCount(0);
-    await expect(page.locator(".trip-detail-meta")).toContainText("Driver: Fictional Other Driver");
-    const card = tripCard(page);
-    await expect(card.locator("dt")).toHaveText(["From", "To", "Cargo"]);
-    for (const name of ["Sources", "Qualification check", "History", "Completion screenshots"])
-      await expect(region(page, name)).toHaveCount(0);
-    expect(
-      requests.filter((path) => privatePaths.test(path) || path.includes("/evidence")),
-    ).toEqual([]);
-
+    // No recorded source is explained inside the dispatcher block.
     state.view = withoutSources();
-    await page.reload();
-    await loaded(page);
-    const sources = region(page, "Sources");
-    await expect(sources).toContainText("No sources are recorded for this trip.");
-    await expect(sources.getByRole("listitem")).toHaveCount(0);
+    await refresh(page);
+    const block = page.locator("details.trip-staff");
+    if ((await block.getAttribute("open")) === null) await block.locator("summary").first().click();
+    await expect(region(page, "Sources")).toContainText("No sources are recorded for this trip.");
+    await expect(region(page, "Sources").getByRole("listitem")).toHaveCount(0);
   },
 );
 
+/** The pending own trip the dialog cases link: on 10 Nov 10:00–18:00 UTC between two cities. */
+function pendingTelemetry() {
+  const trip = acceptedTelemetry("no-event");
+  const view = tripPrivate(trip);
+  view.summary.decision = "pending_review";
+  view.decisions = [];
+  return trip;
+}
+const events = {
+  older: fictionalEvent(1, "2026-11-01T09:00:00.000Z"),
+  otherGame: fictionalEvent(2, "2026-11-10T08:00:00.000Z", { game: "ats" }),
+  cancelled: fictionalEvent(3, "2026-11-10T08:30:00.000Z", { status: "cancelled" }),
+  match: fictionalEvent(4, "2026-11-10T09:00:00.000Z", {
+    sameRoute: true,
+    title: "Fictional Westport Convoy",
+  }),
+  sameDay: fictionalEvent(5, "2026-11-10T20:00:00.000Z", { title: "Fictional Evening Run" }),
+  later: fictionalEvent(6, "2026-11-12T09:00:00.000Z", { title: "Fictional Later Run" }),
+};
+/**
+ * Serves the past events in pages keyed by cursor, each member read by event, and records every
+ * list request's query string.
+ */
+async function serveEvents(
+  page: Page,
+  pages: Record<string, { items: (typeof events)[keyof typeof events][]; next: string | null }>,
+  members: Record<string, ReturnType<typeof eventMember>> = {},
+) {
+  const reads: string[] = [];
+  const control = { status: 200 };
+  await page.route(/\/api\/v1\/events(\?.*)?$/, (route) => {
+    const url = new URL(route.request().url());
+    // Other event reads (the shell's upcoming events) keep the default mock.
+    if (url.searchParams.get("period") !== "past") return route.fallback();
+    reads.push(url.search);
+    if (control.status !== 200)
+      return route.fulfill({
+        status: control.status,
+        json: { error: { code: "PRIVATE_SENTINEL" } },
+      });
+    const found = pages[url.searchParams.get("cursor") ?? ""];
+    if (!found)
+      return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
+    return route.fulfill({ json: eventPage(found.items, found.next) });
+  });
+  await page.route(/\/api\/v1\/events\/[0-9a-f-]{36}$/, (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").at(-1) ?? "";
+    const member = members[id];
+    return member
+      ? route.fulfill({ json: member })
+      : route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND" } } });
+  });
+  return { reads, control };
+}
+const dialog = (page: Page) => page.getByRole("dialog", { name: "Link to an event" });
+const options = (page: Page) => dialog(page).getByRole("radio");
+const optionNames = (page: Page) =>
+  dialog(page).locator(".trip-event-option strong").allInnerTexts();
+
 test(
-  "R1 the author sees a human trip page while staff get collapsed technical details",
+  "the event dialog lists same-game scheduled events of the trip day, matches routes and links the trip",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const { state, requests } = await author(page, needsFixManual());
+    const { state } = await author(page, pendingTelemetry());
+    const { reads } = await serveEvents(
+      page,
+      {
+        "": {
+          items: [events.older, events.otherGame, events.cancelled, events.match],
+          next: "cursor-2",
+        },
+        "cursor-2": { items: [events.sameDay, events.later], next: "cursor-3" },
+        "cursor-3": { items: [], next: "cursor-4" },
+        "cursor-4": { items: [], next: null },
+      },
+      {
+        [events.match.id]: eventMember(events.match, "unconfirmed", "participating"),
+        [events.sameDay.id]: eventMember(events.sameDay, "unconfirmed", "unanswered"),
+        [events.older.id]: eventMember(events.older, "attended", "participating"),
+      },
+    );
     await page.goto(tripPath);
     await catalogLanguage(page);
     await loaded(page);
+    const conditions = region(page, "Conditions");
+    await expect(fact(conditions, "Event")).toHaveText("Not linked·Link");
+    const link = fact(conditions, "Event").getByRole("button", { name: "Link", exact: true });
+    await link.click();
+    await expect(dialog(page)).toBeVisible();
+    await expect(dialog(page)).toContainText(
+      "Fictional Westport → Fictional Eastbrook · 10 Nov, 10:00–10 Nov, 18:00 · ETS2",
+    );
+    await expect(dialog(page)).toContainText("Times in UTC");
+    // The scan stops once a page passes the trip day; the next cursor is not read.
+    await expect.poll(() => reads.length).toBe(2);
+    for (const [index, search] of reads.entries()) {
+      const query = new URLSearchParams(search);
+      expect(query.get("period")).toBe("past");
+      expect(query.get("limit")).toBe("100");
+      expect(query.get("cursor")).toBe(index === 0 ? null : "cursor-2");
+    }
 
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      "Fictional Westport → Fictional Eastbrook",
+    const tabs = dialog(page).getByRole("group", { name: "Events to show" });
+    await expect(tabs.getByRole("button", { name: "On the trip day" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
-    await expect(page.locator(".trip-detail-meta")).toHaveText(
-      "Trip #1044 · ETS2 · Manual report · completed 10 Nov, 18:00",
+    // Newest first; another game and a cancelled event are never offered.
+    expect(await optionNames(page)).toEqual([events.sameDay.title, events.match.title]);
+    const matchCard = dialog(page).locator(".trip-event-option", { hasText: events.match.title });
+    await expect(matchCard).toContainText(
+      "10 Nov, 09:00 · Fictional Westport → Fictional Eastbrook",
     );
-    await expect(page.getByRole("main").getByRole("navigation")).toHaveCount(0);
-    // The effective fact names no receiving company, so the place is the city alone.
-    const receiver = fact(tripCard(page), "To");
-    await expect(receiver).toHaveText("Fictional Eastbrook");
+    await expect(matchCard.getByText("Route matches", { exact: true })).toBeVisible();
     await expect(
-      page.getByRole("complementary", { name: "Trip history and check", exact: true }),
-    ).toContainText("History");
-    const fix = page.getByRole("link", { name: "Fix the report", exact: true });
-    await expect(fix).toHaveAttribute("href", `/account/reports/${needsFixReportId}/edit`);
-    const next = tile(page, "What next");
-    await expect(next).toHaveAttribute("data-attention", "true");
-    await expect(next).toContainText(`Fictional Stage Four Dispatcher: "${needsFixReason}"`);
-    const shots = region(page, "Completion screenshots");
-    await expect(shots).toContainText("Screenshots: 1");
-    await expect(shots).toContainText(needsFixEvidence.originalName);
-    await expect(shots).toContainText("Ready");
-    await expect(shots.getByRole("button", { name: "View Evidence 1", exact: true })).toBeVisible();
-    // The author sees the retention notice under the screenshots, not only staff details.
-    await expect(shots.getByText(retentionNotice, { exact: true })).toBeVisible();
-    await expect(fact(tripCard(page), "Trailer")).toHaveText("Fictional trailer_type");
-    await expect(fact(tripCard(page), "Damage")).toHaveText("12.5 % of cargo");
-    for (const hidden of [
-      "Technical details",
-      "Private report and review history",
-      "Reconciliation history",
-    ])
-      await expect(page.getByText(hidden, { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Review workspace", exact: true })).toHaveCount(0);
-    await expectHumanText(page, [String(needsFixEvidence.byteLength)]);
+      dialog(page).locator(".trip-event-option", { hasText: events.sameDay.title }),
+    ).toContainText(`10 Nov, 20:00 · ${events.sameDay.route}`);
+    await expect(dialog(page).getByText("Route matches", { exact: true })).toHaveCount(1);
+    await expect(dialog(page).getByText("Only part of the list is loaded.")).toHaveCount(0);
 
-    // Without an effective fact the report's trailer and damage stand in, marked as reported.
-    state.view = needsFixManual("no-fact");
-    await page.reload();
-    await loaded(page);
-    const trailer = fact(tripCard(page), "Trailer");
-    await expect(trailer).toContainText("Fictional trailer_type");
-    await expect(trailer).toContainText("by the report");
-    const reportedDamage = fact(tripCard(page), "Damage");
-    await expect(reportedDamage).toContainText("12.5 % of cargo");
-    await expect(reportedDamage).toContainText("by the report");
-    await expect(await openTip(page, reportedDamage, "About values from the report")).toHaveText(
-      "The driver stated this in the manual report. Staff confirmation determines reporting and qualification.",
+    const submit = dialog(page).getByRole("button", { name: "Link", exact: true });
+    await expect(submit).toBeDisabled();
+    await matchCard.click();
+    await expect(options(page).nth(1)).toBeChecked();
+    await expect(submit).toBeEnabled();
+    const consequence = dialog(page).locator(".trip-event-consequence");
+    await expect(consequence).toHaveText(
+      "The trip is linked at once and checked again. You signed up, but attendance is not confirmed yet; until then the level limits apply.",
     );
+    // Native radios move the selection with the arrow keys.
+    await page.keyboard.press("ArrowUp");
+    await expect(options(page).nth(0)).toBeChecked();
+    await expect(options(page).nth(0)).toBeFocused();
+    await expect(consequence).toContainText("You did not sign up and attendance is not confirmed");
+    const help = await openTip(page, consequence, "How linking works");
+    await expect(help).toContainText("Linking is not attendance");
+    await expect(help).toContainText("RSVP does not prove attendance");
     await closeTip(page);
-    // An explicit unknown from the server is not replaced by the report's damage.
-    state.view = needsFixManual("unknown-damage");
-    await page.reload();
-    await loaded(page);
-    await expect(fact(tripCard(page), "Damage")).toHaveText("Unavailable");
 
-    // A manual report without screenshots keeps the card but has nothing to retain.
-    const bare = needsFixManual();
-    tripPrivate(bare).evidence = [];
-    state.view = bare;
-    await page.reload();
-    await loaded(page);
-    await expect(region(page, "Completion screenshots")).toBeVisible();
-    await expect(page.getByText(retentionNotice, { exact: true })).toHaveCount(0);
-
-    state.view = telemetryWithEvent();
-    await page.reload();
-    await loaded(page);
-    await expectHumanText(page);
-    expect(requests.filter((path) => privatePaths.test(path))).toEqual([]);
-
-    // Staff reading another member's trip: the review link and collapsed technical details.
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    const staff = await author(page, asOtherMember(needsFixManual()), "UTC", true);
-    await page.reload();
-    await loaded(page);
-    await expect(page.getByRole("link", { name: "Review workspace", exact: true })).toHaveAttribute(
-      "href",
-      `/account/review/${tripPageId}`,
+    // All past events, then the rest of the list on demand.
+    await tabs.getByRole("button", { name: "All past" }).click();
+    expect(await optionNames(page)).toEqual([
+      events.later.title,
+      events.sameDay.title,
+      events.match.title,
+      events.older.title,
+    ]);
+    await expect(dialog(page).getByText("Only part of the list is loaded.")).toBeVisible();
+    await dialog(page).getByRole("button", { name: "Load more events" }).click();
+    await expect(dialog(page).getByText("Only part of the list is loaded.")).toHaveCount(0);
+    // Past the trip day, one Load more reads the full batch budget, not a single page.
+    expect(reads.slice(-2).map((search) => new URLSearchParams(search).get("cursor"))).toEqual([
+      "cursor-3",
+      "cursor-4",
+    ]);
+    await dialog(page).locator(".trip-event-option", { hasText: events.older.title }).click();
+    await expect(consequence).toContainText(
+      "Your attendance is confirmed, so the level limits do not apply to this trip.",
     );
-    await expect(page.getByRole("link", { name: "Fix the report", exact: true })).toHaveCount(0);
-    // Staff read the same status and credit as the owner; only the owner can act on the fix.
-    await expect(status(page)).toHaveText("Needs fixes");
-    await expect(page.locator(".trip-detail-meta")).toContainText("Driver: Fictional Other Driver");
-    await expect(tile(page, "What next")).toContainText("Waiting for the driver's fix");
-    await expect(tile(page, "What next")).toContainText(
-      `Fictional Stage Four Dispatcher: "${needsFixReason}"`,
-    );
-    await expect(tile(page, "What next")).not.toHaveAttribute("data-attention", "true");
-    await expect(tile(page, "Credited")).toContainText("Not yet");
-    await expect(
-      region(page, "Completion screenshots").getByText(retentionNotice, { exact: true }),
-    ).toBeVisible();
-    const technical = page.locator("details").filter({
-      has: page.locator("summary", { hasText: "Technical details" }),
+    // A selection outside the trip day stays visible and checked on that tab.
+    await tabs.getByRole("button", { name: "On the trip day" }).click();
+    expect(await optionNames(page)).toEqual([
+      events.older.title,
+      events.sameDay.title,
+      events.match.title,
+    ]);
+    await expect(options(page).nth(0)).toBeChecked();
+
+    // Cancel and Escape close without a command and return focus to the opener.
+    await dialog(page).getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(link).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(dialog(page)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(link).toBeFocused();
+
+    // Link from the menu: exactly the event ID with the trip version and an idempotency key.
+    const posts: Request[] = [];
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    await expect(technical).not.toHaveAttribute("open");
+    await page.route(`**/api/v1/trips/${tripPageId}/event-association`, async (route) => {
+      posts.push(route.request());
+      await held;
+      const linked = pendingTelemetry();
+      tripPrivate(linked).summary.event = { id: events.match.id, title: events.match.title };
+      state.view = linked;
+      await route.fulfill({
+        json: { data: { id: tripPageId, version: 4 }, meta: { requestId: "synthetic" } },
+        headers: { ETag: '"v4"' },
+      });
+    });
+    const menu = await openMenu(page);
+    await menu.getByRole("menuitem", { name: "Link to an event…" }).click();
+    await expect(dialog(page)).toBeVisible();
+    await expect(dialog(page).getByRole("radio").first()).toBeVisible();
+    await dialog(page).locator(".trip-event-option", { hasText: events.match.title }).click();
+    const before = state.calls;
+    await submit.click();
+    await expect.poll(() => posts.length).toBe(1);
+    await expect(submit).toBeDisabled();
+    await expect(dialog(page).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toBeVisible();
+    release();
+    await expect(dialog(page)).toHaveCount(0);
     await expect(
-      page.getByText("Private report and review history", { exact: true }),
+      page.getByRole("status").filter({ hasText: "The trip is linked to the event." }),
     ).toBeVisible();
-    await expectHumanText(page, [String(needsFixEvidence.byteLength)]);
-    await technical.locator("summary").click();
-    await expect(technical).toHaveAttribute("open");
-    await expect(technical.getByText(tripPageId, { exact: true })).toBeVisible();
-    await expect(
-      technical.getByText("41500000-0000-4000-8000-000000000310", { exact: true }).first(),
-    ).toBeVisible();
-    await expect(technical).toContainText(String(needsFixEvidence.byteLength));
-    await expect(technical.getByText("SYNTHETIC_STAFF_REVIEW", { exact: true })).toBeVisible();
-    await expect(technical.getByText("SYNTHETIC_REJECTED", { exact: true })).toBeVisible();
-    expect(
-      staff.requests.filter((path) => /\/manual-revisions|\/manual-reports/.test(path)),
-    ).toEqual([]);
+    await expect(menuButton(page)).toBeFocused();
+    await expect.poll(() => state.calls).toBeGreaterThan(before);
+    await expect(fact(region(page, "Conditions"), "Event")).toHaveText(
+      `${events.match.title}·Change`,
+    );
+    expect(posts).toHaveLength(1);
+    const [post] = posts;
+    if (!post) throw new Error("POST_MISSING");
+    expect(post.postDataJSON()).toEqual({ eventId: events.match.id });
+    expect(post.headers()["if-match"]).toBe('"v1"');
+    expect(post.headers()["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
   },
 );
 
-const labels = {
-  en: {
-    refresh: "Refresh",
-    next: "What next",
-    credited: "Credited",
-    held: "Why it is held",
-    reason: "Other reason",
-    rows: [
-      ["Accepted", "Nothing to do", "Yes"],
-      ["Pending review", "Nothing to do", "Not yet"],
-      ["Needs fixes", "Fix the report", "Not yet"],
-      ["Rejected", "Not counted", "No"],
-      ["In progress", "Finish the delivery", "Not yet"],
-      ["Not checked yet", "Not checked yet", "Not yet"],
-      ["Cancelled", "Delivery cancelled", "No"],
-    ],
-  },
-  ru: {
-    refresh: "Обновить",
-    next: "Что дальше",
-    credited: "Засчитан",
-    held: "Почему на проверке",
-    reason: "Другая причина",
-    rows: [
-      ["Принят", "Ничего не нужно", "Да"],
-      ["На проверке", "Ничего не нужно", "Пока нет"],
-      ["Нужно исправить", "Исправьте отчёт", "Пока нет"],
-      ["Отклонён", "Не засчитан", "Нет"],
-      ["Выполняется", "Завершите доставку", "Пока нет"],
-      ["Ещё не проверен", "Ещё не проверен", "Пока нет"],
-      ["Отменён", "Доставка отменена", "Нет"],
-    ],
-  },
-} as const;
-
 test(
-  "R2 every status, next step and credit state reads in words in EN and RU",
+  "the event dialog explains decided trips, keeps the selection on conflict and recovers failed reads",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const unassessed = openTelemetry();
-    tripPrivate(unassessed).summary.outcome = "delivered";
-    const cancelled = openTelemetry();
-    tripPrivate(cancelled).summary.outcome = "cancelled";
-    const views = () => [
-      telemetryWithEvent(),
-      pendingManual(),
-      needsFixManual(),
-      returnedTrip(),
-      openTelemetry(),
-      structuredClone(unassessed),
-      structuredClone(cancelled),
-    ];
-    const { state } = await author(page, telemetryWithEvent());
+    // The accepted trip is linked to an event outside the loaded list.
+    await author(page, acceptedTelemetry());
+    const served = await serveEvents(
+      page,
+      // The first batch stops after an event past the trip day, leaving a cursor the server rejects.
+      { "": { items: [events.older, events.later], next: "stale" } },
+      {
+        [events.older.id]: eventMember(events.older, "not_attended", "participating"),
+        [tripEventId]: eventMember(
+          { ...events.older, id: tripEventId, title: "Fictional Winter Convoy" },
+          "attended",
+        ),
+      },
+    );
+    let conflicts = 0;
+    await page.route(`**/api/v1/trips/${tripPageId}/event-association`, (route) => {
+      conflicts++;
+      return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
+    });
     await page.goto(tripPath);
-    for (const locale of ["en", "ru"] as const) {
-      await catalogLanguage(page, locale);
-      const text = labels[locale];
-      for (const [index, view] of views().entries()) {
-        const [label, next, credited] = text.rows[index] ?? [];
-        state.view = view;
-        const read = page.waitForResponse((r) => r.url().endsWith(`/trips/${tripPageId}`));
-        await page.getByRole("button", { name: text.refresh, exact: true }).click();
-        await read;
-        await expect(status(page)).toHaveText(new RegExp(`^.?${label}$`));
-        await expect(tile(page, text.next).locator(".trip-detail-tile-value")).toHaveText(
-          next ?? "",
-        );
-        await expect(tile(page, text.credited).locator(".trip-detail-tile-value")).toHaveText(
-          credited ?? "",
-        );
-        if (index === 1) {
-          const tip = await openTip(page, tile(page, text.next), text.held);
-          await expect(tip).toContainText(text.reason);
-          await expect(tip).not.toContainText("SYNTHETIC_");
-          await closeTip(page);
-        }
-      }
-    }
+    await catalogLanguage(page);
+    await loaded(page);
+    await fact(region(page, "Conditions"), "Event").getByRole("button", { name: "Change" }).click();
+    await expect(dialog(page)).toBeVisible();
+    // Nothing of the loaded list started on the trip day; the current event is still offered.
+    const current = dialog(page).locator(".trip-event-option", {
+      hasText: "Fictional Winter Convoy",
+    });
+    await expect(current).toContainText("Linked now");
+    await expect(current.getByRole("radio")).toBeChecked();
+    const consequence = dialog(page).locator(".trip-event-consequence");
+    await expect(consequence).toHaveText(
+      "The trip is already decided, so staff will review the link; the current result stays until then. Your attendance is confirmed, so the level limits do not apply to this trip.",
+    );
+    // The preselected linked event is not a change: Link stays disabled until another is picked.
+    const submit = dialog(page).getByRole("button", { name: "Link", exact: true });
+    await expect(submit).toBeDisabled();
+    await dialog(page).getByRole("button", { name: "All past" }).click();
+    await dialog(page).locator(".trip-event-option", { hasText: events.later.title }).click();
+    await expect(submit).toBeEnabled();
+    await current.click();
+    await expect(current.getByRole("radio")).toBeChecked();
+    await expect(submit).toBeDisabled();
+    await submit.click({ force: true });
+    expect(conflicts).toBe(0);
+
+    // A rejected (stale) cursor shows a safe failure; Refresh starts over from the first page.
+    await dialog(page).getByRole("button", { name: "All past" }).click();
+    await dialog(page).locator(".trip-event-option", { hasText: events.older.title }).click();
+    await expect(consequence).toContainText("Staff recorded that you did not attend");
+    await dialog(page).getByRole("button", { name: "Load more events" }).click();
+    await expect(dialog(page).getByRole("alert")).toContainText("The record changed.");
+    await expect(dialog(page).getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
+    await expect(dialog(page)).not.toContainText("VERSION_CONFLICT");
+    const readsBefore = served.reads.length;
+    await dialog(page).getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(dialog(page).getByRole("alert")).toHaveCount(0);
+    expect(new URLSearchParams(served.reads[readsBefore]).get("cursor")).toBeNull();
+
+    // A conflicting link keeps the dialog and the selection and explains the conflict.
+    await dialog(page).locator(".trip-event-option", { hasText: events.older.title }).click();
+    await dialog(page).getByRole("button", { name: "Link", exact: true }).click();
+    await expect(dialog(page).getByRole("alert")).toContainText("The record changed.");
+    await expect(
+      dialog(page)
+        .locator(".trip-event-option", { hasText: events.older.title })
+        .getByRole("radio"),
+    ).toBeChecked();
+    expect(conflicts).toBe(1);
+    await page.keyboard.press("Escape");
+
+    // A failed list read is a safe alert with Refresh.
+    served.control.status = 503;
+    await fact(region(page, "Conditions"), "Event").getByRole("button", { name: "Change" }).click();
+    await expect(dialog(page).getByRole("alert")).toContainText("The service is unavailable");
+    await expect(dialog(page)).not.toContainText("PRIVATE_SENTINEL");
+    served.control.status = 200;
+    await dialog(page).getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(dialog(page).getByRole("alert")).toHaveCount(0);
+    await expect(dialog(page).getByText("Linked now")).toBeVisible();
   },
 );
 
 test(
-  "L1 trip page fits phone, tablet and desktop widths in RU and EN with the aside beside or below",
+  "an incomplete scan never claims that no events exist",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await author(page, pendingTelemetry());
+    // Five empty pages fill the first batch and still leave a cursor.
+    const empty = (next: string) => ({ items: [], next });
+    const { reads } = await serveEvents(page, {
+      "": empty("c1"),
+      c1: empty("c2"),
+      c2: empty("c3"),
+      c3: empty("c4"),
+      c4: empty("c5"),
+      c5: { items: [events.match], next: null },
+    });
+    await page.goto(tripPath);
+    await catalogLanguage(page);
+    await loaded(page);
+    await fact(region(page, "Conditions"), "Event").getByRole("button", { name: "Link" }).click();
+    await expect.poll(() => reads.length).toBe(5);
+    for (const tab of ["On the trip day", "All past"]) {
+      await dialog(page).getByRole("button", { name: tab, exact: true }).click();
+      await expect(options(page)).toHaveCount(0);
+      await expect(dialog(page)).toContainText("Nothing found in the loaded part yet.");
+      await expect(dialog(page)).not.toContainText(
+        "No events of this game started on the trip day.",
+      );
+      await expect(dialog(page)).not.toContainText("No past events of this game.");
+      await expect(dialog(page).getByText("Only part of the list is loaded.")).toBeVisible();
+    }
+    await dialog(page).getByRole("button", { name: "Load more events" }).click();
+    await expect(options(page)).toHaveCount(1);
+    expect(new URLSearchParams(reads.at(-1)).get("cursor")).toBe("c5");
+    await expect(dialog(page).getByText("Only part of the list is loaded.")).toHaveCount(0);
+    await expect(dialog(page)).not.toContainText("Nothing found in the loaded part yet.");
+  },
+);
+
+test(
+  "a successful link of a decided trip is announced as sent for review",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await author(page, acceptedTelemetry("no-event"));
+    const sameRouteLater = fictionalEvent(7, "2026-11-12T12:00:00.000Z", { sameRoute: true });
+    await serveEvents(page, { "": { items: [events.older, sameRouteLater], next: null } });
+    await page.route(`**/api/v1/trips/${tripPageId}/event-association`, (route) =>
+      route.fulfill({ json: { data: { id: tripPageId, version: 2 }, meta: { requestId: "s" } } }),
+    );
+    await page.goto(tripPath);
+    await catalogLanguage(page, "ru");
+    await loaded(page);
+    await fact(region(page, "Условия"), "Мероприятие")
+      .getByRole("button", { name: "Привязать", exact: true })
+      .click();
+    const box = page.getByRole("dialog", { name: "Привязать к мероприятию" });
+    await expect(box).toContainText("Время в поясе UTC");
+    // Nothing started on the trip day; the whole past list is one tab away.
+    await expect(box.getByRole("radio")).toHaveCount(0);
+    await expect(box).toContainText("В день рейса мероприятий этой игры не было.");
+    await box.getByRole("button", { name: "Все прошедшие" }).click();
+    await expect(box.getByRole("radio")).toHaveCount(2);
+    const option = box.locator(".trip-event-option", { hasText: sameRouteLater.title });
+    await expect(option.getByText("Совпадает маршрут", { exact: true })).toBeVisible();
+    await expect(box.getByText("Совпадает маршрут", { exact: true })).toHaveCount(1);
+    await option.click();
+    await expect(box.locator(".trip-event-consequence")).toContainText(
+      "Решение по рейсу уже есть, поэтому привязку проверит сотрудник",
+    );
+    await box.getByRole("button", { name: "Привязать", exact: true }).click();
+    await expect(box).toHaveCount(0);
+    await expect(
+      page.getByRole("status").filter({ hasText: "Привязка отправлена на проверку сотруднику." }),
+    ).toBeVisible();
+  },
+);
+
+test(
+  "the reported cargo labels use icon badges in both languages without a second info button",
   browserCase(["@layout"]),
   async ({ page }, info) => {
-    const { state } = await author(page, longValues());
+    const trip = acceptedTelemetry();
+    const facts = tripPrivate(trip).effectiveFacts;
+    if (!facts) throw new Error("EXPECTED_PRIVATE_TELEMETRY_FACTS");
+    facts.cargoClassification = {
+      fragile: true,
+      valuable: true,
+      adr: { state: "class", class: 3 },
+      overweight: true,
+      oversize: null,
+      groups: ["liquid", "refrigerated"],
+    };
+    await author(page, trip);
     await page.goto(tripPath);
+    for (const [locale, card, term, labels] of [
+      [
+        "en",
+        "Cargo and trailer",
+        "Properties",
+        ["ADR 3", "Fragile", "Valuable", "Heavy", "Liquid", "Refrigerated"],
+      ],
+      [
+        "ru",
+        "Груз и прицеп",
+        "Свойства",
+        ["ADR 3", "Хрупкий", "Ценный", "Тяжёлый", "Наливной", "Рефрижератор"],
+      ],
+    ] as const) {
+      await catalogLanguage(page, locale);
+      await loaded(page);
+      const properties = fact(region(page, card), term);
+      await expect(properties.getByRole("listitem")).toHaveText([...labels]);
+      await expect(properties.locator(".lucide")).toHaveCount(labels.length);
+      await expect(properties.getByRole("button")).toHaveCount(0);
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        .toBe(true);
+      await region(page, card).screenshot({
+        path: info.outputPath(`trip-cargo-labels-${locale}.png`),
+      });
+    }
+  },
+);
+
+/** Top edges of the visible text rectangles; a badge on one line has a single top. */
+async function textLines(locator: Locator) {
+  return locator.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const tops = Array.from(range.getClientRects(), (rect) => rect.top).sort((a, b) => a - b);
+    return tops.filter((top, index) => index === 0 || top - (tops[index - 1] ?? top) > 4).length;
+  });
+}
+async function box(locator: Locator) {
+  const found = await locator.boundingBox();
+  if (!found) throw new Error("NOT_RENDERED");
+  return found;
+}
+
+test(
+  "the trip page fits phone, tablet and desktop in RU and EN with the route and strip per width",
+  browserCase(["@layout"]),
+  async ({ page }, info) => {
     const width = page.viewportSize()?.width ?? 0;
+    const long = withRoute(longValues());
+    const longSummary = tripPrivate(long).summary;
+    if (longSummary.origin) longSummary.origin.label = "Fictional Westport-on-the-Long-Bay";
+    const { state } = await author(page, acceptedTelemetry());
+    await serveEvents(page, {
+      "": {
+        items: Array.from({ length: 12 }, (_, i) =>
+          fictionalEvent(10 + i, `2026-11-10T0${i % 10}:15:00.000Z`, {
+            sameRoute: i % 3 === 0,
+            title: `${longEventTitle} ${i}`,
+          }),
+        ),
+        next: null,
+      },
+    });
+    await page.goto(tripPath);
     for (const [name, view] of [
-      ["long", longValues],
-      ["needs-fix", needsFixManual],
+      ["accepted", () => acceptedTelemetry()],
+      ["no-revenue", () => acceptedTelemetry("no-revenue")],
+      ["no-labels", () => acceptedTelemetry("no-labels")],
+      ["needs-fix", () => withRoute(needsFixManual())],
+      ["long", () => structuredClone(long)],
     ] as const) {
       state.view = view();
-      await page.reload();
       for (const locale of ["en", "ru"] as const) {
+        await page.reload();
         await catalogLanguage(page, locale);
         await loaded(page);
-        const labels =
-          locale === "en"
-            ? { trip: "Trip", sources: "Sources", check: "Qualification check", from: "From" }
-            : {
-                trip: "Рейс",
-                sources: "Источники",
-                check: "Проверка квалификации",
-                from: "Откуда",
-              };
-        const card = tripCard(page, labels.trip);
-        const sources = region(page, labels.sources);
-        const check = region(page, labels.check);
-        if (name === "long") {
-          await expect(check.getByRole("listitem")).toHaveCount(6);
-          await expect(check).toContainText(locale === "en" ? "37.5%" : "37,5%");
-          const sender = fact(card, labels.from);
-          await expect(sender).toContainText(longCompanyName);
-          await expect(card).toContainText(longEventTitle);
-          await expect(check).toContainText(`${longTrailerLabel}, ${longTrailerLabel}`);
-          await expect(check).toContainText(`${longTrailerLabel} Tanker`);
-          await expect(check.locator("svg.lucide-flame")).toBeVisible();
-          const plate = await sender.locator(".company-logo").boundingBox();
-          const company = await sender.locator(".trip-company-name").boundingBox();
-          if (!plate || !company) throw new Error("COMPANY_NOT_RENDERED");
-          expect(Math.round(plate.width)).toBe(128);
-          expect(Math.round(plate.height)).toBe(32);
-          const overlaps =
-            company.x < plate.x + plate.width &&
-            plate.x < company.x + company.width &&
-            company.y < plate.y + plate.height &&
-            plate.y < company.y + company.height;
-          expect(overlaps).toBe(false);
-        }
-        await expect(sources).toBeVisible();
-
         await page.evaluate(() => document.fonts.ready);
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -846,65 +1235,65 @@ test(
           .locator(".trip-detail .card")
           .evaluateAll((cards) => cards.map((el) => el.scrollWidth - el.clientWidth)))
           expect(overflow).toBeLessThanOrEqual(0);
+        expect(await textLines(status(page))).toBe(1);
 
-        const main = await page.locator(".trip-detail-main").boundingBox();
-        const aside = await page.locator(".trip-detail-aside").boundingBox();
-        if (!main || !aside) throw new Error("COLUMNS_NOT_RENDERED");
-        if (width >= 1100) {
-          expect(aside.x).toBeGreaterThanOrEqual(main.x + main.width - 1);
-          expect(Math.abs(aside.y - main.y)).toBeLessThan(2);
-        } else expect(aside.y).toBeGreaterThanOrEqual(main.y + main.height - 1);
-        const tiles = await page
-          .locator(".trip-detail-tile")
+        const origin = await box(page.locator(".trip-route-end[data-side=origin]"));
+        const destination = await box(page.locator(".trip-route-end[data-side=destination]"));
+        if (width < 560) expect(destination.y).toBeGreaterThanOrEqual(origin.y + origin.height - 1);
+        else expect(destination.x).toBeGreaterThanOrEqual(origin.x + origin.width - 1);
+        const cells = await page
+          .locator(".trip-route-strip > div")
           .evaluateAll((items) => items.map((el) => Math.round(el.getBoundingClientRect().top)));
-        expect(tiles).toHaveLength(3);
-        if (width >= 1100) expect(new Set(tiles).size).toBe(1);
-        if (width < 600) expect(new Set(tiles).size).toBe(3);
-
-        // Lucide paths have independent rectangles; only text rectangles determine wrapping.
-        const states = page.locator(".trip-source-effective");
-        for (const lines of await states.evaluateAll((elements) =>
-          elements.map((element) => {
-            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-            const tops: number[] = [];
-            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-              if (!node.textContent?.trim()) continue;
-              const range = document.createRange();
-              range.selectNodeContents(node);
-              tops.push(...Array.from(range.getClientRects(), (rect) => Math.round(rect.top)));
-            }
-            return new Set(tops).size;
-          }),
-        ))
-          expect(lines).toBe(1);
-        // The status symbol may come from a fallback font a few pixels off the text line, so
-        // tops within 4px count as one line; a wrapped status would start a line lower.
-        const statusLines = await status(page).evaluate((element) => {
-          const range = document.createRange();
-          range.selectNodeContents(element);
-          const tops = Array.from(range.getClientRects(), (rect) => rect.top).sort((a, b) => a - b);
-          return tops.filter((top, index) => index === 0 || top - (tops[index - 1] ?? top) > 4)
-            .length;
-        });
-        expect(statusLines).toBe(1);
-        // On phones only the primary action fills the row; secondary buttons keep their width.
-        const actions = await page.locator(".trip-detail-actions").boundingBox();
-        if (!actions) throw new Error("ACTIONS_NOT_RENDERED");
-        const buttons = await page.locator(".trip-detail-actions > .button").evaluateAll((items) =>
-          items.map((el) => ({
-            primary: el.classList.contains("button-primary"),
-            width: el.getBoundingClientRect().width,
-          })),
-        );
-        expect(buttons.some(({ primary }) => !primary)).toBe(true);
-        expect(buttons.some(({ primary }) => primary)).toBe(name === "needs-fix");
-        if (width <= 760)
-          for (const { primary, width: button } of buttons)
-            if (primary) expect(button).toBeGreaterThanOrEqual(actions.width - 1);
-            else expect(button).toBeLessThan(actions.width * 0.6);
+        if (width >= 1280) expect(new Set(cells).size).toBe(1);
+        if (width < 560 && cells.length === 4) {
+          expect(cells[0]).toBe(cells[1]);
+          expect(cells[2]).toBe(cells[3]);
+          expect(cells[2]).toBeGreaterThan(cells[0] ?? 0);
+        }
+        if (name === "long") {
+          await expect(page.locator(".trip-route")).toContainText(longCompanyName);
+          // All six limits, including the cargo damage cap, fit once the rules are shown.
+          const check = page.locator(".trip-qualification");
+          await check
+            .getByRole("button", { name: locale === "en" ? "Show rules" : "Показать правила" })
+            .click();
+          await expect(check.getByRole("listitem")).toHaveCount(6);
+          await expect(check).toContainText(locale === "en" ? "37.5%" : "37,5%");
+        }
+        if (name === "needs-fix") {
+          const section = await box(page.locator(".trip-banner"));
+          const action = await box(page.locator(".trip-banner-action"));
+          if (width < 560) expect(action.width).toBeGreaterThanOrEqual(section.width - 40);
+          else expect(action.width).toBeLessThan(section.width / 2);
+        }
         await capture(page, info, `trip-page-${name}-${locale}-${width}`);
       }
     }
+
+    // The open dialog fits a phone: scrolling list, visible actions.
+    state.view = pendingTelemetry();
+    await page.reload();
+    await catalogLanguage(page);
+    await loaded(page);
+    await fact(region(page, "Conditions"), "Event").getByRole("button", { name: "Link" }).click();
+    await expect(options(page)).toHaveCount(12);
+    const frame = await box(dialog(page));
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error("VIEWPORT_MISSING");
+    expect(frame.x).toBeGreaterThanOrEqual(0);
+    expect(frame.x + frame.width).toBeLessThanOrEqual(viewport.width);
+    expect(frame.y + frame.height).toBeLessThanOrEqual(viewport.height);
+    for (const name of ["Cancel", "Link"])
+      await expect(dialog(page).getByRole("button", { name, exact: true })).toBeInViewport();
+    const list = dialog(page).locator(".trip-event-options");
+    // The list scrolls inside its own box; it never runs under the actions.
+    const listBox = await box(list);
+    const actions = await box(dialog(page).locator(".trip-event-actions"));
+    expect(listBox.y + listBox.height).toBeLessThanOrEqual(actions.y);
+    if (width < 1280)
+      expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    expect(await dialog(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath(`trip-event-dialog-${width}.png`) });
   },
 );
 
